@@ -1,0 +1,15 @@
+{
+  "dependencies": [],
+  "content_type": "AIRCRAFT",
+  "title": "PSX.NET.MSFS.WASM Liveries",
+  "manufacturer": "PSX.NET",
+  "creator": "PSX.NET",
+  "package_version": "0.0.1",
+  "minimum_game_version": "1.26.5",
+  "release_notes": {
+    "neutral": {
+      "LastUpdate": "VERSION 0.0.1",
+      "OlderHistory": ""
+    }
+  }
+}
