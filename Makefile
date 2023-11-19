@@ -2,7 +2,7 @@
 
 LINTVENVDIR = $${HOME}/.venv-lint/$(osname)
 
-LINTFILES = psx_msfs_altitude_sync.py
+LINTFILES = radiosync.py
 
 osname=$(shell uname -s)-$(shell uname -r)
 
