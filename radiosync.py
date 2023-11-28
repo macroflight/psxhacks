@@ -51,8 +51,8 @@ Requirements:
 """
 
 import asyncio
-from psx import Client  # pylint: disable=import-error
 import SimConnect  # pylint: disable=import-error
+from psx import Client  # pylint: disable=import-error
 
 # Keep track of the last seen VHF L and VHF R active frequencies
 global PSX_RCP_VHF_L_ACTIVE  # pylint: disable=global-at-module-level
