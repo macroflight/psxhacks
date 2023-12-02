@@ -2,11 +2,12 @@
 
 LINTVENVDIR = $${HOME}/.venv-lint/$(osname)
 
-LINTFILES = radiosync.py frankenusb.py frankenusb-*.conf
+LINTFILES = radiosync.py frankenusb.py
+CONFIGFILES = frankenusb-devel-*.conf frankenusb-frankensim.conf
 
 osname=$(shell uname -s)-$(shell uname -r)
 
-lint: venv pylint pycodestyle pydocstyle
+lint: venv pylint configlint pycodestyle pydocstyle
 	$(info LINT: Your code passed lint!)
 
 venv: $(LINTVENVDIR)/bin/activate
@@ -19,6 +20,10 @@ $(LINTVENVDIR)/bin/activate:
 pylint: venv
 	$(info * LINT: Running pylint)
 	. $(LINTVENVDIR)/bin/activate; pylint --rcfile=.pylintrc.toml -r n $(LINTFILES)
+
+configlint: venv
+	$(info * LINT: Running pylint on config files)
+	. $(LINTVENVDIR)/bin/activate; pylint --rcfile=.pylintrc.toml --disable=duplicate-code -r n $(CONFIGFILES)
 
 pycodestyle: venv
 	$(info * LINT: Running pycodestyle)

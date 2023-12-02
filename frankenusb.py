@@ -9,8 +9,6 @@ from collections import defaultdict
 import pygame  # pylint: disable=import-error
 import psx  # pylint: disable=unused-import
 
-# TODO: reimplement BUTTON_ROTARY_TMB
-
 
 class FrankenUsbException(Exception):
     """FrankenUSB exception.
@@ -52,7 +50,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
             description='(partial)Replacement for PSX USB controller subsystem',
             epilog='Good luck!')
         parser.add_argument('--config-file',
-                            action='store', default="frankenusb.conf")
+                            action='store', default="frankenusb-frankensim.conf")
         parser.add_argument('--debug',
                             action='store_true')
         parser.add_argument('--quiet',
@@ -99,6 +97,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
         if 'static zones' in axis_config:
             for zone in axis_config['static zones']:
                 if event.value >= zone[0] and event.value <= zone[1]:
+                    self.logger.debug("In static zone: %s -> %s", event.value, zone[2])
                     event.value = zone[2]
         # Swap axis if neede
         if 'axis swap' in axis_config:
@@ -106,14 +105,35 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
                 event.value = -event.value
         # Normalize
         axis_normalized = (event.value - axis_min) / (axis_max - axis_min)
-        # Convert to PSX value
-        psx_range = axis_config['psx max'] - axis_config['psx min']
-        psx_value = int(axis_config['psx min'] + psx_range * axis_normalized)
-        await self.psx_axis_queue.put({
-            'variable': axis_config['psx variable'],
-            'indexes': axis_config['engine indexes'],
-            'value': psx_value,
-        })
+
+        tiller_active = False
+        if 'tiller' in axis_config and axis_config['tiller']:
+            # Custom mode where we control the tiller aboce 0 and below 40 kts groundspeed
+            gs = int(self.psx.get('GroundSpeed'))
+            if 0 < gs < 40:
+                self.logger.info("Tiller active")
+                tiller_active = True
+
+        if not tiller_active:
+            # Normal mode. Convert to PSX value and send
+            psx_range = axis_config['psx max'] - axis_config['psx min']
+            psx_value = int(axis_config['psx min'] + psx_range * axis_normalized)
+            await self.psx_axis_queue.put({
+                'variable': axis_config['psx variable'],
+                'indexes': axis_config['indexes'],
+                'value': psx_value,
+            })
+        else:
+            # Tiller mode
+            psx_min = -999
+            psx_max = 999
+            psx_range = psx_max - psx_min
+            psx_value = int(psx_min + psx_range * axis_normalized)
+            await self.psx_axis_queue.put({
+                'variable': 'Tiller',
+                'indexes': [0],
+                'value': psx_value,
+            })
 
     async def handle_axis_motion_speedbrake(self, event, axis_config):
         """Handle motion on a speedbrake axis.
@@ -158,7 +178,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
             'value': psx_value,
         })
 
-    async def handle_throttle_reverse_button(self, mode, joystick_name, event, config, reverse):  # pylint:disable=too-many-arguments,too-many-locals
+    async def handle_throttle_reverse_button(self, mode, joystick_name, event, config, reverse):  # pylint:disable=too-many-arguments,too-many-locals,too-many-branches
         """Handle throttle with thrust reverser button."""
         axis_min = -1.0
         axis_max = 1.0
@@ -204,15 +224,15 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
             return
         if axis_config['axis type'] == 'NORMAL':
             await self.handle_axis_motion_normal(event, axis_config)
-        if axis_config['axis type'] == 'THROTTLE_WITH_REVERSE_BUTTON':
+        elif axis_config['axis type'] == 'THROTTLE_WITH_REVERSE_BUTTON':
             await self.handle_throttle_reverse_button(
                 'axis', joystick_name, event, axis_config, None)
-        if axis_config['axis type'] == 'SPEEDBRAKE':
+        elif axis_config['axis type'] == 'SPEEDBRAKE':
             await self.handle_axis_motion_speedbrake(event, axis_config)
         else:
-            raise FrankenUsbException(f"Unknown psx action type {axis_config['psx action type']}")
+            raise FrankenUsbException(f"Unknown axis type {axis_config['axis type']}")
 
-    async def handle_button(self, event):
+    async def handle_button(self, event):  # pylint: disable=too-many-branches
         """Handle button press/release."""
         direction = 'up' if event.type == pygame.JOYBUTTONUP else 'down'
         joystick_name = self.joysticks[event.instance_id].get_name()
@@ -257,7 +277,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
                 raise FrankenUsbException(f"Got event type we do not handle: {thisevent.type}")
             await asyncio.sleep(0.01)
 
-    async def read_pygame_events(self):
+    async def read_pygame_events(self):  # pylint: disable=too-many-branches
         """Read pygame events from queue and handle them."""
         while True:
             if not self.psx_connected:
@@ -319,6 +339,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
         self.psx.subscribe("id")
         self.psx.subscribe("version", connected)
 
+        # Needed for tiller mode
+        self.psx.subscribe("GroundSpeed")
+        self.psx.subscribe("Tiller")
+
         self.psx.onResume = setup
         self.psx.onPause = teardown
         self.psx.onDisconnect = teardown
@@ -343,7 +367,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
         self.psx.send(psx_variable, new_psx_value)
         self.psx._set(psx_variable, new_psx_value)  # pylint: disable=protected-access
 
-    async def psx_axis_sender(self):
+    async def psx_axis_sender(self):  # pylint: disable=too-many-branches
         """Send axis data to PSX.
 
         Pygame axis events can easily arrive faster than we want to
