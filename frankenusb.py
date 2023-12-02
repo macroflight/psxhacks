@@ -1,638 +1,469 @@
-"""A replacement for PSX's builtin USB handling."""
+"""Replace PSX USB subsystem."""
 # pylint: disable=invalid-name
+import argparse
 import asyncio
+import importlib
 import logging
-import sys
-import threading
 import time
+from collections import defaultdict
 import pygame  # pylint: disable=import-error
-from psx import Client
+import psx  # pylint: disable=unused-import
 
-# We will never send data to PSX faster than this
-MAX_PSX_HZ = 20.0
-
-CONFIG = {
-    'MFG Crosswind V2': {
-        'axis motion': {
-            2: {
-                # Rudder
-                'psx action type': 'AXIS_NORMAL',
-                'psx variable': 'FltControls',
-                'indexes': [2],
-                'psx min': -999,
-                'psx max': 999,
-                'axis nullzone': (-0.05, 0.05, 0.0),  # axis min, axis max, axis replacement value
-                'axis swap': False,
-            },
-            0: {
-                # Toe Brake Left
-                'psx action type': 'AXIS_NORMAL',
-                'psx variable': 'Brakes',
-                'indexes': [0],
-                'psx min': 0,
-                'psx max': 1000,
-                'axis swap': False,
-            },
-            1: {
-                # Toe Brake Left
-                'psx action type': 'AXIS_NORMAL',
-                'psx variable': 'Brakes',
-                'indexes': [1],
-                'psx min': 0,
-                'psx max': 1000,
-                'axis swap': False,
-            },
-        },
-    },
-    'TCA YOKE BOEING': {
-        'axis motion': {
-            0: {
-                # Aileron
-                'psx action type': 'AXIS_NORMAL',
-                'psx variable': 'FltControls',
-                'indexes': [1],
-                'psx min': -999,
-                'psx max': 999,
-                'axis nullzone': (-0.01, 0.01, 0.0),  # axis min, axis max, axis replacement value
-                'axis swap': False,
-            },
-            1: {
-                # Elevator
-                'psx action type': 'AXIS_NORMAL',
-                'psx variable': 'FltControls',
-                'indexes': [0],
-                'psx min': -999,
-                'psx max': 999,
-                'axis nullzone': (-0.01, 0.01, 0.0),  # axis min, axis max, axis replacement value
-                'axis swap': False,
-            },
-        },
-        'button down': {
-            11: {
-                # AP disconnect
-                'psx action type': 'PUSH_DELTA1',
-                'psx variable': 'ApDisc',
-            },
-        },
-    },
-    'TCA Quadrant Boeing 1&2': {
-        'axis motion': {
-            4: {
-                # A throttle axis that uses a button to switch into
-                # reverse mode.
-                'psx action type': 'THROTTLE_WITH_REVERSE_BUTTON',
-                'psx variable': 'Tla',
-                'axis min': -1.0,
-                'axis max': 1.0,
-                'axis swap': True,
-                # Values to send to PSX at idle and full thrust
-                'psx idle': 0,
-                'psx full': 5000,
-                # PSX values to send at reverse idle and reverse full
-                'psx reverse idle': -100,
-                'psx reverse full': -8925,
-                # The PSX engines (1-4) controlled by this throttle
-                'engine indexes': [0, 1],
-                # The button that triggers reverse
-                'reverse button': 4,
-            },
-            5: {
-                'psx action type': 'THROTTLE_WITH_REVERSE_BUTTON',
-                'psx variable': 'Tla',
-                'axis min': -1.0,
-                'axis max': 1.0,
-                'axis swap': True,
-                'psx idle': 0,
-                'psx full': 5000,
-                'psx reverse idle': -100,
-                'psx reverse full': -8925,
-                'engine indexes': [2, 3],
-                'reverse button': 5,
-            },
-            3: {
-                # Speedbrake
-                'psx action type': 'AXIS_SPEEDBRAKE',
-                'psx variable': 'ApDisc',
-            },
-        },
-        'button down': {
-            4: {
-                # A button used for a THROTTLE_WITH_REVERSE_BUTTON axis
-                'psx action type': 'BUTTON_FOR_THROTTLE_WITH_REVERSE_BUTTON',
-                'psx reverse': True,
-                'axis': 4,
-            },
-            5: {
-                'psx action type': 'BUTTON_FOR_THROTTLE_WITH_REVERSE_BUTTON',
-                'psx reverse': True,
-                'axis': 5,
-            },
-            8: {
-                # Raise flaps
-                'psx action type': 'INCREMENT',
-                'psx variable': 'FlapLever',
-                'increment': -1,
-                'min': 0, 'max': 6,
-            },
-            9: {
-                # Toe brake both down
-                'psx action type': 'SET',
-                'psx variable': 'ToeBrakeTogg',
-                'value': 3,
-            },
-            10: {
-                # Lower flaps
-                'psx action type': 'INCREMENT',
-                'psx variable': 'FlapLever',
-                'increment': 1,
-                'min': 0, 'max': 6,
-            },
-            15: {
-                'psx action type': 'BUTTON_ROTARY_TMB',
-                'direction': 'cw',
-                'button': 'down',
-                # Which buttons control the mode: speed, heading, altitude
-                'modebuttons': [11, 12, 13],
-            },
-            14: {
-                'psx action type': 'BUTTON_ROTARY_TMB',
-                'direction': 'ccw',
-                'button': 'down',
-                'modebuttons': [11, 12, 13],
-            },
-            16: {
-                'psx action type': 'BUTTON_ROTARY_TMB',
-                'direction': 'push',
-                'modebuttons': [11, 12, 13],
-            },
-        },
-        'button up': {
-            4: {
-                'psx action type': 'BUTTON_FOR_THROTTLE_WITH_REVERSE_BUTTON',
-                'psx reverse': False,
-                'axis': 4,
-            },
-            5: {
-                'psx action type': 'BUTTON_FOR_THROTTLE_WITH_REVERSE_BUTTON',
-                'psx reverse': False,
-                'axis': 5,
-            },
-            9: {
-                # Toe brake both down
-                'psx action type': 'SET',
-                'psx variable': 'ToeBrakeTogg',
-                'value': 0,
-            },
-            15: {
-                'psx action type': 'BUTTON_ROTARY_TMB',
-                'direction': 'cw',
-                'button': 'up',
-                # Which buttons control the mode: speed, heading, altitude
-                'modebuttons': [11, 12, 13],
-            },
-            14: {
-                'psx action type': 'BUTTON_ROTARY_TMB',
-                'direction': 'ccw',
-                'button': 'up',
-                'modebuttons': [11, 12, 13],
-            },
-        },
-    },
-}
-
-# Global variable containing our PSX connection object
-PSX = None
-joysticks = {}
-
-# Cache rotary events when they are too rapid, we can't afford to lose
-# any
-rotary_cache = {}
-
-#
-# Helper functions to do common PSX things, e.g send a simple value,
-# push a MOM buttont, ...
-#
+# TODO: reimplement BUTTON_ROTARY_TMB
 
 
-def psx_send_and_set(variable, value):
-    """Send a variable to PSX and set it in the local db."""
-    PSX.send(variable, value)
-    PSX._set(variable, value)  # pylint: disable=protected-access
+class FrankenUsbException(Exception):
+    """FrankenUSB exception.
 
-
-def psx_push_mom(buttonname):
-    """Push a Big or MCP Momentary Action Switch.
-
-    E.g McpPshThr
-
-    See https://aerowinx.com/assets/networkers/Network%20Documentation.txt
-
-    To push such a switch we need to get its current value (things
-    like if the light is on), then enable the 1 bit and send the
-    result back to PSX.
+    For now, no special handling, this class just exists to make
+    pylint happy. :)
     """
-    logging.info("PUSH_MOM for %s", buttonname)
-    try:
-        value = int(PSX.get(buttonname))
-    except ValueError:
-        logging.info("ERROR: could not get %s from PSX", buttonname)
+
+
+class FrankenUsb():  # pylint: disable=too-many-instance-attributes
+    """Replaces the PSX USB subsystem."""
+
+    def __init__(self):
+        """Initialize the class."""
+        log_format = "%(asctime)s: %(message)s"
+        logging.basicConfig(
+            format=log_format,
+            level=logging.INFO,
+            datefmt="%H:%M:%S",
+        )
+        self.logger = logging.getLogger("frankenusb")
+        self.config = None
+        # Pygame events we are intersted in are added to this queue
+        self.axis_event_queue = asyncio.Queue(maxsize=0)
+        # Variables to be sent to PSX are added to this queue
+        self.psx_axis_queue = asyncio.Queue(maxsize=0)
+        self.joysticks = {}
+        self.args = {}
+        # Keeps track of what and when we have sent to PSX
+        self.psx_send_state = defaultdict(dict)
+        # Main PSX connection object
+        self.psx = None
+        self.psx_connected = False
+
+    def _handle_args(self):
+        """Handle command line arguments."""
+        parser = argparse.ArgumentParser(
+            prog='frankenusb',
+            description='(partial)Replacement for PSX USB controller subsystem',
+            epilog='Good luck!')
+        parser.add_argument('--config-file',
+                            action='store', default="frankenusb.conf")
+        parser.add_argument('--debug',
+                            action='store_true')
+        parser.add_argument('--quiet',
+                            action='store_true')
+        parser.add_argument('--max-rate',
+                            action='store', default=30.0, type=float,
+                            help='the maximum rate we update a PSX variable (Hz)',
+                            )
+        self.args = parser.parse_args()
+        self.logger.info("PSX max rate is set to %.1f Hz", self.args.max_rate)
+        if self.args.quiet:
+            self.logger.setLevel(logging.CRITICAL)
+        elif self.args.debug:
+            self.logger.setLevel(logging.DEBUG)
+
+    def load_module_from_file(self, module_name, path):
+        """Load config file."""
+        loader = importlib.machinery.SourceFileLoader(module_name, path)
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        module = importlib.util.module_from_spec(spec)
+        loader.exec_module(module)
+        return module
+
+    def joystick_get_axis_position(self, joystick_name, axis):
+        """Get the current position for a given axis."""
+        for _, joystick in self.joysticks.items():
+            if joystick.get_name() == joystick_name:
+                return joystick.get_axis(axis)
         return False
-    value_new = value | 1
-    logging.info("MOMSW %s is %s, setting to %s", buttonname, value, value_new)
-    psx_send_and_set(buttonname, value_new)
-    return True
 
-
-def psx_push_delta(buttonname, value=1):
-    """Push a button that has Mode=DELTA; Min=0; Max=1.
-
-    E.g McpPshHdgSel
-
-    See https://aerowinx.com/assets/networkers/Network%20Documentation.txt
-    """
-    value = int(value)
-    psx_send_and_set(buttonname, str(value))
-
-
-def psx_increment_delta(buttonname, increment=1, min_value=None, max_value=None):
-    """Read a value and increment it."""
-    try:
-        value = int(PSX.get(buttonname))
-    except ValueError:
-        logging.info("ERROR: could not get %s from PSX", buttonname)
+    def joystick_get_button_position(self, joystick_name, button):
+        """Get the current position for a given button."""
+        for _, joystick in self.joysticks.items():
+            if joystick.get_name() == joystick_name:
+                return joystick.get_button(button)
         return False
-    increment = int(increment)
-    new_value = value + increment
-    if min_value is not None and new_value < min_value:
-        new_value = min_value
-    if max_value is not None and new_value > max_value:
-        new_value = max_value
-    if new_value != value:
-        psx_send_and_set(buttonname, str(new_value))
-    return True
 
+    async def handle_axis_motion_normal(self, event, axis_config):
+        """Handle motion on a normal axis."""
+        # pygame axes are always -1 .. +1?
+        axis_min = -1.0
+        axis_max = 1.0
+        # Apply static zones to pygame axis value
+        if 'static zones' in axis_config:
+            for zone in axis_config['static zones']:
+                if event.value >= zone[0] and event.value <= zone[1]:
+                    event.value = zone[2]
+        # Swap axis if neede
+        if 'axis swap' in axis_config:
+            if axis_config['axis swap'] is True:
+                event.value = -event.value
+        # Normalize
+        axis_normalized = (event.value - axis_min) / (axis_max - axis_min)
+        # Convert to PSX value
+        psx_range = axis_config['psx max'] - axis_config['psx min']
+        psx_value = int(axis_config['psx min'] + psx_range * axis_normalized)
+        await self.psx_axis_queue.put({
+            'variable': axis_config['psx variable'],
+            'indexes': axis_config['engine indexes'],
+            'value': psx_value,
+        })
 
-def psx_set(buttonname, value):
-    """Set a PSX variable to value.
+    async def handle_axis_motion_speedbrake(self, event, axis_config):
+        """Handle motion on a speedbrake axis.
 
-    E.g GearLever
+        PSX values: 0-800
 
-    See https://aerowinx.com/assets/networkers/Network%20Documentation.txt
-    """
-    psx_send_and_set(buttonname, str(value))
+        armed: a range around 41 (61 is no longer armed)
+        max in flight: 375
+        full ground 800
+        """
+        axis_position = event.value
+        axis_min = -1.0
+        axis_max = 1.0
 
+        if 'axis swap' in axis_config:
+            if axis_config['axis swap'] is True:
+                axis_position = -axis_position
+        # Normalize axis position to range 0..1
+        axis_position = (axis_position - axis_min) / (axis_max - axis_min)
+        self.logger.info("speedbrake axis position is %s", axis_position)
+        if axis_position < axis_config['limit stowed']:
+            self.logger.info("speedbrake STOWED")
+            psx_value = int(0)
+        elif axis_position < axis_config['limit armed']:
+            self.logger.info("speedbrake ARMED")
+            psx_value = int(41)
+        elif axis_position > axis_config['limit flight upper']:
+            self.logger.info("speedbrake MAX GROUND")
+            psx_value = int(800)
+        else:
+            # Flight range
+            flightrange_axis = axis_config['limit flight upper'] - axis_config['limit armed']
+            flightrange_psx = 375 - 61
+            psx_per_axis_unit = flightrange_psx / flightrange_axis
+            psx_speedbrake = 61 + (axis_position - axis_config['limit armed']) * psx_per_axis_unit
+            psx_value = int(psx_speedbrake)
+            self.logger.info("speedbrake FLIGHT %s", psx_value)
 
-def axis2psx(axis_position, psx_min, psx_max, axis_swap=False):
-    """Translate an axis value to a PSX value."""
-    # For now, assume all joystick axes return values between -1.0 and +1.0.
-    axis_min = -1.0
-    axis_max = 1.0
-    if axis_swap:
-        axis_position = -1.0 * axis_position
-    # Normalize axis position to range 0..1
-    axis_position = (axis_position - axis_min) / (axis_max - axis_min)
-    # How large is the PSX range?
-    psx_range = psx_max - psx_min
-    return int(psx_min + psx_range * axis_position)
+        await self.psx_axis_queue.put({
+            'variable': axis_config['psx variable'],
+            'indexes': [0],
+            'value': psx_value,
+        })
 
+    async def handle_throttle_reverse_button(self, mode, joystick_name, event, config, reverse):  # pylint:disable=too-many-arguments,too-many-locals
+        """Handle throttle with thrust reverser button."""
+        axis_min = -1.0
+        axis_max = 1.0
+        if mode == 'button':
+            axis_position = self.joystick_get_axis_position(joystick_name, config['axis'])
+            axis_config = self.config[joystick_name]['axis motion'][config['axis']]
+        else:
+            button_position = self.joystick_get_button_position(
+                joystick_name, config['reverse button'])
+            reverse = False
+            if button_position == 1:
+                reverse = True
+            axis_position = event.value
+            axis_config = config
+        # Swap axis if neede
+        if 'axis swap' in axis_config:
+            if axis_config['axis swap'] is True:
+                axis_position = -axis_position
+        # Normalize
+        axis_normalized = (axis_position - axis_min) / (axis_max - axis_min)
+        # Convert to PSX value
+        if reverse:
+            psx_min = axis_config['psx reverse idle']
+            psx_max = axis_config['psx reverse full']
+        else:
+            psx_min = axis_config['psx idle']
+            psx_max = axis_config['psx full']
+        psx_range = psx_max - psx_min
+        psx_value = int(psx_min + psx_range * axis_normalized)
+        await self.psx_axis_queue.put({
+            'variable': axis_config['psx variable'],
+            'indexes': axis_config['engine indexes'],
+            'value': psx_value,
+        })
 
-def speedbrake2psx(axis_position, axis_swap=False):
-    """Translate axis to PSX SpdBrkLever.
+    async def handle_axis_motion(self, event):
+        """Handle any axis motion."""
+        joystick_name = self.joysticks[event.instance_id].get_name()
+        try:
+            axis_config = self.config[joystick_name]['axis motion'][event.axis]
+        except KeyError:
+            # Not handling this axis
+            return
+        if axis_config['axis type'] == 'NORMAL':
+            await self.handle_axis_motion_normal(event, axis_config)
+        if axis_config['axis type'] == 'THROTTLE_WITH_REVERSE_BUTTON':
+            await self.handle_throttle_reverse_button(
+                'axis', joystick_name, event, axis_config, None)
+        if axis_config['axis type'] == 'SPEEDBRAKE':
+            await self.handle_axis_motion_speedbrake(event, axis_config)
+        else:
+            raise FrankenUsbException(f"Unknown psx action type {axis_config['psx action type']}")
 
-    PSX values: 0-800
-
-    armed: a range around 41 (61 is no longer armed)
-    max in flight: 375
-    full ground 800
-    """
-    axis_min = -1.0
-    axis_max = 1.0
-
-    STOWED_LIMIT = 0.1
-    ARMED_LIMIT = 0.3
-    FLIGHTRANGE_LIMIT = 0.9
-
-    if axis_swap:
-        axis_position = -1.0 * axis_position
-    # Normalize axis position to range 0..1
-    axis_position = (axis_position - axis_min) / (axis_max - axis_min)
-    if axis_position < STOWED_LIMIT:
-        return int(0)
-    if axis_position < ARMED_LIMIT:
-        return int(41)
-    if axis_position > FLIGHTRANGE_LIMIT:
-        return int(800)
-    # Flight range
-    flightrange_axis = FLIGHTRANGE_LIMIT - ARMED_LIMIT
-    flightrange_psx = 375 - 61
-    psx_per_axis_unit = flightrange_psx / flightrange_axis
-    psx_speedbrake = 61 + (axis_position - ARMED_LIMIT) * psx_per_axis_unit
-    return int(psx_speedbrake)
-
-
-def psx_axis_modify_element(variable, indexes, new_value):
-    """Read a variable and update one or more elements.
-
-    E.g for toe brakes or throttles.
-
-    If one axis controls several engines, indexes can be e.g [0,1]
-    """
-    try:
-        psx_value = PSX.get(variable)
-    except ValueError:
-        logging.info("ERROR: could not get %s from PSX", variable)
-        return False
-    elems = psx_value.split(';')
-    for index in indexes:
-        elems[index] = str(new_value)
-    variable_new = ';'.join(elems)
-    psx_send_and_set(variable, variable_new)
-    return True
-
-
-def throttle_with_reverse_button_get_tla(conf, axis_position, reverse_thrust):
-    """Get the thrust lever angle matching this axis position."""
-    if reverse_thrust:
-        # idle reverse starts at approx -3000, -8925 is full reverse
-        tla = axis2psx(axis_position, -3000, -8925, axis_swap=conf['axis swap'])
-    else:
-        # 0 is idle, 5000 full thrust
-        tla = axis2psx(axis_position, 0, 5000, axis_swap=conf['axis swap'])
-    return tla
-
-#
-# Basic PSX functions
-#
-
-
-def psx_setup():
-    """Run when connected to PSX."""
-    logging.info("Simulation started")
-
-
-def psx_teardown():
-    """Run when disconnected from PSX."""
-    logging.info("Simulation stopped")
-
-
-def psx_action(this_action, axis_position=None, name=None):  # pylint: disable=too-many-branches,too-many-statements
-    """Run PSX action, e.g a button press."""
-    global rotary_cache  # pylint: disable=global-variable-not-assigned
-
-    def rotary_push_or_cache(button, variable, increment):
-        # This one is a little tricky... when turning the knob we get
-        # a button down event per click and then a button up
-        # event. However, if we turn the knob quickly, we get a single
-        # button down event and then a button up.
-        #
-        # How to translate that into a PSX delta which is the number
-        # of clicks the rotary is turned...?
-        #
-        # When we get a button down, cache it and log the time
-        # When we get a button up, check the cache:
-        # If time since button down < N: send a delta of 1 (or -1) to PSX
-        # Else: send an increment that is X * time_since_button_down
-        # Then: reset cache
-        if button == 'down':
-            rotary_cache[variable] = time.time()
-        elif button == 'up':
-            if variable not in rotary_cache:
-                return  # should not happen, ignore
-            elapsed = time.time() - rotary_cache[variable]
-            if elapsed < 0.1:
-                psx_push_delta(variable, increment)
+    async def handle_button(self, event):
+        """Handle button press/release."""
+        direction = 'up' if event.type == pygame.JOYBUTTONUP else 'down'
+        joystick_name = self.joysticks[event.instance_id].get_name()
+        try:
+            button_config = self.config[joystick_name][f"button {direction}"][event.button]
+        except KeyError:
+            # Not handling this button/direction
+            return
+        self.logger.info("button_config is %s", button_config)
+        if button_config['button type'] == "SET":
+            # Set a PSX variable to the value in config
+            self.psx_send_and_set(button_config['psx variable'], button_config['value'])
+        elif button_config['button type'] == "REVERSE_LEVER":
+            if direction == 'up':
+                # mode, joystick_name, event, config, reverse
+                await self.handle_throttle_reverse_button(
+                    'button', joystick_name, event, button_config, False)
             else:
-                # A fast turn is ~180 degrees/s == 15 clicks/s
-                ROTARY_CLICKS_PER_SECOND = 50
-                increment = int(increment * ROTARY_CLICKS_PER_SECOND * elapsed)
-                psx_push_delta(variable, increment)
-            del rotary_cache[variable]
-        else:
-            logging.error("Got invalid button event %s", button)
+                await self.handle_throttle_reverse_button(
+                    'button', joystick_name, event, button_config, True)
+        elif button_config['button type'] == 'INCREMENT':
+            value = int(self.psx.get(button_config['psx variable']))
+            increment = int(button_config['increment'])
+            new_value = value + increment
+            if 'min' in button_config and new_value < button_config['min']:
+                new_value = button_config['min']
+            elif 'max' in button_config and new_value > button_config['max']:
+                new_value = button_config['max']
+            if new_value != value:
+                self.psx_send_and_set(button_config['psx variable'], new_value)
 
-    action_type = this_action['psx action type']
-    if action_type == 'PUSH_MOM':
-        psx_push_mom(this_action['psx variable'])
-    elif action_type == 'PUSH_DELTA1':
-        psx_push_delta(this_action['psx variable'])
-    elif action_type == 'INCREMENT':
-        psx_increment_delta(this_action['psx variable'], this_action['increment'],
-                            min_value=this_action['min'], max_value=this_action['max'])
-    elif action_type == 'SET':
-        psx_set(this_action['psx variable'], this_action['value'])
-    elif action_type == 'AXIS_NORMAL':
-        # A normal (e.g elevator) axis with optional null zone
-        if 'axis nullzone' in action:
-            if this_action['axis nullzone'][0] < axis_position < this_action['axis nullzone'][1]:
-                logging.info("Nulling %s as it is within nullzone", axis_position)
-                axis_position = this_action['axis nullzone'][2]
-        psx_value = axis2psx(axis_position, this_action['psx min'],
-                             this_action['psx max'], axis_swap=this_action['axis swap'])
-        psx_axis_modify_element(this_action['psx variable'], this_action['indexes'], psx_value)
-    elif action_type == 'AXIS_SPEEDBRAKE':
-        # Special axis handling for speedbrake.
-        psx_speedbrake = speedbrake2psx(axis_position, axis_swap=False)
-        psx_set('SpdBrkLever', str(psx_speedbrake))
-    elif action_type == 'THROTTLE_WITH_REVERSE_BUTTON':
-        # Throttle axis with reverser controlled by a button (e.g
-        # Thrustmaster Boeing throttle)
-        reverse_thrust = False
-        if get_joy_byname(name).get_button(this_action['reverse button']) == 1:
-            reverse_thrust = True
-        tla = throttle_with_reverse_button_get_tla(action, axis_position, reverse_thrust)
-        psx_axis_modify_element('Tla', this_action['engine indexes'], tla)
-    elif action_type == 'BUTTON_FOR_THROTTLE_WITH_REVERSE_BUTTON':
-        # We need to handle if the reverser button is pressed without moving the throttle
-        reverse_thrust = this_action['psx reverse']
-        # Get the axis position
-        axis_position = get_joy_byname(name).get_axis(this_action['axis'])
-        # We need the action dict for the axis
-        action_axis = CONFIG[name]['axis motion'][this_action['axis']]
-        tla = throttle_with_reverse_button_get_tla(action_axis, axis_position, reverse_thrust)
-        psx_axis_modify_element('Tla', action_axis['engine indexes'], tla)
-    elif action_type == 'BUTTON_ROTARY_TMB':
-        # Thrustmaster Boeing Throttle Quadrant rotary knob
-        joy = get_joy_byname(name)
-        # We assume only one button can be pressed at a time
-        if joy.get_button(this_action['modebuttons'][0]) == 1:
-            variables = ('McpTurnSpd', 'McpPshSpdSel')
-        elif joy.get_button(this_action['modebuttons'][1]) == 1:
-            variables = ('McpTurnHdg', 'McpPshHdgSel')
-        elif joy.get_button(this_action['modebuttons'][2]) == 1:
-            variables = ('McpTurnAlt', 'McpPshAltSel')
-        if this_action['direction'] == 'push':
-            psx_push_delta(variables[1])
-        elif this_action['direction'] == 'cw':
-            rotary_push_or_cache(this_action['button'], variables[0], 1)
-        elif this_action['direction'] == 'ccw':
-            rotary_push_or_cache(this_action['button'], variables[0], -1)
+    async def handle_pygame_events(self):
+        """Read pygame events from queue and handle them."""
+        while True:
+            thisevent = await self.axis_event_queue.get()
+            self.logger.debug("handle_pygame_events got %s", thisevent)
+            if thisevent.type == pygame.JOYAXISMOTION:
+                await self.handle_axis_motion(thisevent)
+            elif thisevent.type in [pygame.JOYBUTTONDOWN, pygame.JOYBUTTONUP]:
+                await self.handle_button(thisevent)
+            else:
+                raise FrankenUsbException(f"Got event type we do not handle: {thisevent.type}")
+            await asyncio.sleep(0.01)
 
-#
-# Threads
-#
-
-
-def get_joy_byname(name):
-    """Get a joystick object by its name."""
-    for _, joy in joysticks.items():
-        if joy.get_name() == name:
-            return joy
-    return None
-
-
-def psx_thread(name):
-    """Handle the PSX connection."""
-    global PSX  # pylint: disable=global-statement,global-variable-not-assigned
-    logging.info("Thread %s starting", name)
-    with Client() as PSX:
-        # PSX.logger = lambda msg: logging.info(f"   {msg}")
-        PSX.subscribe("id")
-        PSX.onResume = psx_setup
-        PSX.onPause = psx_teardown
-        PSX.onDisconnect = psx_teardown
-        try:
-            asyncio.run(PSX.connect())
-        except KeyboardInterrupt:
-            logging.info("\nStopped by keyboard interrupt (Ctrl-C)")
-
-
-def pygame_thread(name):
-    """Wait for and process pygame events."""
-    logging.info("Thread %s starting", name)
-
-    global joysticks  # pylint: disable=global-statement,global-variable-not-assigned
-    pygame.init()
-    for i in range(pygame.joystick.get_count()):
-        joystick_name = pygame.joystick.Joystick(i).get_name()
-        if joystick_name not in CONFIG.keys():  # pylint: disable=consider-iterating-dictionary
-            logging.info("Joystick %s (%s) but not configured", i, joystick_name)
-            continue
-        logging.info("Joystick %s found: %s", i, joystick_name)
-        joy = pygame.joystick.Joystick(i)
-        joy.init()
-        joysticks[joy.get_instance_id()] = joy
-
-    # Loop forever, fetching events (one or more at a time)
-    while True:
-        for event in pygame.event.get():
-            if event.type == pygame.JOYBUTTONDOWN:
-                joystick = joysticks[event.instance_id]
-                try:
-                    config = CONFIG[joystick.get_name()]['button down'][event.button]
-                except KeyError:
-                    logging.info("no config for %s button %s down",
-                                 joystick.get_name(), event.button)
-                    continue
-                psx_action(config, name=joystick.get_name())
-            elif event.type == pygame.JOYBUTTONUP:
-                joystick = joysticks[event.instance_id]
-                try:
-                    config = CONFIG[joystick.get_name()]['button up'][event.button]
-                except KeyError:
-                    logging.info("no config for %s button %s up", joystick.get_name(), event.button)
-                    continue
-                psx_action(config, name=joystick.get_name())
-
-
-def pygame_axis_thread(name):  # pylint: disable=too-many-branches
-    """Poll managed axes at fixed frequency.
-
-    Cache sent values and inhibit send if new value is too close to old value.
-    """
-    logging.info("Thread %s starting", name)
-
-    last_axis_positions = {}
-
-    axis_tolerance = 0.01  # global for now
-
-    global joysticks  # pylint: disable=global-statement,global-variable-not-assigned
-
-    while True:  # pylint: disable=too-many-nested-blocks
-        start = time.time()
-        for _, joy in joysticks.items():
-            name = joy.get_name()
-            if name not in CONFIG:
-                logging.info("Joystick %s not managed", name)
+    async def read_pygame_events(self):
+        """Read pygame events from queue and handle them."""
+        while True:
+            if not self.psx_connected:
+                self.logger.warning("PSX not connected, not reading any pygame events")
+                await asyncio.sleep(1.0)
                 continue
-            if 'axis motion' not in CONFIG[name]:
-                logging.info("Joystick %s has no managed axis", name)
-                continue
-            for axis, config in CONFIG[name]['axis motion'].items():
-                axis_position = joy.get_axis(axis)
+            if self.axis_event_queue.qsize() > 10:
+                self.logger.warning("WARNING: event queue size: %d",
+                                    self.axis_event_queue.qsize())
+            axis_events = {}
+            other_events = []
+            for event in pygame.event.get():
+                # Filter out events we won't handle anyway
+                if event.type == pygame.JOYAXISMOTION:
+                    # To avoid overloading the event handler, cache
+                    # the events and only put the last event for a
+                    # certain axis in the queue.
+                    axis_events[(event.instance_id, event.axis)] = event
+                elif event.type in [pygame.JOYBUTTONUP, pygame.JOYBUTTONDOWN]:
+                    other_events.append(event)
+            for event in other_events:
+                # If queue is full, we wait until a slot is available,
+                # we never want to drop button events.
+                await self.axis_event_queue.put(event)
+            for _, event in axis_events.items():
+                # It's OK to drop axis events if the queue is full
                 try:
-                    last_axis_position = last_axis_positions[name][axis]
+                    self.axis_event_queue.put_nowait(event)
+                except asyncio.QueueFull:
+                    self.logger.warning("Dropping pygame axis events as queue is full")
+            # 0.01s here leads to a buildup of events in the queue
+            # when moving two axes. Why? Not enough time left over for
+            # the other coroutines that will process the events? 0.05s
+            # seems fine.
+            await asyncio.sleep(0.05)
+
+    async def setup_psx_connection(self):
+        """Set up the PSX connection."""
+        def setup():
+            self.logger.info("Connected to PSX, setting up")
+            self.psx.send("FreeMsgW", "FRANKENSIM ALIVE")
+            self.psx.send("demand", "GroundSpeed")
+            self.psx_connected = True
+            # setup()
+
+        def teardown():
+            self.logger.info("Disconnected from PSX, tearing down")
+            self.psx.send("FreeMsgW", "")
+            self.psx_connected = False
+            # teardown()
+
+        def connected(key, value):
+            self.logger.info("Connected to PSX %s %s as #%s", key, value, self.psx.get('id'))
+            self.psx_connected = True
+
+        self.psx = psx.Client()
+        self.psx.logger = self.logger.debug  # .info to see traffic
+
+        self.psx.subscribe("id")
+        self.psx.subscribe("version", connected)
+
+        self.psx.onResume = setup
+        self.psx.onPause = teardown
+        self.psx.onDisconnect = teardown
+
+        # We need to subscribe to PSX variables included in the config
+        psx_variables = set()
+        for _, data in self.config.items():
+            for _, data in data.items():
+                for _, action in data.items():
+                    if 'psx variable' in action:
+                        psx_variables.add(action['psx variable'])
+        self.logger.info("Subscribing to PSX variables %s", psx_variables)
+        for psx_variable in psx_variables:
+            self.psx.subscribe(psx_variable)
+        self.logger.info("PSX subscribed variables: %s", ', '.join(self.psx.variables.keys()))
+        # Nothing happens until we connect()
+        await self.psx.connect()
+
+    def psx_send_and_set(self, psx_variable, new_psx_value):
+        """Send variable to PSX and store in local db."""
+        self.logger.debug("TO PSX: %s -> %s", psx_variable, new_psx_value)
+        self.psx.send(psx_variable, new_psx_value)
+        self.psx._set(psx_variable, new_psx_value)  # pylint: disable=protected-access
+
+    async def psx_axis_sender(self):
+        """Send axis data to PSX.
+
+        Pygame axis events can easily arrive faster than we want to
+        push data to PSX, to those variables are handled like this:
+
+        if variable not in psx_send_state
+          send variable to PSX and store the time and last value sent in psx_send_state
+        else
+          check elapsed time since last send
+          if enough time elapsed
+            send variable to PSX and store the time and last value sent in psx_send_state
+          else
+            store value we want to send in psx_send_state
+
+        We also check psx_send_state on each loop, and if enough time has
+        passed for some variable, we send the saved value to PSX.
+
+        Since multiple axes can provide data (e.g elevator and aileron
+        both use FltControls) to the same PSX variable, we need to
+        handle this. And we must not overwrite data already in the
+
+        variable that we don't update. So a read-modify-write is
+        needed.
+
+        state["FltControls"] = {
+           'last sent': 12345567.0,
+           'new data' : {
+             0: 576,
+             1: 224,
+           },
+        }
+
+        The above will result in FltControls="576;224;X" being sent to
+        PSX where X is the existing value of the third element that we
+        do not update. X will only be read from PSX just before we
+        will update the variable.
+
+        """
+        while True:
+            if not self.psx_connected:
+                self.logger.warning("PSX not connected, not looking at self.psx_axis_queue")
+                await asyncio.sleep(1.0)
+                continue
+            if self.psx_axis_queue.qsize() > 10:
+                self.logger.warning("WARNING: psx_axis queue size: %d", self.psx_axis_queue.qsize())
+            try:
+                # If an event is available, process it
+                thisevent = self.psx_axis_queue.get_nowait()
+                try:
+                    elapsed = time.time() - self.psx_send_state[thisevent['variable']]['last sent']
                 except KeyError:
-                    last_axis_position = None
-                if last_axis_position is not None:
-                    movement = abs(axis_position - last_axis_position)
-                    if movement > axis_tolerance:
-                        logging.info("Axis movement detected by polling: %s is %s",
-                                     axis, axis_position)
-                        psx_action(config, axis_position, name=name)
-                        if name not in last_axis_positions:
-                            last_axis_positions[name] = {}
-                        last_axis_positions[name][axis] = axis_position
-                else:
-                    psx_action(config, axis_position, name=name)
-                    if name not in last_axis_positions:
-                        last_axis_positions[name] = {}
-                    last_axis_positions[name][axis] = axis_position
+                    elapsed = time.time()  # never sent
 
-        elapsed = time.time() - start
-        sleep = (1.0 / MAX_PSX_HZ) - elapsed
-        if sleep < 0:
-            logging.info("TIMEOUT: axis poll thread not keeping up. elapsed=%.3fs", elapsed)
-        else:
-            time.sleep(sleep)
+                # Store the new value(s) in state
+                for index in thisevent['indexes']:
+                    if 'new data' not in self.psx_send_state[thisevent['variable']]:
+                        self.psx_send_state[thisevent['variable']]['new data'] = {}
+                    self.psx_send_state[
+                        thisevent['variable']]['new data'][index] = thisevent['value']
+                # If enough time has passed sinc the last send, set last sent to zero,
+                # triggering sending to PSX
+                if elapsed > (1.0 / self.args.max_rate):
+                    self.psx_send_state[thisevent['variable']]['last sent'] = 0.0
+            except asyncio.QueueEmpty:
+                # self.logger.debug("No event from PSX queue")
+                pass
 
+            # Check self.psx_send_state for variables to send to PSX
+            for variable, data in self.psx_send_state.items():
+                if 'new data' not in data or len(data['new data']) == 0:
+                    # No data to send for this variable
+                    continue
+                elapsed = time.time() - data['last sent']
+                if elapsed > (1.0 / self.args.max_rate):
+                    # Read data from PSX, modify and write back
+                    psx_value = self.psx.get(variable)
+                    elems = psx_value.split(';')
+                    new_data = data['new data']
+                    for index, value in new_data.items():
+                        elems[index] = str(value)
+                    new_psx_value = ";".join(elems)
+                    self.psx_send_and_set(variable, new_psx_value)
+                    data['last sent'] = time.time()
+                    data['new data'] = {}
+            await asyncio.sleep(0.01)
 
-if __name__ == "__main__":
-    log_format = "%(asctime)s: %(message)s"
-    logging.basicConfig(format=log_format, level=logging.INFO,
-                        datefmt="%H:%M:%S")
-    psx_thread = threading.Thread(target=psx_thread, args=("PSX",), daemon=True)
-    psx_thread.start()
-
-    # We need to subscribe to PSX variables included in the config
-    psx_variables = set()
-    for device, data in CONFIG.items():
-        for event_type, data in data.items():
-            for ident, action in data.items():
-                if 'psx variable' in action:
-                    psx_variables.add(action['psx variable'])
-    logging.info("Subscribing to PSX variables %s", psx_variables)
-    for psx_variable in psx_variables:
-        PSX.subscribe(psx_variable)
-
-    logging.info("PSX subscribed variables: %s", ', '.join(PSX.variables.keys()))
-
-    while True:
-        logging.info("Waiting for PSX connection...")
-        if PSX is not None:
-            break
-        time.sleep(1.0)
-    logging.info("Connected to PSX!")
-    time.sleep(1.0)
-
-    PSX.subscribe("version", lambda key, value:
-                  logging.info("Connected to PSX %s as client #%s", value, PSX.get('id')))
-
-    logging.info("Starting pygame thread.")
-
-    pygame_thread = threading.Thread(target=pygame_thread, args=("pygame",), daemon=True)
-    pygame_thread.start()
-
-    while len(joysticks) <= 0:
-        logging.info("Waiting for joysticks to be initialized...")
-        time.sleep(1.0)
-
-    pygame_axis_thread = threading.Thread(target=pygame_axis_thread,
-                                          args=("pygameaxis",), daemon=True)
-    pygame_axis_thread.start()
-
-    while True:
+    async def main(self):
+        """Start the script."""
+        self._handle_args()
         try:
-            time.sleep(1.0)
-        except KeyboardInterrupt:
-            logging.info("\nStopped by keyboard interrupt (Ctrl-C)")
-            sys.exit()
+            self.config = self.load_module_from_file("self.config", self.args.config_file).CONFIG
+        except IOError as inst:
+            raise FrankenUsbException(
+                f"Failed to open config file {self.args.config_file}: {inst}") from inst
+
+        pygame.init()
+        pygame.joystick.init()
+        for i in range(pygame.joystick.get_count()):
+            joystick_name = pygame.joystick.Joystick(i).get_name()
+            if joystick_name not in self.config:
+                self.logger.debug("Joystick %s (%s) but not configured", i, joystick_name)
+                continue
+            self.logger.debug("Joystick %s found: %s", i, joystick_name)
+            joy = pygame.joystick.Joystick(i)
+            joy.init()
+            self.joysticks[joy.get_instance_id()] = joy
+        if len(self.joysticks) <= 0:
+            raise FrankenUsbException("Found no configured joysticks to watch, exiting")
+        await asyncio.gather(
+            self.read_pygame_events(),
+            self.handle_pygame_events(),
+            self.psx_axis_sender(),
+            self.setup_psx_connection(),
+        )
+
+    def run(self):
+        """Start everything up."""
+        asyncio.run(self.main())
+
+
+if __name__ == '__main__':
+    me = FrankenUsb()
+    me.run()

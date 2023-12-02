@@ -2,7 +2,7 @@
 
 LINTVENVDIR = $${HOME}/.venv-lint/$(osname)
 
-LINTFILES = radiosync.py frankenusb.py
+LINTFILES = radiosync.py frankenusb.py frankenusb-*.conf
 
 osname=$(shell uname -s)-$(shell uname -r)
 
