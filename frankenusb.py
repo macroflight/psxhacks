@@ -5,9 +5,13 @@ import asyncio
 import importlib
 import logging
 import time
+import winsound  # pylint: disable=import-error
 from collections import defaultdict
 import pygame  # pylint: disable=import-error
 import psx  # pylint: disable=unused-import
+
+# The type of message we use to display the tiller status in the sim
+TILLER_MSG = "FreeMsgM"
 
 
 class FrankenUsbException(Exception):
@@ -42,6 +46,8 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
         # Main PSX connection object
         self.psx = None
         self.psx_connected = False
+        self.axis_cache = defaultdict(dict)
+        self.aileron_tiller_active = False
 
     def _handle_args(self):
         """Handle command line arguments."""
@@ -56,9 +62,18 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
         parser.add_argument('--quiet',
                             action='store_true')
         parser.add_argument('--max-rate',
-                            action='store', default=30.0, type=float,
+                            action='store', default=20.0, type=float,
                             help='the maximum rate we update a PSX variable (Hz)',
                             )
+        parser.add_argument('--axis-jitter-limit-low',
+                            action='store', default=0.01, type=float,
+                            help='axis movements smaller than this are filtered out',
+                            )
+        parser.add_argument('--axis-jitter-limit-high',
+                            action='store', default=1.5, type=float,
+                            help='axis movements larger than this are filtered out',
+                            )
+
         self.args = parser.parse_args()
         self.logger.info("PSX max rate is set to %.1f Hz", self.args.max_rate)
         if self.args.quiet:
@@ -88,6 +103,23 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
                 return joystick.get_button(button)
         return False
 
+    def centre_ailerons_and_tiller(self):
+        """Send events to PSX that centres the aileron and tiller.
+
+        Used whenever we switch tiller mode on and off.
+        """
+        self.logger.info("centreing aileron and tiller")
+        self.psx_axis_queue.put({
+            'variable': 'Tiller',
+            'indexes': [0],
+            'value': 0,
+        })
+        self.psx_axis_queue.put({
+            'variable': 'FltControls',
+            'indexes': [1],
+            'value': 0,
+        })
+
     async def handle_axis_motion_normal(self, event, axis_config):
         """Handle motion on a normal axis."""
         # pygame axes are always -1 .. +1?
@@ -106,24 +138,11 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
         # Normalize
         axis_normalized = (event.value - axis_min) / (axis_max - axis_min)
 
-        tiller_active = False
-        if 'tiller' in axis_config and axis_config['tiller']:
-            # Custom mode where we control the tiller aboce 0 and below 40 kts groundspeed
-            gs = int(self.psx.get('GroundSpeed'))
-            if 0 < gs < 40:
-                self.logger.info("Tiller active")
-                tiller_active = True
+        tiller_axis_in_tiller_mode = False
+        if 'tiller' in axis_config and axis_config['tiller'] is True and self.aileron_tiller_active:
+            tiller_axis_in_tiller_mode = True
 
-        if not tiller_active:
-            # Normal mode. Convert to PSX value and send
-            psx_range = axis_config['psx max'] - axis_config['psx min']
-            psx_value = int(axis_config['psx min'] + psx_range * axis_normalized)
-            await self.psx_axis_queue.put({
-                'variable': axis_config['psx variable'],
-                'indexes': axis_config['indexes'],
-                'value': psx_value,
-            })
-        else:
+        if tiller_axis_in_tiller_mode:
             # Tiller mode
             psx_min = -999
             psx_max = 999
@@ -132,6 +151,15 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
             await self.psx_axis_queue.put({
                 'variable': 'Tiller',
                 'indexes': [0],
+                'value': psx_value,
+            })
+        else:
+            # Normal mode
+            psx_range = axis_config['psx max'] - axis_config['psx min']
+            psx_value = int(axis_config['psx min'] + psx_range * axis_normalized)
+            await self.psx_axis_queue.put({
+                'variable': axis_config['psx variable'],
+                'indexes': axis_config['indexes'],
                 'value': psx_value,
             })
 
@@ -193,7 +221,13 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
                 reverse = True
             axis_position = event.value
             axis_config = config
-        # Swap axis if neede
+        # Apply static zones to pygame axis value
+        if 'static zones' in axis_config:
+            for zone in axis_config['static zones']:
+                if zone[1] >= axis_position >= zone[0]:
+                    self.logger.info("In static zone: %s -> %s", axis_position, zone[2])
+                    axis_position = zone[2]
+        # Swap axis if needed
         if 'axis swap' in axis_config:
             if axis_config['axis swap'] is True:
                 axis_position = -axis_position
@@ -208,11 +242,24 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
             psx_max = axis_config['psx full']
         psx_range = psx_max - psx_min
         psx_value = int(psx_min + psx_range * axis_normalized)
-        await self.psx_axis_queue.put({
-            'variable': axis_config['psx variable'],
-            'indexes': axis_config['engine indexes'],
-            'value': psx_value,
-        })
+        if self.autothrottle_active():
+            self.logger.info("Throttle movement to %s, but A/T active, blocking", psx_value)
+            # Play sound if lever somewhat matches the Tla
+            # winsound.Beep(440, 500)
+            tla = int(self.psx.get('Tla').split(';')[axis_config['engine indexes'][0]])
+            self.logger.info("This Tla is %s", tla)
+            diff = abs(tla - psx_value)
+            if diff < 100:
+                self.logger.info("Axis is close to Tla angle - diff=%s", diff)
+                winsound.Beep(440, 500)
+            else:
+                self.logger.info("Axis is far from Tla angle - diff=%s", diff)
+        else:
+            await self.psx_axis_queue.put({
+                'variable': axis_config['psx variable'],
+                'indexes': axis_config['engine indexes'],
+                'value': psx_value,
+            })
 
     async def handle_axis_motion(self, event):
         """Handle any axis motion."""
@@ -222,6 +269,27 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
         except KeyError:
             # Not handling this axis
             return
+        # Filter out very small movements
+        try:
+            last_seen = self.axis_cache[event.instance_id][event.axis]
+        except KeyError:
+            self.logger.debug("No axis_cache data for %s/%s, no action",
+                              event.instance_id, event.axis)
+            self.axis_cache[event.instance_id][event.axis] = event.value
+        else:
+            axis_move_absolute = abs(event.value - last_seen)
+            if axis_move_absolute < self.args.axis_jitter_limit_low:
+                self.logger.debug("Ignoring small move (%s) for axis %s/%s, no action",
+                                  axis_move_absolute, event.instance_id, event.axis)
+                return
+            if axis_move_absolute > self.args.axis_jitter_limit_high:
+                self.logger.debug("Ignoring large move (%s) for axis %s/%s, no action",
+                                  axis_move_absolute, event.instance_id, event.axis)
+                return
+        # Update cache
+        self.axis_cache[event.instance_id][event.axis] = event.value
+        self.logger.debug("axis cache: %s", self.axis_cache)
+
         if axis_config['axis type'] == 'NORMAL':
             await self.handle_axis_motion_normal(event, axis_config)
         elif axis_config['axis type'] == 'THROTTLE_WITH_REVERSE_BUTTON':
@@ -263,6 +331,20 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
                 new_value = button_config['max']
             if new_value != value:
                 self.psx_send_and_set(button_config['psx variable'], new_value)
+        elif button_config['button type'] == 'TILLER_TOGGLE':
+            if self.aileron_tiller_active:
+                # Remove warning, centre aileron and tiller, disable tiller mode
+                self.psx.send(TILLER_MSG, "")
+                self.centre_ailerons_and_tiller()
+                self.aileron_tiller_active = False
+            else:
+                # Display warning message, centre aileron and tiller, enable tiller mode
+                self.psx.send(TILLER_MSG, "TILLER ACTIVE")
+                self.centre_ailerons_and_tiller()
+                # Enable tiller mode
+                self.aileron_tiller_active = True
+        else:
+            raise FrankenUsbException(f"Unknown button type {button_config['button type']}")
 
     async def handle_pygame_events(self):
         """Read pygame events from queue and handle them."""
@@ -314,18 +396,37 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
             # seems fine.
             await asyncio.sleep(0.05)
 
+    def autothrottle_active(self):
+        """Check if the autothrottle is managing the levers.
+
+        If the AFDS mode is blank or HOLD, we own the levers :)
+
+        BLANK = 0
+        HOLD = 21
+        Source: https://aerowinx.com/board/index.php/topic,4408.msg72250.html#msg72250
+        """
+        afds = self.psx.get("Afds")
+        atmode = int(afds.split(';')[0])
+        if atmode in [0, 21]:
+            return False
+        return True
+
+    def print_psx_variable(self, key, value):
+        """Log the value of a PSX variable."""
+        self.logger.info("PSX variable %s is now %s", key, value)
+
     async def setup_psx_connection(self):
         """Set up the PSX connection."""
         def setup():
             self.logger.info("Connected to PSX, setting up")
-            self.psx.send("FreeMsgW", "FRANKENSIM ALIVE")
             self.psx.send("demand", "GroundSpeed")
             self.psx_connected = True
+            self.aileron_tiller_active = False
             # setup()
 
         def teardown():
             self.logger.info("Disconnected from PSX, tearing down")
-            self.psx.send("FreeMsgW", "")
+            self.psx.send(TILLER_MSG, "")
             self.psx_connected = False
             # teardown()
 
@@ -340,8 +441,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
         self.psx.subscribe("version", connected)
 
         # Needed for tiller mode
-        self.psx.subscribe("GroundSpeed")
         self.psx.subscribe("Tiller")
+
+        # Needed for autothrottle
+        self.psx.subscribe("Afds", self.print_psx_variable)
 
         self.psx.onResume = setup
         self.psx.onPause = teardown
