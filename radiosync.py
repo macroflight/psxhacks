@@ -1,5 +1,9 @@
 """Workaround for 134.149 MHz bug.
 
+NOTE: as of 2023-123-16 this is no longer needed, see
+https://aerowinx.com/board/index.php/topic,7238.msg78578.html#msg78578
+Keeping the script here anyway in case it contains something useful...
+
 See https://aerowinx.com/board/index.php/topic,7238.0.html
 
 The script will:
@@ -41,7 +45,7 @@ Requirements:
   COM_RADIO_SET_HZ and COM2_RADIO_SET_HZ, just copy and edit the
   COM_RADIO_SET and COM2_RADIO_SET lines)
 
-- Update SimConenct.dll in the SimConnect module to a more recent one
+- Update SimConnenct.dll in the SimConnect module to a more recent one
   (I installed the latest MSFS SDK and grabbed it from there).
 
 - Hoppie's psx.py (https://www.hoppie.nl/psxpython/psx.py, docs on
