@@ -8,8 +8,25 @@ Various small utilities for the PSX ecosystem
 Replacement for the PSX USB subsystem (for my needs at least). Things
 it can do that native PSX cannot:
 
-- Handle the reverse levers on the Thrustmaster Boeing Quadrant
-- Handle the gear lever on the Thrustmaster Boeing Yoke
+- Handle the reverse levers on e.g the Thrustmaster Boeing Quadrant,
+  i.e you pull the lever to engage reverse idle and then push the
+  throttle forward for more reverse.
+
+- Handle the gear lever on the Thrustmaster Boeing Yoke (which looks
+  like two buttons UP+DOWN).
+
+- Handle the gear lever on the STECS Standard, which has three
+  positions but two buttons (UP, no_button, DOWN).
+
+- Control PSX towing (change target heading, start, stop, toggle
+  direction)
+
+- A button to switch between using an axis as tiller and aileron (i.e
+  not the automated switch that PSX offers)
+
+- Custom speedbrake axis - since we never really use the range between
+  max flight speedbrake and max ground speedbrake, we let most of the
+  axis range handle the in-flight band giving better sensitivity.
 
 ### comparator.py
 
@@ -35,6 +52,18 @@ when developing PSX Python scripts.
 Shows events on all connected USB joystick-type devices. Useful if you
 e.g want to find the USB button or axis number that matches a physical
 button or axis, or the pygame name of a device.
+
+### psx_shutdown.py
+
+Connect to PSX and send the magic message that cause all instances to
+shutdown cleanly.
+
+### psx_fuel_transfer.py
+
+SMall hack to transfer X tons of ZFW into the centre tank, simulating
+a large fuel tank in the hold that can be emptied into the center
+tank. Who said you can't fly London to Sydney with a decent payload in
+a 744? :)
 
 ## What you need to run my Python scripts:
 

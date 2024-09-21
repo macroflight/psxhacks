@@ -5,7 +5,6 @@ import asyncio
 import importlib
 import logging
 import time
-import winsound  # pylint: disable=import-error
 from collections import defaultdict
 import pygame  # pylint: disable=import-error
 import psx  # pylint: disable=unused-import
@@ -22,7 +21,7 @@ class FrankenUsbException(Exception):
     """
 
 
-class FrankenUsb():  # pylint: disable=too-many-instance-attributes
+class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-public-methods
     """Replaces the PSX USB subsystem."""
 
     def __init__(self):
@@ -48,6 +47,8 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
         self.psx_connected = False
         self.axis_cache = defaultdict(dict)
         self.aileron_tiller_active = False
+        # We use a button to toggle between reverse and normal mode for the throttles
+        self.axis_reverse_mode = {}
 
     def _handle_args(self):
         """Handle command line arguments."""
@@ -66,7 +67,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
                             help='the maximum rate we update a PSX variable (Hz)',
                             )
         parser.add_argument('--axis-jitter-limit-low',
-                            action='store', default=0.01, type=float,
+                            action='store', default=0.005, type=float,
                             help='axis movements smaller than this are filtered out',
                             )
         parser.add_argument('--axis-jitter-limit-high',
@@ -119,6 +120,62 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
             'indexes': [1],
             'value': 0,
         })
+
+    def towing_heading_change(self, increment):
+        """Change the pushback target heading by increment degrees.
+
+        Towing is a string of six digits. Wee care about digits 4, 5 and 6, which are the heading.
+        """
+        towing = str(self.psx.get('Towing'))
+        self.logger.debug("Towing string: %s", towing)
+        self.logger.debug("Current towing heading str: %s", towing[3:6])
+        heading = int(towing[3:6])
+        self.logger.debug("Current towing heading: %s", heading)
+        heading_new = heading + increment
+        if heading_new > 360:
+            heading_new -= 360
+        if heading_new < 0:
+            heading_new += 360
+        self.logger.debug("New towing heading: %s", heading_new)
+        towing_new = towing[:3] + str(heading_new).zfill(3)
+        self.logger.debug("New towing string: %s", towing_new)
+        self.psx_send_and_set('Towing', towing_new)
+
+    def towing_direction_toggle(self):
+        """Toggle the towing direction.
+
+        Towing is a string of six digits. Wee care about digit 1 (1 = pushback, 2 = push forward)
+        """
+        towing = str(self.psx.get('Towing'))
+        self.logger.debug("Towing string: %s", towing)
+        direction = towing[0]
+        if direction == "1":
+            direction = "2"
+        else:
+            direction = "1"
+        self.logger.debug("New towing direction: %s", direction)
+        towing_new = direction + towing[1:]
+        self.logger.debug("New towing string: %s", towing_new)
+        self.psx_send_and_set('Towing', towing_new)
+
+    def towing_mode_toggle(self):
+        """Toggle the towing mode (start/stop).
+
+        Towing is a string of six digits. Wee care about digit 2 and 3 (20=stop, 80=start)
+        We never use auto.
+        """
+        towing = str(self.psx.get('Towing'))
+        self.logger.debug("Towing string: %s", towing)
+        mode = towing[1:3]
+        self.logger.debug("Towing mode: %s", mode)
+        if mode == "10":
+            mode = "98"
+        else:
+            mode = "20"
+        self.logger.debug("New towing mode: %s", mode)
+        towing_new = towing[:1] + mode + towing[3:]
+        self.logger.debug("New towing string: %s", towing_new)
+        self.psx_send_and_set('Towing', towing_new)
 
     async def handle_axis_motion_normal(self, event, axis_config):
         """Handle motion on a normal axis."""
@@ -206,21 +263,53 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
             'value': psx_value,
         })
 
-    async def handle_throttle_reverse_button(self, mode, joystick_name, event, config, reverse):  # pylint:disable=too-many-arguments,too-many-locals,too-many-branches
+    async def handle_throttle_reverse_button(self, mode, joystick_name, event, config, reverse):  # pylint:disable=too-many-arguments,too-many-locals,too-many-branches,too-many-positional-arguments,too-many-statements
         """Handle throttle with thrust reverser button."""
-        axis_min = -1.0
-        axis_max = 1.0
+        if 'axis min' in config:
+            axis_min = config['axis min']
+        else:
+            axis_min = -1.0
+        if 'axis max' in config:
+            axis_max = config['axis max']
+        else:
+            axis_max = 1.0
+
+        def get_axis_mode(axis):
+            if joystick_name not in self.axis_reverse_mode:
+                self.axis_reverse_mode[joystick_name] = {}
+            if axis not in self.axis_reverse_mode[joystick_name]:
+                self.axis_reverse_mode[joystick_name][axis] = 'normal'
+            try:
+                return self.axis_reverse_mode[joystick_name][axis]
+            except KeyError:
+                return 'normal'
+
+        def set_axis_mode(axis, mode):
+            self.axis_reverse_mode[joystick_name][axis] = mode
+
         if mode == 'button':
             axis_position = self.joystick_get_axis_position(joystick_name, config['axis'])
             axis_config = self.config[joystick_name]['axis motion'][config['axis']]
-        else:
-            button_position = self.joystick_get_button_position(
-                joystick_name, config['reverse button'])
-            reverse = False
-            if button_position == 1:
+            if axis_position > axis_config['reverse lever unlocked range'][1]:
+                self.logger.info("Cannot toggle reverse, lever position %s", axis_position)
+                return
+            if axis_position < axis_config['reverse lever unlocked range'][0]:
+                self.logger.info("Cannot toggle reverse, lever position %s", axis_position)
+                return
+
+            if get_axis_mode(config['axis']) == 'normal':
+                self.logger.info("Set axis mode for axis %s to reverse", config['axis'])
+                set_axis_mode(config['axis'], 'reverse')
                 reverse = True
+            else:
+                self.logger.info("Set axis mode for axis %s to normal", config['axis'])
+                set_axis_mode(config['axis'], 'normal')
+                reverse = False
+        else:
+            reverse = bool(get_axis_mode(event.axis) == 'reverse')
             axis_position = event.value
             axis_config = config
+
         # Apply static zones to pygame axis value
         if 'static zones' in axis_config:
             for zone in axis_config['static zones']:
@@ -237,21 +326,28 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
         if reverse:
             psx_min = axis_config['psx reverse idle']
             psx_max = axis_config['psx reverse full']
+            psx_range = psx_max - psx_min
+            psx_value = int(psx_min + psx_range * axis_normalized)
+            # Never send a value outside the expected range
+            psx_value = max(psx_max, psx_value)
+            psx_value = min(psx_min, psx_value)
         else:
             psx_min = axis_config['psx idle']
             psx_max = axis_config['psx full']
-        psx_range = psx_max - psx_min
-        psx_value = int(psx_min + psx_range * axis_normalized)
+            psx_range = psx_max - psx_min
+            psx_value = int(psx_min + psx_range * axis_normalized)
+            # Never send a value outside the expected range
+            psx_value = min(psx_max, psx_value)
+            psx_value = max(psx_min, psx_value)
+
         if self.autothrottle_active():
             self.logger.info("Throttle movement to %s, but A/T active, blocking", psx_value)
-            # Play sound if lever somewhat matches the Tla
-            # winsound.Beep(440, 500)
             tla = int(self.psx.get('Tla').split(';')[axis_config['engine indexes'][0]])
             self.logger.info("This Tla is %s", tla)
             diff = abs(tla - psx_value)
             if diff < 100:
                 self.logger.info("Axis is close to Tla angle - diff=%s", diff)
-                winsound.Beep(440, 500)
+                pygame.mixer.Sound("C:/fs/psx/Aerowinx/Audio/Basics/cab1.wav").play()
             else:
                 self.logger.info("Axis is far from Tla angle - diff=%s", diff)
         else:
@@ -300,7 +396,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
         else:
             raise FrankenUsbException(f"Unknown axis type {axis_config['axis type']}")
 
-    async def handle_button(self, event):  # pylint: disable=too-many-branches
+    async def handle_button(self, event):  # pylint: disable=too-many-branches,too-many-statements
         """Handle button press/release."""
         direction = 'up' if event.type == pygame.JOYBUTTONUP else 'down'
         joystick_name = self.joysticks[event.instance_id].get_name()
@@ -309,12 +405,11 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
         except KeyError:
             # Not handling this button/direction
             return
-        self.logger.info("button_config is %s", button_config)
         if button_config['button type'] == "SET":
             # Set a PSX variable to the value in config
             self.psx_send_and_set(button_config['psx variable'], button_config['value'])
         elif button_config['button type'] == "REVERSE_LEVER":
-            if direction == 'up':
+            if direction == 'down':
                 # mode, joystick_name, event, config, reverse
                 await self.handle_throttle_reverse_button(
                     'button', joystick_name, event, button_config, False)
@@ -325,12 +420,33 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
             value = int(self.psx.get(button_config['psx variable']))
             increment = int(button_config['increment'])
             new_value = value + increment
+            wrap = False
+            if 'wrap' in button_config and button_config['wrap'] is True:
+                wrap = True
             if 'min' in button_config and new_value < button_config['min']:
-                new_value = button_config['min']
+                if wrap:
+                    new_value = button_config['max']
+                else:
+                    new_value = button_config['min']
             elif 'max' in button_config and new_value > button_config['max']:
-                new_value = button_config['max']
+                if wrap:
+                    new_value = button_config['min']
+                else:
+                    new_value = button_config['max']
             if new_value != value:
                 self.psx_send_and_set(button_config['psx variable'], new_value)
+        elif button_config['button type'] == 'BIGMOMPSH':
+            self.logger.debug("BIGMOMPSH event for %s", button_config['psx variable'])
+            value = int(self.psx.get(button_config['psx variable']))
+            new_value = value | 1
+            if new_value != value:
+                self.psx_send_and_set(button_config['psx variable'], new_value)
+        elif button_config['button type'] == 'TOWING_HEADING':
+            self.towing_heading_change(button_config['increment'])
+        elif button_config['button type'] == 'TOWING_DIRECTION_TOGGLE':
+            self.towing_direction_toggle()
+        elif button_config['button type'] == 'TOWING_MODE_TOGGLE':
+            self.towing_mode_toggle()
         elif button_config['button type'] == 'TILLER_TOGGLE':
             if self.aileron_tiller_active:
                 # Remove warning, centre aileron and tiller, disable tiller mode
@@ -343,6 +459,15 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes
                 self.centre_ailerons_and_tiller()
                 # Enable tiller mode
                 self.aileron_tiller_active = True
+        elif button_config['button type'] == 'ACTION_RUNWAY_ENTRY':
+            # Transponder TARA, all lights except outer landing lights on
+            self.logger.info("Runway entry action: NOT IMPLEMENTED")
+        elif button_config['button type'] == 'ACTION_CLEARED_TAKEOFF':
+            # Outer landing lights on
+            self.logger.info("Cleared takeoff action: NOT IMPLEMENTED")
+        elif button_config['button type'] == 'ACTION_EXITED_RUNWAY':
+            # Transponder standby, landing lights off, taxi lights on, APU start, autobrake disable
+            self.logger.info("Runway exited action: NOT IMPLEMENTED")
         else:
             raise FrankenUsbException(f"Unknown button type {button_config['button type']}")
 

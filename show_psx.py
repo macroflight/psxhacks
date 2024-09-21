@@ -1,35 +1,40 @@
-"""Watch a single PSX variable"""
+"""Watch a single PSX variable."""
+# pylint: disable=missing-function-docstring,duplicate-code
 import asyncio
 import sys
-import time
 from psx import Client
+
 
 def psx_setup():
     """Run when connected to PSX."""
     print("Simulation started")
-    
+
+
 def psx_teardown():
     """Run when disconnected from PSX."""
     print("Simulation stopped")
 
+
 def print_change(key, value):
+    """Print change to variable."""
     print(f"PSX {key} is now {value}")
-    
-psx_variable = sys.argv[1]
-print(f"Watching {psx_variable}")
+
+
+psx_variables = sys.argv[1].split(",")
+print(f"Watching {psx_variables}")
 
 with Client() as psx:
     psx.logger = lambda msg: print(f"   {msg}")
     psx.subscribe("id")
     psx.subscribe("version", lambda key, value:
                   print(f"Connected to PSX {value} as client #{psx.get('id')}"))
-    psx.subscribe(psx_variable, print_change)
-    psx.onResume     = psx_setup
-    psx.onPause      = psx_teardown
+    for psx_variable in psx_variables:
+        psx.subscribe(psx_variable, print_change)
+    psx.onResume = psx_setup
+    psx.onPause = psx_teardown
     psx.onDisconnect = psx_teardown
 
     try:
         asyncio.run(psx.connect())
-    except KeyboardInterrupt:
-        logging.info("\nStopped by keyboard interrupt (Ctrl-C)")
-
+    except KeyboardInterrupt as exc:
+        raise SystemExit("Stopped by keyboard interrupt (Ctrl-C)") from exc
