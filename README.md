@@ -70,7 +70,7 @@ a 744? :)
 - Python 3.10 or later (might work with earlier versions but not
   tested) from https://www.python.org/
 - The Python-SimConnect Python module (https://pypi.org/project/SimConnect/)
-- Hoppie's psx.py module from https://www.hoppie.nl/psxpython/
+- Hoppie's psx.py module from https://www.hoppie.nl/psx/python/
 
 ## Installing the needed things, my way
 
@@ -116,7 +116,7 @@ c:\fs\python\psxpython\Lib\site-packages\SimConnect\SimConnect.dll.
 ### Download Hoppie's psx.py
 
 - Create a directory where you will run the scripts from. I'm using c:\fs\psx\python.
-- Download https://www.hoppie.nl/psxpython/psx.py into that directory
+- Download https://www.hoppie.nl/psx/python/psx.py into that directory
 
 ## Running one of my scripts
 
