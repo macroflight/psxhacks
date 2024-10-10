@@ -347,7 +347,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             diff = abs(tla - psx_value)
             if diff < 100:
                 self.logger.info("Axis is close to Tla angle - diff=%s", diff)
-                pygame.mixer.Sound("C:/fs/psx/Aerowinx/Audio/Basics/cab1.wav").play()
+                pygame.mixer.Sound(self.config_misc["THROTTLE_SYNC_SOUND"]).play()
             else:
                 self.logger.info("Axis is far from Tla angle - diff=%s", diff)
         else:
@@ -687,6 +687,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         self._handle_args()
         try:
             self.config = self.load_module_from_file("self.config", self.args.config_file).CONFIG
+            self.config_misc = self.load_module_from_file("self.config_misc", self.args.config_file).CONFIG_MISC
         except IOError as inst:
             raise FrankenUsbException(
                 f"Failed to open config file {self.args.config_file}: {inst}") from inst
