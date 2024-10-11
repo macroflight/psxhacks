@@ -23,7 +23,7 @@ def teardown():
     print("Simulation stopped")
 
 
-def psx_thread(name):
+def psx_thread(name, x, y):
     """Start PSX communication thread."""
     global PSX
     logging.info("Thread %s starting", name)
@@ -45,7 +45,7 @@ if __name__ == "__main__":
     LOGFORMAT = "%(asctime)s: %(message)s"
     logging.basicConfig(format=LOGFORMAT, level=logging.INFO,
                         datefmt="%H:%M:%S")
-    psx_thread = threading.Thread(target=psx_thread, args=("PSX", PSX,), daemon=True)
+    psx_thread = threading.Thread(target=psx_thread, args=("PSX"), daemon=True)
     psx_thread.start()
 
     while True:
