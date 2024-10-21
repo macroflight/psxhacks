@@ -34,6 +34,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         )
         self.logger = logging.getLogger("frankenusb")
         self.config = None
+        self.config_misc = None
         # Pygame events we are intersted in are added to this queue
         self.axis_event_queue = asyncio.Queue(maxsize=0)
         # Variables to be sent to PSX are added to this queue
@@ -687,7 +688,8 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         self._handle_args()
         try:
             self.config = self.load_module_from_file("self.config", self.args.config_file).CONFIG
-            self.config_misc = self.load_module_from_file("self.config_misc", self.args.config_file).CONFIG_MISC
+            self.config_misc = self.load_module_from_file("self.config_misc",
+                                                          self.args.config_file).CONFIG_MISC
         except IOError as inst:
             raise FrankenUsbException(
                 f"Failed to open config file {self.args.config_file}: {inst}") from inst

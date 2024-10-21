@@ -23,7 +23,7 @@ def teardown():
     print("Simulation stopped")
 
 
-def psx_thread(name, x, y):
+def psx_thread(name, x, y):  # pylint: disable=unused-argument
     """Start PSX communication thread."""
     global PSX
     logging.info("Thread %s starting", name)
