@@ -9,15 +9,15 @@ import SimConnect  # pylint: disable=import-error
 import psx  # pylint: disable=unused-import
 
 
-class AmbientSyncException(Exception):
-    """AmbientSync exception.
+class FrankenWindException(Exception):
+    """FrankenWind exception.
 
     For now, no special handling, this class just exists to make
     pylint happy. :)
     """
 
 
-class AmbientSync():  # pylint: disable=too-many-instance-attributes
+class FrankenWind():  # pylint: disable=too-many-instance-attributes
     """Sync MSFS ambient conditions to PSX.
 
     S1200.0W17500.0
@@ -37,7 +37,7 @@ class AmbientSync():  # pylint: disable=too-many-instance-attributes
             datefmt="%H:%M:%S",
         )
 
-        self.logger = logging.getLogger("ambientsync")
+        self.logger = logging.getLogger("frankenwind")
         self.args = {}
         # MSFS SimConncect object
         self.msfs_sc = None
@@ -328,5 +328,5 @@ class AmbientSync():  # pylint: disable=too-many-instance-attributes
 
 
 if __name__ == '__main__':
-    me = AmbientSync()
+    me = FrankenWind()
     me.run()

@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['ambientsync.py'],
+    ['frankenwind.py'],
     pathex=[],
     binaries=[],
 	datas=[('SimConnect.dll', '.'),
@@ -23,7 +23,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='ambientsync',
+    name='frankenwind',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

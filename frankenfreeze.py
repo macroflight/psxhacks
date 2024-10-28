@@ -31,7 +31,7 @@ class FrankenFreeze():  # pylint: disable=too-many-instance-attributes
         )
         ctypes.windll.kernel32.SetDllDirectoryW(None)
 
-        self.logger = logging.getLogger("ambientsync")
+        self.logger = logging.getLogger("frankenfreeze")
         self.args = {}
         # MSFS SimConncect object
         self.msfs_sc = None
