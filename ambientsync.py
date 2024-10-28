@@ -4,7 +4,6 @@ import argparse
 import asyncio
 import logging
 import math
-import re
 import signal
 import SimConnect  # pylint: disable=import-error
 import psx  # pylint: disable=unused-import
@@ -25,6 +24,8 @@ class AmbientSync():  # pylint: disable=too-many-instance-attributes
     Nddmm.?Wdddmm.?
     S      E
 
+    N7705.4E02959.7
+
     """
 
     def __init__(self):
@@ -35,6 +36,7 @@ class AmbientSync():  # pylint: disable=too-many-instance-attributes
             level=logging.INFO,
             datefmt="%H:%M:%S",
         )
+
         self.logger = logging.getLogger("ambientsync")
         self.args = {}
         # MSFS SimConncect object
@@ -44,9 +46,10 @@ class AmbientSync():  # pylint: disable=too-many-instance-attributes
         self.msfs_connected = False
 
         self.altimeter_mode = None
+        self.saved_corridor = None
+        self.saved_corridor_sel = None
 
         self.dummy_waypoint = 'MACRO'  # no such point in AIRAC 2410 :)
-        self.dummy_section_length = 4  # number of lines in the generated dummy entry
 
         self.msfs_vars = [
             "AMBIENT_TEMPERATURE",     # degrees C
@@ -65,18 +68,8 @@ class AmbientSync():  # pylint: disable=too-many-instance-attributes
     def sigint_handler(self, signum, frame):  # pylint: disable=unused-argument
         """Handle the TERM signal by removing the dummt waypoint and shutting down."""
         if self.psx_connected:
-            corridor_txt = self.psx.get("WxCorridorTxt")
-            dummy_waypoint_in_data = False
-            for line in corridor_txt.split('^'):
-                if re.match(rf".* {self.dummy_waypoint} .*", line):
-                    dummy_waypoint_in_data = True
-            corridor_txt_lines = corridor_txt.split('^')
-            if dummy_waypoint_in_data:
-                self.logger.info("Removing old dummy waypoint")
-                # Remove the last N lines (dummy waypoint entry)
-                corridor_txt = "^".join(corridor_txt_lines[0:-(self.dummy_section_length - 1)])
-                self.psx_send_and_set("WxCorridorTxt", corridor_txt)
-                self.psx_send_and_set("WxCorridorSel", "200")
+            self.psx_send_and_set("WxCorridorTxt", self.saved_corridor)
+            self.psx_send_and_set("WxCorridorSel", "200")
         else:
             self.logger.info("Not connected to PSX")
         raise SystemExit("Ctrl-C pressed")
@@ -90,6 +83,10 @@ class AmbientSync():  # pylint: disable=too-many-instance-attributes
                             action='store_true')
         parser.add_argument('--sim-update', default=60.0, action='store', type=float,
                             help="How often (seconds) we will fetch data from MSFS.")
+        parser.add_argument('--psx-host', default='127.0.0.1', action='store', type=str,
+                            help="The IP address of the PSX server.")
+        parser.add_argument('--psx-port', default=10747, action='store', type=int,
+                            help="The port number to connect to on the PSX server.")
 
         self.args = parser.parse_args()
         if self.args.debug:
@@ -111,10 +108,16 @@ class AmbientSync():  # pylint: disable=too-many-instance-attributes
                 appendix = 'N'
         degree_whole = int(math.floor(decimaldegree))
         decimalminutes = float((decimaldegree - degree_whole) * 60)
-        # S1200.0W17500.0
+        # We need to handle the case when e.g 59.96 degrees is rounded up to 60.0 when printed.
+        # The wind corridor parser (correctly) considers 60 minutes invalid.
+        decimalminutes_rounded = round(decimalminutes, ndigits=1)
+        if decimalminutes_rounded >= 60.0:
+            self.logger.info("Rounding up fix")
+            decimalminutes_rounded -= 60.0
+            degree_whole += 1
         if appendix in ['N', 'S']:
-            return f"{appendix}{degree_whole:02d}{decimalminutes:04.1f}"
-        return f"{appendix}{degree_whole:03d}{decimalminutes:04.1f}"
+            return f"{appendix}{degree_whole:02d}{decimalminutes_rounded:04.1f}"
+        return f"{appendix}{degree_whole:03d}{decimalminutes_rounded:04.1f}"
 
     def psx_send_and_set(self, psx_variable, new_psx_value):
         """Send variable to PSX and store in local db."""
@@ -131,9 +134,9 @@ class AmbientSync():  # pylint: disable=too-many-instance-attributes
         if altimeter_mode != self.altimeter_mode:
             self.logger.info("Altimeter mode changed to %s", altimeter_mode)
             if altimeter_mode == 's':
-                self.ensure_dummy_waypoint(present=True)
+                self.ensure_dummy_waypoint()
             else:
-                self.ensure_dummy_waypoint(present=False)
+                self.ensure_dummy_waypoint_absent()
             self.altimeter_mode = altimeter_mode
 
     async def setup_msfs_connection(self):
@@ -176,102 +179,95 @@ class AmbientSync():  # pylint: disable=too-many-instance-attributes
         self.psx.subscribe("id")
         self.psx.subscribe("version", connected)
 
-        self.psx.subscribe("GroundSpeed")
         self.psx.subscribe("WxCorridorTxt")
         self.psx.subscribe("WxCorridorSel")
         self.psx.subscribe("PiBaHeAlTas")
-        self.psx.subscribe("Elev")
         self.psx.subscribe("LeftPfdAlt", self.handle_altimeter_change)
 
         self.psx.onResume = setup
         self.psx.onPause = teardown
         self.psx.onDisconnect = teardown
 
-        await self.psx.connect()
+        await self.psx.connect(host=self.args.psx_host, port=self.args.psx_port)
 
-    def ensure_dummy_waypoint(self, present=True):  # pylint: disable=too-many-locals,too-many-statements
+    def ensure_dummy_waypoint(self):  # pylint: disable=too-many-locals,too-many-statements
         """Add dummy waypoint if needed, or remove it."""
-        new_dummy_waypoint_entry = ""
-        if present is True:
-            # Get data from MSFS SimConnect API
-            try:
-                msfs_ambient_temperature = float(self.msfs_aq.get("AMBIENT_TEMPERATURE"))
-                msfs_ambient_wind_direction = float(self.msfs_aq.get("AMBIENT_WIND_DIRECTION"))
-                msfs_ambient_wind_velocity = float(self.msfs_aq.get("AMBIENT_WIND_VELOCITY"))
-                self.logger.info("MSFS ambient: T=%.1fC wind %.0f/%.0f",
-                                 msfs_ambient_temperature, msfs_ambient_wind_direction,
-                                 msfs_ambient_wind_velocity)
-            except TypeError as exc:
-                self.logger.info("Got bad data from MSFS, continuing: %s", exc)
-                return False
-            # We should now have semi-valid data (at least it was converted to floats correctly)
+        if self.saved_corridor is None:
+            self.saved_corridor = self.psx.get("WxCorridorTxt")
+            self.saved_corridor_sel = self.psx.get("WxCorridorSel")
+            self.logger.debug("Saved original PWX weather corridor data: %s", self.saved_corridor)
 
-            try:
-                # Get PSX altitude and position
-                piba = self.psx.get("PiBaHeAlTas")
-                self.logger.debug("PiBaHeAlTas=%s", piba)
-                (_, _, _, altitude, _, latitude, longitude) = piba.split(';')
-                altitude_true_ft = float(altitude) / 1000
-                latitude_r = float(latitude)  # radians
-                longitude_r = float(longitude)  # radians
-                latitude_d = math.degrees(latitude_r)
-                longitude_d = math.degrees(longitude_r)
-                longitude_dms = self.dd2dms(longitude_d, direction='x')
-                latitude_dms = self.dd2dms(latitude_d, direction='y')
-                self.logger.debug("PSX altitude: %.0f ft", altitude_true_ft)
-                self.logger.debug("PSX position: longitude=%.2f latitude=%.2f",
-                                  longitude_d, latitude_d)
-                self.logger.debug("PSX position DNS: longitude=%s latitude=%s",
-                                  longitude_dms, latitude_dms)
-            except TypeError as exc:
-                self.logger.info("Got bad data from PSX, continuing: %s", exc)
-                return False
-            # Create the dummy waypoint entry
-            psx_fl = int(altitude_true_ft / 100)
-            fl1 = psx_fl - 40
-            fl2 = psx_fl - 20
-            fl3 = psx_fl + 20
-            fl4 = psx_fl + 40
-            temperature = self.ambient_float_to_text(msfs_ambient_temperature)
-            wind = (f"{self.roundWindDirection(msfs_ambient_wind_direction):02.0f}" +
-                    f"{msfs_ambient_wind_velocity:03.0f}")
-            coordinates = f"{latitude_dms}{longitude_dms}"
-            # NOTE: if making the generated section longer, update self.dummy_section_length
-            new_dummy_waypoint_entry += "^"
-            new_dummy_waypoint_entry += f"                                        {fl1:03.0f}   {fl2:03.0f}   {fl3:03.0f}   {fl4:03.0f}"       # pylint: disable=line-too-long
-            new_dummy_waypoint_entry += "^"
-            new_dummy_waypoint_entry += f"{coordinates} {self.dummy_waypoint} 042 017 {psx_fl:03d} {temperature} {wind} {wind} {wind} {wind}"  # pylint: disable=line-too-long
-            new_dummy_waypoint_entry += "^"
-            self.logger.debug("Will add this dummy entry: %s", new_dummy_waypoint_entry)
-        else:
-            self.logger.debug("Will add no dummy entry")
-        # Get the current wind corridor
-        corridor_txt = self.psx.get("WxCorridorTxt")
-        corridor_txt_orig = corridor_txt
-        dummy_waypoint_in_data = False
-        for line in corridor_txt.split('^'):
-            if re.match(rf".* {self.dummy_waypoint} .*", line):
-                dummy_waypoint_in_data = True
-        corridor_txt_lines = corridor_txt.split('^')
-        if dummy_waypoint_in_data:
-            self.logger.debug("Removing old dummy waypoint")
-            # Remove the last N lines (dummy waypoint entry)
-            corridor_txt = "^".join(corridor_txt_lines[0:-(self.dummy_section_length - 1)])
-        # Add the dummy waypoint entry (which might be empty)
-        corridor_txt += new_dummy_waypoint_entry
+        # Get data from MSFS SimConnect API
+        try:
+            msfs_ambient_temperature = float(self.msfs_aq.get("AMBIENT_TEMPERATURE"))
+            msfs_ambient_wind_direction = float(self.msfs_aq.get("AMBIENT_WIND_DIRECTION"))
+            msfs_ambient_wind_velocity = float(self.msfs_aq.get("AMBIENT_WIND_VELOCITY"))
+            self.logger.debug("MSFS ambient: T=%.1fC wind %.0f/%.0f",
+                              msfs_ambient_temperature, msfs_ambient_wind_direction,
+                              msfs_ambient_wind_velocity)
+        except TypeError as exc:
+            self.logger.info("Got bad data from MSFS, continuing: %s", exc)
+            return
+        # We should now have semi-valid data (at least it was converted to floats correctly)
+
+        try:
+            # Get PSX altitude and position
+            piba = self.psx.get("PiBaHeAlTas")
+            self.logger.debug("PiBaHeAlTas=%s", piba)
+            (_, _, _, altitude, _, latitude, longitude) = piba.split(';')
+            altitude_true_ft = float(altitude) / 1000
+            latitude_r = float(latitude)  # radians
+            longitude_r = float(longitude)  # radians
+            latitude_d = math.degrees(latitude_r)
+            longitude_d = math.degrees(longitude_r)
+            longitude_dms = self.dd2dms(longitude_d, direction='x')
+            latitude_dms = self.dd2dms(latitude_d, direction='y')
+            self.logger.debug("PSX altitude: %.0f ft", altitude_true_ft)
+            self.logger.debug("PSX position: longitude=%.2f latitude=%.2f",
+                              longitude_d, latitude_d)
+            self.logger.debug("PSX position DNS: longitude=%s latitude=%s",
+                              longitude_dms, latitude_dms)
+        except TypeError as exc:
+            self.logger.info("Got bad data from PSX, continuing: %s", exc)
+            return
+        # Create the dummy waypoint entry
+        psx_fl = int(altitude_true_ft / 100)
+        fl1 = psx_fl - 40
+        fl2 = psx_fl - 20
+        fl3 = psx_fl + 20
+        fl4 = psx_fl + 40
+        temperature = self.ambient_float_to_text(msfs_ambient_temperature)
+        wind = (f"{self.roundWindDirection(msfs_ambient_wind_direction):02.0f}" +
+                f"{msfs_ambient_wind_velocity:03.0f}")
+        coordinates = f"{latitude_dms}{longitude_dms}"
+        # NOTE: if making the generated section longer, update self.dummy_section_length
+        corridor_txt = ""
+        corridor_txt += "^"
+        corridor_txt += f"                                        {fl1:03.0f}   {fl2:03.0f}   {fl3:03.0f}   {fl4:03.0f}"       # pylint: disable=line-too-long
+        corridor_txt += "^"
+        corridor_txt += f"{coordinates} {self.dummy_waypoint} 042 017 {psx_fl:03d} {temperature} {wind} {wind} {wind} {wind}"  # pylint: disable=line-too-long
+        corridor_txt += "^"
+        corridor_txt_orig = self.psx.get("WxCorridorTxt")
         if corridor_txt != corridor_txt_orig:
-            if new_dummy_waypoint_entry == "":
-                self.logger.info("Removing dummy entry from corridor")
-            else:
-                self.logger.info("Updating corridor txt, new winds at %s @ FL%s are %s",
-                                 coordinates, psx_fl, wind)
-            self.logger.debug("OLD corridor entry: %s", corridor_txt_orig)
-            self.logger.debug("NEW corridor entry: %s", corridor_txt)
+            self.logger.debug(corridor_txt)
+            self.logger.debug(corridor_txt_orig)
+            self.logger.info(
+                "Replacing weather corridor with MSFS ambient: T=%s wind %.0f/%.0f (%s) at %s",
+                temperature, msfs_ambient_wind_direction,
+                msfs_ambient_wind_velocity, wind, coordinates)
+            self.logger.debug("New corridor: %s", corridor_txt)
             self.psx_send_and_set("WxCorridorTxt", corridor_txt)
             self.psx_send_and_set("WxCorridorSel", "200")
-        else:
-            self.logger.debug("no change, not updating corridor txt")
-        return True
+
+    def ensure_dummy_waypoint_absent(self):  # pylint: disable=too-many-locals,too-many-statements
+        """Remove dummy waypoint if needed and replace with original corridor."""
+        if self.saved_corridor is None:
+            self.logger.debug("No saved corridor, assuming original corridor active")
+            return
+        # Replace the current weather corridor with the cached original one
+        self.logger.info("Replacing weather corridor with original data")
+        self.psx_send_and_set("WxCorridorTxt", self.saved_corridor)
+        self.psx_send_and_set("WxCorridorSel", self.saved_corridor_sel)
 
     def roundWindDirection(self, direction):
         """Convert wind direction in degrees to tens of degrees.
@@ -310,9 +306,9 @@ class AmbientSync():  # pylint: disable=too-many-instance-attributes
                 altimeter_mode = self.psx.get("LeftPfdAlt")[0]
                 self.logger.debug("Altimeter mode: %s", altimeter_mode)
                 if altimeter_mode == 's':
-                    self.ensure_dummy_waypoint(present=True)
+                    self.ensure_dummy_waypoint()
                 else:
-                    self.ensure_dummy_waypoint(present=False)
+                    self.ensure_dummy_waypoint_absent()
                 self.altimeter_mode = altimeter_mode
             except TypeError as exc:
                 self.logger.info("Got bad data from PSX, continuing: %s", exc)
