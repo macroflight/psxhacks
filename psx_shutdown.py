@@ -1,5 +1,5 @@
 """Shut down PSX cleanly."""
-# pylint: disable=missing-function-docstring,global-statement
+# pylint: disable=missing-function-docstring,global-statement,invalid-name
 import asyncio
 import logging
 import sys
@@ -54,7 +54,11 @@ if __name__ == "__main__":
             break
         time.sleep(1.0)
     print("Connected to PSX!")
+    retry = 0
     while True:
+        retry += 1
+        if retry > 10:
+            raise SystemExit("Giving up")
         if not CONNECTED:
             print(f"Not yet, CONNECTED is {CONNECTED}...")
             time.sleep(1.0)
