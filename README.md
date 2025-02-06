@@ -30,11 +30,11 @@ it can do that native PSX cannot:
 
 ### comparator.py
 
-Compares the PSX and MSFS pitch, bank, heading and groundspeed. Useful
-to detect if the PSX.NET.MSFS.WASM plane is not doing what PSX wants
-it to do. Also checks that the MSFS camera angles are zero/zero (I had
-an issue where they would drift slightly, and that really screwed up
-my landings...)
+Mostly an example script. Compares the PSX and MSFS pitch, bank,
+heading and groundspeed. Useful to detect if the PSX.NET.MSFS.WASM
+plane is not doing what PSX wants it to do. Also checks that the MSFS
+camera angles are zero/zero (I had an issue where they would drift
+slightly, and that really screwed up my landings...)
 
 ### radiosync.py
 
@@ -47,11 +47,16 @@ SimConnect.
 Will display and monitor for changes one PSX variable. Mostly useful
 when developing PSX Python scripts.
 
+E.g "show_psx.py Tla" will show the thrust lever angles
+
 ### show_usb.py
 
 Shows events on all connected USB joystick-type devices. Useful if you
 e.g want to find the USB button or axis number that matches a physical
 button or axis, or the pygame name of a device.
+
+If your USB device is not detected by show_usb.py, frankenusb.py will
+not be able to use it (since both use pygame to access USB devices).
 
 ### psx_shutdown.py
 
@@ -60,7 +65,7 @@ shutdown cleanly.
 
 ### psx_fuel_transfer.py
 
-SMall hack to transfer X tons of ZFW into the centre tank, simulating
+Small hack to transfer X tons of ZFW into the centre tank, simulating
 a large fuel tank in the hold that can be emptied into the center
 tank. Who said you can't fly London to Sydney with a decent payload in
 a 744? :)
@@ -130,3 +135,33 @@ E.g
 cd c:\fs\psx\python
 c:\fs\python\psxpython\Scripts\python.exe comparator.py --debug
 ```
+
+## Binary packages
+
+If you're not comfortable with installing Python, a virtual
+environment, etc. you can download some of the above scripts as EXE
+files. These are packaged using
+[Pyinstaller](https://pyinstaller.org/).
+
+Pros: Easier to install
+
+Cons: You cannot edit the Python script inside if you want to change
+something. You also cannot verify what the binary does, so you have to
+trust the developer...
+
+You can find the binary packages on
+https://drive.google.com/drive/folders/1Eu1uJCNUiLkFg9Qq8YwPCiPd9V7D5FbA
+
+All the binaries can be run by double-clicking on them or starting
+them in a PowerShell or CMD window.
+
+show_psx.exe must be run in a window since you need to tell it which
+PSX variable to monitor, e.g "show_psx.exe Tla".
+
+In order to use frankenusb.exe you probably need to edit
+frankenusb-frankensim.conf first.
+
+
+## Help
+
+Ask macroflight in the Aerowinx forum on Discord (username mk3830).
