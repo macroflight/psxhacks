@@ -95,6 +95,11 @@ class FrankenFreeze():  # pylint: disable=too-many-instance-attributes
             description='Sync MSFS in-cloud status to PSX to improve icing')
         parser.add_argument('--debug',
                             action='store_true')
+        parser.add_argument('--tweak-oat',
+                            action='store_true',
+                            help="Tweak PSX surface temp to make PSX OAT be close to MSFS OAT")
+        parser.add_argument('--allowed.oat-sim-update', default=5.0, action='store', type=float,
+                            help="How often (seconds) we will fetch data from MSFS.")
         parser.add_argument('--sim-update', default=5.0, action='store', type=float,
                             help="How often (seconds) we will fetch data from MSFS.")
         parser.add_argument('--psx-host', default='127.0.0.1', action='store', type=str,
@@ -146,7 +151,7 @@ class FrankenFreeze():  # pylint: disable=too-many-instance-attributes
         self.focused_zone = value
         self.merge_msfs_weather_into_focused_zone()
 
-    def merge_msfs_weather_into_focused_zone(self):  # pylint: disable=too-many-branches,too-many-statements
+    def merge_msfs_weather_into_focused_zone(self):  # pylint: disable=too-many-branches,too-many-statements, too-many-locals
         """Get MSFS weather and merge into the focused zone."""
         if self.msfs_in_cloud == 1:
             self.logger.info(
@@ -156,6 +161,7 @@ class FrankenFreeze():  # pylint: disable=too-many-instance-attributes
             self.logger.info(
                 "Updating PSX weather in zone %s. MSFS is NOT in cloud",
                 self.focused_zone)
+
         # Get the PSX weather for the zone
         zonename = "WxBasic"
         if int(self.focused_zone) > 0:
@@ -176,6 +182,40 @@ class FrankenFreeze():  # pylint: disable=too-many-instance-attributes
         loCloudCov = int(data[3])
         loCloudTop = int(data[4])
         loCloudBase = int(data[5])
+        surfaceTemp = float(data[22])
+
+        # Figure out if we need to do a temperature correction
+        if self.args.tweak_oat:
+            # Get MSFS and PSX OAT
+            msfs_oat = None
+            try:
+                msfs_oat = float(self.msfs_aq.get('AMBIENT_TEMPERATURE'))
+                msfs_qnh = float(self.msfs_aq.get('SEA_LEVEL_PRESSURE'))
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                self.logger.info("Failed to get MSFS OAT: %s", exc)
+            psx_oat = None
+            try:
+                psx_MiscFltData = self.psx.get("MiscFltData")
+                (_, psx_oat, _, _, _, _, _) = psx_MiscFltData.split(";")
+                psx_oat = float(psx_oat) / 10.0
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                self.logger.info("Failed to get PSX OAT: %s", exc)
+            if msfs_oat is None or psx_oat is None:
+                self.logger.warning("Failed to fetch OAT data, cannot adjust temperature")
+            else:
+                self.logger.info(
+                    "MSFS QNH=%s, OAT=%.1f, PSX OAT=%.1f, PSX surface temp=%s",
+                    msfs_qnh, msfs_oat, psx_oat, surfaceTemp)
+                oat_change_needed = msfs_oat - psx_oat
+                new_surface_temp = surfaceTemp + oat_change_needed
+                if data[22] != str(round(new_surface_temp)):
+                    self.logger.info(
+                        "Adjusting PSX surface temperature from %s to %s",
+                        data[22], str(round(new_surface_temp)))
+                    data[22] = str(round(new_surface_temp))
+                else:
+                    self.logger.info("No PSX surface temp adjustment needed/possible")
+
         # Find out if PSX already is in cloud
         psx_in_cloud = False
         psx_in_dense_cloud = False
@@ -302,6 +342,7 @@ class FrankenFreeze():  # pylint: disable=too-many-instance-attributes
         self.psx.subscribe("WxMode7")
         self.psx.subscribe("FocussedWxZone", self.handle_wx_focus_change)
         self.psx.subscribe("PiBaHeAlTas", self.handle_piba_change)
+        self.psx.subscribe("MiscFltData")
 
         self.psx.onResume = setup
         self.psx.onPause = teardown
