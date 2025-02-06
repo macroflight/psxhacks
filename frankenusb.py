@@ -695,7 +695,14 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 f"Failed to open config file {self.args.config_file}: {inst}") from inst
 
         pygame.init()
+        self.logger.debug("Waiting a little after pygame.init()")
+        # iadbound had problems with devices not showing up unless
+        # --debug was used. This seems to have made his setup stable.
+        await asyncio.sleep(2.0)
         pygame.joystick.init()
+        self.logger.debug("Waiting a little after pygame.joystickinit()")
+        # see above comment about iadbound
+        await asyncio.sleep(2.0)
         for i in range(pygame.joystick.get_count()):
             joystick_name = pygame.joystick.Joystick(i).get_name()
             if joystick_name not in self.config:
