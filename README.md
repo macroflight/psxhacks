@@ -161,6 +161,22 @@ PSX variable to monitor, e.g "show_psx.exe Tla".
 In order to use frankenusb.exe you probably need to edit
 frankenusb-frankensim.conf first.
 
+## Short frankenusb tutorial
+
+- Download the binary package zipfile and unpack it somewhere
+- Double-click frankenusb.exe (you will probably see a Windows warning
+  about untrusted apps)
+- If you see "Connected to PSX, setting up" things are working, but
+  you won't be able to do much unless you have the exact same USB
+  devices as I do, so stop the script (Control-C in the window or just
+  close the window)
+- Double-click show_usb.exe
+- Press an USB device button you want to use (or move an axis), note
+  the name and button/axis number
+- Edit the config file to match your devices
+- Start frankenusb.exe again and try the change
+- Repeat until you have mapped all the buttons and axes you want to
+  use
 
 ## Help
 
