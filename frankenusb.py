@@ -47,6 +47,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.psx = None
         self.psx_connected = False
         self.axis_cache = defaultdict(dict)
+        self.button_cache = defaultdict(dict)
         self.aileron_tiller_active = False
         # We use a button to toggle between reverse and normal mode for the throttles
         self.axis_reverse_mode = {}
@@ -401,6 +402,22 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         """Handle button press/release."""
         direction = 'up' if event.type == pygame.JOYBUTTONUP else 'down'
         joystick_name = self.joysticks[event.instance_id].get_name()
+
+        # Store this press in the button cache. This cache is used to
+        # detect rapid button presses, e.g to move the altitude
+        # quicker when the knob is turned faster
+
+        try:
+            last_event = self.button_cache[event.instance_id][event.button]
+        except KeyError:
+            self.logger.debug("No button cache data for %s/%s",
+                              event.instance_id, event.button)
+            last_event = 0
+        self.button_cache[event.instance_id][event.button] = time.time()
+        time_since_last_event = time.time() - last_event
+        self.logger.debug("Button %s/%s last pressed %.2f s ago",
+                          event.instance_id, event.button,
+                          time_since_last_event)
         try:
             button_config = self.config[joystick_name][f"button {direction}"][event.button]
         except KeyError:
@@ -409,6 +426,20 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         if button_config['button type'] == "SET":
             # Set a PSX variable to the value in config
             self.psx_send_and_set(button_config['psx variable'], button_config['value'])
+        elif button_config['button type'] == "SET_ACCELERATED":
+            minimum_interval = button_config['minimum interval']
+            acceleration = button_config['acceleration']
+            # Assumes this is a delta variable (where we send e.g 1 or -1 normally).
+            # If the time since the last event for this button is low
+            # enough, we multiply the value by 5.
+            if time.time() - last_event < minimum_interval:
+                new_value = button_config['value'] * acceleration
+                self.logger.debug("Button %s/%s last pressed %.2f s ago, ACCELERATED",
+                                  event.instance_id, event.button,
+                                  time_since_last_event)
+                self.psx_send_and_set(button_config['psx variable'], new_value)
+            else:
+                self.psx_send_and_set(button_config['psx variable'], button_config['value'])
         elif button_config['button type'] == "REVERSE_LEVER":
             if direction == 'down':
                 # mode, joystick_name, event, config, reverse
