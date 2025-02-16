@@ -361,7 +361,14 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
 
     async def handle_axis_motion(self, event):
         """Handle any axis motion."""
-        joystick_name = self.joysticks[event.instance_id].get_name()
+        try:
+            joystick_name = self.joysticks[event.instance_id].get_name()
+        except KeyError:
+            self.logger.warning(
+                "Dropping event for joystick %s (normal if joystick just added or removed)",
+                event.instance_id
+            )
+            return
         try:
             axis_config = self.config[joystick_name]['axis motion'][event.axis]
         except KeyError:
@@ -529,6 +536,13 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             axis_events = {}
             other_events = []
             for event in pygame.event.get():
+                # If a device is added or removed, restart
+                if event.type == pygame.JOYDEVICEREMOVED:
+                    self.logger.info("Joystick device removed, re-init joysticks")
+                    await self.init_joysticks()
+                if event.type == pygame.JOYDEVICEADDED:
+                    self.logger.info("Joystick device added, re-init joysticks")
+                    await self.init_joysticks()
                 # Filter out events we won't handle anyway
                 if event.type == pygame.JOYAXISMOTION:
                     # To avoid overloading the event handler, cache
@@ -575,17 +589,15 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
     async def setup_psx_connection(self):
         """Set up the PSX connection."""
         def setup():
-            self.logger.info("Connected to PSX, setting up")
             self.psx.send("demand", "GroundSpeed")
             self.psx_connected = True
             self.aileron_tiller_active = False
-            # setup()
+            self.logger.info("Connected to PSX")
 
         def teardown():
             self.logger.info("Disconnected from PSX, tearing down")
             self.psx.send(TILLER_MSG, "")
             self.psx_connected = False
-            # teardown()
 
         def connected(key, value):
             self.logger.info("Connected to PSX %s %s as #%s", key, value, self.psx.get('id'))
@@ -714,6 +726,37 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                     data['new data'] = {}
             await asyncio.sleep(0.01)
 
+    async def init_joysticks(self):
+        """Initialize the joysticks."""
+        self.logger.info("Initializing joysticks...")
+        self.joysticks = {}
+        # Since the IDs might change, we need to empty the queue of any old events
+        self.logger.info("Considering dropping events from queue")
+        while not self.axis_event_queue.empty():
+            self.logger.info("Dropping one event from queue")
+            self.axis_event_queue.get_nowait()
+            self.axis_event_queue.task_done()
+        while not self.psx_axis_queue.empty():
+            self.logger.info("Dropping one event from queue")
+            self.psx_axis_queue.get_nowait()
+            self.psx_axis_queue.task_done()
+        self.logger.info("Done considering dropping events from queue")
+
+        for i in range(pygame.joystick.get_count()):
+            joystick_name = pygame.joystick.Joystick(i).get_name()
+            if joystick_name not in self.config:
+                self.logger.warning(
+                    "Joystick %s (%s) found but not used in config file", i, joystick_name)
+                continue
+            self.logger.info("Joystick %s found: %s", i, joystick_name)
+            joy = pygame.joystick.Joystick(i)
+            joy.init()
+            self.joysticks[joy.get_instance_id()] = joy
+        if len(self.joysticks) <= 0:
+            self.logger.warning("Found no configured joysticks!")
+        else:
+            self.logger.info("Watching %d joysticks for events", len(self.joysticks))
+
     async def main(self):
         """Start the script."""
         self._handle_args()
@@ -734,17 +777,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.logger.debug("Waiting a little after pygame.joystickinit()")
         # see above comment about iadbound
         await asyncio.sleep(2.0)
-        for i in range(pygame.joystick.get_count()):
-            joystick_name = pygame.joystick.Joystick(i).get_name()
-            if joystick_name not in self.config:
-                self.logger.debug("Joystick %s (%s) but not configured", i, joystick_name)
-                continue
-            self.logger.debug("Joystick %s found: %s", i, joystick_name)
-            joy = pygame.joystick.Joystick(i)
-            joy.init()
-            self.joysticks[joy.get_instance_id()] = joy
-        if len(self.joysticks) <= 0:
-            raise FrankenUsbException("Found no configured joysticks to watch, exiting")
+
         await asyncio.gather(
             self.read_pygame_events(),
             self.handle_pygame_events(),
