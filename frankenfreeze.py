@@ -151,7 +151,7 @@ class FrankenFreeze():  # pylint: disable=too-many-instance-attributes
         self.focused_zone = value
         self.merge_msfs_weather_into_focused_zone()
 
-    def merge_msfs_weather_into_focused_zone(self):  # pylint: disable=too-many-branches,too-many-statements, too-many-locals
+    def merge_msfs_weather_into_focused_zone(self):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         """Get MSFS weather and merge into the focused zone."""
         if self.msfs_in_cloud == 1:
             self.logger.info(
