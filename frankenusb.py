@@ -507,17 +507,87 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 self.centre_ailerons_and_tiller()
                 # Enable tiller mode
                 self.aileron_tiller_active = True
-        elif button_config['button type'] == 'ACTION_RUNWAY_ENTRY':
-            # Transponder TARA, all lights except outer landing lights on
-            self.logger.info("Runway entry action: NOT IMPLEMENTED")
-        elif button_config['button type'] == 'ACTION_CLEARED_TAKEOFF':
-            # Outer landing lights on
-            self.logger.info("Cleared takeoff action: NOT IMPLEMENTED")
-        elif button_config['button type'] == 'ACTION_EXITED_RUNWAY':
-            # Transponder standby, landing lights off, taxi lights on, APU start, autobrake disable
-            self.logger.info("Runway exited action: NOT IMPLEMENTED")
+        elif button_config['button type'] == 'ACTION_FLIGHT_PHASE_TRIGGER':
+            for button, phase in button_config['button to phase'].items():
+                if self.joystick_get_button_position(joystick_name, button) == 1:
+                    await self.flight_phase_setup(phase)
         else:
             raise FrankenUsbException(f"Unknown button type {button_config['button type']}")
+
+    async def flight_phase_setup(self, phase):  # pylint: disable=too-many-statements
+        """Flight phase change functions."""
+        if phase == 'RUNWAY_ENTRY':
+            # Set transponder to TARA
+            # TcasPanSel: 4 digits, semicolon-separated. #4 controls the mode selector: 0-3
+            tcaspansel = self.psx.get("TcasPanSel")
+            tcaspansel_a = tcaspansel.split(';')
+            tcaspansel_a[3] = '3'
+            self.psx_send_and_set("TcasPanSel", ";".join(tcaspansel_a))
+            # Lights on
+            self.psx_send_and_set("LtLandInbL", "1")
+            self.psx_send_and_set("LtLandInbR", "1")
+            self.psx_send_and_set("LtStrobe", "1")
+            self.psx_send_and_set("LtWing", "1")
+            self.psx_send_and_set("LtLogo", "1")
+            self.psx_send_and_set("LtRwyTurnL", "1")
+            self.psx_send_and_set("LtRwyTurnR", "1")
+        elif phase == 'CLEARED_TAKEOFF':
+            # Turn on outer landing lights
+            self.psx_send_and_set("LtLandOubL", "1")
+            self.psx_send_and_set("LtLandOubR", "1")
+        elif phase == 'AFTER_TAKEOFF':
+            # Turn off some lights
+            self.psx_send_and_set("LtWing", "0")
+            self.psx_send_and_set("LtLogo", "0")
+            self.psx_send_and_set("LtRwyTurnL", "0")
+            self.psx_send_and_set("LtRwyTurnR", "0")
+            self.psx_send_and_set("LtTaxi", "0")
+        elif phase == 'NORMAL_FLIGHT':
+            # Toggle STD/QNH
+            self.psx_send_and_set("EcpStdCp", "1")
+        elif phase == 'EXITED_RUNWAY':
+            # Turn off strobe
+            self.psx_send_and_set("LtStrobe", "0")
+            # Turn off outer landing lights
+            self.psx_send_and_set("LtLandOubL", "0")
+            self.psx_send_and_set("LtLandOubR", "0")
+            # If we have a taxi light, turn it on and then turn off
+            # inner landing lights. If not, turn on inner landing
+            # lights
+            if self.psx.get("CfgTaxiLight") == "1":
+                self.psx_send_and_set("LtTaxi", "1")
+                self.psx_send_and_set("LtLandInbL", "0")
+                self.psx_send_and_set("LtLandInbR", "0")
+            else:
+                self.psx_send_and_set("LtLandInbL", "1")
+                self.psx_send_and_set("LtLandInbR", "1")
+            # Set transponder to XPDR
+            # TcasPanSel: 4 digits, semicolon-separated. #4 controls the mode selector: 0-3
+            tcaspansel = self.psx.get("TcasPanSel")
+            tcaspansel_a = tcaspansel.split(';')
+            tcaspansel_a[3] = '1'
+            self.psx_send_and_set("TcasPanSel", ";".join(tcaspansel_a))
+            # Speedbrake down
+            self.psx_send_and_set("SpdBrkLever", "0")
+            # Flaps up
+            self.psx_send_and_set("FlapLever", "0")
+            # Autobrake off
+            self.psx_send_and_set("Autobr", "1")
+            # Both FD + A/T off
+            self.psx_send_and_set("McpFdCp", "0")
+            self.psx_send_and_set("McpFdFo", "0")
+            self.psx_send_and_set("McpAtArm", "0")
+            # Start APU
+            self.logger.info("ApuStart=>1")
+            self.psx_send_and_set("ApuStart", "1")
+            await asyncio.sleep(2.0)
+            self.logger.info("ApuStart=>2")
+            self.psx_send_and_set("ApuStart", "2")
+            await asyncio.sleep(2.0)
+            self.logger.info("ApuStart=>1")
+            self.psx_send_and_set("ApuStart", "1")
+        else:
+            self.logger.warning("Unknown flight phase %s - no action", phase)
 
     async def handle_pygame_events(self):
         """Read pygame events from queue and handle them."""
@@ -620,6 +690,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
 
         # Needed for tiller mode
         self.psx.subscribe("Tiller")
+
+        # Needed to handle runway entry/exit feature
+        self.psx.subscribe("CfgTaxiLight")
+        self.psx.subscribe("TcasPanSel")
 
         # Needed for autothrottle
         self.psx.subscribe("Afds", self.print_psx_variable)
