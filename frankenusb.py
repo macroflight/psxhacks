@@ -412,7 +412,12 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
     async def handle_button(self, event):  # pylint: disable=too-many-branches,too-many-statements
         """Handle button press/release."""
         direction = 'up' if event.type == pygame.JOYBUTTONUP else 'down'
-        joystick_name = self.joysticks[event.instance_id].get_name()
+        try:
+            joystick_name = self.joysticks[event.instance_id].get_name()
+        except KeyError:
+            self.logger.error(
+                "Failed to lookup joystick name for instance ID %s", event.instance_id)
+            return
 
         # Store this press in the button cache. This cache is used to
         # detect rapid button presses, e.g to move the altitude
