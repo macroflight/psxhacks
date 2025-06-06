@@ -9,8 +9,8 @@ from collections import defaultdict
 import pygame  # pylint: disable=import-error
 import psx  # pylint: disable=unused-import
 
-# The type of message we use to display the tiller status in the sim
-TILLER_MSG = "FreeMsgM"
+# The type of message we use to display the tiller status (or flight control lock) in the sim
+MSG_TYPE = "FreeMsgM"
 
 
 class FrankenUsbException(Exception):
@@ -51,6 +51,15 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.aileron_tiller_active = False
         # We use a button to toggle between reverse and normal mode for the throttles
         self.axis_reverse_mode = {}
+
+        self.flight_control_lock_active = False
+        self.flight_control_lock_variables = [
+            'FltControls',
+            'Brakes',
+            'Tla',
+            'SpdBrkLever',
+            'Tiller',
+        ]
 
     def _handle_args(self):
         """Handle command line arguments."""
@@ -495,15 +504,24 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             self.towing_direction_toggle()
         elif button_config['button type'] == 'TOWING_MODE_TOGGLE':
             self.towing_mode_toggle()
+        elif button_config['button type'] == 'FLIGHT_CONTROL_LOCK_TOGGLE':
+            if self.flight_control_lock_active:
+                # Remove warning and disable lock
+                self.psx.send(MSG_TYPE, "")
+                self.flight_control_lock_active = False
+            else:
+                # Add warning and enable lock
+                self.psx.send(MSG_TYPE, "FLT CTL LCK")
+                self.flight_control_lock_active = True
         elif button_config['button type'] == 'TILLER_TOGGLE':
             if self.aileron_tiller_active:
                 # Remove warning, centre aileron and tiller, disable tiller mode
-                self.psx.send(TILLER_MSG, "")
+                self.psx.send(MSG_TYPE, "")
                 self.centre_ailerons_and_tiller()
                 self.aileron_tiller_active = False
             else:
                 # Display warning message, centre aileron and tiller, enable tiller mode
-                self.psx.send(TILLER_MSG, "TILLER ACTIVE")
+                self.psx.send(MSG_TYPE, "TILLER ACTIVE")
                 self.centre_ailerons_and_tiller()
                 # Enable tiller mode
                 self.aileron_tiller_active = True
@@ -675,7 +693,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
 
         def teardown():
             self.logger.info("Disconnected from PSX, tearing down")
-            self.psx.send(TILLER_MSG, "")
+            self.psx.send(MSG_TYPE, "")
             self.psx_connected = False
 
         def connected(key, value):
@@ -717,7 +735,15 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         await self.psx.connect(host=self.args.psx_server)
 
     def psx_send_and_set(self, psx_variable, new_psx_value):
-        """Send variable to PSX and store in local db."""
+        """Send variable to PSX and store in local db.
+
+        Filtering: if the flight control lock is active, do not send
+        any of the flight control variables to PSX.
+        """
+        if self.flight_control_lock_active:
+            if psx_variable in self.flight_control_lock_variables:
+                self.logger.debug("FLT CTL LOCK: not updating %s", psx_variable)
+                return
         self.logger.debug("TO PSX: %s -> %s", psx_variable, new_psx_value)
         self.psx.send(psx_variable, new_psx_value)
         self.psx._set(psx_variable, new_psx_value)  # pylint: disable=protected-access
