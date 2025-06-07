@@ -28,19 +28,41 @@ it can do that native PSX cannot:
   max flight speedbrake and max ground speedbrake, we let most of the
   axis range handle the in-flight band giving better sensitivity.
 
-### comparator.py
+- Bind a button to certain common procedures that are done during busy
+  phases of flight, e.g raise flaps, start APU, stow spoilers,
+  transponder to XPDR, lights off, etc. after vacating the runway.
 
-Mostly an example script. Compares the PSX and MSFS pitch, bank,
-heading and groundspeed. Useful to detect if the PSX.NET.MSFS.WASM
-plane is not doing what PSX wants it to do. Also checks that the MSFS
-camera angles are zero/zero (I had an issue where they would drift
-slightly, and that really screwed up my landings...)
+You can find sample config files for this in the config_examples
+directory.
 
-### radiosync.py
+### frankenusb.py
 
-Not needed anymore (bug in PSX.NET.MSFS.WASM now fixed), but maybe
-useful as a simple example of how to inject PSX data into MSFS using
-SimConnect.
+A flexible replacement for the PSX USB subsystem. Works with any
+hardware that pygame supports (the only thing we found so far that
+does not work is one type of rudder pedals). Development is currently
+done on VKB Gladiator joystick, VKB STECS throttle, MFG pedals and
+Thrustmaster Boeing yoke. Also tested with Bravo throttle,
+Thrustmaster Airbuse joystick, etc.
+
+### frankenfreeze.py
+
+This will create cloud in PSX's weather model when MSFS is in
+cloud. This helps make PSX icing match MSFS conditions better, i.e you
+will see icing start when you enter a cloud in MSFS (if the
+temperature is right).
+
+### frankenwind.py
+
+This will replace the PSX wind corridor data with the current MSFS
+wind at your altitude when the altimeter is set to STD, and restore
+the PSX data when the altimeter is set to QNH. The reasoning behind
+this is that the PSX wind data will match MSFS anyway when near an
+airport (i.e low, so QNH set).
+
+Use this if you feel that your winds are very different than other
+VATSIM users when enroute. Personally, I'm not convinced that this is
+needed, my enroute winds (from Simbrief) seems to match MSFS quite
+well.
 
 ### show_psx.py
 
@@ -69,6 +91,24 @@ Small hack to transfer X tons of ZFW into the centre tank, simulating
 a large fuel tank in the hold that can be emptied into the center
 tank. Who said you can't fly London to Sydney with a decent payload in
 a 744? :)
+
+### comparator.py
+
+Mostly an example script. Compares the PSX and MSFS pitch, bank,
+heading and groundspeed. Useful to detect if the PSX.NET.MSFS.WASM
+plane is not doing what PSX wants it to do. Also checks that the MSFS
+camera angles are zero/zero (I had an issue where they would drift
+slightly, and that really screwed up my landings...)
+
+### radiosync.py
+
+Not needed anymore (bug in PSX.NET.MSFS.WASM now fixed), but maybe
+useful as a simple example of how to inject PSX data into MSFS using
+SimConnect.
+
+## make_gatefinder_database.py
+Extracts gate positions from a LittleNavMap database, for use with the
+Gatefinder tool.
 
 ## What you need to run my Python scripts:
 
