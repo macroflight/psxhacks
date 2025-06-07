@@ -447,6 +447,9 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             button_config = self.config[joystick_name][f"button {direction}"][event.button]
         except KeyError:
             # Not handling this button/direction
+            if direction == 'down':
+                self.logger.verbose(
+                    "Unhandled button down event for %s: %s", joystick_name, event.button)
             return
         if button_config['button type'] == "SET":
             # Set a PSX variable to the value in config
