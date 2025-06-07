@@ -35,14 +35,11 @@ it can do that native PSX cannot:
 You can find sample config files for this in the config_examples
 directory.
 
-### frankenusb.py
-
-A flexible replacement for the PSX USB subsystem. Works with any
-hardware that pygame supports (the only thing we found so far that
-does not work is one type of rudder pedals). Development is currently
-done on VKB Gladiator joystick, VKB STECS throttle, MFG pedals and
-Thrustmaster Boeing yoke. Also tested with Bravo throttle,
-Thrustmaster Airbuse joystick, etc.
+Works with any hardware that pygame supports (the only thing we found
+so far that does not work is one type of rudder pedals). Development
+is currently done on VKB Gladiator joystick, VKB STECS throttle, MFG
+pedals and Thrustmaster Boeing yoke. Also tested with Bravo throttle,
+Thrustmaster Airbus joystick, etc.
 
 ### frankenfreeze.py
 
@@ -201,7 +198,7 @@ PSX variable to monitor, e.g "show_psx.exe Tla".
 In order to use frankenusb.exe you probably need to edit
 frankenusb-frankensim.conf first.
 
-## Short frankenusb tutorial
+## Short frankenusb tutorial if you use the binary package
 
 - Download the binary package zipfile and unpack it somewhere
 - Double-click frankenusb.exe (you will probably see a Windows warning
