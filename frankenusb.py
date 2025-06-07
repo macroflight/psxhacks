@@ -9,8 +9,18 @@ from collections import defaultdict
 import pygame  # pylint: disable=import-error
 import psx  # pylint: disable=unused-import
 
-# The type of message we use to display the tiller status (or flight control lock) in the sim
-MSG_TYPE = "FreeMsgM"
+# Avail message categories
+# Qs418="FreeMsgW"; Mode=ECON; Min=0; Max=16;  master warning + message in red on upper EICAS
+# Qs419="FreeMsgC"; Mode=ECON; Min=0; Max=16;  yellow caution on upper EICAS
+# Qs420="FreeMsgA"; Mode=ECON; Min=0; Max=16;  yellow caution on upper EICAS
+# Qs421="FreeMsgM"; Mode=ECON; Min=0; Max=16;  white text on upper EICAS
+# Qs422="FreeMsgS"; Mode=ECON; Min=0; Max=16;  status message, trigger "STATUS" on EICAS but only shown when STAT selected
+
+# The type of message we use to display the tiller status
+MSG_TYPE_TILLER = "FreeMsgA"
+
+# The type of message we use to display when the flight control lock is enabled
+MSG_TYPE_FLT_CTL_LOCK = "FreeMsgM"
 
 
 class FrankenUsbException(Exception):
@@ -88,6 +98,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         parser.add_argument('--psx-server',
                             action='store', default="127.0.0.1", type=str,
                             help='Hostname or IP address of the main PSX server',
+                            )
+        parser.add_argument('--fo',
+                            action='store_true',
+                            help='Use this in shared cockpit if you are the FO',
                             )
 
         self.args = parser.parse_args()
@@ -448,7 +462,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         except KeyError:
             # Not handling this button/direction
             if direction == 'down':
-                self.logger.verbose(
+                self.logger.debug(
                     "Unhandled button down event for %s: %s", joystick_name, event.button)
             return
         if button_config['button type'] == "SET":
@@ -508,23 +522,16 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         elif button_config['button type'] == 'TOWING_MODE_TOGGLE':
             self.towing_mode_toggle()
         elif button_config['button type'] == 'FLIGHT_CONTROL_LOCK_TOGGLE':
-            if self.flight_control_lock_active:
-                # Remove warning and disable lock
-                self.psx.send(MSG_TYPE, "")
-                self.flight_control_lock_active = False
-            else:
-                # Add warning and enable lock
-                self.psx.send(MSG_TYPE, "FLT CTL LCK")
-                self.flight_control_lock_active = True
+            self.toggle_flight_control_lock()
         elif button_config['button type'] == 'TILLER_TOGGLE':
             if self.aileron_tiller_active:
                 # Remove warning, centre aileron and tiller, disable tiller mode
-                self.psx.send(MSG_TYPE, "")
+                self.psx.send(MSG_TYPE_TILLER, "")
                 self.centre_ailerons_and_tiller()
                 self.aileron_tiller_active = False
             else:
                 # Display warning message, centre aileron and tiller, enable tiller mode
-                self.psx.send(MSG_TYPE, "TILLER ACTIVE")
+                self.psx.send(MSG_TYPE_TILLER, "TILLER ACTIVE")
                 self.centre_ailerons_and_tiller()
                 # Enable tiller mode
                 self.aileron_tiller_active = True
@@ -534,6 +541,71 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                     await self.flight_phase_setup(phase)
         else:
             raise FrankenUsbException(f"Unknown button type {button_config['button type']}")
+
+    def toggle_flight_control_lock(self):  # pylint: disable=too-many-branches
+        """Toggle the flight control lock and update status message."""
+        # Lock modes:
+        # 0 - no flight control lock
+        # 1 - captain's controls locked
+        # 2 - first officer's controls locked
+        # 3 - both controls locked
+        # 4 - unknown
+        # Note: for this to work both shared cockpit pilots must use
+        # frankenusb, and one must be started with the --fo option.
+        prefix = "AXLK:"
+        current_message = self.psx.get(MSG_TYPE_FLT_CTL_LOCK)
+        if current_message == '':
+            lock_mode = 0
+        elif current_message == f"({prefix} CP)":
+            lock_mode = 1
+        elif current_message == f"({prefix} FO)":
+            lock_mode = 2
+        elif current_message == f"({prefix} BOTH)":
+            lock_mode = 3
+        else:
+            self.logger.warning(
+                "Found unexpected %s value %s", MSG_TYPE_FLT_CTL_LOCK, current_message)
+            lock_mode = 4
+
+        # Toggle the actual lock
+        if self.flight_control_lock_active:
+            self.flight_control_lock_active = False
+        else:
+            self.flight_control_lock_active = True
+
+        # Update EICAS message
+        if self.args.fo:
+            # FO mode
+            if self.flight_control_lock_active:
+                # FO lock enabled
+                if lock_mode in [0, 2, 4]:
+                    new_message = f"({prefix} FO)"
+                else:
+                    new_message = f"({prefix} BOTH)"
+            else:
+                # FO lock disabled
+                if lock_mode in [1, 3]:
+                    new_message = f"({prefix} CP)"
+                else:  # 0, 2, 4
+                    new_message = ''
+        else:
+            # Captain mode
+            if self.flight_control_lock_active:
+                # Captain's lock enabled
+                if lock_mode in [0, 1, 4]:
+                    new_message = f"({prefix} CP)"
+                else:  # 2, 3
+                    new_message = f"({prefix} BOTH)"
+            else:
+                # Captain's lock disabled
+                if lock_mode in [2, 3]:
+                    new_message = f"({prefix} FO)"
+                else:  # 0, 1, 4
+                    new_message = ''
+        self.logger.info(
+            "Flight control lock toggled. New value: %s. Message change from %s to %s",
+            self.flight_control_lock_active, current_message, new_message)
+        self.psx_send_and_set(MSG_TYPE_FLT_CTL_LOCK, new_message)
 
     async def flight_phase_setup(self, phase):  # pylint: disable=too-many-statements
         """Flight phase change functions."""
@@ -696,7 +768,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
 
         def teardown():
             self.logger.info("Disconnected from PSX, tearing down")
-            self.psx.send(MSG_TYPE, "")
+            self.psx.send(MSG_TYPE_TILLER, "")
             self.psx_connected = False
 
         def connected(key, value):
@@ -715,6 +787,9 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         # Needed to handle runway entry/exit feature
         self.psx.subscribe("CfgTaxiLight")
         self.psx.subscribe("TcasPanSel")
+
+        # Subscribe to EICAS messages that another addon might set
+        self.psx.subscribe(MSG_TYPE_FLT_CTL_LOCK)
 
         # Needed for autothrottle
         self.psx.subscribe("Afds", self.print_psx_variable)
