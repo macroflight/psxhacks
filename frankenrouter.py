@@ -128,7 +128,14 @@ async def write_to_psx_server(data, client_addr):
     writer = psx_server[1]
     writer.write(data)
     await writer.drain()
-        
+    # We also need to send this data to all the other clients!!!
+    for this_addr, client in clients.items():
+        if this_addr != client_addr:
+            print(f"{this_addr} <= {client_addr}: {data.decode().rstrip()}")
+            writer = client['writer']
+            writer.write(data)
+            await writer.drain()
+
 async def psx_server_connection():
     global psx_server, current_conn
     while True:
