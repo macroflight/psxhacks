@@ -50,6 +50,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                             action='store', default=10747)
         parser.add_argument('--psx-main-server-host',
                             action='store', default='127.0.0.1')
+        parser.add_argument('--server-buffer-size', type=int,
+                            action='store', default=65536)
         parser.add_argument('--state-cache-file',
                             action='store', default='frankenrouter.cache.json')
         parser.add_argument('--debug',
@@ -92,7 +94,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         def send_if_unsent(key):
             if key not in sent:
                 if key not in self.state:
-                    self.logger.warning("%s not found in self.state, client restart might be needed after server connection", key)
+                    self.logger.warning(
+                        "%s not found in self.state, client restart might be needed" +
+                        " after server connection", key)
                     return
                 line = f"{key}={self.state[key]}"
                 client['writer'].write(f"{line}\n".encode())
@@ -235,9 +239,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             # We know the protocol is text-based, so we can use readline()
             try:
                 data = await reader.readline()
-            except Exception as exc:
+            except Exception as exc:  # pylint: disable=broad-exception-caught
                 del self.clients[client_addr]
-                self.logger.warning("Client connection broke for %s", client_addr)
+                self.logger.warning("Client connection broke (%s) for %s", exc, client_addr)
                 self.print_status()
                 return
             line = data.decode().strip()
@@ -308,6 +312,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 reader, writer = await asyncio.open_connection(
                     self.args.psx_main_server_host,
                     self.args.psx_main_server_port,
+                    limit=self.args.server_buffer_size,
                 )
             except ConnectionRefusedError:
                 self.logger.warning(
@@ -332,7 +337,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 # read one line at a time.
                 try:
                     data = await reader.readline()
-                except Exception as exc:
+                except Exception as exc:  # pylint: disable=broad-exception-caught
                     self.server = {}
                     self.logger.info(
                         "Server connection broke (%s), sleeping %.1f s before reconnect",
@@ -341,7 +346,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     )
                     self.print_status()
                     await asyncio.sleep(PSX_SERVER_RECONNECT_DELAY)
-                    
+
                 line = data.decode().strip()
                 if line == '':
                     self.server = {}
@@ -434,6 +439,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.handle_new_connection_cb,
             host=self.args.listen_host,
             port=self.args.listen_port,
+            limit=self.args.server_buffer_size,
         )
         self.logger.info("Listening on %s", self.proxy_server.sockets[0].getsockname())
         self.print_status()
