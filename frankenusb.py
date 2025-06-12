@@ -99,6 +99,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                             action='store', default="127.0.0.1", type=str,
                             help='Hostname or IP address of the main PSX server',
                             )
+        parser.add_argument('--psx-port',
+                            action='store', default="10747", type=str,
+                            help='Port number of the main PSX server',
+                            )
         parser.add_argument('--fo',
                             action='store_true',
                             help='Use this in shared cockpit if you are the FO',
@@ -810,7 +814,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             self.psx.subscribe(psx_variable)
         self.logger.info("PSX subscribed variables: %s", ', '.join(self.psx.variables.keys()))
         # Nothing happens until we connect()
-        await self.psx.connect(host=self.args.psx_server)
+        await self.psx.connect(host=self.args.psx_server, port=self.args.psx_port)
 
     def psx_send_and_set(self, psx_variable, new_psx_value):
         """Send variable to PSX and store in local db.
