@@ -91,6 +91,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
         def send_if_unsent(key):
             if key not in sent:
+                if key not in self.state:
+                    self.logger.warning("%s not found in self.state, client restart might be needed after server connection", key)
+                    return
                 line = f"{key}={self.state[key]}"
                 client['writer'].write(f"{line}\n".encode())
                 sent.append(key)
@@ -230,7 +233,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         while self.client_connected(client_addr):
             self.logger.debug("Waiting for data from client %s", client_addr)
             # We know the protocol is text-based, so we can use readline()
-            data = await reader.readline()
+            try:
+                data = await reader.readline()
+            except Exception as exc:
+                del self.clients[client_addr]
+                self.logger.warning("Client connection broke for %s", client_addr)
+                self.print_status()
+                return
             line = data.decode().strip()
             if line == "":
                 writer.close()
@@ -240,7 +249,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 return
             self.logger.debug("From client %s: %s", client_addr, line)
 
-            key, _, value = line.partition("=")
+            key, sep, value = line.partition("=")
             if key in ['load1', 'load2', 'load3']:
                 # Load messages: should not be sent by clients, ignore
                 self.logger.warning(
@@ -265,7 +274,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.logger.info("Client %s is disconnecting", client_addr)
                 self.print_status()
                 return
-            elif value != "":
+            elif sep != "":
                 self.state[key] = value
                 line = f"{key}={value}"
                 await self.send_to_server(line, client_addr)
@@ -321,7 +330,18 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 # We know the protocol is line-oriented and the lines will
                 # not be too long to handle as a single unit, so we can
                 # read one line at a time.
-                data = await reader.readline()
+                try:
+                    data = await reader.readline()
+                except Exception as exc:
+                    self.server = {}
+                    self.logger.info(
+                        "Server connection broke (%s), sleeping %.1f s before reconnect",
+                        exc,
+                        PSX_SERVER_RECONNECT_DELAY,
+                    )
+                    self.print_status()
+                    await asyncio.sleep(PSX_SERVER_RECONNECT_DELAY)
+                    
                 line = data.decode().strip()
                 if line == '':
                     self.server = {}
