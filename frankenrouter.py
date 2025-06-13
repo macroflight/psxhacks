@@ -6,6 +6,7 @@ import datetime
 import json
 import logging
 import os
+import pathlib
 import time
 
 VERSION = '0.2'
@@ -40,26 +41,37 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.server = {}
         self.stream_logfiles = {}
         self.start_time = int(time.time())
+        self.allowed_clients = {
+        }
 
     def handle_args(self):
         """Handle command line arguments."""
         parser = argparse.ArgumentParser(
             prog='frankenrouter',
             description='A PSX router',
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
             epilog='Good luck!')
-        parser.add_argument('--listen-port',
+        parser.add_argument('--listen-port', type=int,
                             action='store', default=10748)
-        parser.add_argument('--listen-host',
+        parser.add_argument('--listen-host', type=int,
                             action='store', default=None)
-        parser.add_argument('--psx-main-server-port',
-                            action='store', default=10747)
-        parser.add_argument('--psx-main-server-host',
+        parser.add_argument('--psx-main-server-host', type=str,
                             action='store', default='127.0.0.1')
+        parser.add_argument('--psx-main-server-port', type=int,
+                            action='store', default=10747)
+        parser.add_argument('--allowed-clients',
+                            action='store', default="127.0.0.1:full:localhost",
+                            type=str,
+                            help=(
+                                "Comma-separated lists of clients thay may connect." +
+                                " format: IP:access level:identifier" +
+                                ", e.g 192.168.1.42:full:FrankenThrottle"),
+                            )
         parser.add_argument('--server-buffer-size', type=int,
                             action='store', default=65536)
-        parser.add_argument('--state-cache-file',
+        parser.add_argument('--state-cache-file', type=pathlib.Path,
                             action='store', default='frankenrouter.cache.json')
-        parser.add_argument('--log-dir',
+        parser.add_argument('--log-dir', type=pathlib.Path,
                             action='store', default='./')
         parser.add_argument('--log-streams',
                             action='store_true')
@@ -69,6 +81,17 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.args = parser.parse_args()
         if self.args.debug:
             self.logger.setLevel(logging.DEBUG)
+        for client in self.args.allowed_clients.split(','):
+            (ip, access_level, identifier) = client.split(":")
+            if access_level not in ['full', 'readonly']:
+                parser.error(f"Invalid client access level {access_level}")
+            if len(identifier) > 16:
+                parser.error("Client identifier max length is 16")
+            self.allowed_clients[ip] = {
+                'source': 'command line',
+                'access': access_level,
+                'identifier': identifier,
+            }
 
     def server_connected(self):
         """Return True if we are connected to the PSX main server."""
@@ -94,6 +117,21 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             len(self.clients),
             len(self.state),
         )
+        self.logger.info(
+            "%-16s %-15s %5s %8s",
+            "Identifier     ",
+            "Client IP       ",
+            "Port ",
+            "Access  ",
+        )
+        for data in self.clients.values():
+            self.logger.info(
+                "%-16s %-15s %5d %8s",
+                data['identifier'],
+                data['ip'],
+                data['port'],
+                data['access'],
+            )
 
     def to_stream(self, endpoint, line):
         """Write data to a stream and optionally to a log file."""
@@ -250,18 +288,40 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         send_unconditionally("Qs124")
         send_unconditionally("Qs125")
 
-    async def handle_new_connection_cb(self, reader, writer):
+    async def handle_new_connection_cb(self, reader, writer):  # pylint: disable=too-many-branches,too-many-statements
         """Handle a new client connection."""
         client_addr = writer.get_extra_info('peername')
         assert client_addr not in self.clients, f"Duplicate client ID {client_addr}"
         # Store the connection information for later
         self.clients[client_addr] = {
             'peername': client_addr,
+            'ip': client_addr[0],
+            'port': client_addr[1],
             'reader': reader,
             'writer': writer,
+            'access': 'noaccess',
+            'identifier': 'unknown',
         }
         self.logger.info("Client connected: %s", client_addr)
 
+        if client_addr[0] in self.allowed_clients:
+            self.clients[client_addr]['access'] = self.allowed_clients[
+                client_addr[0]]['access']
+            self.clients[client_addr]['identifier'] = self.allowed_clients[
+                client_addr[0]]['identifier']
+            self.logger.info(
+                "Client identified as %s, access level %s",
+                self.clients[client_addr]['identifier'],
+                self.clients[client_addr]['access'],
+            )
+        else:
+            self.logger.warning("Client not identified, closing connection")
+            writer.write("unauthorized\n".encode())
+            writer.close()
+            del self.clients[client_addr]
+            self.logger.info("Client %s disconnected", client_addr)
+            self.print_status()
+            return
         if self.args.log_streams:
             logfile = os.path.join(
                 self.args.log_dir,
@@ -295,33 +355,39 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             # Log data from client
             self.from_stream(self.clients[client_addr], line)
 
-            key, sep, value = line.partition("=")
-            if key in ["bang", "start", "again"]:
-                # Forward to server but not other clients
-                self.send_to_server(key, client_addr)
-            elif key in ["nolong"]:
-                self.logger.warning("nolong not implemented, ignoring")
-            elif key in ["load1", "load2", "load3", "pleaseBeSoKindAndQuit"]:
-                # Forward to server and other clients
-                self.logger.info("%s from %s", key, client_addr)
-                self.send_to_server(key, client_addr)
-                self.client_broadcast(key, client_filter=[client_addr])
-            elif key in [
-                    'exit',
-            ]:
-                # Shut down client connection cleanly
-                writer.close()
-                del self.clients[client_addr]
-                self.logger.info("Client %s is disconnecting", client_addr)
-                self.print_status()
-                return
-            elif sep != "":
-                self.state[key] = value
-                line = f"{key}={value}"
-                self.send_to_server(line, client_addr)
-                self.client_broadcast(line, client_filter=[client_addr])
+            if self.clients[client_addr]['access'] == 'full':
+                key, sep, value = line.partition("=")
+                if key in ["bang", "start", "again"]:
+                    # Forward to server but not other clients
+                    self.send_to_server(key, client_addr)
+                elif key in ["nolong"]:
+                    self.logger.warning("nolong not implemented, ignoring")
+                elif key in ["load1", "load2", "load3", "pleaseBeSoKindAndQuit"]:
+                    # Forward to server and other clients
+                    self.logger.info("%s from %s", key, client_addr)
+                    self.send_to_server(key, client_addr)
+                    self.client_broadcast(key, client_filter=[client_addr])
+                elif key in [
+                        'exit',
+                ]:
+                    # Shut down client connection cleanly
+                    writer.close()
+                    del self.clients[client_addr]
+                    self.logger.info("Client %s is disconnecting", client_addr)
+                    self.print_status()
+                    return
+                elif sep != "":
+                    self.state[key] = value
+                    line = f"{key}={value}"
+                    self.send_to_server(line, client_addr)
+                    self.client_broadcast(line, client_filter=[client_addr])
+                else:
+                    self.logger.warning("Unhandled data from client: %s", line)
             else:
-                self.logger.warning("Unhandled data from client: %s", line)
+                self.logger.info(
+                    "Read-only client tried to send data, ignoring: %s",
+                    line
+                )
 
     def client_broadcast(self, line, client_filter=None):
         """Send a line to all connected clients except the ones in the filter list."""
@@ -360,6 +426,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             server_addr = writer.get_extra_info('peername')
             self.server = {
                 'peername': server_addr,
+                'ip': server_addr[0],
+                'port': server_addr[1],
                 'reader': reader,
                 'writer': writer,
             }
