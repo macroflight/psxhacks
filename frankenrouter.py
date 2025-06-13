@@ -8,7 +8,7 @@ import logging
 import os
 import time
 
-VERSION = '0.1'
+VERSION = '0.2'
 
 PSX_SERVER_RECONNECT_DELAY = 1.0
 
