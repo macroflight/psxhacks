@@ -41,6 +41,46 @@ is currently done on VKB Gladiator joystick, VKB STECS throttle, MFG
 pedals and Thrustmaster Boeing yoke. Also tested with Bravo throttle,
 Thrustmaster Airbus joystick, etc.
 
+### frankenrouter.py
+
+A PSX router/broker. As of version 0.2, it can handle all addons in my
+sim except BACARS (which I can then run locally on the computer that
+hosts the PSX main server).
+
+Maturity: low, but I have completed a full flight using all my addons
+(except BACARS) and extra PSX instances connected through the router.
+
+#### Current features:
+
+- Logging of the data streams sent and received from the PSX main
+  server, all PSX main clients and all addons.
+- Allow clients to stay connected to the router even when the PSX main
+  server is restarted.
+- Auto-connects to the PSX main server if disconnected.
+
+#### Ideas for the future:
+
+- Access control (whitelisted IPs and/or authentication using a
+  password) - for shared cockpit over the Internet
+
+- Read-only connections (for shared cockpit observers)
+
+- Toggleable flight control axis lock for shared cockpit (prevent the
+  PNF's noisy controls from interfering with the PF) - will simply
+  filter out e.g FltControls updates from that client.
+
+- User-friendly names for connected clients (rather than just
+  IP/port). For addons that send a name string - use that, otherwise
+  deduce it from config file (e.g 192.168.1.26 == Throttles) or the
+  type of traffic sent by the client.
+
+- Statistics for data sent/received per client, variables sent by
+  client, ...
+
+#### Dependencies
+
+- Python (no extra modules required)
+
 ### frankenfreeze.py
 
 This will create cloud in PSX's weather model when MSFS is in

@@ -10,11 +10,11 @@ import pygame  # pylint: disable=import-error
 import psx  # pylint: disable=unused-import
 
 # Avail message categories
-# Qs418="FreeMsgW"; Mode=ECON; Min=0; Max=16;  master warning + message in red on upper EICAS
-# Qs419="FreeMsgC"; Mode=ECON; Min=0; Max=16;  yellow caution on upper EICAS
-# Qs420="FreeMsgA"; Mode=ECON; Min=0; Max=16;  yellow caution on upper EICAS
-# Qs421="FreeMsgM"; Mode=ECON; Min=0; Max=16;  white text on upper EICAS
-# Qs422="FreeMsgS"; Mode=ECON; Min=0; Max=16;  status message, trigger "STATUS" on EICAS but only shown when STAT selected
+# Qs418="FreeMsgW"; master warning + message in red on upper EICAS
+# Qs419="FreeMsgC"; yellow caution on upper EICAS
+# Qs420="FreeMsgA"; yellow caution on upper EICAS
+# Qs421="FreeMsgM"; white text on upper EICAS
+# Qs422="FreeMsgS"; status message, trigger "STATUS" on EICAS but only shown when STAT selected
 
 # The type of message we use to display the tiller status
 MSG_TYPE_TILLER = "FreeMsgA"
@@ -98,6 +98,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         parser.add_argument('--psx-server',
                             action='store', default="127.0.0.1", type=str,
                             help='Hostname or IP address of the main PSX server',
+                            )
+        parser.add_argument('--psx-port',
+                            action='store', default="10747", type=str,
+                            help='Port number of the main PSX server',
                             )
         parser.add_argument('--fo',
                             action='store_true',
@@ -810,7 +814,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             self.psx.subscribe(psx_variable)
         self.logger.info("PSX subscribed variables: %s", ', '.join(self.psx.variables.keys()))
         # Nothing happens until we connect()
-        await self.psx.connect(host=self.args.psx_server)
+        await self.psx.connect(host=self.args.psx_server, port=self.args.psx_port)
 
     def psx_send_and_set(self, psx_variable, new_psx_value):
         """Send variable to PSX and store in local db.

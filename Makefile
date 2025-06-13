@@ -2,8 +2,8 @@
 
 LINTVENVDIR = $${HOME}/.venv-lint/$(osname)
 
-LINTFILES = radiosync.py frankenusb.py comparator.py psx_fuel_transfer.py psx_shutdown.py show_psx.py show_usb.py frankenwind.py frankenfreeze.py make_gatefinder_database.py
-CONFIGFILES = frankenusb-frankensim.conf
+LINTFILES = radiosync.py frankenusb.py comparator.py psx_fuel_transfer.py psx_shutdown.py show_psx.py show_usb.py frankenwind.py frankenfreeze.py make_gatefinder_database.py frankenrouter.py
+CONFIGFILES = config_examples/*
 
 osname=$(shell uname -s)-$(shell uname -r)
 
