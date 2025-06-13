@@ -164,6 +164,7 @@ class FrankenWind():  # pylint: disable=too-many-instance-attributes
             self.logger.info("Connected to PSX, setting up")
             self.psx.send("demand", "GroundSpeed")
             self.psx_connected = True
+            self.psx.send("name", "FrankenWind:frankenwind.py")
 
         def teardown():
             self.logger.info("Disconnected from PSX, tearing down")

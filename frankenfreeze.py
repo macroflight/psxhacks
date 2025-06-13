@@ -310,6 +310,7 @@ class FrankenFreeze():  # pylint: disable=too-many-instance-attributes
         def setup():
             self.logger.info("Connected to PSX, setting up")
             self.psx_connected = True
+            self.psx.send("name", "FrankenFreeze:frankenfreeze.py")
 
         def teardown():
             self.logger.info("Disconnected from PSX, tearing down")
