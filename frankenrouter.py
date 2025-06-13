@@ -354,7 +354,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.args.psx_main_server_port,
                     limit=self.args.server_buffer_size,
                 )
-            except ConnectionRefusedError:
+            # At least on Windows we get OSError after ~30s if the PSX server is down or unreachable
+            except (ConnectionRefusedError, OSError):
                 self.logger.warning(
                     "PSX server connection refused, sleeping %.1f s before retry",
                     PSX_SERVER_RECONNECT_DELAY,
