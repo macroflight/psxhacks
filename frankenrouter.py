@@ -7,11 +7,15 @@ import json
 import logging
 import os
 import pathlib
+import re
 import time
 
 VERSION = '0.2'
 
 PSX_SERVER_RECONNECT_DELAY = 1.0
+
+# Regexp matching "normal" PSX network keywords
+REGEX_PSX_KEYWORDS = r"^(id|version|layout|metar|demand|load[1-3]|Q[hsdi]\d+|L[sih]\d+\(.*\))$"
 
 
 class FrankenrouterException(Exception):
@@ -51,40 +55,60 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             description='A PSX router',
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
             epilog='Good luck!')
-        parser.add_argument('--listen-port', type=int,
-                            action='store', default=10748)
-        parser.add_argument('--listen-host', type=int,
-                            action='store', default=None)
-        parser.add_argument('--psx-main-server-host', type=str,
-                            action='store', default='127.0.0.1')
-        parser.add_argument('--psx-main-server-port', type=int,
-                            action='store', default=10747)
-        parser.add_argument('--allowed-clients',
-                            action='store', default="127.0.0.1:full:localhost",
-                            type=str,
-                            help=(
-                                "Comma-separated lists of clients thay may connect." +
-                                " format: IP:access level:identifier" +
-                                ", e.g 192.168.1.42:full:FrankenThrottle"),
-                            )
-        parser.add_argument('--print-client-keywords',
-                            action='store', default="",
-                            type=str,
-                            help="Comma-separated lists of keywords sent from clients to print to stdout")
-        parser.add_argument('--print-server-keywords',
-                            action='store', default="",
-                            type=str,
-                            help="Comma-separated lists of keywords sent from server to print to stdout")
-        parser.add_argument('--server-buffer-size', type=int,
-                            action='store', default=65536)
-        parser.add_argument('--state-cache-file', type=pathlib.Path,
-                            action='store', default='frankenrouter.cache.json')
-        parser.add_argument('--log-dir', type=pathlib.Path,
-                            action='store', default='./')
-        parser.add_argument('--log-streams',
-                            action='store_true')
-        parser.add_argument('--debug',
-                            action='store_true')
+        parser.add_argument(
+            '--listen-port', type=int,
+            action='store', default=10748)
+        parser.add_argument(
+            '--listen-host', type=int,
+            action='store', default=None)
+        parser.add_argument(
+            '--psx-main-server-host', type=str,
+            action='store', default='127.0.0.1')
+        parser.add_argument(
+            '--psx-main-server-port', type=int,
+            action='store', default=10747)
+        parser.add_argument(
+            '--allowed-clients',
+            action='store', default="127.0.0.1:full:localhost",
+            type=str,
+            help=(
+                "Comma-separated lists of clients thay may connect." +
+                " format: IP:access level:identifier" +
+                ", e.g 192.168.1.42:full:FrankenThrottle"),
+        )
+        parser.add_argument(
+            '--print-client-keywords',
+            action='store', default="",
+            type=str,
+            help="Comma-separated lists of keywords sent from clients to print to stdout")
+        parser.add_argument(
+            '--print-server-keywords',
+            action='store', default="",
+            type=str,
+            help="Comma-separated lists of keywords sent from server to print to stdout")
+        parser.add_argument(
+            '--print-client-non-psx',
+            action='store_true',
+            help="Print all non-PSX communication from clients")
+        parser.add_argument(
+            '--print-server-non-psx',
+            action='store_true',
+            help="Print all non-PSX communication from server")
+        parser.add_argument(
+            '--server-buffer-size', type=int,
+            action='store', default=65536)
+        parser.add_argument(
+            '--state-cache-file', type=pathlib.Path,
+            action='store', default='frankenrouter.cache.json')
+        parser.add_argument(
+            '--log-dir', type=pathlib.Path,
+            action='store', default='./')
+        parser.add_argument(
+            '--log-streams',
+            action='store_true')
+        parser.add_argument(
+            '--debug',
+            action='store_true')
 
         self.args = parser.parse_args()
         if self.args.debug:
@@ -102,7 +126,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             }
         self.args.print_client_keywords = self.args.print_client_keywords.split(",")
         self.args.print_server_keywords = self.args.print_server_keywords.split(",")
-            
+
     def server_connected(self):
         """Return True if we are connected to the PSX main server."""
         if len(self.server) > 0:
@@ -119,7 +143,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         """Print a one-line status message."""
         serverinfo = "[NO SERVER CONNECTION]"
         if self.server_connected():
-            serverinfo = f"[{self.server['ip']}{self.server['port']}]"
+            serverinfo = f"[{self.server['ip']}:{self.server['port']}]"
 
         self.logger.info(
             "%5s %2d clients, %3d keywords",
@@ -368,6 +392,25 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             key, sep, value = line.partition("=")
             if key in self.args.print_client_keywords:
                 self.logger.info("%s from %s: %s", key, client_addr, line)
+            if self.args.print_client_non_psx:
+                if not re.match(REGEX_PSX_KEYWORDS, key):
+                    self.logger.info("NONPSX %s from %s: %s", key, client_addr, line)
+            if key == 'name':
+                thisname = value
+                if re.match(r".*PSX.NET EFB.*", value):
+                    thisname = value.split(":")[0]
+                elif re.match(r":PSX Sounds", value):
+                    thisname = "PSX Sounds"
+                # name=MSFS Router:PSX.NET Modules
+                elif re.match(r"^MSFS Router", value):
+                    thisname = "MSFS Router"
+                elif re.match(r".*:franken.*.py", value):
+                    thisname = value.split(":")[0]
+                self.clients[client_addr]['identifier'] = f"L:{thisname}"
+                self.logger.info(
+                    "Client %s identifies as %s, using that name",
+                    self.clients[client_addr]['peername'], thisname)
+                self.print_status()
             if self.clients[client_addr]['access'] == 'full':
                 if key in ["bang", "start", "again"]:
                     # Forward to server but not other clients
@@ -418,7 +461,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.to_stream(self.server, line)
         self.logger.debug("To server from %s: %s", client_addr, line)
 
-    async def handle_psx_server_connection(self):
+    async def handle_psx_server_connection(self):  # pylint: disable=too-many-branches,too-many-statements
         """Set up and maintain a PSX server connection."""
         while True:
             try:
@@ -492,7 +535,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
                 if key in self.args.print_server_keywords:
                     self.logger.info("%s from server: %s", key, line)
-
+                if self.args.print_server_non_psx:
+                    if not re.match(REGEX_PSX_KEYWORDS, key):
+                        self.logger.info("NONPSX %s from server: %s", key, line)
                 if key in [
                         'load1',
                         'load2',
@@ -559,6 +604,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         """Shut down the proxy."""
         self.logger.info("Shutting down")
         self.write_cache()
+        raise SystemExit("Exiting")
 
     async def main(self):
         """Start the proxy."""
@@ -583,6 +629,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 if __name__ == '__main__':
     me = Frankenrouter()
     try:
-        asyncio.run(me.main())
-    except KeyboardInterrupt:
-        me.shutdown()
+        me = Frankenrouter()
+        try:
+            asyncio.run(me.main())
+        except KeyboardInterrupt:
+            me.shutdown()
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        print("Caught %s", exc)
