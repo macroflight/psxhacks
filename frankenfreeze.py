@@ -318,6 +318,7 @@ class FrankenFreeze():  # pylint: disable=too-many-instance-attributes
         def connected(key, value):
             self.logger.info("Connected to PSX %s %s as #%s", key, value, self.psx.get('id'))
             self.psx_connected = True
+            self.psx.send("name", "ICING:FRANKEN.PY frankenfreeze MSFS to PSX ice sync")
 
         self.psx = psx.Client()
         # self.psx.logger = self.logger.debug  # .info to see traffic

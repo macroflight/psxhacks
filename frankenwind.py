@@ -172,6 +172,7 @@ class FrankenWind():  # pylint: disable=too-many-instance-attributes
         def connected(key, value):
             self.logger.info("Connected to PSX %s %s as #%s", key, value, self.psx.get('id'))
             self.psx_connected = True
+            self.psx.send("name", "WIND:FRANKEN.PY frankenwind MSFS to PSX wind sync")
 
         self.psx = psx.Client()
         # self.psx.logger = self.logger.debug  # .info to see traffic
