@@ -67,6 +67,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                                 " format: IP:access level:identifier" +
                                 ", e.g 192.168.1.42:full:FrankenThrottle"),
                             )
+        parser.add_argument('--print-client-keywords',
+                            action='store', default="",
+                            type=str,
+                            help="Comma-separated lists of keywords sent from clients to print to stdout")
+        parser.add_argument('--print-server-keywords',
+                            action='store', default="",
+                            type=str,
+                            help="Comma-separated lists of keywords sent from server to print to stdout")
         parser.add_argument('--server-buffer-size', type=int,
                             action='store', default=65536)
         parser.add_argument('--state-cache-file', type=pathlib.Path,
@@ -92,7 +100,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 'access': access_level,
                 'identifier': identifier,
             }
-
+        self.args.print_client_keywords = self.args.print_client_keywords.split(",")
+        self.args.print_server_keywords = self.args.print_server_keywords.split(",")
+            
     def server_connected(self):
         """Return True if we are connected to the PSX main server."""
         if len(self.server) > 0:
@@ -112,7 +122,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             serverinfo = f"[{self.server['ip']}{self.server['port']}]"
 
         self.logger.info(
-            "%5s %2d clients, %3d variables",
+            "%5s %2d clients, %3d keywords",
             serverinfo,
             len(self.clients),
             len(self.state),
@@ -157,7 +167,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
     def client_send_welcome(self, client):  # pylint: disable=too-many-branches
         """Send the same data as a real PSX server would send to a new client."""
-        # If some mandatory variables are not yet received from the server, fake them
+        # If some mandatory keywords are not yet received from the server, fake them
         sent = []
 
         def send_if_unsent(key):
@@ -355,8 +365,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             # Log data from client
             self.from_stream(self.clients[client_addr], line)
 
+            key, sep, value = line.partition("=")
+            if key in self.args.print_client_keywords:
+                self.logger.info("%s from %s: %s", key, client_addr, line)
             if self.clients[client_addr]['access'] == 'full':
-                key, sep, value = line.partition("=")
                 if key in ["bang", "start", "again"]:
                     # Forward to server but not other clients
                     self.send_to_server(key, client_addr)
@@ -477,6 +489,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 # Store various things that we get e.g on initial
                 # connection and that we might need later.
                 key, sep, value = line.partition("=")
+
+                if key in self.args.print_server_keywords:
+                    self.logger.info("%s from server: %s", key, line)
 
                 if key in [
                         'load1',
