@@ -107,9 +107,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
     def print_status(self):
         """Print a one-line status message."""
-        serverinfo = "[---]"
+        serverinfo = "[NO SERVER CONNECTION]"
         if self.server_connected():
-            serverinfo = "[PSX]"
+            serverinfo = f"[{self.server['ip']}{self.server['port']}]"
 
         self.logger.info(
             "%5s %2d clients, %3d variables",
