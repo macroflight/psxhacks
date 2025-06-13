@@ -296,19 +296,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.from_stream(self.clients[client_addr], line)
 
             key, sep, value = line.partition("=")
-            if key in ['load1', 'load2', 'load3']:
-                # Load messages: should not be sent by clients, ignore
-                self.logger.warning(
-                    "From client %s: %s - IGNORING",
-                    client_addr, key)
-            elif key in ["bang", "start", "again"]:
+            if key in ["bang", "start", "again"]:
                 # Forward to server but not other clients
                 self.send_to_server(key, client_addr)
             elif key in ["nolong"]:
                 self.logger.warning("nolong not implemented, ignoring")
-            elif key in ["pleaseBeSoKindAndQuit"]:
+            elif key in ["load1", "load2", "load3", "pleaseBeSoKindAndQuit"]:
                 # Forward to server and other clients
-                self.logger.info("pleaseBeSoKindAndQuit from %s", client_addr)
+                self.logger.info("%s from %s", key, client_addr)
                 self.send_to_server(key, client_addr)
                 self.client_broadcast(key, client_filter=[client_addr])
             elif key in [
