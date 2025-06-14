@@ -129,13 +129,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.args.print_client_keywords = self.args.print_client_keywords.split(",")
         self.args.print_server_keywords = self.args.print_server_keywords.split(",")
 
-    def server_connected(self):
+    def is_server_connected(self):
         """Return True if we are connected to the PSX main server."""
         if len(self.server) > 0:
             return True
         return False
 
-    def client_connected(self, client_addr):
+    def is_client_connected(self, client_addr):
         """Return True if this client is connected."""
         if client_addr in self.clients:
             return True
@@ -144,7 +144,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
     def print_status(self):
         """Print a one-line status message."""
         serverinfo = "[NO SERVER CONNECTION]"
-        if self.server_connected():
+        if self.is_server_connected():
             serverinfo = f"[{self.server['ip']}:{self.server['port']}]"
 
         self.logger.info(
@@ -154,28 +154,51 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             len(self.state),
         )
         self.logger.info(
-            "%2s %-16s %-15s %5s %8s",
+            "%2s %-16s %-15s %5s %8s %6s %6s %6s %6s",
+            "",
+            "",
+            "",
+            "Local",
+            "",
+            "Lines",
+            "Lines",
+            "Bytes",
+            "Bytes",
+        )
+        self.logger.info(
+            "%2s %-16s %-15s %5s %8s %6s %6s %6s %6s",
             "id",
-            "Identifier     ",
-            "Client IP       ",
-            "Port ",
-            "Access  ",
+            "Identifier",
+            "Client IP",
+            "Port",
+            "Access",
+            "sent",
+            "recvd",
+            "sent",
+            "recvd",
         )
         for data in self.clients.values():
             self.logger.info(
-                "%2d %-16s %-15s %5d %8s",
+                "%2d %-16s %-15s %5d %8s %6d %6d %6d %6d",
                 data['id'],
                 data['identifier'],
                 data['ip'],
                 data['port'],
                 data['access'],
+                data['messages sent'],
+                data['messages received'],
+                data['bytes sent'],
+                data['bytes received'],
             )
+
 
     async def to_stream(self, endpoint, line):
         """Write data to a stream and optionally to a log file."""
         # Write to stream
         endpoint['writer'].write(f"{line}\n".encode())
         await endpoint['writer'].drain()
+        endpoint['messages sent'] += 1
+        endpoint['bytes sent'] += len(line) + 1
         if self.args.log_streams:
             if endpoint['peername'] not in self.stream_logfiles:
                 self.logger.warning(
@@ -186,6 +209,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
     def from_stream(self, endpoint, line):
         """Log data read from stream."""
+        endpoint['messages received'] += 1
+        endpoint['bytes received'] += len(line) + 1
         if self.args.log_streams:
             if endpoint['peername'] not in self.stream_logfiles:
                 self.logger.warning(
@@ -345,6 +370,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 'access': 'noaccess',
                 'identifier': 'unknown',
                 'id': self.next_client_id,
+                'messages sent': 0,
+                'messages received': 0,
+                'bytes sent': 0,
+                'bytes received': 0,
             }
             self.next_client_id += 1
             self.logger.info("Client connected: %s", client_addr)
@@ -379,7 +408,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             await self.client_send_welcome(self.clients[client_addr])
 
             # Wait for data from client
-            while self.client_connected(client_addr):
+            while self.is_client_connected(client_addr):
                 self.logger.debug("Waiting for data from client %s", client_addr)
                 # We know the protocol is text-based, so we can use readline()
                 try:
@@ -483,7 +512,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
     async def send_to_server(self, line, client_addr):
         """Send a line to the PSX main server."""
-        if not self.server_connected():
+        if not self.is_server_connected():
             self.logger.warning("Server is disconnected, discarding: %s", line)
             return
         await self.to_stream(self.server, line)
@@ -513,6 +542,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 'port': server_addr[1],
                 'reader': reader,
                 'writer': writer,
+                'messages sent': 0,
+                'messages received': 0,
+                'bytes sent': 0,
+                'bytes received': 0,
             }
             self.logger.info("Connected to server: %s", server_addr)
 
@@ -526,7 +559,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.print_status()
 
             # Wait for and process data from server connection
-            while self.server_connected():
+            while self.is_server_connected():
                 # We know the protocol is line-oriented and the lines will
                 # not be too long to handle as a single unit, so we can
                 # read one line at a time.
@@ -667,7 +700,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
     async def routermonitor(self):
         """Monitor the router and shut down when requested."""
+        last_status_message = 0
         while True:
+            if time.perf_counter() - last_status_message > 10:
+                 self.print_status()
+                 last_status_message = time.perf_counter()
             self.logger.debug(
                 "MONITOR: clients: %d",
                 len(self.clients)
