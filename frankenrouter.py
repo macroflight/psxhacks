@@ -39,7 +39,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         )
         self.args = None
         self.logger = logging.getLogger("frankenrouter")
-        self.proxy_server = None
         self.state = None
         self.clients = {}
         self.server = {}
@@ -47,6 +46,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.start_time = int(time.time())
         self.allowed_clients = {
         }
+        self.shutdown_requested = False
+        self.proxy_server = None
+        self.next_client_id = 1
 
     def handle_args(self):
         """Handle command line arguments."""
@@ -59,7 +61,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             '--listen-port', type=int,
             action='store', default=10748)
         parser.add_argument(
-            '--listen-host', type=int,
+            '--listen-host', type=str,
             action='store', default=None)
         parser.add_argument(
             '--psx-main-server-host', type=str,
@@ -152,7 +154,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             len(self.state),
         )
         self.logger.info(
-            "%-16s %-15s %5s %8s",
+            "%2s %-16s %-15s %5s %8s",
+            "id",
             "Identifier     ",
             "Client IP       ",
             "Port ",
@@ -160,17 +163,19 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         )
         for data in self.clients.values():
             self.logger.info(
-                "%-16s %-15s %5d %8s",
+                "%2d %-16s %-15s %5d %8s",
+                data['id'],
                 data['identifier'],
                 data['ip'],
                 data['port'],
                 data['access'],
             )
 
-    def to_stream(self, endpoint, line):
+    async def to_stream(self, endpoint, line):
         """Write data to a stream and optionally to a log file."""
         # Write to stream
         endpoint['writer'].write(f"{line}\n".encode())
+        await endpoint['writer'].drain()
         if self.args.log_streams:
             if endpoint['peername'] not in self.stream_logfiles:
                 self.logger.warning(
@@ -189,12 +194,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.stream_logfiles[endpoint['peername']].write(
                 f"{datetime.datetime.now().isoformat()} <<< {line}\n")
 
-    def client_send_welcome(self, client):  # pylint: disable=too-many-branches
+    async def client_send_welcome(self, client):  # pylint: disable=too-many-branches
         """Send the same data as a real PSX server would send to a new client."""
         # If some mandatory keywords are not yet received from the server, fake them
         sent = []
 
-        def send_if_unsent(key):
+        async def send_if_unsent(key):
             if key not in sent:
                 if key not in self.state:
                     self.logger.warning(
@@ -202,18 +207,18 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         " after server connection", key)
                     return
                 line = f"{key}={self.state[key]}"
-                self.to_stream(client, line)
+                await self.to_stream(client, line)
                 sent.append(key)
                 self.logger.debug("To %s: %s", client['peername'], line)
 
-        def send_unconditionally(key):
+        async def send_unconditionally(key):
             line = f"{key}={self.state[key]}"
-            self.to_stream(client, line)
+            await self.to_stream(client, line)
             sent.append(key)
             self.logger.debug("To %s: %s", client['peername'], line)
 
-        def send_line(line):
-            self.to_stream(client, line)
+        async def send_line(line):
+            await self.to_stream(client, line)
             self.logger.debug("To %s: %s", client['peername'], line)
 
         if 'id' not in self.state:
@@ -247,10 +252,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # Qs124=1397634006009
         # Qs125=1397634006009
 
+        # Send a "fake" client id
+        await send_line(f"id={client['id']}")
+
         for key in [
-                "id", "version", "layout",
+                "version", "layout",
         ]:
-            send_if_unsent(key)
+            await send_if_unsent(key)
 
         # Lexicon
         for prefix in [
@@ -260,7 +268,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         ]:
             for key in self.state.keys():
                 if key.startswith(prefix):
-                    send_if_unsent(key)
+                    await send_if_unsent(key)
         for prefix in [
                 "Qi138",
                 "Qs440",
@@ -269,8 +277,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         ]:
             for key in self.state.keys():
                 if key == prefix:
-                    send_if_unsent(key)
-        send_line("load1")
+                    await send_if_unsent(key)
+        await send_line("load1")
         for prefix in [
                 "Qi0",
                 "Qi1",
@@ -307,8 +315,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         ]:
             for key in self.state.keys():
                 if key == prefix:
-                    send_if_unsent(key)
-        send_line("load2")
+                    await send_if_unsent(key)
+        await send_line("load2")
         for prefix in [
                 "Qi",
                 "Qh",
@@ -316,154 +324,174 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         ]:
             for key in self.state.keys():
                 if key.startswith(prefix):
-                    send_if_unsent(key)
-        send_line("load3")
-        send_if_unsent("metar")
-        send_unconditionally("Qs124")
-        send_unconditionally("Qs125")
+                    await send_if_unsent(key)
+        await send_line("load3")
+        await send_if_unsent("metar")
+        await send_unconditionally("Qs124")
+        await send_unconditionally("Qs125")
 
     async def handle_new_connection_cb(self, reader, writer):  # pylint: disable=too-many-branches,too-many-statements
         """Handle a new client connection."""
-        client_addr = writer.get_extra_info('peername')
-        assert client_addr not in self.clients, f"Duplicate client ID {client_addr}"
-        # Store the connection information for later
-        self.clients[client_addr] = {
-            'peername': client_addr,
-            'ip': client_addr[0],
-            'port': client_addr[1],
-            'reader': reader,
-            'writer': writer,
-            'access': 'noaccess',
-            'identifier': 'unknown',
-        }
-        self.logger.info("Client connected: %s", client_addr)
+        try:
+            client_addr = writer.get_extra_info('peername')
+            assert client_addr not in self.clients, f"Duplicate client ID {client_addr}"
+            # Store the connection information for later
+            self.clients[client_addr] = {
+                'peername': client_addr,
+                'ip': client_addr[0],
+                'port': client_addr[1],
+                'reader': reader,
+                'writer': writer,
+                'access': 'noaccess',
+                'identifier': 'unknown',
+                'id': self.next_client_id,
+            }
+            self.next_client_id += 1
+            self.logger.info("Client connected: %s", client_addr)
 
-        if client_addr[0] in self.allowed_clients:
-            self.clients[client_addr]['access'] = self.allowed_clients[
-                client_addr[0]]['access']
-            self.clients[client_addr]['identifier'] = self.allowed_clients[
-                client_addr[0]]['identifier']
-            self.logger.info(
-                "Client identified as %s, access level %s",
-                self.clients[client_addr]['identifier'],
-                self.clients[client_addr]['access'],
-            )
-        else:
-            self.logger.warning("Client not identified, closing connection")
-            writer.write("unauthorized\n".encode())
-            writer.close()
-            del self.clients[client_addr]
-            self.logger.info("Client %s disconnected", client_addr)
-            self.print_status()
-            return
-        if self.args.log_streams:
-            logfile = os.path.join(
-                self.args.log_dir,
-                f"client-{self.start_time}-{client_addr[0]}-p{client_addr[1]}.psxnet.log"
-            )
-            self.stream_logfiles[client_addr] = open(logfile, 'a', encoding='utf-8')  # pylint: disable=consider-using-with
-
-        self.print_status()
-        self.client_send_welcome(self.clients[client_addr])
-
-        # Wait for data from client
-        while self.client_connected(client_addr):
-            self.logger.debug("Waiting for data from client %s", client_addr)
-            # We know the protocol is text-based, so we can use readline()
-            try:
-                data = await reader.readline()
-            except Exception as exc:  # pylint: disable=broad-exception-caught
-                del self.clients[client_addr]
-                self.logger.warning("Client connection broke (%s) for %s", exc, client_addr)
-                self.print_status()
-                return
-            line = data.decode().strip()
-            if line == "":
-                writer.close()
-                del self.clients[client_addr]
-                self.logger.info("Client %s disconnected", client_addr)
-                self.print_status()
-                return
-            self.logger.debug("From client %s: %s", client_addr, line)
-
-            # Log data from client
-            self.from_stream(self.clients[client_addr], line)
-
-            key, sep, value = line.partition("=")
-            if key in self.args.print_client_keywords:
-                self.logger.info("%s from %s: %s", key, client_addr, line)
-            if self.args.print_client_non_psx:
-                if not re.match(REGEX_PSX_KEYWORDS, key):
-                    self.logger.info("NONPSX %s from %s: %s", key, client_addr, line)
-            if key == 'name':
-                thisname = value
-                if re.match(r".*PSX.NET EFB.*", value):
-                    thisname = value.split(":")[0]
-                elif re.match(r":PSX Sounds", value):
-                    thisname = "PSX Sounds"
-                # name=MSFS Router:PSX.NET Modules
-                elif re.match(r"^MSFS Router", value):
-                    thisname = "MSFS Router"
-                elif re.match(r".*:franken.*.py", value):
-                    thisname = value.split(":")[0]
-                self.clients[client_addr]['identifier'] = f"L:{thisname}"
+            if client_addr[0] in self.allowed_clients:
+                self.clients[client_addr]['access'] = self.allowed_clients[
+                    client_addr[0]]['access']
+                self.clients[client_addr]['identifier'] = self.allowed_clients[
+                    client_addr[0]]['identifier']
                 self.logger.info(
-                    "Client %s identifies as %s, using that name",
-                    self.clients[client_addr]['peername'], thisname)
+                    "Client identified as %s, access level %s",
+                    self.clients[client_addr]['identifier'],
+                    self.clients[client_addr]['access'],
+                )
+            else:
+                self.logger.warning("Client not identified, closing connection")
+                writer.write("unauthorized\n".encode())
+                writer.close()
+                await writer.wait_closed()
+                del self.clients[client_addr]
+                self.logger.info("Client %s was disconnected", client_addr)
                 self.print_status()
-            if self.clients[client_addr]['access'] == 'full':
-                if key in ["bang", "start", "again"]:
-                    # Forward to server but not other clients
-                    self.send_to_server(key, client_addr)
-                elif key in ["nolong"]:
-                    self.logger.warning("nolong not implemented, ignoring")
-                elif key in ["load1", "load2", "load3", "pleaseBeSoKindAndQuit"]:
-                    # Forward to server and other clients
-                    self.logger.info("%s from %s", key, client_addr)
-                    self.send_to_server(key, client_addr)
-                    self.client_broadcast(key, client_filter=[client_addr])
-                elif key in [
-                        'exit',
-                ]:
-                    # Shut down client connection cleanly
-                    writer.close()
+                return
+            if self.args.log_streams:
+                logfile = os.path.join(
+                    self.args.log_dir,
+                    f"client-{self.start_time}-{client_addr[0]}-p{client_addr[1]}.psxnet.log"
+                )
+                self.stream_logfiles[client_addr] = open(logfile, 'a', encoding='utf-8')  # pylint: disable=consider-using-with
+
+            self.print_status()
+            await self.client_send_welcome(self.clients[client_addr])
+
+            # Wait for data from client
+            while self.client_connected(client_addr):
+                self.logger.debug("Waiting for data from client %s", client_addr)
+                # We know the protocol is text-based, so we can use readline()
+                try:
+                    data = await reader.readline()
+                except Exception as exc:  # pylint: disable=broad-exception-caught
                     del self.clients[client_addr]
-                    self.logger.info("Client %s is disconnecting", client_addr)
+                    self.logger.warning("Client connection broke (%s) for %s", exc, client_addr)
                     self.print_status()
                     return
-                elif sep != "":
-                    self.state[key] = value
-                    line = f"{key}={value}"
-                    self.send_to_server(line, client_addr)
-                    self.client_broadcast(line, client_filter=[client_addr])
-                else:
-                    self.logger.warning("Unhandled data from client: %s", line)
-            else:
-                self.logger.info(
-                    "Read-only client tried to send data, ignoring: %s",
-                    line
-                )
+                line = data.decode().strip()
+                if line == "":
+                    writer.close()
+                    await writer.wait_closed()
+                    del self.clients[client_addr]
+                    self.logger.info("Client %s disconnected", client_addr)
+                    self.print_status()
+                    return
+                self.logger.debug("From client %s: %s", client_addr, line)
 
-    def client_broadcast(self, line, client_filter=None):
+                # Log data from client
+                self.from_stream(self.clients[client_addr], line)
+
+                key, sep, value = line.partition("=")
+                if key in self.args.print_client_keywords:
+                    self.logger.info("%s from %s: %s", key, client_addr, line)
+                if self.args.print_client_non_psx:
+                    if not re.match(REGEX_PSX_KEYWORDS, key):
+                        self.logger.info("NONPSX %s from %s: %s", key, client_addr, line)
+
+                # Handle name information from clients
+                if key == 'name':
+                    thisname = value
+                    if re.match(r".*PSX.NET EFB.*", value):
+                        thisname = value.split(":")[0]
+                    elif re.match(r":PSX Sounds", value):
+                        thisname = "PSX Sounds"
+                    # name=MSFS Router:PSX.NET Modules
+                    elif re.match(r"^MSFS Router", value):
+                        thisname = "MSFS Router"
+                    elif re.match(r".*:franken.*.py", value):
+                        thisname = value.split(":")[0]
+                    self.clients[client_addr]['identifier'] = f"L:{thisname}"
+                    self.logger.info(
+                        "Client %s identifies as %s, using that name",
+                        self.clients[client_addr]['peername'], thisname)
+                    self.print_status()
+
+                # Router management via client commands
+                if key == 'RouterStop':
+                    self.logger.info("Got RouterStop command from %s", client_addr)
+                    self.shutdown_requested = True
+                    continue
+
+                if self.clients[client_addr]['access'] == 'full':
+                    if key in ["bang", "start", "again"]:
+                        # Forward to server but not other clients
+                        await self.send_to_server(key, client_addr)
+                    elif key in ["nolong"]:
+                        self.logger.warning("nolong not implemented, ignoring")
+                    elif key in ["load1", "load2", "load3", "pleaseBeSoKindAndQuit"]:
+                        # Forward to server and other clients
+                        self.logger.info("%s from %s", key, client_addr)
+                        await self.send_to_server(key, client_addr)
+                        await self.client_broadcast(key, client_filter=[client_addr])
+                    elif key in [
+                            'exit',
+                    ]:
+                        # Shut down client connection cleanly
+                        writer.close()
+                        await writer.wait_closed()
+                        del self.clients[client_addr]
+                        self.logger.info("Client %s sent exit message, disconnecting", client_addr)
+                        self.print_status()
+                        return
+                    elif sep != "":
+                        self.state[key] = value
+                        line = f"{key}={value}"
+                        await self.send_to_server(line, client_addr)
+                        await self.client_broadcast(line, client_filter=[client_addr])
+                    else:
+                        self.logger.warning("Unhandled data from client: %s", line)
+                else:
+                    self.logger.info(
+                        "Read-only client tried to send data, ignoring: %s",
+                        line
+                    )
+        except ConnectionResetError:
+            self.logger.info("Connection reset by client %s", client_addr)
+            # writer.close()
+            # await writer.wait_closed()
+            del self.clients[client_addr]
+
+    async def client_broadcast(self, line, client_filter=None):
         """Send a line to all connected clients except the ones in the filter list."""
         for client in self.clients.values():
             if client_filter and client['peername'] in client_filter:
                 self.logger.debug("Not sending to filtered client %s", client['peername'])
                 continue
-            self.to_stream(client, line)
+            await self.to_stream(client, line)
             self.logger.debug("To %s: %s", client['peername'], line)
 
-    def send_to_server(self, line, client_addr):
+    async def send_to_server(self, line, client_addr):
         """Send a line to the PSX main server."""
         if not self.server_connected():
             self.logger.warning("Server is disconnected, discarding: %s", line)
             return
-        self.to_stream(self.server, line)
+        await self.to_stream(self.server, line)
         self.logger.debug("To server from %s: %s", client_addr, line)
 
     async def handle_psx_server_connection(self):  # pylint: disable=too-many-branches,too-many-statements
         """Set up and maintain a PSX server connection."""
-        while True:
+        while not self.shutdown_requested:
             try:
                 reader, writer = await asyncio.open_connection(
                     self.args.psx_main_server_host,
@@ -511,6 +539,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         exc,
                         PSX_SERVER_RECONNECT_DELAY,
                     )
+                    writer.close()
+                    await writer.wait_closed()
                     self.print_status()
                     await asyncio.sleep(PSX_SERVER_RECONNECT_DELAY)
                     continue
@@ -522,6 +552,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         "Server disconnected, sleeping %.1f s before reconnect",
                         PSX_SERVER_RECONNECT_DELAY,
                     )
+                    writer.close()
+                    await writer.wait_closed()
                     self.print_status()
                     await asyncio.sleep(PSX_SERVER_RECONNECT_DELAY)
                     continue
@@ -545,7 +577,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 ]:
                     # Load messages: send to connected clients
                     self.logger.info("From PSX: %s", key)
-                    self.client_broadcast(line)
+                    await self.client_broadcast(line)
                 elif key in [
                         'bang',
                         'start',
@@ -557,9 +589,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 ]:
                     # Shut down server connection cleanly
                     self.logger.info(
-                        "Server disconnecting, sleeping %.1f s before reconnect",
+                        "Server sent exit message, disconnecting, sleeping %.1f s before reconnect",
                         PSX_SERVER_RECONNECT_DELAY,
                     )
+                    writer.close()
+                    await writer.wait_closed()
                     self.print_status()
                     self.server = {}
                     await asyncio.sleep(PSX_SERVER_RECONNECT_DELAY)
@@ -568,7 +602,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     # state and send to connected clients
                     self.logger.debug("Storing key-value from server: %s=%s", key, value)
                     self.state[key] = value
-                    self.client_broadcast(line)
+                    await self.client_broadcast(line)
                 else:
                     self.logger.warning("Unhandled data from server: %s", line)
 
@@ -600,39 +634,66 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             with open(self.args.state_cache_file, 'w', encoding='utf-8') as statefile:
                 statefile.write(json.dumps(self.state))
 
-    def shutdown(self):
+    async def shutdown(self):
         """Shut down the proxy."""
         self.logger.info("Shutting down")
+        await self.client_broadcast("exit")
+        self.logger.info("Exit message sent to clients, sleeping")
+        await asyncio.sleep(1)
+
+        self.logger.info("Closing listener")
+        self.proxy_server.close()
+        self.proxy_server.close_clients()
+        await self.proxy_server.wait_closed()
+        self.clients = {}
+
+        self.logger.info("Closing server connection %s", self.server['peername'])
+        try:
+            self.server['writer'].close()
+            await self.server['writer'].wait_closed()
+        except ConnectionResetError:
+            pass
+        self.server = {}
         self.write_cache()
-        raise SystemExit("Exiting")
+
+    async def start_listener(self):
+        """Start the listener."""
+        self.proxy_server = await asyncio.start_server(
+            self.handle_new_connection_cb,
+            host=self.args.listen_host,
+            port=self.args.listen_port,
+            limit=self.args.server_buffer_size
+        )
+
+    async def routermonitor(self):
+        """Monitor the router and shut down when requested."""
+        while True:
+            self.logger.debug(
+                "MONITOR: clients: %d",
+                len(self.clients)
+            )
+            if self.shutdown_requested:
+                await self.shutdown()
+                self.logger.info("Monitor shutting down")
+                return
+            await asyncio.sleep(1.0)
 
     async def main(self):
         """Start the proxy."""
         self.handle_args()
         self.read_cache()
         self.logger.info("frankenusb version %s starting", VERSION)
-        self.proxy_server = await asyncio.start_server(
-            self.handle_new_connection_cb,
-            host=self.args.listen_host,
-            port=self.args.listen_port,
-            limit=self.args.server_buffer_size,
+
+        await asyncio.gather(
+            self.start_listener(),
+            self.handle_psx_server_connection(),
+            self.routermonitor(),
         )
-        self.logger.info("Listening on %s", self.proxy_server.sockets[0].getsockname())
-        self.print_status()
-
-        await self.handle_psx_server_connection()
-
-        # Wait for connections
-        await asyncio.sleep(99999999)  # find a better way
 
 
 if __name__ == '__main__':
     me = Frankenrouter()
-    try:
-        me = Frankenrouter()
-        try:
-            asyncio.run(me.main())
-        except KeyboardInterrupt:
-            me.shutdown()
-    except Exception as exc:  # pylint: disable=broad-exception-caught
-        print("Caught %s", exc)
+    #try:
+    asyncio.run(me.main())
+    #except Exception as exc:
+    #    raise SystemExit(f"Caught exception: {exc}") from exc
