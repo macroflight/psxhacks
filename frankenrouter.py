@@ -1,5 +1,5 @@
 """A protocol-aware PSX router."""
-# pylint: disable=invalid-name
+# pylint: disable=invalid-name,too-many-lines
 import argparse
 import asyncio
 import datetime
@@ -516,7 +516,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             if self.args.log_streams:
                 logfile = os.path.join(
                     self.args.log_dir,
-                    f"client-{self.start_time}-{this_client['id']}-{this_client['ip']}-{this_client['port']}.psxnet.log"
+                    f"client-{self.start_time}-{this_client['id']}-{this_client['ip']}-{this_client['port']}.psxnet.log"  # pylint: disable=line-too-long
                 )
                 self.stream_logfiles[client_addr] = open(logfile, 'a', encoding='utf-8')  # pylint: disable=consider-using-with
 
@@ -634,7 +634,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.shutdown_requested = True
                     continue
 
+                allow_write = False
                 if this_client['access'] == 'full':
+                    allow_write = True
+                elif key in ['demand']:
+                    # read-only clients may still send demand=...
+                    allow_write = True
+
+                if allow_write:
                     if key in ["bang", "start", "again"]:
                         # Forward to server but not other clients
                         await self.send_to_server(key, client_addr)
