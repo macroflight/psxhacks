@@ -93,6 +93,24 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             '--psx-main-server-port', type=int,
             action='store', default=10747)
         parser.add_argument(
+            '--this-router-password', type=str,
+            action='store',
+            help=("Password required for incoming connections to this router." +
+                  " Set to AUTO to generate"),
+        )
+        parser.add_argument(
+            '--password', type=str,
+            action='store',
+            help="Password to use for connecting to an upstream router")
+        parser.add_argument(
+            '--blocked-clients',
+            action='store', default="",
+            type=str,
+            help=(
+                "Comma-separated lists of clients thay may not connect." +
+                " format: IP,IP,IP,..."),
+        )
+        parser.add_argument(
             '--allowed-clients',
             action='store', default="",
             type=str,
@@ -172,11 +190,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
         self.args.print_client_keywords = self.args.print_client_keywords.split(",")
         self.args.print_server_keywords = self.args.print_server_keywords.split(",")
+        self.args.blocked_clients = self.args.blocked_clients.split(",")
+        if self.args.this_router_password == 'AUTO':
+            self.args.this_router_password = self.get_random_id(18)
 
-    def get_random_id(self):
+    def get_random_id(self, length=16):
         """Return a random string we can use for FRDP request id."""
         return ''.join(
-            random.choices(string.ascii_letters + string.digits, k=16))
+            random.choices(string.ascii_letters + string.digits, k=length))
 
     def is_server_connected(self):
         """Return True if we are connected to the PSX main server."""
@@ -209,7 +230,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.logger.info(serverinfo)
         self.logger.info(
             "%-19s %-15s %5s %8s %7s %6s %6s %6s %6s %7s %7s",
-            f"{len(self.clients)} clients",
+            f"{len(self.clients)} clients, pwd: {self.args.this_router_password}",
             "",
             "Local",
             "",
@@ -457,7 +478,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
     async def handle_new_connection_cb(self, reader, writer):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         """Handle a new client connection."""
-        try:
+        try:  # pylint: disable=too-many-nested-blocks
             client_addr = writer.get_extra_info('peername')
             assert client_addr not in self.clients, f"Duplicate client ID {client_addr}"
             # Store the connection information and some other useful
@@ -482,13 +503,23 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 'ping_rtt': None,
                 'writedraintimes': [],
                 'connected_clients': 0,
+                'welcome_sent': False
             }
             self.clients[client_addr] = this_client
             self.next_client_id += 1
             self.logger.info("New client connection: %s", client_addr)
 
             # Allow whitelisted IPs to connect
+            if this_client['ip'] in self.args.blocked_clients:
+                self.logger.warning(
+                    "Blocked client %s connected, closing connection", this_client['ip'])
+                writer.write("bye now\n".encode())
+                await writer.drain()
+                await self.close_client_connection(this_client)
+                return
+            self.logger.info("Client not blocked. allowed_clients=%s", self.args.allowed_clients)
             if self.args.allowed_clients == "ALL":
+                print("ALLOW ALL")
                 this_client['access'] = "full"
                 this_client['identifier'] = "allow-all"
                 if client_addr[0] in self.allowed_clients:
@@ -511,10 +542,19 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     this_client['access'],
                 )
             else:
-                self.logger.warning("Client %s not identified, closing connection", client_addr)
-                writer.write("unauthorized\n".encode())
-                await self.close_client_connection(this_client)
-                return
+                if self.args.this_router_password:
+                    # Print message and keep connection open
+                    self.logger.warning(
+                        "Client %s connected, not identified, no access yet)", client_addr)
+                    writer.write(
+                        "addon=frankenrouter:authorization token required\n".encode())
+                else:
+                    # Print error and close the connection
+                    self.logger.warning(
+                        "Client %s connected, not identified, connection closed", client_addr)
+                    writer.write("addon=frankenrouter:unauthorized:blyat\n".encode())
+                    await self.close_client_connection(this_client)
+                    return
 
             if self.args.log_streams:
                 logfile = os.path.join(
@@ -524,7 +564,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.stream_logfiles[client_addr] = open(logfile, 'a', encoding='utf-8')  # pylint: disable=consider-using-with
 
             self.print_status()
-            await self.client_send_welcome(this_client)
+            if this_client['access'] != 'noaccess':
+                await self.client_send_welcome(this_client)
+                this_client['welcome_sent'] = True
 
             # Wait for data from client
             while self.is_client_connected(client_addr):
@@ -565,7 +607,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         continue
 
                 if key == 'nolong':
-                    print("NOLONG NOLONG")
                     # Toggle nolong bit for this client, but do not send upstream
                     this_client['nolong'] = not this_client['nolong']
                     self.logger.info(
@@ -578,7 +619,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     if messagetype == 'ping':
                         self.logger.debug(
                             "Got FRDP ping message from client %s: %s", client_addr, line)
-                        (identifier, request_id) = message.split(":", 1)
+                        (identifier, request_id, auth_token) = message.split(":", 2)
                         await self.client_broadcast(
                             f"frankenrouter=pong:{self.args.sim_name}:{request_id}",
                             include=[client_addr],
@@ -586,6 +627,18 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         # store name and the fact that this client is a frankenrouter
                         this_client['is_frankenrouter'] = True
                         this_client['identifier'] = f"R:{identifier}"
+                        if auth_token == self.args.this_router_password:
+                            if this_client['access'] == "noaccess":
+                                self.logger.info(
+                                    "Client %s has authenticated", this_client['identifier'])
+                                this_client['access'] = "full"
+                                await self.client_send_welcome(this_client)
+                                this_client['welcome_sent'] = True
+                        else:
+                            self.logger.warning(
+                                "Client %s failed to authenticate, password used=%s",
+                                this_client['identifier'], auth_token)
+                            await self.close_client_connection(this_client)
                         continue
                     if messagetype == 'pong':
                         self.logger.debug(
@@ -678,7 +731,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.info("Connection reset by client %s", client_addr)
             del self.clients[client_addr]
 
-    async def client_broadcast(self, line, exclude=None, include=None, islong=False):
+    async def client_broadcast(self, line, exclude=None, include=None, islong=False):  # pylint: disable=too-many-branches
         """Send a line to connected clients.
 
         If exclude is provided, send to all connected clients except
@@ -692,6 +745,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             return
         if exclude:
             for client in self.clients.values():
+                if client['access'] == 'noaccess':
+                    self.logger.debug(
+                        "A Not sending to noaccess client %s", client['peername'])
+                    continue
                 if client['peername'] in exclude:
                     self.logger.debug(
                         "Not sending to excluded client %s", client['peername'])
@@ -705,6 +762,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.logger.debug("To %s: %s", client['peername'], line)
         elif include:
             for client in self.clients.values():
+                if client['access'] == 'noaccess':
+                    self.logger.debug(
+                        "B Not sending to noaccess client %s", client['peername'])
+                    continue
                 if client['peername'] not in include:
                     self.logger.debug(
                         "Not sending to not-included client %s", client['peername'])
@@ -718,6 +779,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.logger.debug("To %s: %s", client['peername'], line)
         else:
             for client in self.clients.values():
+                if client['access'] == 'noaccess':
+                    self.logger.debug(
+                        "C Not sending to noaccess client %s", client['peername'])
+                    continue
                 if islong and client['nolong']:
                     self.logger.debug(
                         "Not sending long string to nolong client %s: %s",
@@ -819,6 +884,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 key, sep, value = line.partition("=")
 
                 # FrankenRouter DiscoveryProtocol :)
+                if self.args.password:
+                    # assume server is frankenrouter if we use --password
+                    self.server['is_frankenrouter'] = True
+
                 if key == 'frankenrouter':
                     (messagetype, message) = value.split(":", 1)
                     if messagetype == 'ping':
@@ -949,7 +1018,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         """Monitor the router and shut down when requested."""
         last_status_message = time.perf_counter()
         last_ping = time.perf_counter()
-        ping_interval = 5.0
+        ping_interval = 2.0
         status_interval = 5.0
         while True:
             elapsed_since_ping = time.perf_counter() - last_ping
@@ -958,8 +1027,19 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 if self.is_server_connected() and self.server['is_frankenrouter']:
                     self.logger.debug("Sending FRDP ping to server")
                     frdp_request_id = self.get_random_id()
-                    await self.send_to_server(
-                        f"frankenrouter=ping:{self.args.sim_name}:{frdp_request_id}")
+                    if self.args.password:
+                        await self.send_to_server(
+                            "%s=%s:%s:%s:%s" % (  # pylint: disable=consider-using-f-string
+                                "frankenrouter",
+                                "ping",
+                                self.args.sim_name,
+                                frdp_request_id,
+                                self.args.password,
+                            )
+                        )
+                    else:
+                        await self.send_to_server(
+                            f"frankenrouter=ping:{self.args.sim_name}:{frdp_request_id}:")
                     self.server['ping_sent'] = time.perf_counter()
                     self.server['ping_identifier'] = frdp_request_id
                 # Send FRDP ping to any frankenrouter clients
