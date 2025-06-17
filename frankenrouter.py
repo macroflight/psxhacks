@@ -32,6 +32,8 @@ NOLONG_KEYWORDS = [
     "Qs412",
 ]
 
+HEADER_LINE_LENGTH = 110
+
 
 class FrankenrouterException(Exception):
     """Frankenrouter exception.
@@ -187,7 +189,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
     def print_status(self):
         """Print a multi-line status message."""
-        self.logger.info("-" * 100)
+        self.logger.info("-" * HEADER_LINE_LENGTH)
         self.logger.info(
             "Frankenrouter %s listening on %d, %d keywords cached",
             self.args.sim_name, self.args.listen_port, len(self.state),
@@ -252,7 +254,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 f"{data['ping_rtt']:.3f}" if data['ping_rtt'] else "-",
                 average_writedrain,
             )
-        self.logger.info("-" * 100)
+        self.logger.info("-" * HEADER_LINE_LENGTH)
 
     async def to_stream(self, endpoint, line):
         """Write data to a stream and optionally to a log file.
