@@ -119,7 +119,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             help="Print all non-PSX communication from server")
         parser.add_argument(
             '--server-buffer-size', type=int,
-            action='store', default=65536)
+            action='store', default=1048576)
         parser.add_argument(
             '--ping-interval', type=int,
             action='store', default=1,
