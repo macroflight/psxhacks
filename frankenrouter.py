@@ -514,7 +514,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             if self.args.log_streams:
                 logfile = os.path.join(
                     self.args.log_dir,
-                    f"client-{self.start_time}-{client_addr[0]}-p{client_addr[1]}.psxnet.log"
+                    f"client-{self.start_time}-{this_client['id']}-{this_client['ip']}-{this_client['port']}.psxnet.log"
                 )
                 self.stream_logfiles[client_addr] = open(logfile, 'a', encoding='utf-8')  # pylint: disable=consider-using-with
 
