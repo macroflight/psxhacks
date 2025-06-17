@@ -1,5 +1,6 @@
 """A protocol-aware PSX router."""
 # pylint: disable=invalid-name,too-many-lines
+from __future__ import annotations
 import argparse
 import asyncio
 import datetime
@@ -193,6 +194,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.args.blocked_clients = self.args.blocked_clients.split(",")
         if self.args.this_router_password == 'AUTO':
             self.args.this_router_password = self.get_random_id(18)
+
+    def psx_keyword_sort(self, input_list: list[str]) -> list[str]:
+        """More or less natural sorting."""
+        def alphanum_key(key):
+            return [int(s) if s.isdigit() else s.lower() for s in re.split("([0-9]+)", key)]
+        return sorted(input_list, key=alphanum_key)
 
     def get_random_id(self, length=16):
         """Return a random string we can use for FRDP request id."""
@@ -447,7 +454,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 "Qh",
                 "Qs",
         ]:
-            for key in self.state.keys():
+            for key in self.psx_keyword_sort(self.state.keys()):
                 if key.startswith(prefix):
                     await send_if_unsent(key)
         await send_line("load3")
