@@ -189,8 +189,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         """Print a multi-line status message."""
         self.logger.info("-" * 100)
         self.logger.info(
-            "Frankenrouter %s listening on %d",
-            self.args.sim_name, self.args.listen_port)
+            "Frankenrouter %s listening on %d, %d keywords cached",
+            self.args.sim_name, self.args.listen_port, len(self.state),
+        )
         serverinfo = "[NO SERVER CONNECTION]"
         if self.is_server_connected():
             serverinfo = f"SERVER {self.server['ip']}:{self.server['port']}"
@@ -200,19 +201,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             if len(self.server['writedraintimes']) > 0:
                 average_writedrain = statistics.mean(self.server['writedraintimes'])
                 serverinfo = serverinfo + f", average output delay {average_writedrain:.6f} s"
-
+        self.logger.info(serverinfo)
         self.logger.info(
-            "%s, %d clients, %d keywords cached",
-            serverinfo,
-            len(self.clients),
-            len(self.state),
-        )
-        self.logger.info(
-            "%2s %-16s %-15s %5s %8s %6s %6s %6s %6s %7s %7s",
-            "",
-            "",
+            "%-19s %-15s %5s %8s %7s %6s %6s %6s %6s %7s %7s",
+            f"{len(self.clients)} clients",
             "",
             "Local",
+            "",
             "",
             "Lines",
             "Lines",
@@ -222,12 +217,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             "Output",
         )
         self.logger.info(
-            "%2s %-16s %-15s %5s %8s %6s %6s %6s %6s %7s %7s",
+            "%2s %-16s %-15s %5s %8s %7s %6s %6s %6s %6s %7s %7s",
             "id",
             "Identifier",
             "Client IP",
             "Port",
             "Access",
+            "Clients",
             "sent",
             "recvd",
             "sent",
@@ -242,12 +238,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 average_writedrain = "  NODATA"
 
             self.logger.info(
-                "%2d %-16s %-15s %5d %8s %6d %6d %6d %6d %7s %7s",
+                "%2d %-16s %-15s %5d %8s %7d %6d %6d %6d %6d %7s %7s",
                 data['id'],
                 data['identifier'],
                 data['ip'],
                 data['port'],
                 data['access'],
+                data['connected_clients'],
                 data['messages sent'],
                 data['messages received'],
                 data['bytes sent'],
@@ -479,6 +476,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 'ping_sent': None,
                 'ping_rtt': None,
                 'writedraintimes': [],
+                'connected_clients': 0,
             }
             self.clients[client_addr] = this_client
             self.next_client_id += 1
@@ -553,7 +551,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.logger.debug("key is name for %s", line)
                     if re.match(r"^frankenrouter:", value):
                         identifier = value.split(":")[1]
-                        self.logger.info("Client %s identified as frankenrouter %s", client_addr, identifier)
+                        self.logger.info(
+                            "Client %s identified as frankenrouter %s",
+                            client_addr, identifier)
                         this_client['is_frankenrouter'] = True
                         this_client['identifier'] = f"R:{identifier}"
                         # We should not send this upstream, so stop here
@@ -585,8 +585,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     if messagetype == 'pong':
                         self.logger.debug(
                             "Got FRDP pong message from client %s: %s", client_addr, line)
-                        (identifier, request_id) = message.split(":", 1)
+                        (identifier, request_id, connected_clients) = message.split(":", 2)
+                        connected_clients = int(connected_clients)
                         this_client['ping_rtt'] = time.perf_counter() - this_client['ping_sent']
+                        this_client['connected_clients'] = connected_clients
                         continue
                     self.logger.critical(
                         "Unsupported FRDP message (%s): %s", messagetype, line)
@@ -813,7 +815,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         # send a reply back
                         self.logger.debug("Sending FRDP pong to server")
                         await self.send_to_server(
-                            f"frankenrouter=pong:{self.args.sim_name}:{request_id}")
+                            "%s=%s:%s:%s:%s" % (  # pylint:disable=consider-using-f-string
+                                "frankenrouter",
+                                "pong",
+                                self.args.sim_name,
+                                request_id,
+                                len(self.clients)))
                         # store name and the fact that this client is a frankenrouter
                         self.server['is_frankenrouter'] = True
                         self.server['identifier'] = f"R:{identifier}"
