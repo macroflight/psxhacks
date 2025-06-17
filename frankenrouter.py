@@ -20,6 +20,18 @@ PSX_SERVER_RECONNECT_DELAY = 1.0
 # Regexp matching "normal" PSX network keywords
 REGEX_PSX_KEYWORDS = r"^(id|version|layout|metar|demand|load[1-3]|Q[hsdi]\d+|L[sih]\d+\(.*\))$"
 
+NOLONG_KEYWORDS = [
+    "Qs375",
+    "Qs376",
+    "Qs377",
+    "Qs407",
+    "Qs408",
+    "Qs409",
+    "Qs410",
+    "Qs411",
+    "Qs412",
+]
+
 
 class FrankenrouterException(Exception):
     """Frankenrouter exception.
@@ -457,6 +469,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 'access': 'noaccess',
                 'identifier': 'unknown',
                 'id': self.next_client_id,
+                'nolong': False,
                 'messages sent': 0,
                 'messages received': 0,
                 'bytes sent': 0,
@@ -537,14 +550,22 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 # For initial detection of other frankenrouters, we
                 # send the "standard" name= keyword.
                 if key == 'name':
-                    self.logger.info("key is name for %s", line)
+                    self.logger.debug("key is name for %s", line)
                     if re.match(r"^frankenrouter:", value):
                         identifier = value.split(":")[1]
-                        self.logger.info("Client %s is frankenrouter %s", client_addr, identifier)
+                        self.logger.info("Client %s identified as frankenrouter %s", client_addr, identifier)
                         this_client['is_frankenrouter'] = True
                         this_client['identifier'] = f"R:{identifier}"
                         # We should not send this upstream, so stop here
                         continue
+
+                if key == 'nolong':
+                    print("NOLONG NOLONG")
+                    # Toggle nolong bit for this client, but do not send upstream
+                    this_client['nolong'] = not this_client['nolong']
+                    self.logger.info(
+                        "Client %s toggled nolong to %s", client_addr, this_client['nolong'])
+                    continue
 
                 if key == 'frankenrouter':
                     self.logger.debug("frankenrouter message from client %s", client_addr)
@@ -643,7 +664,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.info("Connection reset by client %s", client_addr)
             del self.clients[client_addr]
 
-    async def client_broadcast(self, line, exclude=None, include=None):
+    async def client_broadcast(self, line, exclude=None, include=None, islong=False):
         """Send a line to connected clients.
 
         If exclude is provided, send to all connected clients except
@@ -661,6 +682,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.logger.debug(
                         "Not sending to excluded client %s", client['peername'])
                     continue
+                if islong and client['nolong']:
+                    self.logger.debug(
+                        "Not sending long string to nolong client %s: %s",
+                        client['peername'], line)
+                    continue
                 await self.to_stream(client, line)
                 self.logger.debug("To %s: %s", client['peername'], line)
         elif include:
@@ -669,10 +695,20 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.logger.debug(
                         "Not sending to not-included client %s", client['peername'])
                     continue
+                if islong and client['nolong']:
+                    self.logger.debug(
+                        "Not sending long string to nolong client %s: %s",
+                        client['peername'], line)
+                    continue
                 await self.to_stream(client, line)
                 self.logger.debug("To %s: %s", client['peername'], line)
         else:
             for client in self.clients.values():
+                if islong and client['nolong']:
+                    self.logger.debug(
+                        "Not sending long string to nolong client %s: %s",
+                        client['peername'], line)
+                    continue
                 await self.to_stream(client, line)
                 self.logger.debug("To %s: %s", client['peername'], line)
 
@@ -825,7 +861,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     # state and send to connected clients
                     self.logger.debug("Storing key-value from server: %s=%s", key, value)
                     self.state[key] = value
-                    await self.client_broadcast(line)
+                    if key in NOLONG_KEYWORDS:
+                        await self.client_broadcast(line, islong=True)
+                    else:
+                        await self.client_broadcast(line)
                 else:
                     self.logger.warning("Unhandled data from server: %s", line)
 
