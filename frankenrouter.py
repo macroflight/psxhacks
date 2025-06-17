@@ -9,6 +9,7 @@ import os
 import pathlib
 import random
 import re
+import statistics
 import string
 import time
 
@@ -174,7 +175,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
     def print_status(self):
         """Print a multi-line status message."""
-        self.logger.info("-"*72)
+        self.logger.info("-" * 100)
         self.logger.info(
             "Frankenrouter %s listening on %d",
             self.args.sim_name, self.args.listen_port)
@@ -184,8 +185,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             serverinfo += f" {self.server['identifier']}"
             if self.server['ping_rtt']:
                 serverinfo = serverinfo + f", RTT: {self.server['ping_rtt']:.3f} s"
-            else:
-                serverinfo = serverinfo + ", RTT not measured"
+            if len(self.server['writedraintimes']) > 0:
+                average_writedrain = statistics.mean(self.server['writedraintimes'])
+                serverinfo = serverinfo + f", average output delay {average_writedrain:.6f} s"
+
         self.logger.info(
             "%s, %d clients, %d keywords cached",
             serverinfo,
@@ -193,7 +196,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             len(self.state),
         )
         self.logger.info(
-            "%2s %-16s %-15s %5s %8s %6s %6s %6s %6s %7s",
+            "%2s %-16s %-15s %5s %8s %6s %6s %6s %6s %7s %7s",
             "",
             "",
             "",
@@ -203,10 +206,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             "Lines",
             "Bytes",
             "Bytes",
-            "",
+            "ping",
+            "Output",
         )
         self.logger.info(
-            "%2s %-16s %-15s %5s %8s %6s %6s %6s %6s %7s",
+            "%2s %-16s %-15s %5s %8s %6s %6s %6s %6s %7s %7s",
             "id",
             "Identifier",
             "Client IP",
@@ -216,11 +220,17 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             "recvd",
             "sent",
             "recvd",
-            "RTT",
+            "RTT(s)",
+            "delay(s)",
         )
         for data in self.clients.values():
+            if len(data['writedraintimes']) > 0:
+                average_writedrain = f"{statistics.mean(data['writedraintimes']):.6f}"
+            else:
+                average_writedrain = "  NODATA"
+
             self.logger.info(
-                "%2d %-16s %-15s %5d %8s %6d %6d %6d %6d %7s",
+                "%2d %-16s %-15s %5d %8s %6d %6d %6d %6d %7s %7s",
                 data['id'],
                 data['identifier'],
                 data['ip'],
@@ -231,8 +241,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 data['bytes sent'],
                 data['bytes received'],
                 f"{data['ping_rtt']:.3f}" if data['ping_rtt'] else "-",
+                average_writedrain,
             )
-        self.logger.info("-"*72)
+        self.logger.info("-" * 100)
 
     async def to_stream(self, endpoint, line):
         """Write data to a stream and optionally to a log file.
@@ -240,8 +251,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         Also update traffic counters.
         """
         # Write to stream
+        start_time = time.perf_counter()
         endpoint['writer'].write(f"{line}\n".encode())
         await endpoint['writer'].drain()
+        elapsed = time.perf_counter() - start_time
+        # keep a list of the last 100 messages send per endpoint
+        endpoint['writedraintimes'].append(elapsed)
+        endpoint['writedraintimes'] = endpoint['writedraintimes'][-100:]
+
         endpoint['messages sent'] += 1
         endpoint['bytes sent'] += len(line) + 1
         # Write to optional log file
@@ -252,6 +269,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 return
             self.stream_logfiles[endpoint['peername']].write(
                 f"{datetime.datetime.now().isoformat()} >>> {line}\n")
+        return elapsed
 
     def from_stream(self, endpoint, line):
         """Log data read from stream."""
@@ -447,6 +465,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 'ping_identifier': None,
                 'ping_sent': None,
                 'ping_rtt': None,
+                'writedraintimes': [],
             }
             self.clients[client_addr] = this_client
             self.next_client_id += 1
@@ -699,6 +718,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 'ping_identifier': None,
                 'ping_sent': None,
                 'ping_rtt': None,
+                'writedraintimes': [],
             }
             self.logger.info("Connected to server: %s", server_addr)
 
