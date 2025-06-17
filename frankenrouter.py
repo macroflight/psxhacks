@@ -144,6 +144,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         parser.add_argument(
             '--debug',
             action='store_true')
+        parser.add_argument(
+            '--restart-on-exception',
+            action='store_true')
 
         self.args = parser.parse_args()
         if self.args.debug:
@@ -921,16 +924,16 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
         self.logger.info("Closing listener")
         self.proxy_server.close()
-        self.proxy_server.close_clients()
         await self.proxy_server.wait_closed()
         self.clients = {}
 
-        self.logger.info("Closing server connection %s", self.server['peername'])
-        try:
-            await self.close_server_connection()
-        except ConnectionResetError:
-            pass
-        self.server = {}
+        if self.is_server_connected():
+            self.logger.info("Closing server connection %s", self.server['peername'])
+            try:
+                await self.close_server_connection()
+            except ConnectionResetError:
+                pass
+            self.server = {}
         self.write_cache()
 
     async def start_listener(self):
@@ -989,13 +992,29 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.read_cache()
         self.logger.info("frankenusb version %s starting", VERSION)
 
-        await asyncio.gather(
-            self.start_listener(),
-            self.handle_psx_server_connection(),
-            self.routermonitor(),
-        )
+        while True:
+            try:
+                await asyncio.gather(
+                    self.start_listener(),
+                    self.handle_psx_server_connection(),
+                    self.routermonitor(),
+                )
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                if self.args.restart_on_exception:
+                    print(f"Unhandled exception {exc}, trying to restart myself")
+                    continue
+                print(f"Caught exception {exc}, shutting down")
+                await self.shutdown()
+                break
 
 
 if __name__ == '__main__':
     me = Frankenrouter()
-    asyncio.run(me.main())
+    loop = asyncio.get_event_loop()
+    try:
+        loop.run_until_complete(me.main())
+    except KeyboardInterrupt as exc:
+        print("Caught outer KeyboardInterrupt, no action")
+        loop.run_until_complete(me.shutdown())
+    finally:
+        print("Exited cleanly!")
