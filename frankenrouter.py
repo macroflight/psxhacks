@@ -462,7 +462,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         await send_unconditionally("Qs124")
         await send_unconditionally("Qs125")
         await send_line(f"name=frankenrouter:{self.args.sim_name}")
-        client['initialized'] = True
 
     async def close_client_connection(self, client):
         """Close a client connection and remove client data."""
@@ -512,7 +511,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 'writedraintimes': [],
                 'connected_clients': 0,
                 'welcome_sent': False,
-                'initialized': False,
             }
             self.clients[client_addr] = this_client
             self.next_client_id += 1
@@ -777,10 +775,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.logger.debug(
                     "C Not sending to noaccess client %s", client['peername'])
                 continue
-            if not client['initialized']:
+            if not client['welcome_sent']:
                 # Do not send to clients until they have been initialied (got the welcome message)
                 self.logger.info(
-                    "Not sending to un-initialized client %s", client['peername'])
+                    "Not sending to not-yet-welcomed client %s", client['peername'])
                 continue
             await self.to_stream(client, line)
             self.logger.debug("To %s: %s", client['peername'], line)
