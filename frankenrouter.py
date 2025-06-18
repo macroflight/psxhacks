@@ -682,6 +682,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     # name=MSFS Router:PSX.NET Modules
                     elif re.match(r"^MSFS Router", value):
                         thisname = "MSFS Router"
+                    # name=VPLG:vPilot Plugin
+                    elif re.match(r"VPLG:", value):
+                        thisname = "vPilot"
                     # e.g name=FrankenUSB:frankenusb.py
                     elif re.match(r".*:franken.*.py", value):
                         thisname = value.split(":")[0]
