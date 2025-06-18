@@ -63,6 +63,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.shutdown_requested = False
         self.proxy_server = None
         self.next_client_id = 1
+        self.starttime = time.perf_counter()
 
     def handle_args(self):
         """Handle command line arguments."""
@@ -234,8 +235,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             return
         self.logger.info("-" * HEADER_LINE_LENGTH)
         self.logger.info(
-            "Frankenrouter %s listening on %d, %d keywords cached",
+            "Frankenrouter %s listening on %d, %d keywords cached, uptime %d s",
             self.args.sim_name, self.args.listen_port, len(self.state),
+            int(time.perf_counter() - self.starttime),
         )
         serverinfo = "[NO SERVER CONNECTION]"
         if self.is_server_connected():
@@ -1116,7 +1118,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.routermonitor(),
                 )
             except Exception as exc:  # pylint: disable=broad-exception-caught
-                self.logger.critical("Unhandled exception: %s", exc)
+                uptime = int(time.perf_counter() - self.starttime)
+                self.logger.critical("Unhandled exception after %d s uptime: %s", uptime, exc)
                 self.logger.critical(traceback.format_exc())
                 if self.args.stop_on_exception:
                     self.logger.critical("Shutting down...")
@@ -1129,6 +1132,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     pass
                 time.sleep(5)
                 continue
+
 
 if __name__ == '__main__':
     me = Frankenrouter()
