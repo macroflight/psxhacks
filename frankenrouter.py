@@ -12,7 +12,9 @@ import random
 import re
 import statistics
 import string
+import sys
 import time
+import traceback
 
 VERSION = '0.2'
 
@@ -49,14 +51,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
     def __init__(self):
         """Initialize the class."""
-        log_format = "%(asctime)s: %(message)s"
-        logging.basicConfig(
-            format=log_format,
-            level=logging.INFO,
-            datefmt="%H:%M:%S",
-        )
         self.args = None
-        self.logger = logging.getLogger("frankenrouter")
+        self.logger = None
         self.state = None
         self.clients = {}
         self.server = {}
@@ -155,6 +151,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             '--state-cache-file', type=pathlib.Path,
             action='store', default='frankenrouter.cache.json')
         parser.add_argument(
+            '--router-log-dir', type=pathlib.Path,
+            action='store', default='./',
+            help=("Directory where the standard output and crash backtraces" +
+                  " from the router will be written."),
+        )
+        parser.add_argument(
             '--log-dir', type=pathlib.Path,
             action='store', default='./')
         parser.add_argument(
@@ -164,8 +166,15 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             '--debug',
             action='store_true')
         parser.add_argument(
-            '--restart-on-exception',
-            action='store_true')
+            '--stop-on-exception',
+            action='store_true',
+            help="Stop when router encounters an unhandled exception",
+        )
+        parser.add_argument(
+            '--keep-router-logs',
+            action='store_true',
+            help="Keep all router logs, useful for development."
+        )
 
         self.args = parser.parse_args()
         if self.args.debug:
@@ -220,6 +229,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
     def print_status(self):
         """Print a multi-line status message."""
+        # No complicated status output when we're shutting down
+        if self.shutdown_requested is True:
+            return
         self.logger.info("-" * HEADER_LINE_LENGTH)
         self.logger.info(
             "Frankenrouter %s listening on %d, %d keywords cached",
@@ -979,7 +991,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 statefile.write(json.dumps(self.state))
 
     async def shutdown(self):
-        """Shut down the proxy."""
+        """Shut down the proxy.
+
+        In hard mode we try to call as little code as possible to
+        avoid triggering exceptions.
+        """
+        self.shutdown_requested = True
         self.logger.info("Shutting down")
         await self.client_broadcast("exit")
         self.logger.info("Exit message sent to clients, sleeping")
@@ -1063,6 +1080,31 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
     async def main(self):
         """Start the proxy."""
         self.handle_args()
+        # Initialize logging
+        if self.args.keep_router_logs:
+            # Keep all log files
+            router_log_file = os.path.join(
+                self.args.router_log_dir,
+                f"frankenrouter-{self.args.sim_name}-{self.start_time}.log"
+            )
+        else:
+            router_log_file = os.path.join(
+                self.args.router_log_dir,
+                f"frankenrouter-{self.args.sim_name}.log"
+            )
+        log_format = "%(asctime)s: %(message)s"
+        logging.basicConfig(
+            format=log_format,
+            level=logging.INFO,
+            datefmt="%H:%M:%S",
+            handlers=[
+                logging.FileHandler(router_log_file),
+                logging.StreamHandler(sys.stdout)
+            ],
+        )
+        self.logger = logging.getLogger("frankenrouter")
+        self.logger.info("Started logging to %s", router_log_file)
+
         self.read_cache()
         self.logger.info("frankenusb version %s starting", VERSION)
 
@@ -1074,13 +1116,19 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.routermonitor(),
                 )
             except Exception as exc:  # pylint: disable=broad-exception-caught
-                if self.args.restart_on_exception:
-                    print(f"Unhandled exception {exc}, trying to restart myself")
-                    continue
-                print(f"Caught exception {exc}, shutting down")
-                await self.shutdown()
-                break
-
+                self.logger.critical("Unhandled exception: %s", exc)
+                self.logger.critical(traceback.format_exc())
+                if self.args.stop_on_exception:
+                    self.logger.critical("Shutting down...")
+                    await self.shutdown()
+                    break
+                self.logger.critical("Trying to restart myself...")
+                try:
+                    await self.shutdown()
+                except Exception:  # pylint: disable=broad-exception-caught
+                    pass
+                time.sleep(5)
+                continue
 
 if __name__ == '__main__':
     me = Frankenrouter()
@@ -1091,4 +1139,4 @@ if __name__ == '__main__':
         print("Caught outer KeyboardInterrupt, no action")
         loop.run_until_complete(me.shutdown())
     finally:
-        print("Exited cleanly!")
+        print("Frankenrouter exited")
