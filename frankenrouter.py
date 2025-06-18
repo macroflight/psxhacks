@@ -462,6 +462,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         await send_unconditionally("Qs124")
         await send_unconditionally("Qs125")
         await send_line(f"name=frankenrouter:{self.args.sim_name}")
+        client['initialized'] = True
 
     async def close_client_connection(self, client):
         """Close a client connection and remove client data."""
@@ -510,7 +511,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 'ping_rtt': None,
                 'writedraintimes': [],
                 'connected_clients': 0,
-                'welcome_sent': False
+                'welcome_sent': False,
+                'initialized': False,
             }
             self.clients[client_addr] = this_client
             self.next_client_id += 1
@@ -753,53 +755,35 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.critical(
                 "client_broadcast called with bost include and exclude - not supported")
             return
-        if exclude:
-            for client in self.clients.values():
-                if client['access'] == 'noaccess':
-                    self.logger.debug(
-                        "A Not sending to noaccess client %s", client['peername'])
-                    continue
-                if client['peername'] in exclude:
-                    self.logger.debug(
-                        "Not sending to excluded client %s", client['peername'])
-                    continue
-                if islong and client['nolong']:
-                    self.logger.debug(
-                        "Not sending long string to nolong client %s: %s",
-                        client['peername'], line)
-                    continue
-                await self.to_stream(client, line)
-                self.logger.debug("To %s: %s", client['peername'], line)
-        elif include:
-            for client in self.clients.values():
-                if client['access'] == 'noaccess':
-                    self.logger.debug(
-                        "B Not sending to noaccess client %s", client['peername'])
-                    continue
-                if client['peername'] not in include:
-                    self.logger.debug(
-                        "Not sending to not-included client %s", client['peername'])
-                    continue
-                if islong and client['nolong']:
-                    self.logger.debug(
-                        "Not sending long string to nolong client %s: %s",
-                        client['peername'], line)
-                    continue
-                await self.to_stream(client, line)
-                self.logger.debug("To %s: %s", client['peername'], line)
-        else:
-            for client in self.clients.values():
-                if client['access'] == 'noaccess':
-                    self.logger.debug(
-                        "C Not sending to noaccess client %s", client['peername'])
-                    continue
-                if islong and client['nolong']:
-                    self.logger.debug(
-                        "Not sending long string to nolong client %s: %s",
-                        client['peername'], line)
-                    continue
-                await self.to_stream(client, line)
-                self.logger.debug("To %s: %s", client['peername'], line)
+        for client in self.clients.values():
+            if client['access'] == 'noaccess':
+                self.logger.debug(
+                    "Not sending to noaccess client %s", client['peername'])
+                continue
+            if exclude and client['peername'] in exclude:
+                self.logger.debug(
+                    "Not sending to excluded client %s", client['peername'])
+                continue
+            if include and client['peername'] not in include:
+                self.logger.debug(
+                    "Not sending to non-included client %s", client['peername'])
+                continue
+            if islong and client['nolong']:
+                self.logger.debug(
+                    "Not sending long string to nolong client %s: %s",
+                    client['peername'], line)
+                continue
+            if client['access'] == 'noaccess':
+                self.logger.debug(
+                    "C Not sending to noaccess client %s", client['peername'])
+                continue
+            if not client['initialized']:
+                # Do not send to clients until they have been initialied (got the welcome message)
+                self.logger.info(
+                    "Not sending to un-initialized client %s", client['peername'])
+                continue
+            await self.to_stream(client, line)
+            self.logger.debug("To %s: %s", client['peername'], line)
 
     async def send_to_server(self, line, client_addr=None):
         """Send a line to the PSX main server."""
@@ -845,6 +829,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 'ping_rtt': None,
                 'writedraintimes': [],
             }
+            # We have a real server, no need for the fake and possibly outdated data anymore.
+            self.state = {}
             self.logger.info("Connected to server: %s", server_addr)
 
             if self.args.log_streams:
