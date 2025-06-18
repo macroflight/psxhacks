@@ -97,6 +97,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                   " Set to AUTO to generate"),
         )
         parser.add_argument(
+            '--this-router-password-readonly', type=str,
+            action='store',
+            help=("Password required for readonly incoming connections to this router." +
+                  " Set to AUTO to generate"),
+        )
+        parser.add_argument(
             '--password', type=str,
             action='store',
             help="Password to use for connecting to an upstream router")
@@ -204,6 +210,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.args.blocked_clients = self.args.blocked_clients.split(",")
         if self.args.this_router_password == 'AUTO':
             self.args.this_router_password = self.get_random_id(18)
+        if self.args.this_router_password_readonly == 'AUTO':
+            self.args.this_router_password_readonly = self.get_random_id(18)
 
     def psx_keyword_sort(self, input_list: list[str]) -> list[str]:
         """More or less natural sorting."""
@@ -239,6 +247,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.args.sim_name, self.args.listen_port, len(self.state),
             int(time.perf_counter() - self.starttime),
         )
+        self.logger.info("%s",
+                         (
+                             f"Password: {self.args.this_router_password}" +
+                             f" Read-only: {self.args.this_router_password_readonly}"
+                         ))
         serverinfo = "[NO SERVER CONNECTION]"
         if self.is_server_connected():
             serverinfo = f"SERVER {self.server['ip']}:{self.server['port']}"
@@ -251,7 +264,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.logger.info(serverinfo)
         self.logger.info(
             "%-19s %-15s %5s %8s %7s %6s %6s %6s %6s %7s %7s",
-            f"{len(self.clients)} clients, pwd: {self.args.this_router_password}",
+            f"{len(self.clients)} clients",
             "",
             "Local",
             "",
@@ -350,11 +363,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.logger.warning(
                         "%s not found in self.state, client restart might be needed" +
                         " after server connection", key)
-                    return
-                line = f"{key}={self.state[key]}"
-                await self.to_stream(client, line)
-                sent.append(key)
-                self.logger.debug("To %s: %s", client['peername'], line)
+                else:
+                    line = f"{key}={self.state[key]}"
+                    await self.to_stream(client, line)
+                    sent.append(key)
+                    self.logger.debug("To %s: %s", client['peername'], line)
 
         async def send_unconditionally(key):
             line = f"{key}={self.state[key]}"
@@ -406,7 +419,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 "version", "layout",
         ]:
             await send_if_unsent(key)
-
+        if len(self.state) < 10:
+            self.logger.info(
+                "No or partial state data available, sent fake welcome to %s",
+                client['peername'])
+            return
         for prefix in [
                 "Ls",
                 "Lh",
@@ -563,7 +580,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     this_client['access'],
                 )
             else:
-                if self.args.this_router_password:
+                if self.args.this_router_password or self.args.this_router_password_readonly:
                     # Print message and keep connection open
                     self.logger.warning(
                         "Client %s connected, not identified, no access yet)", client_addr)
@@ -653,6 +670,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                                 self.logger.info(
                                     "Client %s has authenticated", this_client['identifier'])
                                 this_client['access'] = "full"
+                                await self.client_send_welcome(this_client)
+                                this_client['welcome_sent'] = True
+                        elif auth_token == self.args.this_router_password_readonly:
+                            if this_client['access'] == "noaccess":
+                                self.logger.info(
+                                    "Client %s has authenticated", this_client['identifier'])
+                                this_client['access'] = "readonly"
                                 await self.client_send_welcome(this_client)
                                 this_client['welcome_sent'] = True
                         else:
@@ -1058,7 +1082,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 # Send FRDP ping to any frankenrouter clients
                 for peername, data in self.clients.items():
                     if data['is_frankenrouter']:
-                        self.logger.debug("Sending FRDP ping to client %s", peername)
+                        self.logger.info("Sending FRDP ping to client %s", peername)
                         frdp_request_id = self.get_random_id()
                         await self.client_broadcast(
                             f"frankenrouter=ping:{self.args.sim_name}:{frdp_request_id}",
