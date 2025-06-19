@@ -265,7 +265,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 serverinfo = serverinfo + f", RTT: {self.server['ping_rtt']:.3f} s"
             if len(self.server['writedraintimes']) > 0:
                 average_writedrain = statistics.mean(self.server['writedraintimes'])
-                serverinfo = serverinfo + f", average output delay {average_writedrain:.6f} s"
+                serverinfo = serverinfo + f", average output delay {average_writedrain:.3f} s"
         self.logger.info(serverinfo)
         self.logger.info(
             "%-19s %-15s %5s %8s %7s %6s %6s %6s %6s %7s %7s",
@@ -834,7 +834,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         await self.to_stream(self.server, line)
         self.logger.debug("To server from %s: %s", client_addr, line)
 
-    async def handle_psx_server_connection(self):  # pylint: disable=too-many-branches,too-many-statements
+    async def handle_server_connection(self):  # pylint: disable=too-many-branches,too-many-statements
         """Set up and maintain a PSX server connection."""
         while not self.shutdown_requested:
             try:
@@ -1050,14 +1050,25 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.write_cache()
         self.shutdown_requested = False
 
-    async def start_listener(self):
+    async def run_listener(self):
         """Start the listener."""
-        self.proxy_server = await asyncio.start_server(
-            self.handle_new_connection_cb,
-            host=self.args.listen_host,
-            port=self.args.listen_port,
-            limit=self.args.server_buffer_size
-        )
+        while not self.shutdown_requested:
+            try:
+                self.proxy_server = await asyncio.start_server(
+                    self.handle_new_connection_cb,
+                    host=self.args.listen_host,
+                    port=self.args.listen_port,
+                    limit=self.args.server_buffer_size
+                )
+                while True:  # wait forever
+                    await asyncio.sleep(3600.0)
+
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                self.logger.critical(
+                    "asyncio.start_server caught unhandled exception %s, restarting listener", exc)
+                self.proxy_server = None
+                self.clients = {}
+                await asyncio.sleep(1.0)
 
     async def routermonitor(self):
         """Monitor the router and shut down when requested."""
@@ -1142,8 +1153,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         while True:
             try:
                 await asyncio.gather(
-                    self.start_listener(),
-                    self.handle_psx_server_connection(),
+                    self.run_listener(),
+                    self.handle_server_connection(),
                     self.routermonitor(),
                 )
             except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -1170,7 +1181,7 @@ if __name__ == '__main__':
     try:
         loop.run_until_complete(me.main())
     except KeyboardInterrupt as exc:
-        print("Caught outer KeyboardInterrupt, no action")
+        print("Caught KeyboardInterrupt, shutting down")
         loop.run_until_complete(me.shutdown())
     finally:
         print("Frankenrouter exited")
