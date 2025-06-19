@@ -68,6 +68,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.server_reconnects = 0
         self.router_restarts = 0
         self.last_status_print = 0.0
+        self.master_caution_sent_by_us = False
 
     def handle_args(self):
         """Handle command line arguments."""
@@ -508,8 +509,21 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             await client['writer'].wait_closed()
         except ConnectionResetError:
             pass
+        # if client was another frankenrouter, generate a master caution
+        send_master_caution = False
+        if (
+                self.clients[client['peername']]['is_frankenrouter'] and
+                self.clients[client['peername']] != 'noaccess'
+        ):
+            send_master_caution = True
         del self.clients[client['peername']]
         self.logger.info("Closed client connection %s", client['peername'])
+        if send_master_caution:
+            self.logger.info("Frankenrouter disconnected, sending master caution")
+            await self.send_to_server("Qs419=(RTR DISC)")
+            await self.client_broadcast("Qs419=(RTR DISC)")
+            self.master_caution_sent_by_us = True
+
         self.print_status()
 
     async def close_server_connection(self):
@@ -936,6 +950,15 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 # Store various things that we get e.g on initial
                 # connection and that we might need later.
                 key, sep, value = line.partition("=")
+
+                # Handle master caution reset (clear message we have set)
+                if key in ['Qh114', 'Qh115']:
+                    if int(value) == 0:  # button pushed and lights out
+                        if self.master_caution_sent_by_us:
+                            await self.send_to_server("Qs419=")
+                            await self.client_broadcast("Qs419=")
+                            self.master_caution_sent_by_us = False
+                            self.logger.info("Router master caution cleared")
 
                 # FrankenRouter DiscoveryProtocol :)
                 if self.args.password:
