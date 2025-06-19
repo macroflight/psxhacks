@@ -576,6 +576,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     this_client['identifier'],
                     this_client['access'],
                 )
+                self.print_status()
             elif client_addr[0] in self.allowed_clients:
                 # Update client data with information from IP whitelist
                 this_client['access'] = self.allowed_clients[
@@ -587,6 +588,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     this_client['identifier'],
                     this_client['access'],
                 )
+                self.print_status()
             else:
                 if self.args.this_router_password or self.args.this_router_password_readonly:
                     # Print message and keep connection open
@@ -594,12 +596,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         "Client %s connected, not identified, no access yet)", client_addr)
                     writer.write(
                         "addon=frankenrouter:authorization token required\n".encode())
+                    self.print_status()
                 else:
                     # Print error and close the connection
                     self.logger.warning(
                         "Client %s connected, not identified, connection closed", client_addr)
                     writer.write("addon=frankenrouter:unauthorized:blyat\n".encode())
                     await self.close_client_connection(this_client)
+                    self.print_status()
                     return
 
             if self.args.log_streams:
@@ -650,6 +654,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                             client_addr, identifier)
                         this_client['is_frankenrouter'] = True
                         this_client['identifier'] = f"R:{identifier}"
+                        self.print_status()
                         # We should not send this upstream, so stop here
                         continue
 
