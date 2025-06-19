@@ -1119,7 +1119,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 # Send FRDP ping to any frankenrouter clients
                 for peername, data in self.clients.items():
                     if data['is_frankenrouter']:
-                        self.logger.info("Sending FRDP ping to client %s", peername)
+                        self.logger.debug("Sending FRDP ping to client %s", peername)
                         frdp_request_id = self.get_random_id()
                         await self.client_broadcast(
                             f"frankenrouter=ping:{self.args.sim_name}:{frdp_request_id}",
