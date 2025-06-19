@@ -64,6 +64,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.proxy_server = None
         self.next_client_id = 1
         self.starttime = time.perf_counter()
+        self.server_reconnects = 0
 
     def handle_args(self):
         """Handle command line arguments."""
@@ -243,9 +244,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             return
         self.logger.info("-" * HEADER_LINE_LENGTH)
         self.logger.info(
-            "Frankenrouter %s listening on %d, %d keywords cached, uptime %d s",
+            "Frankenrouter %s listening on %d, %d keywords cached, uptime %d s, server connects %d",
             self.args.sim_name, self.args.listen_port, len(self.state),
             int(time.perf_counter() - self.starttime),
+            self.server_reconnects,
         )
         self.logger.info("%s",
                          (
@@ -865,6 +867,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 'ping_rtt': None,
                 'writedraintimes': [],
             }
+            self.server_reconnects += 1
             # We have a real server, no need for the fake and possibly outdated data anymore.
             self.state = {}
             self.logger.info("Connected to server: %s", server_addr)
