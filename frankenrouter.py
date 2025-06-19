@@ -66,6 +66,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.starttime = time.perf_counter()
         self.server_reconnects = 0
         self.router_restarts = 0
+        self.last_status_print = 0.0
 
     def handle_args(self):
         """Handle command line arguments."""
@@ -149,12 +150,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         parser.add_argument(
             '--ping-interval', type=int,
             action='store', default=1,
-            help="How often to send a ping message to the server",
+            help="How often ping server and router clients (s)",
         )
         parser.add_argument(
             '--status-interval', type=int,
-            action='store', default=10,
-            help="How often to print router status messages",
+            action='store', default=60,
+            help="How often to send print router status to terminal (s)",
         )
         parser.add_argument(
             '--state-cache-file', type=pathlib.Path,
@@ -245,8 +246,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             return
         self.logger.info("-" * HEADER_LINE_LENGTH)
         self.logger.info(
-            ("Frankenrouter %s listening on %d, %d keywords cached, uptime %d s" +
-             ", server connects %d, router restarts %s"),
+            ("Frankenrouter %s port %d, %d keywords cached, uptime %d s" +
+             ", server connects %d, self restarts %s"),
             self.args.sim_name, self.args.listen_port, len(self.state),
             int(time.perf_counter() - self.starttime),
             self.server_reconnects, self.router_restarts,
@@ -317,6 +318,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 average_writedrain,
             )
         self.logger.info("-" * HEADER_LINE_LENGTH)
+        self.last_status_print = time.perf_counter()
 
     async def to_stream(self, endpoint, line):
         """Write data to a stream and optionally to a log file.
@@ -559,9 +561,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 await writer.drain()
                 await self.close_client_connection(this_client)
                 return
-            self.logger.info("Client not blocked. allowed_clients=%s", self.args.allowed_clients)
             if self.args.allowed_clients == "ALL":
-                print("ALLOW ALL")
                 this_client['access'] = "full"
                 this_client['identifier'] = "allow-all"
                 if client_addr[0] in self.allowed_clients:
@@ -605,6 +605,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 )
                 self.stream_logfiles[client_addr] = open(logfile, 'a', encoding='utf-8')  # pylint: disable=consider-using-with
 
+            # New client connected, so print status
             self.print_status()
             if this_client['access'] != 'noaccess':
                 await self.client_send_welcome(this_client)
@@ -618,8 +619,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     data = await reader.readline()
                 except Exception as exc:  # pylint: disable=broad-exception-caught
                     del self.clients[client_addr]
-                    self.logger.warning("Client connection broke (%s) for %s", exc, client_addr)
                     self.print_status()
+                    self.logger.warning("Client connection broke (%s) for %s", exc, client_addr)
                     return
                 line = data.decode().strip()
                 if line == "":
@@ -963,7 +964,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         'load3',
                 ]:
                     # Load messages: send to connected clients
-                    self.logger.info("From PSX: %s", key)
+                    self.logger.info("Load message from server: %s", key)
                     await self.client_broadcast(line)
                 elif key in [
                         'bang',
@@ -1027,6 +1028,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         In hard mode we try to call as little code as possible to
         avoid triggering exceptions.
         """
+        self.print_status()
         self.shutdown_requested = True
         self.logger.info("Shutting down")
         await self.client_broadcast("exit")
@@ -1059,13 +1061,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
     async def routermonitor(self):
         """Monitor the router and shut down when requested."""
-        last_status_message = time.perf_counter()
         last_ping = time.perf_counter()
-        ping_interval = 2.0
-        status_interval = 5.0
         while True:
             elapsed_since_ping = time.perf_counter() - last_ping
-            if elapsed_since_ping > ping_interval:
+            if elapsed_since_ping > self.args.ping_interval:
                 # If connected to a frankenrouter server, send FRDP ping
                 if self.is_server_connected() and self.server['is_frankenrouter']:
                     self.logger.debug("Sending FRDP ping to server")
@@ -1100,9 +1099,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.logger.debug("Only %.3f s since ping", elapsed_since_ping)
 
             # Status display
-            if time.perf_counter() - last_status_message > status_interval:
+            if time.perf_counter() - self.last_status_print > self.args.status_interval:
                 self.print_status()
-                last_status_message = time.perf_counter()
+                self.last_status_print = time.perf_counter()
             if self.shutdown_requested:
                 await self.shutdown()
                 self.logger.info("Monitor shutting down")
