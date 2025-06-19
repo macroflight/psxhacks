@@ -65,6 +65,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.next_client_id = 1
         self.starttime = time.perf_counter()
         self.server_reconnects = 0
+        self.router_restarts = 0
 
     def handle_args(self):
         """Handle command line arguments."""
@@ -244,10 +245,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             return
         self.logger.info("-" * HEADER_LINE_LENGTH)
         self.logger.info(
-            "Frankenrouter %s listening on %d, %d keywords cached, uptime %d s, server connects %d",
+            ("Frankenrouter %s listening on %d, %d keywords cached, uptime %d s" +
+             ", server connects %d, router restarts %s"),
             self.args.sim_name, self.args.listen_port, len(self.state),
             int(time.perf_counter() - self.starttime),
-            self.server_reconnects,
+            self.server_reconnects, self.router_restarts,
         )
         self.logger.info("%s",
                          (
@@ -1159,6 +1161,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 except Exception:  # pylint: disable=broad-exception-caught
                     pass
                 time.sleep(5)
+                self.router_restarts += 1
                 continue
 
 
