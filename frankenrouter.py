@@ -514,11 +514,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
     async def close_server_connection(self):
         """Close a server connection and remove server data."""
         if 'writer' in self.server:
-            self.server['writer'].close()
-            await self.server['writer'].wait_closed()
-            self.logger.info("Closed server connection")
-            self.server = {}
-            self.print_status()
+            try:
+                self.server['writer'].close()
+                await self.server['writer'].wait_closed()
+            except ConnectionResetError:
+                pass
+        self.logger.info("Closed server connection")
+        self.server = {}
+        self.print_status()
 
     async def handle_new_connection_cb(self, reader, writer):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         """Handle a new client connection."""
