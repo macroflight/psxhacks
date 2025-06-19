@@ -1044,6 +1044,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 pass
             self.server = {}
         self.write_cache()
+        self.shutdown_requested = False
 
     async def start_listener(self):
         """Start the listener."""
