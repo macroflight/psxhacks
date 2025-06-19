@@ -6,6 +6,7 @@ import asyncio
 import datetime
 import json
 import logging
+import math
 import os
 import pathlib
 import random
@@ -1073,10 +1074,27 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.clients = {}
                 await asyncio.sleep(1.0)
 
+    def print_aircraft_status(self):
+        """Display a basic aircraft status line to verify sane data."""
+        if 'Qs121' in self.state:
+            PiBaHeAlTas = self.state['Qs121'].split(';')
+            pitch = math.degrees(float(PiBaHeAlTas[0]) / 1000000)
+            bank = math.degrees(float(PiBaHeAlTas[1]) / 1000000)
+            heading_true = math.degrees(float(PiBaHeAlTas[2]))
+            alt_true_ft = float(PiBaHeAlTas[3]) / 1000
+            tas = float(PiBaHeAlTas[4]) / 1000
+            lat = math.degrees(float(PiBaHeAlTas[5]))
+            lon = math.degrees(float(PiBaHeAlTas[6]))
+            self.logger.info(
+                "pitch=%.1f bank=%.1f heading=%.0f altitude_true=%.0f TAS=%.0f lat=%.6f lon=%.6f",
+                pitch, bank, heading_true, alt_true_ft, tas, lat, lon
+            )
+
     async def routermonitor(self):
         """Monitor the router and shut down when requested."""
         last_ping = time.perf_counter()
         while True:
+            await asyncio.sleep(1.0)
             elapsed_since_ping = time.perf_counter() - last_ping
             if elapsed_since_ping > self.args.ping_interval:
                 # If connected to a frankenrouter server, send FRDP ping
@@ -1115,12 +1133,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             # Status display
             if time.perf_counter() - self.last_status_print > self.args.status_interval:
                 self.print_status()
+                self.print_aircraft_status()
                 self.last_status_print = time.perf_counter()
             if self.shutdown_requested:
                 await self.shutdown()
                 self.logger.info("Monitor shutting down")
                 return
-            await asyncio.sleep(1.0)
 
     async def main(self):
         """Start the proxy."""
