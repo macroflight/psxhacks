@@ -679,25 +679,32 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         # store name and the fact that this client is a frankenrouter
                         this_client['is_frankenrouter'] = True
                         this_client['identifier'] = f"R:{identifier}"
-                        if auth_token == self.args.this_router_password:
-                            if this_client['access'] == "noaccess":
-                                self.logger.info(
-                                    "Client %s has authenticated", this_client['identifier'])
-                                this_client['access'] = "full"
-                                await self.client_send_welcome(this_client)
-                                this_client['welcome_sent'] = True
-                        elif auth_token == self.args.this_router_password_readonly:
-                            if this_client['access'] == "noaccess":
-                                self.logger.info(
-                                    "Client %s has authenticated", this_client['identifier'])
-                                this_client['access'] = "readonly"
-                                await self.client_send_welcome(this_client)
-                                this_client['welcome_sent'] = True
+                        if auth_token != "":
+                            # If client provided a password, try it
+                            if auth_token == self.args.this_router_password:
+                                if this_client['access'] == "noaccess":
+                                    self.logger.info(
+                                        "Client %s has authenticated", this_client['identifier'])
+                                    this_client['access'] = "full"
+                                    await self.client_send_welcome(this_client)
+                                    this_client['welcome_sent'] = True
+                            elif auth_token == self.args.this_router_password_readonly:
+                                if this_client['access'] == "noaccess":
+                                    self.logger.info(
+                                        "Client %s has authenticated", this_client['identifier'])
+                                    this_client['access'] = "readonly"
+                                    await self.client_send_welcome(this_client)
+                                    this_client['welcome_sent'] = True
+                            else:
+                                self.logger.warning(
+                                    "Client %s failed to authenticate, password used=%s",
+                                    this_client['identifier'], auth_token)
+                                await self.close_client_connection(this_client)
                         else:
-                            self.logger.warning(
-                                "Client %s failed to authenticate, password used=%s",
-                                this_client['identifier'], auth_token)
-                            await self.close_client_connection(this_client)
+                            # Client provided no password, but might
+                            # already be authenticated by IP, so do
+                            # nothing
+                            pass
                         continue
                     if messagetype == 'pong':
                         self.logger.debug(
