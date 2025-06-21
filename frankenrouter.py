@@ -832,6 +832,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         this_client['peername'], thisname)
                     self.print_status()
 
+                if key == 'name':
+                    self.logger.info("Not passing on name= keyword from %s to upstream", this_client['id'])
+                    continue
+
                 # Router management via client commands
                 if key == 'RouterStop':
                     self.logger.info("Got RouterStop command from %s", client_addr)
