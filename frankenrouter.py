@@ -36,6 +36,23 @@ NOLONG_KEYWORDS = [
     "Qs412",
 ]
 
+ALWAYS_DEMAND = {
+    "Qs325",
+    "Qs479",
+    "Qs480",
+    "Qs481",
+    "Qs482",
+    "Qs483",
+    "Qs491",
+    "Qs492",
+    "Qs562",
+    "Qi211",
+    "Qi214",
+    "Qi271",
+    "Qi273",
+    "Qi274",
+}
+
 HEADER_LINE_LENGTH = 110
 
 
@@ -933,6 +950,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             # Send our name (for when we connect to another router)
             await self.send_to_server(
                 f"name=FROUTER:FRANKEN.PY frankenrouter PSX router {self.args.sim_name}")
+
+            self.logger.info("Sending demand= for %s", ALWAYS_DEMAND)
+            for key in ALWAYS_DEMAND:
+                await self.send_to_server(f"demand={key}")
 
             self.print_status()
 
