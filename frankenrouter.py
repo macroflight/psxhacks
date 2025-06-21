@@ -339,7 +339,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.logger.info("-" * HEADER_LINE_LENGTH)
         self.last_status_print = time.perf_counter()
 
-    async def to_stream(self, endpoint, line):
+    async def to_stream(self, endpoint, line, drain=True):
         """Write data to a stream and optionally to a log file.
 
         Also update traffic counters.
@@ -347,7 +347,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # Write to stream
         start_time = time.perf_counter()
         endpoint['writer'].write(f"{line}\n".encode())
-        await endpoint['writer'].drain()
+        if drain:
+            await endpoint['writer'].drain()
         elapsed = time.perf_counter() - start_time
         # keep a list of the last 100 messages send per endpoint
         endpoint['writedraintimes'].append(elapsed)
@@ -382,7 +383,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # If some mandatory keywords are not yet received from the server, fake them
         sent = []
 
+        # Try sleeping a little between each send. Total welcome time without this was 0.004279
+        extra_delay = None
+        drain_each_send = True
+        # Next idea: no drain
+
         async def send_if_unsent(key):
+            if extra_delay:
+                await asyncio.sleep(extra_delay)
             if key not in sent:
                 if key not in self.state:
                     self.logger.warning(
@@ -390,18 +398,23 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         " after server connection", key)
                 else:
                     line = f"{key}={self.state[key]}"
-                    await self.to_stream(client, line)
+                    await self.to_stream(client, line, drain=drain_each_send)
                     sent.append(key)
                     self.logger.debug("To %s: %s", client['peername'], line)
 
-        async def send_unconditionally(key):
-            line = f"{key}={self.state[key]}"
-            await self.to_stream(client, line)
-            sent.append(key)
-            self.logger.debug("To %s: %s", client['peername'], line)
+# unused for now
+#         async def send_unconditionally(key):
+#             if extra_delay:
+#                 await asyncio.sleep(extra_delay)
+#             line = f"{key}={self.state[key]}"
+#             await self.to_stream(client, line, drain=drain_each_send)
+#             sent.append(key)
+#             self.logger.debug("To %s: %s", client['peername'], line)
 
         async def send_line(line):
-            await self.to_stream(client, line)
+            if extra_delay:
+                await asyncio.sleep(extra_delay)
+            await self.to_stream(client, line, drain=drain_each_send)
             self.logger.debug("To %s: %s", client['peername'], line)
 
         # Transmit the latest cached server data to the client
@@ -515,9 +528,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     await send_if_unsent(key)
         await send_line("load3")
         await send_if_unsent("metar")
-        await send_unconditionally("Qs124")
-        await send_unconditionally("Qs125")
+        # Probably not needed, just time data send by the server at intervals
+        # await send_unconditionally("Qs124")
+        # await send_unconditionally("Qs125")
+        # Tried to comment this out but did not help with BACARS problem
         await send_line(f"name=frankenrouter:{self.args.sim_name}")
+        # drain writer if we did not do it for each send earlier
+        if not drain_each_send:
+            await client['writer'].drain()
 
     async def close_client_connection(self, client):
         """Close a client connection and remove client data."""
