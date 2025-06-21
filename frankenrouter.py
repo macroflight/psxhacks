@@ -74,7 +74,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.state = None
         self.clients = {}
         self.server = {}
-        self.stream_logfiles = {}
+        self.log_data_file = None
+        self.log_data_filename = None
         self.start_time = int(time.time())
         self.allowed_clients = {
         }
@@ -180,20 +181,24 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             '--state-cache-file', type=pathlib.Path,
             action='store', default='frankenrouter.cache.json')
         parser.add_argument(
-            '--router-log-dir', type=pathlib.Path,
+            '--log-dir', type=pathlib.Path,
             action='store', default='./',
-            help=("Directory where the standard output and crash backtraces" +
-                  " from the router will be written."),
+            help=("Directory where the normal router output and any " +
+                  " requested log files is written."),
         )
         parser.add_argument(
-            '--log-dir', type=pathlib.Path,
-            action='store', default='./')
-        parser.add_argument(
-            '--log-streams',
-            action='store_true')
+            '--log-data',
+            action='store_true',
+            help="Log all data to and from clients and server to a single file",
+        )
         parser.add_argument(
             '--debug',
             action='store_true')
+        parser.add_argument(
+            '--no-cache',
+            action='store_true',
+            help="Do not read cached server data on startup",
+        )
         parser.add_argument(
             '--stop-on-exception',
             action='store_true',
@@ -206,8 +211,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         )
 
         self.args = parser.parse_args()
-        if self.args.debug:
-            self.logger.setLevel(logging.DEBUG)
         if self.args.allowed_clients == "":
             parser.error("You must use --allowed-clients")
         if not self.args.sim_name:
@@ -276,6 +279,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                              f"Password: {self.args.this_router_password}" +
                              f" Read-only: {self.args.this_router_password_readonly}"
                          ))
+        if self.log_data_filename:
+            self.logger.info("Logging traffic to %s", self.log_data_filename)
         serverinfo = "[NO SERVER CONNECTION]"
         if self.is_server_connected():
             serverinfo = f"SERVER {self.server['ip']}:{self.server['port']}"
@@ -339,6 +344,23 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.logger.info("-" * HEADER_LINE_LENGTH)
         self.last_status_print = time.perf_counter()
 
+    async def log_data(self, line, endpoints=None, inbound=True):
+        """Write to optional log file."""
+        server_endpoint_desc = 'PSX main server'
+        maxlen = len(server_endpoint_desc)
+        if self.args.log_data:
+            direction = '>>>'
+            if inbound:
+                direction = '<<<'
+            if endpoints is None:
+                endpoint_desc = server_endpoint_desc
+            else:
+                endpoints = str(endpoints)
+                endpoint_desc = endpoints[:maxlen] + " " * (maxlen - len(endpoints[:maxlen]))
+            self.log_data_file.write(
+                f"{datetime.datetime.now().isoformat()} {direction} [{endpoint_desc}] {line}\n"
+            )
+
     async def to_stream(self, endpoint, line, drain=True):
         """Write data to a stream and optionally to a log file.
 
@@ -356,31 +378,21 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
         endpoint['messages sent'] += 1
         endpoint['bytes sent'] += len(line) + 1
-        # Write to optional log file
-        if self.args.log_streams:
-            if endpoint['peername'] not in self.stream_logfiles:
-                self.logger.warning(
-                    "Log file not initialized for %s, this should not happen", endpoint['peername'])
-                return
-            self.stream_logfiles[endpoint['peername']].write(
-                f"{datetime.datetime.now().isoformat()} >>> {line}\n")
         return elapsed
 
     def from_stream(self, endpoint, line):
         """Log data read from stream."""
         endpoint['messages received'] += 1
         endpoint['bytes received'] += len(line) + 1
-        if self.args.log_streams:
-            if endpoint['peername'] not in self.stream_logfiles:
-                self.logger.warning(
-                    "Log file not initialized for %s, this should not happen", endpoint['peername'])
-                return
-            self.stream_logfiles[endpoint['peername']].write(
-                f"{datetime.datetime.now().isoformat()} <<< {line}\n")
 
     async def client_send_welcome(self, client):  # pylint: disable=too-many-branches
         """Send the same data as a real PSX server would send to a new client."""
-        # If some mandatory keywords are not yet received from the server, fake them
+        self.logger.info(
+            "Sending the welcome message to client %s (%d keywords)",
+            client['id'], len(self.state))
+
+        # Keep track of which keywords we have sent to this client (we
+        # need to send them in a certain order.
         sent = []
 
         # Try sleeping a little between each send. Total welcome time without this was 0.004279
@@ -399,6 +411,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 else:
                     line = f"{key}={self.state[key]}"
                     await self.to_stream(client, line, drain=drain_each_send)
+                    await self.log_data(line, endpoints=f"client {client['id']}", inbound=False)
                     sent.append(key)
                     self.logger.debug("To %s: %s", client['peername'], line)
 
@@ -415,6 +428,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             if extra_delay:
                 await asyncio.sleep(extra_delay)
             await self.to_stream(client, line, drain=drain_each_send)
+            await self.log_data(line, endpoints=f"client {client['id']}", inbound=False)
             self.logger.debug("To %s: %s", client['peername'], line)
 
         # Transmit the latest cached server data to the client
@@ -537,6 +551,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         if not drain_each_send:
             await client['writer'].drain()
 
+        self.logger.info("Finished sending the welcome message to client %s", client['id'])
+
     async def close_client_connection(self, client):
         """Close a client connection and remove client data."""
         try:
@@ -655,13 +671,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.print_status()
                     return
 
-            if self.args.log_streams:
-                logfile = os.path.join(
-                    self.args.log_dir,
-                    f"client-{self.start_time}-{this_client['id']}-{this_client['ip']}-{this_client['port']}.psxnet.log"  # pylint: disable=line-too-long
-                )
-                self.stream_logfiles[client_addr] = open(logfile, 'a', encoding='utf-8')  # pylint: disable=consider-using-with
-
             # New client connected, so print status
             self.print_status()
             if this_client['access'] != 'noaccess':
@@ -687,6 +696,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
                 # Log data from client
                 self.from_stream(this_client, line)
+                await self.log_data(line, endpoints=f"client {this_client['id']}")
 
                 key, sep, value = line.partition("=")
 
@@ -696,8 +706,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 # send the "standard" name= keyword.
                 if key == 'name':
                     self.logger.debug("key is name for %s", line)
-                    if re.match(r"^frankenrouter:", value):
-                        identifier = value.split(":")[1]
+                    if re.match(r".*:FRANKEN.PY frankenrouter", value):
+                        identifier = value.split(":")[0]
                         self.logger.info(
                             "Client %s identified as frankenrouter %s",
                             client_addr, identifier)
@@ -793,9 +803,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 # So I will use e.g
                 # name=ICING:FRANKEN.PY frankenfreeze MSFS to PSX ice sync
                 # name=WIND:FRANKEN.PY frankenwind MSFS to PSX wind sync
-                # name=FROUTER:FRANKEN.PY frankenrouter PSX router <routername>
+                # name=<simname>:FRANKEN.PY frankenrouter PSX router <routername>
 
                 if key == 'name' and not this_client['is_frankenrouter']:
+                    learned_prefix = "L"
                     thisname = value
                     self.logger.info("Checking %s against name regexps", value)
                     if re.match(r".*PSX.NET EFB.*", value):
@@ -814,7 +825,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     # FRANKEN.PY clients
                     elif re.match(r".*:FRANKEN\.PY", value):
                         thisname = value.split(":")[0]
-                    this_client['identifier'] = f"F:{thisname}"
+                        learned_prefix = "F"
+                    this_client['identifier'] = f"{learned_prefix}:{thisname}"
                     self.logger.info(
                         "Client %s identifies as %s, using that name",
                         this_client['peername'], thisname)
@@ -877,8 +889,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         """
         if exclude and include:
             self.logger.critical(
-                "client_broadcast called with bost include and exclude - not supported")
+                "client_broadcast called with both include and exclude - not supported")
             return
+
         for client in self.clients.values():
             if client['access'] == 'noaccess':
                 self.logger.debug(
@@ -908,6 +921,24 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 continue
             await self.to_stream(client, line)
             self.logger.debug("To %s: %s", client['peername'], line)
+        # Log to single file
+        if len(self.clients) == 0:
+            destination = 'no clients'
+        elif exclude is None and include is None:
+            destination = 'all clients'
+        elif exclude is not None:
+            ids = []
+            for peername in exclude:
+                ids.append(str(self.clients[peername]['id']))
+            destination = f"not {','.join(ids)}"
+        elif include is not None:
+            ids = []
+            for peername in include:
+                ids.append(str(self.clients[peername]['id']))
+            destination = f"only {','.join(ids)}"
+        else:
+            destination = "UNKNOWN"  # should not happen
+        await self.log_data(line, endpoints=destination, inbound=False)
 
     async def send_to_server(self, line, client_addr=None):
         """Send a line to the PSX main server."""
@@ -915,6 +946,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.warning("Server is disconnected, discarding: %s", line)
             return
         await self.to_stream(self.server, line)
+        await self.log_data(line, inbound=False)
         self.logger.debug("To server from %s: %s", client_addr, line)
 
     async def handle_server_connection(self):  # pylint: disable=too-many-branches,too-many-statements
@@ -954,22 +986,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 'writedraintimes': [],
             }
             self.server_reconnects += 1
-            # We have a real server, no need for the fake and possibly outdated data anymore.
-            self.state = {}
             self.logger.info("Connected to server: %s", server_addr)
-
-            if self.args.log_streams:
-                logfile = os.path.join(
-                    self.args.log_dir,
-                    f"server-{self.start_time}-{server_addr[0]}-p{server_addr[1]}.psxnet.log"
-                )
-                self.stream_logfiles[server_addr] = open(logfile, 'a', encoding='utf-8')  # pylint: disable=consider-using-with
 
             # Send our name (for when we connect to another router)
             await self.send_to_server(
-                f"name=FROUTER:FRANKEN.PY frankenrouter PSX router {self.args.sim_name}")
+                f"name={self.args.sim_name}:FRANKEN.PY frankenrouter PSX router {self.args.sim_name}")
 
-            self.logger.info("Sending demand= for %s", ALWAYS_DEMAND)
+            self.logger.info("Sending demand= for %s", ", ".join(ALWAYS_DEMAND))
             for key in ALWAYS_DEMAND:
                 await self.send_to_server(f"demand={key}")
 
@@ -1004,6 +1027,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
                 self.logger.debug("From server: %s", line)
                 self.from_stream(self.server, line)
+                await self.log_data(line)
 
                 # Store various things that we get e.g on initial
                 # connection and that we might need later.
@@ -1188,6 +1212,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         last_ping = time.perf_counter()
         while True:
             await asyncio.sleep(1.0)
+            # Make sure log data is flushed to disk
+            if self.log_data_file:
+                self.log_data_file.flush()
+
             elapsed_since_ping = time.perf_counter() - last_ping
             if elapsed_since_ping > self.args.ping_interval:
                 # If connected to a frankenrouter server, send FRDP ping
@@ -1240,12 +1268,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         if self.args.keep_router_logs:
             # Keep all log files
             router_log_file = os.path.join(
-                self.args.router_log_dir,
+                self.args.log_dir,
                 f"frankenrouter-{self.args.sim_name}-{self.start_time}.log"
             )
         else:
             router_log_file = os.path.join(
-                self.args.router_log_dir,
+                self.args.log_dir,
                 f"frankenrouter-{self.args.sim_name}.log"
             )
         log_format = "%(asctime)s: %(message)s"
@@ -1260,8 +1288,19 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         )
         self.logger = logging.getLogger("frankenrouter")
         self.logger.info("Started logging to %s", router_log_file)
+        if self.args.debug:
+            self.logger.setLevel(logging.DEBUG)
 
-        self.read_cache()
+        # Logging traffic data to a single file
+        if self.args.log_data:
+            self.log_data_filename = os.path.join(
+                self.args.log_dir,
+                f"routertraffic-{self.start_time}.psxnet.log"
+            )
+            self.log_data_file = open(self.log_data_filename, 'w', encoding='utf-8')  # pylint: disable=consider-using-with
+
+        if not self.args.no_cache:
+            self.read_cache()
         self.logger.info("frankenusb version %s starting", VERSION)
 
         while True:
