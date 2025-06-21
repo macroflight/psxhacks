@@ -770,6 +770,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     # name=MSFS Router:PSX.NET Modules
                     elif re.match(r"^MSFS Router", value):
                         thisname = "MSFS Router"
+                    # name=BACARS:BA ACARS Simulation
+                    elif re.match(r"^BACARS:", value):
+                        thisname = "BACARS"
                     # name=VPLG:vPilot Plugin
                     elif re.match(r"VPLG:", value):
                         thisname = "vPilot"
