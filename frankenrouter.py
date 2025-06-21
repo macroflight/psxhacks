@@ -270,7 +270,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 serverinfo = serverinfo + f", average output delay {average_writedrain:.3f} s"
         self.logger.info(serverinfo)
         self.logger.info(
-            "%-19s %-15s %5s %8s %7s %6s %6s %6s %6s %7s %7s",
+            "%-20s %-15s %5s %8s %7s %6s %6s %6s %6s %7s %7s",
             f"{len(self.clients)} clients",
             "",
             "Local",
@@ -284,7 +284,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             "Output",
         )
         self.logger.info(
-            "%2s %-16s %-15s %5s %8s %7s %6s %6s %6s %6s %7s %7s",
+            "%2s %-18s %-15s %5s %8s %7s %6s %6s %6s %6s %7s %7s",
             "id",
             "Identifier",
             "Client IP",
@@ -305,7 +305,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 average_writedrain = "  NODATA"
 
             self.logger.info(
-                "%2d %-16s %-15s %5d %8s %7d %6d %6d %6d %6d %7s %7s",
+                "%2d %-18s %-15s %5d %8s %7d %6d %6d %6d %6d %7s %7s",
                 data['id'],
                 data['identifier'],
                 data['ip'],
@@ -745,6 +745,21 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 # Note: we inhibit name changes on a connection from a
                 # frankenrouter as other clients are multiplexed on
                 # that connection.
+
+                # The community standard seems to be
+                # name=SHORTNAME:LONGNAME but no prefix
+
+                # Examples:
+                # name=VPLG:vPilot Plugin
+                # name=:PSX Sounds
+                # name=EFB1:PSX.NET EFB For Windows
+                # name=BACARS:BA ACARS Simulation
+
+                # So I will use e.g
+                # name=ICING:FRANKEN.PY frankenfreeze MSFS to PSX ice sync
+                # name=WIND:FRANKEN.PY frankenwind MSFS to PSX wind sync
+                # name=FROUTER:FRANKEN.PY frankenrouter PSX router <routername>
+
                 if key == 'name' and not this_client['is_frankenrouter']:
                     thisname = value
                     self.logger.info("Checking %s against name regexps", value)
@@ -758,10 +773,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     # name=VPLG:vPilot Plugin
                     elif re.match(r"VPLG:", value):
                         thisname = "vPilot"
-                    # e.g name=FrankenUSB:frankenusb.py
-                    elif re.match(r".*:franken.*.py", value):
+                    # FRANKEN.PY clients
+                    elif re.match(r".*:FRANKEN\.PY", value):
                         thisname = value.split(":")[0]
-                    this_client['identifier'] = f"L:{thisname}"
+                    this_client['identifier'] = f"F:{thisname}"
                     self.logger.info(
                         "Client %s identifies as %s, using that name",
                         this_client['peername'], thisname)
@@ -913,7 +928,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.stream_logfiles[server_addr] = open(logfile, 'a', encoding='utf-8')  # pylint: disable=consider-using-with
 
             # Send our name (for when we connect to another router)
-            await self.send_to_server(f"name=frankenrouter:{self.args.sim_name}")
+            await self.send_to_server(
+                f"name=FROUTER:FRANKEN.PY frankenrouter PSX router {self.args.sim_name}")
 
             self.print_status()
 
