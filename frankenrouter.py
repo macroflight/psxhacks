@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import datetime
+import inspect
 import json
 import logging
 import math
@@ -17,9 +18,11 @@ import sys
 import time
 import traceback
 
-VERSION = '0.3'
+VERSION = '0.4'
 
 PSX_SERVER_RECONNECT_DELAY = 1.0
+
+WRITE_BUFFER_WARNING = 65535
 
 # Regexp matching "normal" PSX network keywords
 REGEX_PSX_KEYWORDS = r"^(id|version|layout|metar|demand|load[1-3]|Q[hsdi]\d+|L[sih]\d+\(.*\))$"
@@ -36,7 +39,28 @@ NOLONG_KEYWORDS = [
     "Qs412",
 ]
 
-ALWAYS_DEMAND = {
+# If the router receives START variables from the server within this
+# many seconds of a client sending "start", that client receives the
+# START variable. We also send cached START variables to all clients
+# in the welcome message.
+START_CLIENT_WINDOW = 2.0
+START_KEYWORDS = [
+    "Qs122",
+    "Qs358",
+    "Qs426",
+    "Qs437",
+    "Qs453",
+    "Qs454",
+    "Qs470",
+    "Qs493",
+    "Qs556",
+    "Qi131",
+    "Qi182",
+    "Qi195",
+    "Qi208",
+]
+
+DEMAND_KEYWORDS = {
     "Qs325",
     "Qs479",
     "Qs480",
@@ -66,6 +90,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.state = None
         self.clients = {}
         self.server = {}
+        self.server_pending_outgoing_messages = []
         self.log_data_file = None
         self.log_data_filename = None
         self.start_time = int(time.time())
@@ -300,7 +325,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         )
         self.logger.info("%s",
                          (
-                             f"Ctrl-C to shut down cleanly." +
+                             "Ctrl-C to shut down cleanly." +
                              f" Password: {self.args.this_router_password}" +
                              f" Read-only password: {self.args.this_router_password_readonly}"
                          ))
@@ -409,17 +434,27 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         """
         # Write to stream
         start_time = time.perf_counter()
-        if line is not None:
-            endpoint['writer'].write(f"{line}\n".encode())
-        if drain:
-            elapsed = time.perf_counter() - start_time
-            endpoint['write_drain'].append(elapsed)
-            # limit length of list
-            endpoint['write_drain'] = endpoint['write_drain'][-self.statistics_keep_samples:]
-            await endpoint['writer'].drain()
-
-        endpoint['messages sent'] += 1
-        endpoint['bytes sent'] += len(line) + 1
+        try:
+            if endpoint['writer'].transport.get_write_buffer_size() > WRITE_BUFFER_WARNING:
+                self.logger.warning(
+                    "Write buffer %d > %d for %s",
+                    endpoint['writer'].transport.get_write_buffer_size(),
+                    WRITE_BUFFER_WARNING,
+                    endpoint['peername'])
+            if line is not None:
+                endpoint['writer'].write(f"{line}\n".encode())
+            if drain:
+                elapsed = time.perf_counter() - start_time
+                endpoint['write_drain'].append(elapsed)
+                # limit length of list
+                endpoint['write_drain'] = endpoint['write_drain'][-self.statistics_keep_samples:]
+                await endpoint['writer'].drain()
+        except ConnectionResetError as exc:
+            self.logger.warning(
+                "Connection reset while sending to %s - continuing: %s", endpoint['peername'], exc)
+        else:
+            endpoint['messages sent'] += 1
+            endpoint['bytes sent'] += len(line) + 1
 
     def from_stream(self, endpoint, line):
         """Log data read from stream."""
@@ -575,6 +610,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             await client['writer'].drain()
         self.logger.info(
             "Sent welcome message to client %s in %.1f ms", client['id'], elapsed * 1000)
+        if len(client['pending_outgoing_messages']) > 0:
+            self.logger.info(
+                "Sending %d held client messages to %s",
+                len(client['pending_outgoing_messages']),
+                client['id']
+            )
+            for message in client['pending_outgoing_messages']:
+                await send_line(message)
 
     async def close_client_connection(self, client):
         """Close a client connection and remove client data."""
@@ -602,7 +645,15 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
     async def handle_new_connection_cb(self, reader, writer):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         """Handle a new client connection."""
+        # asyncio will intentionally not propagate exceptions from a
+        # callback (see https://bugs.python.org/issue42526), so we
+        # need to wrap the entire function in try-except.
         try:  # pylint: disable=too-many-nested-blocks
+            # increase write buffer limits a bit
+            writer.transport.set_write_buffer_limits(high=1048576, low=524288)
+            self.logger.info(
+                "to_stream: write buffer limits are %s", writer.transport.get_write_buffer_limits())
+
             client_addr = writer.get_extra_info('peername')
             assert client_addr not in self.clients, f"Duplicate client ID {client_addr}"
             # Store the connection information and some other useful
@@ -628,6 +679,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 'write_drain': [],
                 'connected_clients': 0,
                 'welcome_sent': False,
+                'last_start_sent_timestamp': None,
+                'pending_outgoing_messages': [],
+                'demands': set(),
             }
             self.clients[client_addr] = this_client
             self.next_client_id += 1
@@ -856,6 +910,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         "Not passing on name= keyword from %s to upstream", this_client['id'])
                     continue
 
+                # log addon traffic
+                if key == 'addon=':
+                    self.logger.info(
+                        "ADDON: %s sent %s", this_client['id'], line)
+
                 # Router management via client commands
                 if key == 'RouterStop':
                     self.logger.info("Got RouterStop command from %s", client_addr)
@@ -870,8 +929,19 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     allow_write = True
 
                 if allow_write:
-                    if key in ["bang", "start", "again"]:
+                    if key in ["bang", "again"]:
                         # Forward to server but not other clients
+                        await self.send_to_server(key, client_addr)
+                    elif key in ["start"]:
+                        # Store timestamp and send to server, not other clients
+                        this_client['last_start_sent_timestamp'] = time.perf_counter()
+                        self.logger.info("start sent by %s, storing timestamp", client_addr)
+                        await self.send_to_server(key, client_addr)
+                    elif key in ["demand"]:
+                        # Add to list for this client
+                        this_client['demands'].add(value)
+                        self.logger.info(
+                            "added %s to demand list for %s + send to server", value, client_addr)
                         await self.send_to_server(key, client_addr)
                     elif key in ["nolong"]:
                         self.logger.warning("nolong not implemented, ignoring")
@@ -897,11 +967,15 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         "Read-only client tried to send data, ignoring: %s",
                         line
                     )
-        except ConnectionResetError:
-            self.logger.info("Connection reset by client %s", client_addr)
-            del self.clients[client_addr]
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical(
+                "Unhandled exception %s in callback %s, shutting down %s connection",
+                exc, inspect.currentframe().f_code.co_name, client_addr)
+            await self.close_client_connection(this_client)
+            self.print_status()
+            self.logger.info("Connection %s shut down", client_addr)
 
-    async def client_broadcast(self, line, exclude=None, include=None, islong=False):  # pylint: disable=too-many-branches
+    async def client_broadcast(self, line, exclude=None, include=None, islong=False, isstart=False):  # pylint: disable=too-many-branches, too-many-arguments, too-many-positional-arguments
         """Send a line to connected clients.
 
         If exclude is provided, send to all connected clients except
@@ -934,14 +1008,31 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     "Not sending long string to nolong client %s: %s",
                     client['peername'], line)
                 continue
+            if isstart:
+                if client['last_start_sent_timestamp'] is None:
+                    # Client never sent "start", so do not send this keyword to it
+                    self.logger.info(
+                        "Not sending start keyword to client %s (not requested): %s",
+                        client['peername'], line)
+                    continue
+                elapsed_since_start_sent = time.perf_counter() - client['last_start_sent_timestamp']
+                if elapsed_since_start_sent > START_CLIENT_WINDOW:
+                    self.logger.info(
+                        "Not sending start keyword to client %s (>5s since start sent): %s",
+                        client['peername'], line)
+                    continue
+                # If we get here, this client sent "start" in the last
+                # 5s, and we should send the variable.
             if client['access'] == 'noaccess':
                 self.logger.debug(
                     "C Not sending to noaccess client %s", client['peername'])
                 continue
             if not client['welcome_sent']:
-                # Do not send to clients until they have been initialied (got the welcome message)
+                # Do not send to clients until the welcome message has been sent
+                client['pending_outgoing_messages'].append(line)
                 self.logger.info(
-                    "Not sending to not-yet-welcomed client %s", client['peername'])
+                    "Storing data for not-yet-welcomed client %s (%d entries): %s",
+                    client['peername'], len(client['pending_outgoing_messages']), line)
                 continue
             await self.to_stream(client, line)
             self.logger.debug("To %s: %s", client['peername'], line)
@@ -952,19 +1043,21 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             destination = 'no clients'
         else:
             destination = "clients " + ",".join(map(str, sent_to_clients))
-        await self.log_data(line, endpoints=destination, inbound=False)
+            await self.log_data(line, endpoints=destination, inbound=False)
 
     async def send_to_server(self, line, client_addr=None):
         """Send a line to the PSX main server."""
         if not self.is_server_connected():
-            self.logger.warning("Server is disconnected, discarding: %s from %s",
-                                line, client_addr)
+            self.server_pending_outgoing_messages.append(line)
+            self.logger.info(
+                "Server is not connected, storing data for later send (%d entries): %s",
+                len(self.server_pending_outgoing_messages), line)
             return
         await self.to_stream(self.server, line)
         await self.log_data(line, inbound=False)
         self.logger.debug("To server from %s: %s", client_addr, line)
 
-    async def handle_server_connection(self):  # pylint: disable=too-many-branches,too-many-statements
+    async def handle_server_connection(self):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         """Set up and maintain a PSX server connection."""
         while not self.shutdown_requested:  # pylint: disable=too-many-nested-blocks
             try:
@@ -999,6 +1092,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 'ping_sent': None,
                 'ping_rtts': [],
                 'write_drain': [],
+                'pending_outgoing_messages': [],
             }
             self.server_reconnects += 1
             self.logger.info("Connected to server: %s", server_addr)
@@ -1006,9 +1100,26 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             # Send our name (for when we connect to another router)
             await self.send_to_server(f"name={self.args.sim_name}:FRANKEN.PY frankenrouter PSX router {self.args.sim_name}")  # pylint: disable=line-too-long
 
-            self.logger.info("Sending demand= for %s", ", ".join(ALWAYS_DEMAND))
-            for key in ALWAYS_DEMAND:
-                await self.send_to_server(f"demand={key}")
+            # (re)Send demand= for all keywords that any client has demanded
+            clients_demand = set()
+            for peername, data in self.clients.items():
+                for demand_var in data['demands']:
+                    self.logger.info(
+                        "Adding demand variable %s from %s to req list",
+                        demand_var, peername)
+                    clients_demand.add(demand_var)
+            for demand_var in clients_demand:
+                self.logger.info("Sending demand=%s to server")
+                await self.send_to_server(f"demand={demand_var}")
+
+            if len(self.server_pending_outgoing_messages) > 0:
+                self.logger.info(
+                    "Sending %d held messages to server",
+                    len(self.server_pending_outgoing_messages)
+                )
+                for message in self.server_pending_outgoing_messages:
+                    await self.send_to_server(message)
+            self.server_pending_outgoing_messages = []
 
             self.print_status()
 
@@ -1114,7 +1225,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.logger.debug("Storing key-value from server: %s=%s", key, value)
                     self.state[key] = value
                     if key in NOLONG_KEYWORDS:
+                        # the "nolong" keywords are only sent to
+                        # clients that have asked for them
                         await self.client_broadcast(line, islong=True)
+                    elif key in START_KEYWORDS:
+                        # START keywords are only send to clients that
+                        # requested them in the last 5 seconds.
+                        await self.client_broadcast(line, isstart=True)
                     else:
                         await self.client_broadcast(line)
                 else:
