@@ -3,6 +3,14 @@ Various small utilities for the PSX ecosystem
 
 ## Included scripts
 
+### frankenrouter.py
+
+A PSX router/broker. As of version 0.5, it can handle all addons in my
+sim.
+
+Maturity: stable enough for long flights in a sim with 15+ addons and
+PSX instances connected. Can be used for shared cockpit.
+
 ### frankenusb.py
 
 Replacement for the PSX USB subsystem (for my needs at least). Things
@@ -40,15 +48,6 @@ so far that does not work is one type of rudder pedals). Development
 is currently done on VKB Gladiator joystick, VKB STECS throttle, MFG
 pedals and Thrustmaster Boeing yoke. Also tested with Bravo throttle,
 Thrustmaster Airbus joystick, etc.
-
-### frankenrouter.py
-
-A PSX router/broker. As of version 0.2, it can handle all addons in my
-sim except BACARS (which I can then run locally on the computer that
-hosts the PSX main server).
-
-Maturity: low, but I have completed a full flight using all my addons
-(except BACARS) and extra PSX instances connected through the router.
 
 #### Current features:
 
@@ -257,4 +256,4 @@ frankenusb-frankensim.conf first.
 
 ## Help
 
-Ask macroflight in the Aerowinx forum on Discord (username mk3830).
+Ask macroflight in the Aerowinx forum or on Discord (username mk3830).

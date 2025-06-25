@@ -68,10 +68,10 @@ class Script():  # pylint: disable=too-many-instance-attributes
 
                 if self.psx_altimeter_std:
                     psx_altitude = self.psx_altitude_std
-                    msfs_altitude = self.msfs_indicated_altitude_calibrated
+                    msfs_altitude = self.msfs_indicated_altitude
                 else:
                     psx_altitude = self.psx_altitude_qnh
-                    msfs_altitude = self.msfs_indicated_altitude
+                    msfs_altitude = self.msfs_indicated_altitude_calibrated
 
                 altitude_diff = abs(psx_altitude - msfs_altitude)
                 diff_rate = altitude_diff - last_altitude_diff

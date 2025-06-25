@@ -2,12 +2,30 @@
 
 LINTVENVDIR = $${HOME}/.venv-lint/$(osname)
 
-LINTFILES = radiosync.py frankenusb.py comparator.py psx_fuel_transfer.py psx_shutdown.py show_psx.py show_usb.py frankenwind.py frankenfreeze.py make_gatefinder_database.py frankenrouter.py psx_msfs_sync_checker.py
+# Explicitly list the scripts that are part of the repo and supposed
+# to pass lint. There's usually some other stuff lying around as
+# well.
+LINTFILES = \
+	show_psx.py \
+	show_usb.py \
+	frankenusb.py \
+	frankenwind.py \
+	frankenfreeze.py \
+	router/*.py \
+	psx_fuel_transfer.py \
+	psx_shutdown.py \
+	radiosync.py \
+	comparator.py \
+	make_gatefinder_database.py \
+	psx_msfs_sync_checker.py
+
 CONFIGFILES = config_examples/*
+
+MARKDOWNFILES = router/*.md
 
 osname=$(shell uname -s)-$(shell uname -r)
 
-lint: venv pylint configlint pycodestyle pydocstyle
+lint: venv markdownlint pylint configlint pycodestyle pydocstyle
 	$(info LINT: Your code passed lint!)
 
 venv: $(LINTVENVDIR)/bin/activate
@@ -32,6 +50,10 @@ pycodestyle: venv
 pydocstyle: venv
 	$(info * LINT: Running pydocstyle)
 	. $(LINTVENVDIR)/bin/activate; pydocstyle --ignore=D104,D203,D213 $(LINTFILES)
+
+markdownlint:
+	$(info * LINT: Running markdownlint)
+	mdl --style=.mdl.rb $(MARKDOWNFILES)
 
 clean:
 	$(info * LINT: Removing venv)
