@@ -2,9 +2,9 @@
 
 This is a router/broker for the Aerowinx PSX network protocol.
 
-[Changelog](Changelog.md)
+[Changelog](docs/Changelog.md)
 
-[Some notes on the PSX network protocol and the router design](NOTES.md)
+[Some notes on the PSX network protocol and the router design](docs/NOTES.md)
 
 ## Maturity
 
@@ -33,8 +33,11 @@ For now we distribute the router as Python scripts. If there is enough
 interest we might provide a standalone binary or installer later.
 
 - Clone the [psxhacks Git repository](https://github.com/macroflight/psxhacks)
-    - Alternative: download just the *.py files from the `router` subdirectory from GitHub
-- Download the Variables.txt file from [the PSX Forum](https://aerowinx.com/assets/networkers/Variables.txt)
+    - Alternative if you don't have a Git client installed: download a
+      ZIP of the repository usign the `Code` button's Download Zip
+      option.
+- Download the Variables.txt file from [the PSX
+  Forum](https://aerowinx.com/assets/networkers/Variables.txt)
 - Install Python (see below)
 
 ### Python
@@ -42,9 +45,15 @@ interest we might provide a standalone binary or installer later.
 I recommend using Python 3.13 (or later) as that is what I use for
 development.
 
-For Windows you probably want the [Windows installer (64-bit)](https://www.python.org/ftp/python/3.13.5/python-3.13.5-amd64.exe)
+For Windows you probably want the [Windows installer
+(64-bit)](https://www.python.org/ftp/python/3.13.5/python-3.13.5-amd64.exe)
 
-The router itself needs to extra Python modules, but the script that
+A few extra Python modules are needed for the router:
+
+- tomllib (for the configuration file)
+- aiohttp (for the REST API)
+
+The router itself needs some extra Python modules, but the script that
 identifies PSX clients by their window names does.
 
 You can either install these modules in your main Python installation,
@@ -56,8 +65,8 @@ Example:
 ``` text
 python3 -m venv router1
 . router1/bin/activate
-pip install pywin32
-pip install psutil
+pip install tomllib
+pip install aiohttp
 ```
 
 ### Linux and macOS support
@@ -70,11 +79,17 @@ works on Windows for now.
 
 ## Configuration
 
-Right now the router is entirely configured with command line
-options. I recommend creating a simple BAT or PowerShell script to
-start it.
+[Configuration file format](docs/Configuration.md)
 
-Run `python frankenrouter.py --help` to see all available options.
+Edit frankenrouter.toml (or copy it and use the `--config-file` option
+to start the router using that config file).
+
+There are some config examples in the config_examples directory.
+
+Some aspects of frankenrouter's configuration can be overridded by
+command line options, e.g `--log-traffic` will enable logging of
+traffic. Run `frankenrouter.py --help` to see the available command
+line options.
 
 ## Starting the router
 
@@ -121,6 +136,36 @@ Both clients have full access (as opposed to read-only access)
 The last line shows some basic information about the PSX simulation
 that we get from the router's variable cache.
 
+## REST API
+
+The router has a (currently very small) REST API. You can enable it
+with `--api-port=<some port number>`.
+
+- GET /clients
+    - returns information about connected clients (very basic)
+- POST /upstream/set (provide host= and ip=)
+    - Force the router to connect to a different upstream PSX main
+      server or router.
+
+Example usage (change the upstream connection to 127.0.0.1 port 20747):
+
+``` text
+curl -d "host=127.0.0.1&port=20747" -X POST http://127.0.0.1:8080/upstream/set
+```
+
+Getting information from the router:
+
+``` text
+$ curl -s http://127.0.0.1:8080/clients | jq .
+[
+  {
+    "ip": "127.0.0.1",
+    "port": 49680,
+    "identifier": "R:SlaveSim"
+  }
+]
+```
+
 ## The addon that identifies PSX clients by their window name "frankenrouter_ident"
 
 The router will always identify addons that send the special `name=`
@@ -136,18 +181,28 @@ part of their window title, and that allows us to identify all PSX
 instances by simply giving the layouts descriptive names. This addon
 can also identify those addons that have a window with a useful title.
 
+This addon needs the `pywin32` and `psutil` modules installed, e.g
+using a virtual environment:
+
+``` text
+text
+python3 -m venv router1
+. router1/bin/activate
+pip install pywin32
+pip install psutil
+python3 frankenrouter_ident.py
+```
+
 To start this addon, start a new terminal window and run `python
 frankenrouter_ident.py` in the router directory.
 
 ## Planned changes/new features
 
-- A configuration file (but still possible to override with command
-  line options)
 - Warnings if a client listed in the configuration file is not connected
 - A way to reconfigure the router without restarting it (e.g to switch
   the connection from a local PSX main server to a remote shared
   cockpit master)
-- REST API for controlling the router, checking status, etc.
+- A more feature-rich REST API
 
 ## If you need help  or have suggestions for new features
 

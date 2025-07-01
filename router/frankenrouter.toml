@@ -1,0 +1,28 @@
+# The default frankenrouter config
+#
+# The file format is TOML (https://toml.io/). See
+# docs/Configuration.md for details.
+
+[identity]
+simulator = "ExampleSim"
+router = "router1"
+
+[listen]
+port = 10748
+
+[upstream]
+host = "127.0.0.1"
+port = 10747
+
+[log]
+traffic = false
+
+[psx]
+variables = 'C:\fs\PSX\Variables.txt'
+
+[[access]]
+display_name = "Any local client"
+# Note: you might need to add your local IP, e.g
+# match_ipv4 = [ "127.0.0.1/32", "192.168.17.42/32" ]
+match_ipv4 = [ "127.0.0.1/32" ]
+level = "full"

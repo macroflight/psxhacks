@@ -119,7 +119,7 @@ class Variables():  # pylint: disable=too-few-public-methods
     def is_psx_keyword(self, keyword):
         """Return true of keyword is a normal PSX network keyword."""
         if re.match(
-            r"^(start|lexicon|again|gid|version|layout|metar|demand|load[1-3]|Q[hsdi]\d+|L[sih]\d+\(.*\))$",  # pylint: disable=line-too-long
+            r"^(exit|cduC|cduL|cduR|bang|name|id|start|lexicon|again|gid|version|layout|metar|demand|load[1-3]|Q[hsdi]\d+|L[sih]\d+\(.*\))$",  # pylint: disable=line-too-long
             keyword
         ):
             return True

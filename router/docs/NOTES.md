@@ -195,8 +195,8 @@ called FRDP - FrankenRouter Discovery Protocol.
 
 In order to identify a router connecting to another router as a router
 (and also to be a good PSX network citizen), the connecting router
-will send `name=<<simname>>:FRANKEN.PY frankenrouter PSX router
-<<routername>>` as soon as the connection is established.
+will send `name=<simname>:FRANKEN.PY frankenrouter PSX router
+<routername>` as soon as the connection is established.
 
 The upstream router will then send a FRDP PING message to the
 client. The client will see this message and do two things:
@@ -232,7 +232,7 @@ clients.
 
 ### FRDP PONG
 
-`addon=FRANKENROUTER:PONG:<<ID>>` is sent back by a router to another
+`addon=FRANKENROUTER:PONG:<ID>` is sent back by a router to another
 router upon receiving a PING message. The ID should be the same as in
 the PING message.
 
@@ -241,7 +241,7 @@ clients.
 
 ### FRDP AUTH
 
-`addon=FRANKENROUTER:AUTH:<<PASSWORD>>` is sent by a router to another if
+`addon=FRANKENROUTER:AUTH:<PASSWORD>` is sent by a router to another if
 password authentication is being used.
 
 If the password is accepted by the upstream router, the connection is
@@ -273,9 +273,9 @@ upstream router                client router
 
 ### FRDP IDENT
 
-`addon=FRANKENROUTER:IDENT:<sim or router name>` is sent by a router
-to another to suggest a display name for itself in the upstream router
-logs
+`addon=FRANKENROUTER:IDENT:<simulator name>:<router name>` is sent by
+a router to another to suggest a display name for itself in the
+upstream router status display and logs.
 
 ### FRDP CLIENTINFO
 
@@ -341,6 +341,6 @@ https://github.com/markdownlint/markdownlint/blob/main/docs/RULES.md
 
 Live preview:
 
-retext router/README.md &
+retext router/docs/NOTES.md &
 press Ctrl-e
 --->

@@ -170,6 +170,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
             """Run when connected to PSX."""
             self.logger.info("PSX CONNECTED")
             self.psx_connected = True
+            self.psx.send("name", f"SYNCCHECK:FRANKEN.PY {__MYNAME__}")
 
         def disconnected():
             """Run when we are disconnected from PSX."""

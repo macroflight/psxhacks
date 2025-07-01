@@ -12,15 +12,16 @@ class RouterCacheException(Exception):
 class RouterCache():  # pylint: disable=too-few-public-methods
     """A cache for PSX network variables."""
 
-    def __init__(self):
+    def __init__(self, cache_file):
         """Initialize the instance."""
         self.logger = logging.getLogger(__name__)
         self.cache = {}
+        self.cache_file = cache_file
 
-    def read_from_file(self, filename):
+    def read_from_file(self):
         """Read cached data from file, for use e.g before PSX main server started."""
         try:
-            with open(filename, 'r', encoding='utf-8') as statefile:
+            with open(self.cache_file, 'r', encoding='utf-8') as statefile:
                 self.cache = json.load(statefile)
                 if isinstance(self.cache['version'], str):
                     self.logger.warning("Cache file is old format, starting with empty cache")
@@ -28,13 +29,13 @@ class RouterCache():  # pylint: disable=too-few-public-methods
         except (FileNotFoundError, json.decoder.JSONDecodeError):
             self.logger.warning(
                 "Failed to load data from %s found, you might need to reconnect some clients",
-                filename)
+                self.cache_file)
             self.cache = {}
 
-    def write_to_file(self, filename):
+    def write_to_file(self):
         """Write state cache from file."""
         if self.get_size() > 0:
-            with open(filename, 'w', encoding='utf-8') as statefile:
+            with open(self.cache_file, 'w', encoding='utf-8') as statefile:
                 statefile.write(json.dumps(self.cache))
         else:
             self.logger.info(
@@ -102,12 +103,12 @@ class TestVariablesParser(unittest.TestCase):
 
     def test_basic_cache(self):
         """A few tests of the cache."""
-        me = RouterCache()
+        me = RouterCache("dummy.json")
         self.assertEqual(me.get_size(), 0)
         me.update("Qs123", 456)
-        me.update("Qs128", 666)
+        me.update("Qs128", "somestring")
         self.assertEqual(me.get_size(), 2)
-        self.assertEqual(me.get_value("Qs128"), 666)
+        self.assertEqual(me.get_value("Qs128"), "somestring")
         with self.assertRaises(RouterCacheException):
             me.get_value("Qs999")
 

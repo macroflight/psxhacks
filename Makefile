@@ -2,30 +2,19 @@
 
 LINTVENVDIR = $${HOME}/.venv-lint/$(osname)
 
-# Explicitly list the scripts that are part of the repo and supposed
-# to pass lint. There's usually some other stuff lying around as
-# well.
-LINTFILES = \
-	show_psx.py \
-	show_usb.py \
-	frankenusb.py \
-	frankenwind.py \
-	frankenfreeze.py \
-	router/*.py \
-	psx_fuel_transfer.py \
-	psx_shutdown.py \
-	radiosync.py \
-	comparator.py \
-	make_gatefinder_database.py \
-	psx_msfs_sync_checker.py
+# Run pylint on all *_.py files except psx.py (which is not included
+# in the repo but frequenly there anyway for testing.
+LINTFILES = $(shell find . -name '*.py' ! -name psx.py)
 
 CONFIGFILES = config_examples/*
 
 MARKDOWNFILES = router/*.md
 
+TOMLFILES = router/config_examples/*.toml
+
 osname=$(shell uname -s)-$(shell uname -r)
 
-lint: venv markdownlint pylint configlint pycodestyle pydocstyle
+lint: venv unittests tomlcheck markdownlint pylint configlint pycodestyle pydocstyle
 	$(info LINT: Your code passed lint!)
 
 venv: $(LINTVENVDIR)/bin/activate
@@ -36,11 +25,11 @@ $(LINTVENVDIR)/bin/activate:
 	touch $(LINTVENVDIR)/bin/activate
 
 pylint: venv
-	$(info * LINT: Running pylint)
+	$(info * LINT: Running pylint on scripts)
 	. $(LINTVENVDIR)/bin/activate; pylint --rcfile=.pylintrc.toml -r n $(LINTFILES)
 
 configlint: venv
-	$(info * LINT: Running pylint on config files)
+	$(info * LINT: Running pylint on Python format config files)
 	. $(LINTVENVDIR)/bin/activate; pylint --rcfile=.pylintrc.toml --disable=duplicate-code -r n $(CONFIGFILES)
 
 pycodestyle: venv
@@ -54,6 +43,14 @@ pydocstyle: venv
 markdownlint:
 	$(info * LINT: Running markdownlint)
 	mdl --style=.mdl.rb $(MARKDOWNFILES)
+
+tomlcheck:
+	$(info * LINT: Running tomlcheck)
+	tomlcheck $(TOMLFILES)
+
+unittests:
+	$(info * LINT: Running unit tests)
+	python -m unittest -v router/frankenrouter/*.py
 
 clean:
 	$(info * LINT: Removing venv)

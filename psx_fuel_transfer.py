@@ -16,6 +16,7 @@ def setup():
     global CONNECTED
     print("Simulation started")
     CONNECTED = True
+    PSX.send("name", "FuelXfer:FRANKEN.PY fuel transfer script")
 
 
 def teardown():

@@ -13,6 +13,7 @@ def psx_setup():
 def psx_teardown():
     """Run when disconnected from PSX."""
     print("Simulation stopped")
+    psx.send("name", "show_psx:FRANKEN.PY script that shows a PSX variable")
 
 
 def print_change(key, value):

@@ -104,7 +104,7 @@ class Script():
                     if not re.match(r".*Instructor.*", title):
                         title = re.sub(r" \[1\] - Precision Simulator", "", title)
                         title = re.sub(r"CLIENT[0-9]* \| ", "", title)
-                        name = f"PSX {title}"
+                        name = f"PSX: {title}"
                 elif re.match(r".*PSX.Bacars.*", title):
                     name = "BACARS"
                 elif re.match(r".*PSX.NET.MSFS.Router.*", title):
@@ -149,7 +149,7 @@ class Script():
                     if self.psx_connection is not None:
                         for peername, data in psx_clients_new.items():
                             self.logger.debug("Sending data for %s to router: %s", peername, data)
-                            line = f"addon=FRANKENROUTER:IDENT:{json.dumps(data)}"
+                            line = f"addon=FRANKENROUTER:CLIENTINFO:{json.dumps(data)}"
                             self.psx_connection['writer'].write(
                                 line.encode() + PSX_PROTOCOL_SEPARATOR)
                             await self.psx_connection['writer'].drain()

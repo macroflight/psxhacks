@@ -1,15 +1,16 @@
-# psxhacks
-Various small utilities for the PSX ecosystem
+# Various small utilities for the PSX ecosystem
 
 ## Included scripts
 
-### frankenrouter.py
+### frankenrouter
 
 A PSX router/broker. As of version 0.5, it can handle all addons in my
 sim.
 
 Maturity: stable enough for long flights in a sim with 15+ addons and
 PSX instances connected. Can be used for shared cockpit.
+
+[More information is available here](router/README.md)
 
 ### frankenusb.py
 
@@ -48,37 +49,6 @@ so far that does not work is one type of rudder pedals). Development
 is currently done on VKB Gladiator joystick, VKB STECS throttle, MFG
 pedals and Thrustmaster Boeing yoke. Also tested with Bravo throttle,
 Thrustmaster Airbus joystick, etc.
-
-#### Current features:
-
-- Logging of the data streams sent and received from the PSX main
-  server, all PSX main clients and all addons.
-- Allow clients to stay connected to the router even when the PSX main
-  server is restarted.
-- Auto-connects to the PSX main server if disconnected.
-
-#### Ideas for the future:
-
-- Access control (whitelisted IPs and/or authentication using a
-  password) - for shared cockpit over the Internet
-
-- Read-only connections (for shared cockpit observers)
-
-- Toggleable flight control axis lock for shared cockpit (prevent the
-  PNF's noisy controls from interfering with the PF) - will simply
-  filter out e.g FltControls updates from that client.
-
-- User-friendly names for connected clients (rather than just
-  IP/port). For addons that send a name string - use that, otherwise
-  deduce it from config file (e.g 192.168.1.26 == Throttles) or the
-  type of traffic sent by the client.
-
-- Statistics for data sent/received per client, variables sent by
-  client, ...
-
-#### Dependencies
-
-- Python (no extra modules required)
 
 ### frankenfreeze.py
 
@@ -128,6 +98,12 @@ a large fuel tank in the hold that can be emptied into the center
 tank. Who said you can't fly London to Sydney with a decent payload in
 a 744? :)
 
+### psx_msfs_sync_checker.py
+
+Compare PSX and MSFS altitude. Also useful as an example, but written
+to detect a rare bug where the MSFS WASM plane would detatch from PSX
+in elevation and slowly sink to the ground while still moving forward.
+
 ### comparator.py
 
 Mostly an example script. Compares the PSX and MSFS pitch, bank,
@@ -142,7 +118,7 @@ Not needed anymore (bug in PSX.NET.MSFS.WASM now fixed), but maybe
 useful as a simple example of how to inject PSX data into MSFS using
 SimConnect.
 
-## make_gatefinder_database.py
+### make_gatefinder_database.py
 Extracts gate positions from a LittleNavMap database, for use with the
 Gatefinder tool.
 

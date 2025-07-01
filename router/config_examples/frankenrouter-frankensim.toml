@@ -1,0 +1,54 @@
+# The actual FrankeSim config
+# The file format is TOML (https://toml.io/)
+
+[identity]
+simulator = "FrankenSim"
+router = "router1"
+
+[listen]
+port = 10747
+rest_api_port = 8080
+
+[upstream]
+host = "127.0.0.1"
+port = 20747
+
+[log]
+traffic = true
+
+[psx]
+variables = 'C:\fs\PSX\Variables.txt'
+
+[[access]]
+display_name = "Any local client"
+match_ipv4 = [ "127.0.0.1/32", "192.168.86.34/32" ]
+level = "full"
+
+[[access]]
+display_name = "Ventus"
+match_ipv4 = [ "192.168.86.2/32" ]
+level = "full"
+
+[[access]]
+display_name = "RemoteSim"
+match_ipv4 = [ "123.123.123.123/32" ]
+level = "full"
+
+[[access]]
+display_name = "CDUPAD"
+match_ipv4 = [ "192.168.86.8/32" ]
+level = "full"
+
+[[check]]
+type = "name_regexp"
+regexp = '.*PSX .*'
+limit_min = 5
+limit_max = 5
+comment = "There should be exactly 5 PSX main clients connected"
+
+[[check]]
+type = "name_regexp"
+regexp = '.*BACARS.*'
+limit_min = 1
+limit_max = 1
+comment = "There should be exactly one BACARS"
