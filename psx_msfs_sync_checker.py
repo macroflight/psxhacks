@@ -40,10 +40,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self.psx_altitude_qnh = None
         self.psx_transition_level = None
         self.psx_transition_altitude = None
+        self.psx_zone_qnh_hpa = None
 
         self.msfs_updated = 0.0
         self.msfs_indicated_altitude = None
         self.msfs_indicated_altitude_calibrated = None
+        self.msfs_sea_level_pressure = None
 
         self.in_error = False
 
@@ -94,29 +96,35 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 if altitude_diff > self.args.max_altitude_diff:
                     in_error = True
                     self.logger.warning(
-                        "WARNING: altitude diff is %.0f feet (change=%.1f). PSX==%.0f (%s), MSFS==%.0f, PSX TA/TL is %d/%d)",  # pylint: disable=line-too-long
+                        "WARNING: altitude diff is %.0f feet (change=%.1f). PSX==%.0f (%s), MSFS==%.0f, PSX TA/TL is %d/%d. PSX QNH is %.0f, MSFS QNH is %.0f",  # pylint: disable=line-too-long
                         altitude_diff, diff_rate,
                         psx_altitude,
                         "STD" if self.psx_altimeter_std else "QNH",
                         msfs_altitude,
                         self.psx_transition_altitude, self.psx_transition_level,
+                        self.psx_zone_qnh_hpa,
+                        self.msfs_sea_level_pressure,
                     )
                 else:
                     in_error = False
                     self.logger.info(
-                        "OK: altitude diff is %.0f feet (change=%.1f). PSX==%.0f (%s), MSFS==%.0f, PSX TA/TL is %d/%d)",  # pylint: disable=line-too-long
+                        "OK: altitude diff is %.0f feet (change=%.1f). PSX==%.0f (%s), MSFS==%.0f, PSX TA/TL is %d/%d. PSX QNH is %.0f, MSFS QNH is %.0f",  # pylint: disable=line-too-long
                         altitude_diff, diff_rate, psx_altitude,
                         "STD" if self.psx_altimeter_std else "QNH",
                         msfs_altitude,
                         self.psx_transition_altitude, self.psx_transition_level,
+                        self.psx_zone_qnh_hpa,
+                        self.msfs_sea_level_pressure,
                     )
                 # Play sound on state change
                 if in_error != self.in_error:
                     # state change
                     if in_error:
-                        winsound.Beep(550, 3000)
+                        if self.args.beep:
+                            winsound.Beep(550, 3000)
                     else:
-                        winsound.Beep(1100, 3000)
+                        if self.args.beep:
+                            winsound.Beep(1100, 3000)
                 self.in_error = in_error
 
         except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -157,6 +165,15 @@ class Script():  # pylint: disable=too-many-instance-attributes
                     self.msfs_indicated_altitude_calibrated = float(value)
                     self.logger.debug("Got INDICATED_ALTITUDE_CALIBRATED from MSFS: %.0f",
                                       self.msfs_indicated_altitude_calibrated)
+
+                value = self.msfs_aq.get("SEA_LEVEL_PRESSURE")
+                if value is None:
+                    self.logger.debug("Got no SEA_LEVEL_PRESSURE from SimConnect")
+                else:
+                    self.msfs_sea_level_pressure = float(value)
+                    self.logger.debug("Got SEA_LEVEL_PRESSURE from MSFS: %.0f",
+                                      self.msfs_sea_level_pressure)
+
                 self.msfs_updated = time.perf_counter()
 
         except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -197,6 +214,16 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.psx.subscribe("LeftPfdAlt")
             self.psx.subscribe("FmcVnavX")
 
+            self.psx.subscribe("WxBasic")
+            self.psx.subscribe("Wx1")
+            self.psx.subscribe("Wx2")
+            self.psx.subscribe("Wx3")
+            self.psx.subscribe("Wx4")
+            self.psx.subscribe("Wx5")
+            self.psx.subscribe("Wx6")
+            self.psx.subscribe("Wx7")
+            self.psx.subscribe("FocussedWxZone")
+
             self.psx.subscribe("id")
             self.psx.subscribe("version", connected)
 
@@ -226,7 +253,19 @@ class Script():  # pylint: disable=too-many-instance-attributes
                     )
                     continue
 
-                # Get altitude data
+                # Get PSX QNH in focused zone
+                focuszone = self.psx.get("FocussedWxZone")
+                self.logger.debug("PSX focused zone: %s", focuszone)
+                zonename = "WxBasic"
+                if int(focuszone) > 0:
+                    zonename = f"Wx{focuszone}"
+                psx_zone_weather = self.psx.get(zonename)
+                self.logger.debug("PSX wx in zone %s: %s", zonename, psx_zone_weather)
+                # convert INHG to IN,HG and then to HPA
+                self.psx_zone_qnh_hpa = 33.865 * (int(psx_zone_weather.split(";")[23]) / 100)
+                self.logger.debug("PSX QNH is %s", self.psx_zone_qnh_hpa)
+
+                # Get PSX altitude data
                 value = self.psx.get("LeftPfdAlt")
                 if value.startswith("##"):
                     self.logger.warning("Got invalid LeftPfdAlt data from PSX")
@@ -237,14 +276,14 @@ class Script():  # pylint: disable=too-many-instance-attributes
                     self.psx_altimeter_std = True
                 else:
                     self.psx_altimeter_std = False
-
                 (alt_qnh, alt_std, _) = value[1:].split(';')
                 self.psx_altitude_std = float(alt_std)
                 self.psx_altitude_qnh = float(alt_qnh)
                 self.logger.debug(
                     "Got altitudes from PSX: %.1f STD and %.1f QNH",
                     self.psx_altitude_std, self.psx_altitude_qnh)
-                # Get TA/TL
+
+                # Get PSX TA/TL
                 value = self.psx.get("FmcVnavX")
                 (_, psx_ta, psx_tl, _) = value.split(';', 3)
                 self.psx_transition_altitude = int(psx_ta)
@@ -360,6 +399,11 @@ class Script():  # pylint: disable=too-many-instance-attributes
             '--debug',
             action='store_true',
             help="Print more debug info. Probably only useful for development.",
+        )
+        parser.add_argument(
+            '--beep',
+            action='store_true',
+            help="Make sound when altitude diff is too great.",
         )
         parser.add_argument(
             '--max-altitude-diff',
