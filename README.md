@@ -23,6 +23,8 @@ it can do that native PSX cannot:
   i.e you pull the lever to engage reverse idle and then push the
   throttle forward for more reverse.
 
+- Handle the rotary knob on the Thrustmaster Boeing Quadrant
+
 - Handle the gear lever on the Thrustmaster Boeing Yoke (which looks
   like two buttons UP+DOWN).
 
@@ -43,8 +45,8 @@ it can do that native PSX cannot:
   phases of flight, e.g raise flaps, start APU, stow spoilers,
   transponder to XPDR, lights off, etc. after vacating the runway.
 
-You can find sample config files for this in the config_examples
-directory.
+You can find sample config files for this in the
+[config_examples](./config_examples) directory.
 
 Works with any hardware that pygame supports (the only thing we found
 so far that does not work is one type of rudder pedals). Development

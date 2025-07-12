@@ -71,6 +71,12 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             'Tiller',
         ]
 
+        # State for the TM Boeing throttle
+
+        # The position the 3-position selector is in (IAS/MACH,
+        # HDG/TRK or ALTITUDE)
+        self.tmboeing_mode = None
+
     def _handle_args(self):
         """Handle command line arguments."""
         parser = argparse.ArgumentParser(
@@ -572,6 +578,63 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 for button, phase in button_config['button to phase'].items():
                     if self.joystick_get_button_position(joystick_name, button) == 1:
                         await self.flight_phase_setup(phase)
+            elif button_config['button type'] == 'TMBOEING_ROTARY_MODE':
+                self.tmboeing_mode = button_config['position']
+                self.logger.debug("tmboeing_mode = %s", button_config['position'])
+            elif button_config['button type'] == 'TMBOEING_ROTARY_SEL':
+                if self.tmboeing_mode == 'IAS/MACH':
+                    psx_variable = 'McpPshSpdSel'
+                elif self.tmboeing_mode == 'HDG/TRK':
+                    psx_variable = 'McpPshHdgSel'
+                elif self.tmboeing_mode == 'ALTITUDE':
+                    psx_variable = 'McpPshAltSel'
+                else:
+                    self.logger.critical(
+                        "Invalid TMBOEING_ROTARY_MODE position %s", self.tmboeing_mode)
+                    return
+                self.logger.debug("Sending to PSX: %s => 1", psx_variable)
+                self.psx_send_and_set(psx_variable, 1)
+            elif button_config['button type'] == 'TMBOEING_ROTARY':
+                # If action == start: do nothing
+                if direction == 'down':
+                    self.logger.debug("action==start, no action")
+                    return
+                # Find out how long the "button" was pressed for
+                try:
+                    time_down = self.button_cache[event.instance_id][event.button]['down']
+                    elapsed = time.time() - time_down
+                except KeyError:
+                    self.logger.warning("No data in button cache for %s/%s/down",
+                                        event.instance_id, event.button)
+                    elapsed = 0.0  # should not happen, but handle safely
+                # How many units to turn the PSX knob per
+                # second the tmboeing knob was turning.
+                time_factor = 20
+                if self.tmboeing_mode == 'IAS/MACH':
+                    psx_variable = 'McpTurnSpd'
+                elif self.tmboeing_mode == 'HDG/TRK':
+                    psx_variable = 'McpTurnHdg'
+                elif self.tmboeing_mode == 'ALTITUDE':
+                    psx_variable = 'McpTurnAlt'
+                else:
+                    self.logger.critical(
+                        "Invalid TMBOEING_ROTARY_MODE position %s", self.tmboeing_mode)
+                    return
+                # Increment or decrement the PSX variable
+                self.logger.debug("elapsed=%.3f s", elapsed)
+                if button_config['direction'] == 'cw':
+                    # Always send at least 1
+                    increment = int(max(1, time_factor * elapsed))
+                elif button_config['direction'] == 'ccw':
+                    # Always send at least -1
+                    increment = int(-1 * max(1, int(time_factor * elapsed)))
+                else:
+                    self.logger.critical(
+                        "Invalid TMBOEING_ROTARY_MODE direction %s",
+                        button_config['direction'])
+                    return
+                self.logger.debug("Sending to PSX: %s => %s", psx_variable, increment)
+                self.psx_send_and_set(psx_variable, increment)
             else:
                 raise FrankenUsbException(f"Unknown button type {button_config['button type']}")
             # End of helper
