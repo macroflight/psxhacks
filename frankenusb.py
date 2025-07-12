@@ -1,8 +1,8 @@
 """Replace PSX USB subsystem."""
-# pylint: disable=invalid-name
+# pylint: disable=invalid-name,too-many-lines
 import argparse
 import asyncio
-import importlib
+import importlib.util
 import logging
 import time
 from collections import defaultdict
@@ -106,6 +106,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         parser.add_argument('--fo',
                             action='store_true',
                             help='Use this in shared cockpit if you are the FO',
+                            )
+        parser.add_argument('--long-press-limit',
+                            action='store', default=0.5, type=float,
+                            help='button presses longer than this are considered long',
                             )
 
         self.args = parser.parse_args()
@@ -436,8 +440,88 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         else:
             raise FrankenUsbException(f"Unknown axis type {axis_config['axis type']}")
 
-    async def handle_button(self, event):  # pylint: disable=too-many-branches,too-many-statements
+    async def handle_button(self, event):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         """Handle button press/release."""
+
+        async def handle_button_helper():  # pylint: disable=too-many-branches,too-many-statements
+            if button_config['button type'] == "SET":
+                # Set a PSX variable to the value in config
+                self.psx_send_and_set(button_config['psx variable'], button_config['value'])
+            elif button_config['button type'] == "SET_ACCELERATED":
+                minimum_interval = button_config['minimum interval']
+                acceleration = button_config['acceleration']
+                # Assumes this is a delta variable (where we send e.g 1 or -1 normally).
+                # If the time since the last event for this button is low
+                # enough, we multiply the value by 5.
+                if time.time() - last_event < minimum_interval:
+                    new_value = button_config['value'] * acceleration
+                    self.logger.debug("Button %s/%s last pressed %.2f s ago, ACCELERATED",
+                                      event.instance_id, event.button,
+                                      time_since_last_event)
+                    self.psx_send_and_set(button_config['psx variable'], new_value)
+                else:
+                    self.psx_send_and_set(button_config['psx variable'], button_config['value'])
+            elif button_config['button type'] == "REVERSE_LEVER":
+                if direction == 'down':
+                    # mode, joystick_name, event, config, reverse
+                    await self.handle_throttle_reverse_button(
+                        'button', joystick_name, event, button_config, False)
+                else:
+                    await self.handle_throttle_reverse_button(
+                        'button', joystick_name, event, button_config, True)
+            elif button_config['button type'] == 'INCREMENT':
+                value = int(self.psx.get(button_config['psx variable']))
+                increment = int(button_config['increment'])
+                new_value = value + increment
+                wrap = False
+                if 'wrap' in button_config and button_config['wrap'] is True:
+                    wrap = True
+                if 'min' in button_config and new_value < button_config['min']:
+                    if wrap:
+                        new_value = button_config['max']
+                    else:
+                        new_value = button_config['min']
+                elif 'max' in button_config and new_value > button_config['max']:
+                    if wrap:
+                        new_value = button_config['min']
+                    else:
+                        new_value = button_config['max']
+                if new_value != value:
+                    self.psx_send_and_set(button_config['psx variable'], new_value)
+            elif button_config['button type'] == 'BIGMOMPSH':
+                self.logger.debug("BIGMOMPSH event for %s", button_config['psx variable'])
+                value = int(self.psx.get(button_config['psx variable']))
+                new_value = value | 1
+                if new_value != value:
+                    self.psx_send_and_set(button_config['psx variable'], new_value)
+            elif button_config['button type'] == 'TOWING_HEADING':
+                self.towing_heading_change(button_config['increment'])
+            elif button_config['button type'] == 'TOWING_DIRECTION_TOGGLE':
+                self.towing_direction_toggle()
+            elif button_config['button type'] == 'TOWING_MODE_TOGGLE':
+                self.towing_mode_toggle()
+            elif button_config['button type'] == 'FLIGHT_CONTROL_LOCK_TOGGLE':
+                self.toggle_flight_control_lock()
+            elif button_config['button type'] == 'TILLER_TOGGLE':
+                if self.aileron_tiller_active:
+                    # Remove warning, centre aileron and tiller, disable tiller mode
+                    self.psx.send(MSG_TYPE_TILLER, "")
+                    self.centre_ailerons_and_tiller()
+                    self.aileron_tiller_active = False
+                else:
+                    # Display warning message, centre aileron and tiller, enable tiller mode
+                    self.psx.send(MSG_TYPE_TILLER, "TILLER ACTIVE")
+                    self.centre_ailerons_and_tiller()
+                    # Enable tiller mode
+                    self.aileron_tiller_active = True
+            elif button_config['button type'] == 'ACTION_FLIGHT_PHASE_TRIGGER':
+                for button, phase in button_config['button to phase'].items():
+                    if self.joystick_get_button_position(joystick_name, button) == 1:
+                        await self.flight_phase_setup(phase)
+            else:
+                raise FrankenUsbException(f"Unknown button type {button_config['button type']}")
+            # End of helper
+
         direction = 'up' if event.type == pygame.JOYBUTTONUP else 'down'
         try:
             joystick_name = self.joysticks[event.instance_id].get_name()
@@ -447,104 +531,71 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             return
 
         # Store this press in the button cache. This cache is used to
-        # detect rapid button presses, e.g to move the altitude
-        # quicker when the knob is turned faster
-
+        # detect rapid button presses (e.g to move the altitude
+        # quicker when the knob is turned faster) and long presses.
         try:
-            last_event = self.button_cache[event.instance_id][event.button]
+            last_event = self.button_cache[event.instance_id][event.button][direction]
         except KeyError:
-            self.logger.debug("No button cache data for %s/%s",
-                              event.instance_id, event.button)
+            self.logger.debug("No button cache data for %s/%s/%s",
+                              event.instance_id, event.button, direction)
             last_event = 0
-        self.button_cache[event.instance_id][event.button] = time.time()
-        time_since_last_event = time.time() - last_event
-        self.logger.debug("Button %s/%s last pressed %.2f s ago",
+        if event.instance_id not in self.button_cache:
+            self.button_cache[event.instance_id] = {}
+        if event.button not in self.button_cache[event.instance_id]:
+            self.button_cache[event.instance_id][event.button] = {}
+        now = time.time()
+        self.button_cache[event.instance_id][event.button][direction] = now
+        time_since_last_event = now - last_event
+        self.logger.debug("Button %s/%s last %s %.2f s ago",
                           event.instance_id, event.button,
-                          time_since_last_event)
+                          direction, time_since_last_event)
+
+        #
+        # First, check for a long press config
+        #
+        if direction == 'up':
+            try:
+                time_down = self.button_cache[event.instance_id][event.button]['down']
+            except KeyError:
+                time_down = 0.0  # should not happen, but handle safely
+            elapsed = time.time() - time_down
+
+            # Look for a matching "button long" config
+            try:
+                button_config = self.config[joystick_name]["button long"][event.button]
+            except KeyError:
+                pass
+            else:
+                if elapsed > self.args.long_press_limit:
+                    self.logger.debug("LONGPRESS (%.2fs) on %s/%s",
+                                      elapsed, joystick_name, event.button)
+                    await handle_button_helper()
+                    return
+
+            # Look for a matching "button short" config
+            try:
+                button_config = self.config[joystick_name]["button short"][event.button]
+            except KeyError:
+                pass
+            else:
+                if elapsed <= self.args.long_press_limit:
+                    self.logger.debug("SHORTPRESS (%.2fs) on %s/%s",
+                                      elapsed, joystick_name, event.button)
+                    await handle_button_helper()
+                    return
+
+        #
+        # Handle "button up" and "button down" if we found no
+        # long/short press config that matched
+        #
         try:
             button_config = self.config[joystick_name][f"button {direction}"][event.button]
         except KeyError:
             # Not handling this button/direction
-            if direction == 'down':
-                self.logger.debug(
-                    "Unhandled button down event for %s: %s", joystick_name, event.button)
-            return
-        if button_config['button type'] == "SET":
-            # Set a PSX variable to the value in config
-            self.psx_send_and_set(button_config['psx variable'], button_config['value'])
-        elif button_config['button type'] == "SET_ACCELERATED":
-            minimum_interval = button_config['minimum interval']
-            acceleration = button_config['acceleration']
-            # Assumes this is a delta variable (where we send e.g 1 or -1 normally).
-            # If the time since the last event for this button is low
-            # enough, we multiply the value by 5.
-            if time.time() - last_event < minimum_interval:
-                new_value = button_config['value'] * acceleration
-                self.logger.debug("Button %s/%s last pressed %.2f s ago, ACCELERATED",
-                                  event.instance_id, event.button,
-                                  time_since_last_event)
-                self.psx_send_and_set(button_config['psx variable'], new_value)
-            else:
-                self.psx_send_and_set(button_config['psx variable'], button_config['value'])
-        elif button_config['button type'] == "REVERSE_LEVER":
-            if direction == 'down':
-                # mode, joystick_name, event, config, reverse
-                await self.handle_throttle_reverse_button(
-                    'button', joystick_name, event, button_config, False)
-            else:
-                await self.handle_throttle_reverse_button(
-                    'button', joystick_name, event, button_config, True)
-        elif button_config['button type'] == 'INCREMENT':
-            value = int(self.psx.get(button_config['psx variable']))
-            increment = int(button_config['increment'])
-            new_value = value + increment
-            wrap = False
-            if 'wrap' in button_config and button_config['wrap'] is True:
-                wrap = True
-            if 'min' in button_config and new_value < button_config['min']:
-                if wrap:
-                    new_value = button_config['max']
-                else:
-                    new_value = button_config['min']
-            elif 'max' in button_config and new_value > button_config['max']:
-                if wrap:
-                    new_value = button_config['min']
-                else:
-                    new_value = button_config['max']
-            if new_value != value:
-                self.psx_send_and_set(button_config['psx variable'], new_value)
-        elif button_config['button type'] == 'BIGMOMPSH':
-            self.logger.debug("BIGMOMPSH event for %s", button_config['psx variable'])
-            value = int(self.psx.get(button_config['psx variable']))
-            new_value = value | 1
-            if new_value != value:
-                self.psx_send_and_set(button_config['psx variable'], new_value)
-        elif button_config['button type'] == 'TOWING_HEADING':
-            self.towing_heading_change(button_config['increment'])
-        elif button_config['button type'] == 'TOWING_DIRECTION_TOGGLE':
-            self.towing_direction_toggle()
-        elif button_config['button type'] == 'TOWING_MODE_TOGGLE':
-            self.towing_mode_toggle()
-        elif button_config['button type'] == 'FLIGHT_CONTROL_LOCK_TOGGLE':
-            self.toggle_flight_control_lock()
-        elif button_config['button type'] == 'TILLER_TOGGLE':
-            if self.aileron_tiller_active:
-                # Remove warning, centre aileron and tiller, disable tiller mode
-                self.psx.send(MSG_TYPE_TILLER, "")
-                self.centre_ailerons_and_tiller()
-                self.aileron_tiller_active = False
-            else:
-                # Display warning message, centre aileron and tiller, enable tiller mode
-                self.psx.send(MSG_TYPE_TILLER, "TILLER ACTIVE")
-                self.centre_ailerons_and_tiller()
-                # Enable tiller mode
-                self.aileron_tiller_active = True
-        elif button_config['button type'] == 'ACTION_FLIGHT_PHASE_TRIGGER':
-            for button, phase in button_config['button to phase'].items():
-                if self.joystick_get_button_position(joystick_name, button) == 1:
-                    await self.flight_phase_setup(phase)
+            pass
         else:
-            raise FrankenUsbException(f"Unknown button type {button_config['button type']}")
+            # Handle this as a up/down event
+            await handle_button_helper()
 
     def toggle_flight_control_lock(self):  # pylint: disable=too-many-branches
         """Toggle the flight control lock and update status message."""

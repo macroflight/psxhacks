@@ -17,6 +17,8 @@ PSX instances connected. Can be used for shared cockpit.
 Replacement for the PSX USB subsystem (for my needs at least). Things
 it can do that native PSX cannot:
 
+- Bind different functions to long and short button presses.
+
 - Handle the reverse levers on e.g the Thrustmaster Boeing Quadrant,
   i.e you pull the lever to engage reverse idle and then push the
   throttle forward for more reverse.
