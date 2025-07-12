@@ -28,7 +28,7 @@ from frankenrouter import routercache
 __MYNAME__ = 'frankenrouter'
 __MY_DESCRIPTION__ = 'A PSX Router'
 
-VERSION = '0.5'
+VERSION = '0.6'
 
 # If we have no upstream connection and no cached data, assume this
 # version.
