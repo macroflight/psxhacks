@@ -300,6 +300,58 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             'value': psx_value,
         })
 
+    async def handle_axis_motion_axis_set(self, event, axis_config):
+        """Handle motion on an AXIS_SET axis.
+
+        This axis can be used for e.g the flap lever. Example:
+
+        'axis type': 'AXIS_SET',
+        'psx variable': 'FlapLever',
+        'zones': [
+            (-1.00, -0.50, 0),
+            (-0.50, -0.25, 1),
+            (-0.25, 0.00, 2),
+            (0.00, 0.25, 3),
+            (0.25, 0.50, 4),
+            (0.50, 0.75, 5),
+            (0.75, 1.00, 6),
+        ],
+        """
+        axis_position = event.value
+
+        assert 'psx variable' in axis_config, "\"psx variable\" missing from AXIS set config"
+        assert 'zones' in axis_config, "\"zones\" missing from AXIS set config"
+
+        self.logger.debug(
+            "AXIS_SET axis position for %s is %s",
+            axis_config['psx variable'],
+            axis_position)
+        psx_value = None
+        (lowerlimit, upperlimit) = (0, 0)
+        for zone in axis_config['zones']:
+            (lowerlimit, upperlimit, this_value) = zone
+            if lowerlimit <= axis_position <= upperlimit:
+                psx_value = this_value
+                break
+        if psx_value is None:
+            self.logger.warning(
+                "AXIS_SET config error for %s: %f is outside all zones",
+                axis_config['psx variable'],
+                axis_position)
+            return
+        psx_value = int(psx_value)
+        psx_current_value = int(self.psx.get(axis_config['psx variable']))
+        if psx_value != psx_current_value:
+            self.logger.info("Setting %s to %s (%f <= %f <= %f)",
+                             axis_config['psx variable'],
+                             psx_value,
+                             lowerlimit, axis_position, upperlimit)
+            await self.psx_axis_queue.put({
+                'variable': axis_config['psx variable'],
+                'indexes': [0],
+                'value': psx_value,
+            })
+
     async def handle_throttle_reverse_button(self, mode, joystick_name, event, config, reverse):  # pylint:disable=too-many-arguments,too-many-locals,too-many-branches,too-many-positional-arguments,too-many-statements
         """Handle throttle with thrust reverser button."""
         if 'axis min' in config:
@@ -437,6 +489,8 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 'axis', joystick_name, event, axis_config, None)
         elif axis_config['axis type'] == 'SPEEDBRAKE':
             await self.handle_axis_motion_speedbrake(event, axis_config)
+        elif axis_config['axis type'] == 'AXIS_SET':
+            await self.handle_axis_motion_axis_set(event, axis_config)
         else:
             raise FrankenUsbException(f"Unknown axis type {axis_config['axis type']}")
 
