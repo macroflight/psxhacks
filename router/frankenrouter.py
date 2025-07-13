@@ -1015,7 +1015,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         frdp_request_id = self.get_random_id()
                         await self.send_to_upstream(f"addon=FRANKENROUTER:PING:{frdp_request_id}")
                         self.upstream.ping_sent = time.perf_counter()
-                        self.upstream.ping_request_id = frdp_request_id
+                        self.upstream.frdp_ping_request_id = frdp_request_id
                     #
                     # Send FRDP ping to any frankenrouter clients
                     #
@@ -1029,7 +1029,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                                 f"addon=FRANKENROUTER:PING:{frdp_request_id}",
                                 include=[peername])
                             data.ping_sent = time.perf_counter()
-                            data.ping_request_id = frdp_request_id
+                            data.frdp_ping_request_id = frdp_request_id
                     # Update timestamp
                     last_ping = time.perf_counter()
                 else:
@@ -1182,10 +1182,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     return
                 elif messagetype == 'PONG':
                     request_id = payload
-                    if request_id != self.upstream.ping_request_id:
+                    if request_id != self.upstream.frdp_ping_request_id:
                         self.logger.critical(
                             "Got unexpected PING request ID %s from upstream, expected %s",
-                            request_id, self.upstream.ping_request_id)
+                            request_id, self.upstream.frdp_ping_request_id)
                         return
                     elapsed = time.perf_counter() - self.upstream.ping_sent
                     # Do not warn or log data if we have just connected to
@@ -1335,10 +1335,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.logger.debug(
                     "Got FRDP PONG message from client %s: %s", client_addr, line)
                 request_id = payload
-                if request_id != this_client.ping_request_id:
+                if request_id != this_client.frdp_ping_request_id:
                     self.logger.critical(
                         "Got unexpected PING request ID %s from %s, expected %s",
-                        request_id, client_addr, this_client.ping_request_id)
+                        request_id, client_addr, this_client.frdp_ping_request_id)
                     return
                 elapsed = time.perf_counter() - this_client.ping_sent
                 dolog = True

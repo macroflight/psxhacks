@@ -114,7 +114,6 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
             await self.writer.wait_closed()
         except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError) as exc:
             self.logger.warning("Exception when closing: %s", exc)
-            pass
 
 
 class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,too-many-instance-attributes
