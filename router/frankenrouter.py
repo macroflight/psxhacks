@@ -1011,8 +1011,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     # Send FRDP ping to upstream if it is a frankenrouter
                     #
                     if self.is_upstream_connected() and self.upstream.is_frankenrouter:
-                        self.logger.debug("Sending FRDP ping to upstream")
                         frdp_request_id = self.get_random_id()
+                        self.logger.debug("Sending FRDP ping to upstream, request_id is %s", frdp_request_id)
                         await self.send_to_upstream(f"addon=FRANKENROUTER:PING:{frdp_request_id}")
                         self.upstream.ping_sent = time.perf_counter()
                         self.upstream.frdp_ping_request_id = frdp_request_id
@@ -1020,10 +1020,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     # Send FRDP ping to any frankenrouter clients
                     #
                     sendto = []
-                    frdp_request_id = self.get_random_id()
                     for peername, data in self.clients.items():
                         if data.is_frankenrouter:
-                            self.logger.debug("Sending FRDP ping to client %s", peername)
+                            frdp_request_id = self.get_random_id()
+                            self.logger.debug("Sending FRDP ping to client %s, request_id is %s", peername, frdp_request_id)
                             sendto.append(peername)
                             await self.client_broadcast(
                                 f"addon=FRANKENROUTER:PING:{frdp_request_id}",
@@ -1326,7 +1326,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.logger.debug(
                     "Got FRDP PING message from client %s: %s", client_addr, line)
                 request_id = payload
-                await self.client_broadcast(f"addon=FRANKENROUTER:PONG:{request_id}")
+                await self.client_broadcast(
+                    f"addon=FRANKENROUTER:PONG:{request_id}",
+                    include=[client_addr]
+                )
                 # store name and the fact that this client is a frankenrouter
                 this_client.is_frankenrouter = True
                 # No further processing needed, and should not propagate upstream
