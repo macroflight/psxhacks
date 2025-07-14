@@ -65,6 +65,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.traffic_logger = None
         self.variables = None
         self.cache = None
+        self.last_load1 = 0.0
         self.messagequeue_from_upstream = asyncio.Queue(maxsize=0)
         self.messagequeue_from_clients = asyncio.Queue(maxsize=0)
         self.taskgroup = None
@@ -555,6 +556,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         if self.args.no_pause_clients:
             self.logger.info("Pausing clients")
             await self.client_broadcast("load1")
+            self.last_load1 = time.perf_counter()
 
     async def handle_new_connection_cb(self, reader, writer):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         """Handle a new client connection."""
@@ -1299,6 +1301,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         if not self.variables.is_psx_keyword(key):
             self.logger.info("NONPSX keyword %s from upstream: %s", key, line)
 
+        if key == 'load1':
+            self.last_load1 = time.perf_counter()
+
         if key in [
                 'load1',
                 'load2',
@@ -1580,6 +1585,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     "added %s to demand list for %s + send to upstream", value, client_addr)
                 await self.send_to_upstream(line, client_addr)
             elif key in ["load1", "load2", "load3"]:
+                if key == 'load1':
+                    self.last_load1 = time.perf_counter()
                 # Forward to upstream and other clients
                 self.logger.debug("%s from %s", key, client_addr)
                 await self.send_to_upstream(key, client_addr)
@@ -1638,6 +1645,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         # "welcome message" which includes all
                         # variables.
                         print_delay_warning = False
+                if time.perf_counter() - self.last_load1 < 5.0:
+                    # If we received (or sent) a load1 recently, do
+                    # not print warnings, for is takes ~1s to forward
+                    # the ~2400 keywords in a full load.
+                    print_delay_warning = False
                 if time.perf_counter() - self.last_client_connected < 5.0:
                     # If a client recently connected it is also
                     # expected to see some delays due to the welcome
