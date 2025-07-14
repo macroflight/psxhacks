@@ -66,6 +66,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.variables = None
         self.cache = None
         self.last_load1 = 0.0
+        self.last_bang = 0.0
         self.messagequeue_from_upstream = asyncio.Queue(maxsize=0)
         self.messagequeue_from_clients = asyncio.Queue(maxsize=0)
         self.taskgroup = None
@@ -1292,6 +1293,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         if elapsed > self.config.performance.frdp_rtt_warning:
                             self.logger.warning("SLOW: FRDP RTT to upstream is %.6f s", elapsed)
                     return
+                elif messagetype == 'BANG':
+                    self.last_bang = time.perf_counter()
                 else:
                     self.logger.critical("Unsupported FRDP message type %s (%s)", messagetype, line)
                     # No need for further processing a FRANKENROUTER message,
@@ -1349,6 +1352,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.logger.debug(
                         "START (non-ECON) keyword, handling with isonlystart: %s", key)
                     await self.client_broadcast(line, isonlystart=True, key=key)
+            elif key in [ 'Qi191' ]:  # "Qs119"
+                time_since_bang = time.perf_counter() - self.last_bang
+                if time_since_bang < 2.0:
+                    self.logger.info("Filtering %s due to recent bang", key)
+                    pass
             else:
                 await self.client_broadcast(line)
         else:
@@ -1570,7 +1578,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             allow_write = True
 
         if allow_write:
-            if key in ["bang", "again"]:
+            if key in ["bang"]:
+                # Forward to upstream but not other clients, but send a "bang warning" addon message first.
+                # Note: since we don't get our own addon messages we also need to set self.last_bang
+                self.last_bang = time.perf_counter()
+                await self.send_to_upstream("addon=FRANKENROUTER:BANG:")
+                await self.client_broadcast("addon=FRANKENROUTER:BANG:")
+                await self.send_to_upstream(key, client_addr)
+            elif key in ["again"]:
                 # Forward to upstream but not other clients
                 await self.send_to_upstream(key, client_addr)
             elif key in ["start"]:
@@ -1606,6 +1621,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             elif sep != "":
                 self.cache.update(key, value)
                 line = f"{key}={value}"
+                # Filter out Qs119 (PrinterText) just after client startup. Prevents BACARS from printing some junk when it is started.
+                if key in [ 'Qs119' ]:
+                    if time.perf_counter() - this_client.connected_at < 30.0:
+                        self.logger.info(
+                        "Filtering out %s (%s) from %s due to less than 30s after connection",
+                        key, value, client_addr)
+                        return
                 await self.send_to_upstream(line, client_addr)
                 await self.client_broadcast(line, exclude=[client_addr])
             else:
@@ -1647,6 +1669,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         print_delay_warning = False
                 if time.perf_counter() - self.last_load1 < 5.0:
                     # If we received (or sent) a load1 recently, do
+                    # not print warnings, for is takes ~1s to forward
+                    # the ~2400 keywords in a full load.
+                    print_delay_warning = False
+                if time.perf_counter() - self.last_bang < 5.0:
+                    # If we received (or sent) a bang recently, do
                     # not print warnings, for is takes ~1s to forward
                     # the ~2400 keywords in a full load.
                     print_delay_warning = False
