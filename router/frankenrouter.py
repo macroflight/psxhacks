@@ -65,7 +65,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.traffic_logger = None
         self.variables = None
         self.cache = None
-        self.messagequeue = asyncio.Queue(maxsize=0)
+        self.messagequeue_from_upstream = asyncio.Queue(maxsize=0)
+        self.messagequeue_from_clients = asyncio.Queue(maxsize=0)
         self.taskgroup = None
         self.shutting_down = False
         self.tasks = set()
@@ -74,27 +75,43 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.subsystems = {
             'Router Monitor': {
                 'func': self.monitor_task,
+                'kwargs': {},
             },
             'Client Listener': {
                 'func': self.listener_task,
+                'kwargs': {},
             },
             'Upstream Connector': {
                 'func': self.upstream_connector_task,
+                'kwargs': {},
             },
-            'Forwarder': {
+            'Forward From Upstream': {
                 'func': self.forwarder_task,
+                'kwargs': {
+                    'messagequeue': self.messagequeue_from_upstream,
+                },
+            },
+            'Forward From Clients': {
+                'func': self.forwarder_task,
+                'kwargs': {
+                    'messagequeue': self.messagequeue_from_clients,
+                },
             },
             'FRDP Sender': {
                 'func': self.frdp_send_task,
+                'kwargs': {},
             },
             'Status Display': {
                 'func': self.status_display_task,
+                'kwargs': {},
             },
             'Housekeeping': {
                 'func': self.housekeeping_task,
+                'kwargs': {},
             },
             'REST API': {
                 'func': self.api_task,
+                'kwargs': {},
             },
         }
         self.clients = {}
@@ -225,9 +242,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # No complicated status output when we're shutting down
         self.logger.info("-" * HEADER_LINE_LENGTH)
         self.logger.info(
-            ("Router \"%s\" port %d, %d msgs in queue, uptime %d s" +
+            ("Router \"%s\" port %d, %d/%d msgs in queue from upstream/clients, uptime %d s" +
              ", API port %s, cache=%s"),
-            self.config.identity.simulator, self.config.listen.port, self.messagequeue.qsize(),
+            self.config.identity.simulator, self.config.listen.port,
+            self.messagequeue_from_upstream.qsize(),
+            self.messagequeue_from_clients.qsize(),
             int(time.perf_counter() - self.starttime),
             self.config.listen.rest_api_port, self.cache.get_size(),
         )
@@ -618,7 +637,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     )
                     continue
                 # Put message in queue
-                await self.messagequeue.put({
+                await self.messagequeue_from_clients.put({
                     'payload': data,
                     'received_time': t_read_data,
                     'sender': this_client.peername,
@@ -813,7 +832,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         self.logger.warning(
                             "Got partial line data from upstream, discarding: %s", data)
                         continue
-                    await self.messagequeue.put({
+                    await self.messagequeue_from_upstream.put({
                         'payload': data,
                         'received_time': t_read_data,
                         'sender': None,
@@ -1590,13 +1609,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 line
             )
 
-    async def forwarder_task(self, name):
+    async def forwarder_task(self, messagequeue, name):
         """Read messages from the queue and forward them."""
         try:
             while True:
                 await asyncio.sleep(0)
                 try:
-                    message = await self.messagequeue.get()
+                    message = await messagequeue.get()
                 except asyncio.QueueShutDown:
                     raise SystemExit("Message queue has been shut down, this shuld not happen")  # pylint: disable=raise-missing-from
                 queuetime = time.perf_counter() - message['received_time']
@@ -1629,7 +1648,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         "WARNING: forwarding from %s took %.1f ms" +
                         " (%.1f ms queue time, qsize=%d)",
                         "upstream" if message['sender'] is None else message['sender'],
-                        totaltime * 1000, queuetime * 1000, self.messagequeue.qsize())
+                        totaltime * 1000, queuetime * 1000, messagequeue.qsize())
         # Standard Task cleanup
         except asyncio.exceptions.CancelledError:
             self.logger.info("Task %s was cancelled, cleanup and exit", name)
@@ -1769,7 +1788,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         if taskname not in running:
                             self.logger.info("%s not running, starting it", taskname)
                             thistask = self.taskgroup.create_task(
-                                properties['func'](name=taskname), name=taskname)
+                                properties['func'](
+                                    name=taskname,
+                                    **properties['kwargs']
+                                ), name=taskname)
                             self.tasks.add(thistask)
                             self.logger.debug("Started %s, now has %d tasks",
                                               taskname, len(self.tasks))
