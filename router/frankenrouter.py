@@ -1,5 +1,5 @@
 """A protocol-aware PSX router."""
-# pylint: disable=invalid-name,too-many-lines, fixme
+# pylint: disable=invalid-name,too-many-lines,fixme
 from __future__ import annotations
 import argparse
 import asyncio
@@ -215,6 +215,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         if client_addr in self.clients:
             return True
         return False
+
+    async def pause_clients(self):
+        """Pause connected clients."""
+        self.logger.info("Pausing clients (load1) before connecting to upstream")
+        await self.client_broadcast("load1")
 
     def print_status(self):
         """Print a multi-line status message."""
@@ -607,9 +612,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # Standard Task cleanup
         except asyncio.exceptions.CancelledError:
             self.logger.info(
-                "Client %s handler was cancelled, cleanup and exit", this_client.peername)
+                "Client %s handler was cancelled, cleanup and exit",
+                this_client.peername)
             await self.close_client_connection(this_client)
             self.logger.info("Client %s connection closed", this_client.peername)
+            raise
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s handler, shutting down",
                                  exc, this_client.peername)
@@ -704,8 +711,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         """Upstream connector Task."""
         try:  # pylint: disable=too-many-nested-blocks
             while True:  # pylint: disable=too-many-nested-blocks
-                self.logger.info("Pausing clients (load1) before connecting to upstream")
-                await self.client_broadcast("load1")
+                await self.pause_clients()
                 try:
                     reader, writer = await asyncio.open_connection(
                         self.config.upstream.host,
@@ -802,48 +808,48 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # Standard Task cleanup
         except asyncio.exceptions.CancelledError:
             self.logger.info("Task %s was cancelled, cleanup and exit", name)
+            raise
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s, shutting down",
                                  exc, name)
             self.logger.critical(traceback.format_exc())
             return
-        # END upstream_connector_task
+        # End of upstream_connector_task()
 
     async def listener_task(self, name):
         """Run the client listener."""
-        # Wait a while for the upstream connection. We prefer to give
-        # the clients the real data, not old cached variables.
-        started_waiting = time.perf_counter()
-        while not self.is_upstream_connected():
-            if time.perf_counter() - started_waiting > UPSTREAM_WAITFOR:
-                self.logger.info("Gave up waiting for upstream connection, will serve cached data")
-                break
-            self.logger.info("Upstream not connected, not listening yet...")
-            await asyncio.sleep(1.0)
-
         try:
-            await asyncio.sleep(1.0)
-            self.proxy_server = await asyncio.start_server(
-                self.handle_new_connection_cb,
-                port=self.config.listen.port,
-                limit=self.args.read_buffer_size
-            )
-            while True:  # wait forever
-                await asyncio.sleep(3600.0)
+            # Wait a while for the upstream connection. We prefer to give
+            # the clients the real data, not old cached variables.
+            started_waiting = time.perf_counter()
+            while not self.is_upstream_connected():
+                if time.perf_counter() - started_waiting > UPSTREAM_WAITFOR:
+                    self.logger.info(
+                        "Gave up waiting for upstream connection, will serve cached data")
+                    break
+                self.logger.info("Upstream not connected, not listening yet...")
+                await asyncio.sleep(1.0)
+
+                self.proxy_server = await asyncio.start_server(
+                    self.handle_new_connection_cb,
+                    port=self.config.listen.port,
+                    limit=self.args.read_buffer_size
+                )
+                while True:  # wait forever
+                    await asyncio.sleep(3600.0)
+        # Task cleanup: close connections cleanly
         except asyncio.exceptions.CancelledError:
             self.logger.info("Proxy server shutting down its client connections")
-            while len(self.clients) > 0:
-                # Using thsi loop+break to avoid iterating over a dict
-                # that is changing. Too tired to figure out why this
-                # is needed now. :)
-                for this_client in self.clients.values():
-                    await self.close_client_connection(this_client)
-                    break
-            self.logger.info("No active clients, proxy server shutting down itself")
+            closures = []
+            for this_client in self.clients.values():
+                closures.append(self.close_client_connection(this_client))
+            await asyncio.gather(*closures)
+            self.logger.info("Proxy server shutting down itself")
             self.proxy_server.close()
             await self.proxy_server.wait_closed()
             self.proxy_server = None
             self.clients = {}
+            self.logger.info("Proxy server shut down")
             raise
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s, shutting down",
@@ -854,6 +860,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.proxy_server = None
             self.clients = {}
             return
+        # End of listener_task()
 
     def print_variable_stats(self):
         """Display stats for variables."""
@@ -909,40 +916,40 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 pitch, bank, heading_true, alt_true_ft, tas, lat, lon
             )
 
-    async def logging_task(self, name):
+    async def logging_task(self, name):  # pylint: disable=too-many-branches
         """Handle application logging."""
-        router_log_file = os.path.join(
-            self.config.log.directory,
-            f"frankenrouter-{self.config.identity.router}.log"
-        )
-        if os.path.exists(router_log_file):
-            if os.path.exists(router_log_file + ".OLD"):
-                os.unlink(router_log_file + ".OLD")
-            os.rename(router_log_file, router_log_file + ".OLD")
-
-        self.logger = logging.getLogger(__MYNAME__)
-
-        log_queue = queue.Queue(maxsize=0)
-
-        queue_handler = logging.handlers.QueueHandler(log_queue)
-        self.logger.addHandler(queue_handler)
-
-        console_formatter = logging.Formatter("%(asctime)s: %(message)s", datefmt="%H:%M:%S")
-        file_formatter = logging.Formatter("%(asctime)s: %(message)s")
-
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(console_formatter)
-
-        file_handler = logging.FileHandler(router_log_file)
-        file_handler.setFormatter(file_formatter)
-
-        self.logger.setLevel(logging.INFO)
-        if self.args.debug:
-            self.logger.setLevel(logging.DEBUG)
-
-        listener = logging.handlers.QueueListener(log_queue, console_handler, file_handler)
-
         try:
+            router_log_file = os.path.join(
+                self.config.log.directory,
+                f"frankenrouter-{self.config.identity.router}.log"
+            )
+            if os.path.exists(router_log_file):
+                if os.path.exists(router_log_file + ".OLD"):
+                    os.unlink(router_log_file + ".OLD")
+                os.rename(router_log_file, router_log_file + ".OLD")
+
+            self.logger = logging.getLogger(__MYNAME__)
+
+            log_queue = queue.Queue(maxsize=0)
+
+            queue_handler = logging.handlers.QueueHandler(log_queue)
+            self.logger.addHandler(queue_handler)
+
+            console_formatter = logging.Formatter("%(asctime)s: %(message)s", datefmt="%H:%M:%S")
+            file_formatter = logging.Formatter("%(asctime)s: %(message)s")
+
+            console_handler = logging.StreamHandler()
+            console_handler.setFormatter(console_formatter)
+
+            file_handler = logging.FileHandler(router_log_file)
+            file_handler.setFormatter(file_formatter)
+
+            self.logger.setLevel(logging.INFO)
+            if self.args.debug:
+                self.logger.setLevel(logging.DEBUG)
+
+            listener = logging.handlers.QueueListener(log_queue, console_handler, file_handler)
+
             print('Starting logger')
             # start the listener
             listener.start()
@@ -951,50 +958,85 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             # wait forever
             while True:
                 await asyncio.sleep(60)
-        finally:
-            # report the logger is done
-            self.logger.debug("Task %s has stopped logging", name)
-            # ensure the listener is closed
-            listener.stop()
+
+        # Keep logger alive until all other tasks have ended (or max
+        # 10s), otherwise we won't see the logs from their shutdown.
+        except asyncio.exceptions.CancelledError:
+            self.logger.info("Logging task waiting for other tasks to exit...")
+            logger_cancelled_at = time.perf_counter()
+            while True:
+                await asyncio.sleep(0.1)
+                tasks_ended = set()
+                for task in self.tasks:
+                    if task.done():
+                        tasks_ended.add(task)
+                for task in tasks_ended:
+                    self.tasks.discard(task)
+                if len(self.tasks) <= 1:
+                    self.logger.info("Logging task shutting down")
+                    await asyncio.sleep(1.0)
+                    raise
+                self.logger.debug("Logging task delaying shutdown")
+                if (time.perf_counter() - logger_cancelled_at) > 10.0:
+                    self.logger.info("Logging task gave up waiting, shutting down NOW")
+                    await asyncio.sleep(1.0)
+                    raise
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in %s, shutting down",
+                                 exc, name)
+            self.logger.critical(traceback.format_exc())
+            return
+        # End of logging_task()
 
     async def traffic_logging_task(self, name):
         """Handle traffic logging."""
-        # If using traffic logging, open that log file
-        self.log_traffic_filename = os.path.join(
-            self.config.log.directory,
-            f"{self.config.identity.router}-traffic-{self.start_time}.psxnet.log"
-        )
-
-        self.traffic_logger = logging.getLogger(f"{__MYNAME__}-traffic")
-
-        log_queue = queue.Queue(maxsize=0)
-
-        queue_handler = logging.handlers.QueueHandler(log_queue)
-        self.traffic_logger.addHandler(queue_handler)
-
-        file_formatter = logging.Formatter("%(asctime)s: %(message)s")
-
-        file_handler = logging.FileHandler(self.log_traffic_filename)
-        file_handler.setFormatter(file_formatter)
-
-        self.traffic_logger.setLevel(logging.DEBUG)
-
-        listener = logging.handlers.QueueListener(log_queue, file_handler)
-
         try:
-            print('Starting traffic logger')
-            # start the listener
-            listener.start()
-            # report the logger is ready
-            self.logger.debug("Task %s has initialized traffic logging", name)
-            # wait forever
-            while True:
-                await asyncio.sleep(60)
-        finally:
-            # report the logger is done
-            self.logger.debug("Task %s has stopped traffic logging", name)
-            # ensure the listener is closed
-            listener.stop()
+            # If using traffic logging, open that log file
+            self.log_traffic_filename = os.path.join(
+                self.config.log.directory,
+                f"{self.config.identity.router}-traffic-{self.start_time}.psxnet.log"
+            )
+
+            self.traffic_logger = logging.getLogger(f"{__MYNAME__}-traffic")
+
+            log_queue = queue.Queue(maxsize=0)
+
+            queue_handler = logging.handlers.QueueHandler(log_queue)
+            self.traffic_logger.addHandler(queue_handler)
+
+            file_formatter = logging.Formatter("%(asctime)s: %(message)s")
+
+            file_handler = logging.FileHandler(self.log_traffic_filename)
+            file_handler.setFormatter(file_formatter)
+
+            self.traffic_logger.setLevel(logging.DEBUG)
+
+            listener = logging.handlers.QueueListener(log_queue, file_handler)
+
+            try:
+                print('Starting traffic logger')
+                # start the listener
+                listener.start()
+                # report the logger is ready
+                self.logger.debug("Task %s has initialized traffic logging", name)
+                # wait forever
+                while True:
+                    await asyncio.sleep(60)
+            finally:
+                # report the logger is done
+                self.logger.debug("Task %s has stopped traffic logging", name)
+                # ensure the listener is closed
+                listener.stop()
+        # Standard Task cleanup
+        except asyncio.exceptions.CancelledError:
+            self.logger.info("Task %s was cancelled, cleanup and exit", name)
+            raise
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in %s, shutting down",
+                                 exc, name)
+            self.logger.critical(traceback.format_exc())
+            return
+        # End of traffic_logging_task()
 
     async def frdp_send_task(self, name):
         """Handle sending FRDP messages."""
@@ -1012,8 +1054,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     #
                     if self.is_upstream_connected() and self.upstream.is_frankenrouter:
                         frdp_request_id = self.get_random_id()
-                        self.logger.debug("Sending FRDP ping to upstream, request_id is %s", frdp_request_id)
-                        await self.send_to_upstream(f"addon=FRANKENROUTER:PING:{frdp_request_id}")
+                        self.logger.debug(
+                            "Sending FRDP ping to upstream, request_id is %s",
+                            frdp_request_id)
+                        await self.send_to_upstream(
+                            f"addon=FRANKENROUTER:PING:{frdp_request_id}")
                         self.upstream.ping_sent = time.perf_counter()
                         self.upstream.frdp_ping_request_id = frdp_request_id
                     #
@@ -1023,7 +1068,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     for peername, data in self.clients.items():
                         if data.is_frankenrouter:
                             frdp_request_id = self.get_random_id()
-                            self.logger.debug("Sending FRDP ping to client %s, request_id is %s", peername, frdp_request_id)
+                            self.logger.debug(
+                                "Sending FRDP ping to client %s, request_id is %s",
+                                peername, frdp_request_id)
                             sendto.append(peername)
                             await self.client_broadcast(
                                 f"addon=FRANKENROUTER:PING:{frdp_request_id}",
@@ -1064,6 +1111,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                                  exc, name)
             self.logger.critical(traceback.format_exc())
             return
+        # End of frdp_send_task()
 
     def print_client_warnings(self):
         """Print warnings about unexpected client counts."""
@@ -1094,8 +1142,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
     async def status_display_task(self, name):
         """Status display Task."""
-        last_display = 0.0
         try:
+            last_display = 0.0
             while True:
                 await asyncio.sleep(1.0)
                 display = False
@@ -1122,11 +1170,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                                  exc, name)
             self.logger.critical(traceback.format_exc())
             return
+        # End of status_display_task()
 
     async def housekeeping_task(self, name):
         """Miscellaneous housekeeping Task."""
-        last_run = 0.0
         try:
+            last_run = 0.0
             while True:
                 await asyncio.sleep(1.0)
                 if time.perf_counter() - last_run > self.args.housekeeping_interval:
@@ -1153,6 +1202,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.critical("Unhandled exception %s in %s, shutting down",
                                  exc, name)
             self.logger.critical(traceback.format_exc())
+        # End of housekeeping_task()
 
     async def handle_message_from_upstream(self, message):  # pylint: disable=too-many-branches,too-many-statements
         """Handle a message from upstream."""
@@ -1294,8 +1344,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         client_addr, line)
                 else:
                     self.logger.debug("Client info: %s", clientinfo)
-                    peeraddr = (clientinfo['laddr'], clientinfo['lport'])
-                    if peeraddr in self.clients:
+                    peername = (clientinfo['laddr'], clientinfo['lport'])
+                    if peername in self.clients:
                         thisname = clientinfo['name']
                         if len(thisname) > DISPLAY_NAME_MAXLEN:
                             newname = thisname[:DISPLAY_NAME_MAXLEN]
@@ -1305,12 +1355,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                             thisname = newname
                         self.logger.debug(
                             "Setting name for %s to %s from CLIENTINFO data",
-                            peeraddr, thisname)
-                        self.clients[peeraddr].display_name = f"I:{thisname}"
+                            peername, thisname)
+                        self.clients[peername].display_name = f"I:{thisname}"
                     else:
                         self.logger.warning(
                             "Got CLIENTINFO data for non-connected client %s",
-                            peeraddr)
+                            peername)
                 # No further processing needed, and should not propagate upstream
                 return
             elif message_type == 'IDENT':
@@ -1569,60 +1619,61 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.critical("Unhandled exception %s in %s, shutting down",
                                  exc, name)
             self.logger.critical(traceback.format_exc())
+        # End of forwarder_task()
 
     async def api_task(self, name):
         """REST API Task."""
-        routes = web.RouteTableDef()
-
-        @routes.get('/')
-        async def handle(request):
-            name = request.match_info.get('name', "Anonymous")
-            text = "Hello, " + name
-            return web.Response(text=text)
-
-        @routes.get('/clients')
-        async def handle_clients(_):
-            clients = []
-            for client in self.clients.values():
-                clients.append({
-                    'ip': client.ip,
-                    'port': client.port,
-                    'display_name': client.display_name,
-                })
-            return web.json_response(clients)
-
-        @routes.post('/upstream/set')
-        async def handle_upstream_set(request):
-            data = await request.post()
-            new_host = data.get('host')
-            new_port = int(data.get('port'))
-            self.logger.info(
-                "Got request to change upstream to %s:%s",
-                new_host, new_port)
-            self.logger.info(
-                "Current upstream is %s:%s (connected=%s)",
-                self.config.upstream.host,
-                self.config.upstream.port,
-                self.is_upstream_connected(),
-            )
-
-            reconnect = False
-            if new_host != self.config.upstream.host:
-                self.config.upstream.host = new_host
-                reconnect = True
-            if new_port != self.config.upstream.port:
-                self.config.upstream.port = new_port
-                reconnect = True
-            if not reconnect:
-                return web.Response(text="Already connected to that host/port")
-            self.logger.info(
-                "Will change upstream to %s:%s",
-                self.config.upstream.host,
-                self.config.upstream.port)
-            self.upstream_reconnect_requested = True
-            return web.Response(text="Connecting to new host/port")
-
         try:
+            routes = web.RouteTableDef()
+
+            @routes.get('/')
+            async def handle(request):
+                name = request.match_info.get('name', "Anonymous")
+                text = "Hello, " + name
+                return web.Response(text=text)
+
+            @routes.get('/clients')
+            async def handle_clients(_):
+                clients = []
+                for client in self.clients.values():
+                    clients.append({
+                        'ip': client.ip,
+                        'port': client.port,
+                        'display_name': client.display_name,
+                    })
+                return web.json_response(clients)
+
+            @routes.post('/upstream/set')
+            async def handle_upstream_set(request):
+                data = await request.post()
+                new_host = data.get('host')
+                new_port = int(data.get('port'))
+                self.logger.info(
+                    "Got request to change upstream to %s:%s",
+                    new_host, new_port)
+                self.logger.info(
+                    "Current upstream is %s:%s (connected=%s)",
+                    self.config.upstream.host,
+                    self.config.upstream.port,
+                    self.is_upstream_connected(),
+                )
+                reconnect = False
+                if new_host != self.config.upstream.host:
+                    self.config.upstream.host = new_host
+                    reconnect = True
+                if new_port != self.config.upstream.port:
+                    self.config.upstream.port = new_port
+                    reconnect = True
+                if not reconnect:
+                    return web.Response(text="Already connected to that host/port")
+                self.logger.info(
+                    "Will change upstream to %s:%s",
+                    self.config.upstream.host,
+                    self.config.upstream.port)
+                self.upstream_reconnect_requested = True
+                return web.Response(text="Connecting to new host/port")
+
+            # Run the API
             app = web.Application()
             app.add_routes(routes)
             loop = asyncio.get_event_loop()
@@ -1634,6 +1685,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             )
             while True:  # wait forever
                 await asyncio.sleep(3600.0)
+
         # Standard Task cleanup
         except asyncio.exceptions.CancelledError:
             self.logger.info("Task %s was cancelled, cleanup and exit", name)
@@ -1642,10 +1694,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.critical("Unhandled exception %s in %s, shutting down",
                                  exc, name)
             self.logger.critical(traceback.format_exc())
+        # End of api_task()
 
     async def monitor_task(self, name):  # pylint: disable=too-many-branches,too-many-statements
         """Monitor the other coroutines and restart as needed."""
-        try:
+        try:  # pylint: disable=too-many-nested-blocks
             while True:
                 # Measure the time it takes to sleep 1.0s. If it takes
                 # a lot longer, the router is overloaded.
@@ -1654,7 +1707,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 delay = time.perf_counter() - startsleep - 1.0
                 if delay > self.config.performance.monitor_delay_warning:
                     self.logger.info("Monitor delay is %.1f ms", delay * 1000)
-                self.logger.debug("%s checking for running tasks", name)
+
+                self.logger.debug("%s checking for running and ended tasks", name)
                 running = []
                 tasks_ended = set()
                 for task in self.tasks:
@@ -1680,23 +1734,26 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.logger.debug(
                     "Found %d tasks in any state, %d running: %s",
                     len(self.tasks), len(running), running)
-                # Cleanup ended tasks
+
+                # Remove ended tasks from self.tasks
                 for task in tasks_ended:
                     self.logger.debug("Removing %s from task list", task)
                     self.tasks.discard(task)
                 self.logger.debug("Tasks after cleanup: %d", len(self.tasks))
-                # Ensure the tasks are running
-                for taskname, properties in self.subsystems.items():
-                    if 'start' in properties:
-                        if properties['start'] is False:
-                            continue
-                    if taskname not in running:
-                        self.logger.info("%s not running, starting it", taskname)
-                        thistask = self.taskgroup.create_task(
-                            properties['func'](name=taskname), name=taskname)
-                        self.tasks.add(thistask)
-                        self.logger.debug("Started %s, now has %d tasks",
-                                          taskname, len(self.tasks))
+
+                # Ensure the expected tasks are running
+                if not asyncio.current_task().cancelled():
+                    for taskname, properties in self.subsystems.items():
+                        if 'start' in properties:
+                            if properties['start'] is False:
+                                continue
+                        if taskname not in running:
+                            self.logger.info("%s not running, starting it", taskname)
+                            thistask = self.taskgroup.create_task(
+                                properties['func'](name=taskname), name=taskname)
+                            self.tasks.add(thistask)
+                            self.logger.debug("Started %s, now has %d tasks",
+                                              taskname, len(self.tasks))
 
                 # Restart upstream connection if requested
                 if self.upstream_reconnect_requested:
@@ -1712,31 +1769,16 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                             task.cancel(msg="Reconnecting")
                             break
 
+        # Standard Task cleanup
         except asyncio.exceptions.CancelledError:
-            self.logger.info("Monitoring shutdown...")
-            started_shutdown = time.perf_counter()
-            while True:
-                await asyncio.sleep(1.0)
-                tasks_ended = set()
-                for task in self.tasks:
-                    if task.done():
-                        tasks_ended.add(task)
-                for task in tasks_ended:
-                    self.tasks.discard(task)
-
-                if len(self.tasks) <= 1:
-                    self.logger.info("All tasks but me have ended, exiting")
-                    return
-                self.logger.info("Some tasks still running:")
-                for task in self.tasks:
-                    self.logger.info("- %s", task.get_name())
-                if time.perf_counter() - started_shutdown > 103.0:
-                    raise SystemExit("Something is not stopping cleanly, forcing shutdown")  # pylint: disable=raise-missing-from
+            self.logger.info("Task %s was cancelled, cleanup and exit", name)
+            raise
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s, shutting down",
                                  exc, name)
             self.logger.critical(traceback.format_exc())
             return
+        # End of monitor_task()
 
     async def main(self):  # pylint: disable=too-many-branches,too-many-statements
         """Start the proxy."""
@@ -1796,28 +1838,32 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 i += 1
 
         # Start the Monitor task
-        async with asyncio.TaskGroup() as self.taskgroup:
-            # Initialize logging
-            task = self.taskgroup.create_task(
-                self.logging_task(name="Logging"), name="Logging")
-            self.tasks.add(task)
-            await asyncio.sleep(0)
-            print(f"frankenrouter version {VERSION} starting")
-
-            if self.config.log.traffic:
-                # Initialize traffic logging
+        try:
+            async with asyncio.TaskGroup() as self.taskgroup:
+                # Initialize logging
                 task = self.taskgroup.create_task(
-                    self.traffic_logging_task(
-                        name="Traffic Logging"), name="Traffic Logging")
+                    self.logging_task(name="Logging"), name="Logging")
                 self.tasks.add(task)
                 await asyncio.sleep(0)
+                print(f"frankenrouter version {VERSION} starting")
 
-            # Start the Monitor task
-            task = self.taskgroup.create_task(
-                self.subsystems[self.bootstrap_task]['func'](name=self.bootstrap_task),
-                name=self.bootstrap_task)
-            self.tasks.add(task)
-            self.logger.info("%s started", self.bootstrap_task)
+                if self.config.log.traffic:
+                    # Initialize traffic logging
+                    task = self.taskgroup.create_task(
+                        self.traffic_logging_task(
+                            name="Traffic Logging"), name="Traffic Logging")
+                    self.tasks.add(task)
+                    await asyncio.sleep(0)
+
+                # Start the Monitor task
+                task = self.taskgroup.create_task(
+                    self.subsystems[self.bootstrap_task]['func'](name=self.bootstrap_task),
+                    name=self.bootstrap_task)
+                self.tasks.add(task)
+                self.logger.info("%s started", self.bootstrap_task)
+        except asyncio.CancelledError:  # instead of KeyboardInterrupt
+            print("Router stopped.")
+            raise
         self.logger.info("All tasks ended, shutting down")
 
 
@@ -1825,6 +1871,4 @@ if __name__ == '__main__':
     try:
         asyncio.run(Frankenrouter().main())
     except KeyboardInterrupt:
-        # FIXME: no need to call shutdown, use task cancel instead?
-        # loop.run_until_complete(me.shutdown())
         print("Shut down due to ^C")
