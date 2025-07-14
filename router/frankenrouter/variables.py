@@ -122,6 +122,8 @@ class Variables():  # pylint: disable=too-few-public-methods
         Since we call this for every received message, avoiding
         regexps if possible.
         """
+        if len(keyword) < 2:
+            return False
         if keyword[0] == 'Q':
             if keyword[1] in ['h', 's', 'd', 'i']:
                 return True
