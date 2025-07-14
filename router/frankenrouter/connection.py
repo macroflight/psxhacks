@@ -83,6 +83,8 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
             if line is not None:
                 self.writer.write(line.encode() + PSX_PROTOCOL_SEPARATOR)
                 await self.writer.drain()
+                # Give others a chance to do something
+                await asyncio.sleep(0)
         except ConnectionResetError:
             pass
         except BrokenPipeError:
