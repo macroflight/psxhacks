@@ -117,11 +117,37 @@ class Variables():  # pylint: disable=too-few-public-methods
             assert 'max' in value, f"invalid data, Max missing for {key}"
 
     def is_psx_keyword(self, keyword):
-        """Return true of keyword is a normal PSX network keyword."""
-        if re.match(
-            r"^(exit|cduC|cduL|cduR|bang|name|id|start|lexicon|again|gid|version|layout|metar|demand|load[1-3]|Q[hsdi]\d+|L[sih]\d+\(.*\))$",  # pylint: disable=line-too-long
-            keyword
-        ):
+        """Return true of keyword is a normal PSX network keyword.
+
+        Since we call this for every received message, avoiding
+        regexps if possible.
+        """
+        if keyword[0] == 'Q':
+            if keyword[1] in ['h', 's', 'd', 'i']:
+                return True
+        elif keyword[0] == 'L':
+            if keyword[1] in ['s', 'i', 'h']:
+                return True
+        elif keyword in [
+                'exit',
+                'cduC',
+                'cduL',
+                'cduR',
+                'bang',
+                'name',
+                'id',
+                'start',
+                'lexicon',
+                'again',
+                'gid',
+                'version',
+                'layout',
+                'metar',
+                'demand',
+                'load1',
+                'load2',
+                'load3',
+        ]:
             return True
         return False
 
