@@ -105,11 +105,12 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         else:
             await self.log_traffic(line, endpoints=[self.client_id])
 
-    async def close(self):
+    async def close(self, clean=True):
         """Close a server connection and remove server data."""
         try:
-            await self.to_stream("exit")
-            await asyncio.sleep(0.5)
+            if clean:
+                await self.to_stream("exit")
+                await asyncio.sleep(0.5)
             self.writer.close()
             await self.writer.wait_closed()
         except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError) as exc:

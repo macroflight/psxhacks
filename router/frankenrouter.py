@@ -500,7 +500,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.logger.info(
             "Added client %s in %.1f ms", client.client_id, elapsed * 1000)
 
-    async def close_client_connection(self, client):
+    async def close_client_connection(self, client, clean=True):
         """Close a client connection and remove client data."""
         if client.is_closing:
             self.logger.debug("Client connection already closing: %s", client.peername)
@@ -508,7 +508,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         client.is_closing = True
         self.logger.debug("Closing client connection %s cleanly", client.peername)
         # Send "exit" and close connection
-        await client.close()
+        await client.close(clean)
         # Destroy client connection object and log
         await self.log_connect_evt(client.peername, clientid=client.client_id, disconnect=True)
         del self.clients[client.peername]
@@ -555,7 +555,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.logger.warning(
                     "Blocked client %s connected, closing connection", this_client.ip)
                 this_client.to_stream("bye now")
-                await self.close_client_connection(this_client)
+                await self.close_client_connection(this_client, clean=False)
                 return
 
             # New client connected, so print status
@@ -593,7 +593,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 if data == b"":
                     self.logger.info("Got empty bytes object from %s, closing connection",
                                      this_client.peername)
-                    await self.close_client_connection(this_client)
+                    await self.close_client_connection(this_client, clean=False)
                     return
                 # Note: we can get a partial line at EOF, so discard
                 # data with no newline.
@@ -614,14 +614,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.info(
                 "Client %s handler was cancelled, cleanup and exit",
                 this_client.peername)
-            await self.close_client_connection(this_client)
+            await self.close_client_connection(this_client, clean=True)
             self.logger.info("Client %s connection closed", this_client.peername)
             raise
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s handler, shutting down",
                                  exc, this_client.peername)
             self.logger.critical(traceback.format_exc())
-            await self.close_client_connection(this_client)
+            await self.close_client_connection(this_client, clean=True)
             self.request_status_display()
             self.logger.info("Connection %s shut down", this_client.peername)
             return
@@ -842,7 +842,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.info("Proxy server shutting down its client connections")
             closures = []
             for this_client in self.clients.values():
-                closures.append(self.close_client_connection(this_client))
+                closures.append(self.close_client_connection(this_client, clean=True))
             await asyncio.gather(*closures)
             self.logger.info("Proxy server shutting down itself")
             self.proxy_server.close()
@@ -1419,7 +1419,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         self.logger.warning(
                             "Client %s failed to authenticate, password used=%s",
                             this_client.display_name, password)
-                        await self.close_client_connection(this_client)
+                        await self.close_client_connection(this_client, clean=False)
                     else:
                         await self.client_add_to_network(this_client)
                         this_client.welcome_sent = True
@@ -1556,7 +1556,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             elif key == 'exit':
                 # Shut down client connection cleanly
                 self.logger.info("Client %s sent exit message, closing", client_addr)
-                await self.close_client_connection(this_client)
+                await self.close_client_connection(this_client, clean=True)
                 return
             elif sep != "":
                 self.cache.update(key, value)
