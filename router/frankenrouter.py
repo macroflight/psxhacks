@@ -67,6 +67,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.cache = None
         self.messagequeue = asyncio.Queue(maxsize=0)
         self.taskgroup = None
+        self.shutting_down = False
         self.tasks = set()
         # The toplevel coroutines we will be running
         self.bootstrap_task = 'Router Monitor'
@@ -196,7 +197,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             action='store', type=bool, default=None,
             help="Enable variable stats (experimental)",
         )
-
+        parser.add_argument(
+            '--no-pause-clients',
+            action='store_true',
+        )
         self.args = parser.parse_args()
 
     def get_random_id(self, length=16):
@@ -215,11 +219,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         if client_addr in self.clients:
             return True
         return False
-
-    async def pause_clients(self):
-        """Pause connected clients."""
-        self.logger.info("Pausing clients (load1) before connecting to upstream")
-        await self.client_broadcast("load1")
 
     def print_status(self):
         """Print a multi-line status message."""
@@ -480,6 +479,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         await send_if_unsent("metar")
 
         client.welcome_sent = True
+        welcome_keyword_count = len(client.welcome_keywords_sent)
         client.welcome_keywords_sent = set()
 
         # Send pending messages
@@ -498,7 +498,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
         elapsed = time.perf_counter() - start_time
         self.logger.info(
-            "Added client %s in %.1f ms", client.client_id, elapsed * 1000)
+            "Added client %s in %.1f ms (%d keywords, %.0f/s)",
+            client.client_id, elapsed * 1000,
+            welcome_keyword_count, welcome_keyword_count / elapsed)
 
     async def close_client_connection(self, client, clean=True):
         """Close a client connection and remove client data."""
@@ -529,6 +531,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.logger.info("Closed upstream connection %s", peername)
         self.request_status_display()
 
+    async def pause_clients(self):
+        """Send load1 to pause clients."""
+        if self.args.no_pause_clients:
+            self.logger.info("Pausing clients")
+            await self.client_broadcast("load1")
+
     async def handle_new_connection_cb(self, reader, writer):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         """Handle a new client connection."""
         # asyncio will intentionally not propagate exceptions from a
@@ -548,15 +556,21 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.info("New client connection: %s", this_client.peername)
             await self.log_connect_evt(this_client.peername, clientid=this_client.client_id)
 
-            # Get the client's initial access level based on IP
-            this_client.update_access_level()
+            if self.shutting_down:
+                self.logger.warning("Is shutting down, rejecting new connection")
+                await this_client.to_stream("shutdown in progress")
+                await self.close_client_connection(this_client, clean=False)
+                return
 
             if self.clients[this_client.peername].access_level == 'blocked':
                 self.logger.warning(
                     "Blocked client %s connected, closing connection", this_client.ip)
-                this_client.to_stream("bye now")
+                await this_client.to_stream("bye now")
                 await self.close_client_connection(this_client, clean=False)
                 return
+
+            # Get the client's initial access level based on IP
+            this_client.update_access_level()
 
             # New client connected, so print status
             self.request_status_display()
@@ -711,7 +725,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         """Upstream connector Task."""
         try:  # pylint: disable=too-many-nested-blocks
             while True:  # pylint: disable=too-many-nested-blocks
-                await self.pause_clients()
                 try:
                     reader, writer = await asyncio.open_connection(
                         self.config.upstream.host,
@@ -805,6 +818,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         'received_time': t_read_data,
                         'sender': None,
                     })
+                # Pause clients when we have no upstream connection
+                await self.pause_clients()
         # Standard Task cleanup
         except asyncio.exceptions.CancelledError:
             self.logger.info("Task %s was cancelled, cleanup and exit", name)
@@ -839,11 +854,15 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     await asyncio.sleep(3600.0)
         # Task cleanup: close connections cleanly
         except asyncio.exceptions.CancelledError:
+            self.shutting_down = True  # don't accept new connections
             self.logger.info("Proxy server shutting down its client connections")
             closures = []
+            # Pause clients before closing connections
+            await self.pause_clients()
             for this_client in self.clients.values():
                 closures.append(self.close_client_connection(this_client, clean=True))
             await asyncio.gather(*closures)
+            await asyncio.sleep(1.0)
             self.logger.info("Proxy server shutting down itself")
             self.proxy_server.close()
             await self.proxy_server.wait_closed()
@@ -1763,8 +1782,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         if task.get_name() == name:
                             self.logger.info("Restarting %s", name)
                             self.upstream_reconnect_requested = False
-                            # Pause clients for a smoother transition
-                            await self.client_broadcast("load1")
                             await asyncio.sleep(2.0)
                             task.cancel(msg="Reconnecting")
                             break
