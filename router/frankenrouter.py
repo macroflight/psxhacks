@@ -666,7 +666,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
     async def client_broadcast(
             self, line, exclude=None, include=None,
             islong=False, isonlystart=False,
-            key=None,
+            key=None, exclude_name_regexp=None,
     ):  # pylint: disable=too-many-branches, too-many-arguments, too-many-positional-arguments
         """Send a line to connected clients.
 
@@ -683,6 +683,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         send_to_clients = []
 
         for client in self.clients.values():  # pylint: disable=too-many-nested-blocks
+            if exclude_name_regexp is not None:
+                if re.match(exclude_name_regexp, client.display_name):
+                    self.logger.info(
+                        "Not sending to %s due to regexp match for %s against %s",
+                        client.peername, client.display_name, exclude_name_regexp)
+                    continue
             if not client.has_access():
                 self.logger.debug(
                     "Not sending to noaccess client %s", client.peername)
@@ -1352,11 +1358,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.logger.debug(
                         "START (non-ECON) keyword, handling with isonlystart: %s", key)
                     await self.client_broadcast(line, isonlystart=True, key=key)
-            elif key in [ 'Qi191' ]:  # "Qs119"
-                time_since_bang = time.perf_counter() - self.last_bang
-                if time_since_bang < 2.0:
-                    self.logger.info("Filtering %s due to recent bang", key)
-                    pass
+            elif key == 'Qi191':
+                # Do not send Qi191 to PSX Sounds when bang sent
+                # recently (this variable causes PSX Sounds to play
+                # its gear pin sound)
+                if time.perf_counter() - self.last_bang < 2.0:
+                    await self.client_broadcast(line, exclude_name_regexp=r".*PSX Sound.*")
             else:
                 await self.client_broadcast(line)
         else:
@@ -1552,8 +1559,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             elif re.match(r".*:FRANKEN\.PY", value):
                 thisname = value.split(":")[0]
                 learned_prefix = "F"
-            if len(thisname) > 16:
-                newname = thisname[:16]
+            if len(thisname) > DISPLAY_NAME_MAXLEN:
+                newname = thisname[:DISPLAY_NAME_MAXLEN]
                 self.logger.info(
                     "Client %s name %s is too long, using %s",
                     this_client.peername, thisname, newname)
@@ -1579,8 +1586,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
         if allow_write:
             if key in ["bang"]:
-                # Forward to upstream but not other clients, but send a "bang warning" addon message first.
-                # Note: since we don't get our own addon messages we also need to set self.last_bang
+                # Forward to upstream but not other clients, but send
+                # a "bang warning" addon message first.  Note: since
+                # we don't get our own addon messages we also need to
+                # set self.last_bang
                 self.last_bang = time.perf_counter()
                 await self.send_to_upstream("addon=FRANKENROUTER:BANG:")
                 await self.client_broadcast("addon=FRANKENROUTER:BANG:")
@@ -1621,13 +1630,17 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             elif sep != "":
                 self.cache.update(key, value)
                 line = f"{key}={value}"
-                # Filter out Qs119 (PrinterText) just after client startup. Prevents BACARS from printing some junk when it is started.
-                if key in [ 'Qs119' ]:
-                    if time.perf_counter() - this_client.connected_at < 30.0:
-                        self.logger.info(
-                        "Filtering out %s (%s) from %s due to less than 30s after connection",
-                        key, value, client_addr)
-                        return
+                # Do not accept Qs119 from BACARS within 15s of
+                # connection. Prevents BACARS from printing some junk
+                # when it is started.
+                if key == 'Qs119':
+                    if time.perf_counter() - this_client.connected_at < 15.0:
+                        if re.match(r".*BACARS.*", this_client.display_name):
+                            self.logger.info(
+                                "Not accepting %s from just-connected BACARS %s",
+                                key, this_client.peername)
+                            return
+                # Send normally
                 await self.send_to_upstream(line, client_addr)
                 await self.client_broadcast(line, exclude=[client_addr])
             else:
@@ -1638,7 +1651,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 line
             )
 
-    async def forwarder_task(self, messagequeue, name):
+    async def forwarder_task(self, messagequeue, name):  # pylint: disable=too-many-branches
         """Read messages from the queue and forward them."""
         try:
             while True:
