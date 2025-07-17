@@ -1062,7 +1062,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             return
         # End of traffic_logging_task()
 
-    async def frdp_send_task(self, name):
+    async def frdp_send_task(self, name):  # pylint: disable=too-many-branches
         """Handle sending FRDP messages."""
         try:
             last_ping = time.perf_counter()
@@ -1115,7 +1115,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         self.logger.info("Sending FRDP IDENT to upstream")
                         await self.send_to_upstream(f"addon=FRANKENROUTER:IDENT:{self.config.identity.simulator}:{self.config.identity.router}")  # pylint: disable=line-too-long
                         self.upstream.frdp_ident_sent = True
-
+                for peername, data in self.clients.items():
+                    if data.is_frankenrouter and not data.frdp_ident_sent:
+                        self.logger.info("Sending FRDP IDENT to %s", data.peername)
+                        await self.client_broadcast(f"addon=FRANKENROUTER:IDENT:{self.config.identity.simulator}:{self.config.identity.router}",  # pylint: disable=line-too-long
+                                                    include=[peername])
+                        data.frdp_ident_sent = True
                 #
                 # FRDP AUTH
                 #
@@ -1228,7 +1233,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.critical(traceback.format_exc())
         # End of housekeeping_task()
 
-    async def handle_message_from_upstream(self, message):  # pylint: disable=too-many-branches,too-many-statements
+    async def handle_message_from_upstream(self, message):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         """Handle a message from upstream."""
         if not self.is_upstream_connected():
             self.logger.warning(
@@ -1248,8 +1253,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         if key == 'addon':
             (addon, rest) = value.split(":", 1)
             if addon == 'FRANKENROUTER':
-                (messagetype, payload) = rest.split(":", 1)
-                if messagetype == 'PING':  # pylint: disable=no-else-return
+                (message_type, payload) = rest.split(":", 1)
+                if message_type == 'PING':  # pylint: disable=no-else-return
                     # addon=FRANKENROUTER:PING:<ID>
                     self.logger.debug("Got FRDP PING message from upstream: %s", line)
                     request_id = payload
@@ -1258,8 +1263,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     await self.send_to_upstream(f"addon=FRANKENROUTER:PONG:{request_id}")
                     # store name and the fact that this client is a frankenrouter
                     self.upstream.is_frankenrouter = True
+                    # Stop processing: PING should never be forwarded
                     return
-                elif messagetype == 'PONG':
+                elif message_type == 'PONG':
                     request_id = payload
                     if request_id != self.upstream.frdp_ping_request_id:
                         self.logger.critical(
@@ -1280,11 +1286,24 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         self.upstream.frdp_ping_rtts.append(elapsed)
                         if elapsed > self.config.performance.frdp_rtt_warning:
                             self.logger.warning("SLOW: FRDP RTT to upstream is %.6f s", elapsed)
+                    # Stop processing: PONG should never be forwarded
                     return
-                elif messagetype == 'BANG':
+                elif message_type == 'IDENT':
+                    # addon=FRANKENROUTER:IDENT:<sim name>:<router name>
+                    (simname, routername) = payload.split(':')
+                    self.logger.debug(
+                        "Got FRDP IDENT message from upstream: %s", line)
+                    self.upstream.simulator_name = simname
+                    self.upstream.router_name = routername
+                    self.upstream.display_name = f"I: {routername}"
+                    # Stop processing: IDENT should never be forwarded
+                    return
+                elif message_type == 'BANG':
                     self.last_bang = time.perf_counter()
+                    # No return here, BANG should be propagated through the network
                 else:
-                    self.logger.critical("Unsupported FRDP message type %s (%s)", messagetype, line)
+                    self.logger.critical("Unsupported FRDP message type %s (%s)",
+                                         message_type, line)
                     # No need for further processing a FRANKENROUTER message,
                     # it should not be forwarded upstream.
                     return
@@ -1410,6 +1429,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     "Got FRDP IDENT message from client %s: %s", client_addr, line)
                 this_client.simulator_name = simname
                 this_client.router_name = routername
+                this_client.display_name = f"I: {routername}"
                 # No further processing needed, and should not propagate upstream
                 return
             elif message_type == 'PING':

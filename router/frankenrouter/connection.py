@@ -64,6 +64,9 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         # List of the most recent FRDP PING RTTs
         self.frdp_ping_rtts = []
 
+        # True if we have sent an FRDP IDENT message already
+        self.frdp_ident_sent = False
+
     async def to_stream(self, line, log=True, drain=True):
         """Write data to a stream and optionally to a log file.
 
@@ -240,8 +243,6 @@ class UpstreamConnection(Connection):  # pylint: disable=too-few-public-methods
 
         self.upstream = True
 
-        # True if we have sent an FRDP IDENT upstream
-        self.frdp_ident_sent = False
         # True if we have sent an FRDP AUTH upstream
         self.frdp_auth_sent = False
 
