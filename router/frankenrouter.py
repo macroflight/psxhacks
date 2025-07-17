@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import itertools
-import json
 import logging
 import logging.handlers
 import math
@@ -25,6 +24,9 @@ from frankenrouter import connection
 from frankenrouter import variables
 from frankenrouter import routercache
 
+from frankenrouter.rules import RulesAction, RulesCode, Rules
+
+
 __MYNAME__ = 'frankenrouter'
 __MY_DESCRIPTION__ = 'A PSX Router'
 
@@ -40,7 +42,6 @@ UPSTREAM_WAITFOR = 5.0
 
 # Status display static config
 HEADER_LINE_LENGTH = 120
-DISPLAY_NAME_MAXLEN = 24
 
 # How often to check the RTT to upstream and client frankenrouters
 FDRP_PING_INTERVAL = 5.0
@@ -130,6 +131,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.upstream_reconnect_requested = False
         self.longest_destination_string = 0
         self.variable_stats_buffer = []
+        self.rules = Rules(self)
 
         # Track when we last send the start keyword upstream
         self.start_sent_at = 0.0
@@ -217,7 +219,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         )
         parser.add_argument(
             '--enable-variable-stats',
-            action='store', type=bool, default=None,
+            action='store_true',
             help="Enable variable stats (experimental)",
         )
         parser.add_argument(
@@ -470,7 +472,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             now = time.perf_counter()
             missing = len(expected_start_keywords - client.welcome_keywords_sent)
             if missing <= 0:
-                self.logger.debug("All expected START keywords received, continuing")
+                self.logger.info("All expected START keywords received, continuing")
                 break
             waited = now - self.start_sent_at
             if waited > 1.0:
@@ -515,11 +517,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # frankenrouter)
         await send_line(f"name=frankenrouter:{self.config.identity.simulator}")
 
-        elapsed = time.perf_counter() - start_time
+        frdp_rtt = time.perf_counter() - start_time
         self.logger.info(
             "Added client %s in %.1f ms (%d keywords, %.0f/s)",
-            client.client_id, elapsed * 1000,
-            welcome_keyword_count, welcome_keyword_count / elapsed)
+            client.client_id, frdp_rtt * 1000,
+            welcome_keyword_count, welcome_keyword_count / frdp_rtt)
 
     async def close_client_connection(self, client, clean=True):
         """Close a client connection and remove client data."""
@@ -1240,425 +1242,168 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.critical(traceback.format_exc())
         # End of housekeeping_task()
 
-    async def handle_message_from_upstream(self, message):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
-        """Handle a message from upstream."""
-        if not self.is_upstream_connected():
-            self.logger.warning(
-                "Discarding queued message from upstream as upstream is not connected")
-            return
+    async def handle_message(self, sender, msg):  # pylint: disable=too-many-branches,too-many-statements
+        """Handle a message.
 
-        line = message['payload'].decode().splitlines()[0]
-        self.logger.debug("From upstream: %s", line)
-        await self.upstream.from_stream(line)
+        sender is a reference to a ConnectionClient or ConnectionUpstream object
 
-        # Store various things that we get e.g on initial
-        # connection and that we might need later.
-        key, sep, value = line.partition("=")
+        msg is a PSX network message from the queue (dict)
+        """
+        # Human-readable sender description
+        sender_hr = "upstream" if sender.upstream is None else sender.peername
 
-        self.variable_stats_add(key, None)
+        line = msg['payload'].decode().splitlines()[0]
+        self.logger.debug("Message from %s: %s", sender_hr, line)
+        await sender.from_stream(line)
 
-        if key == 'addon':
-            (addon, rest) = value.split(":", 1)
-            if addon == 'FRANKENROUTER':
-                (message_type, payload) = rest.split(":", 1)
-                if message_type == 'PING':  # pylint: disable=no-else-return
-                    # addon=FRANKENROUTER:PING:<ID>
-                    self.logger.debug("Got FRDP PING message from upstream: %s", line)
-                    request_id = payload
-                    # send reply
-                    self.logger.debug("Sending FRDP pong to upstream")
-                    await self.send_to_upstream(f"addon=FRANKENROUTER:PONG:{request_id}")
-                    # store name and the fact that this client is a frankenrouter
-                    self.upstream.is_frankenrouter = True
-                    # Stop processing: PING should never be forwarded
-                    return
-                elif message_type == 'PONG':
-                    request_id = payload
-                    if request_id != self.upstream.frdp_ping_request_id:
-                        self.logger.critical(
-                            "Got unexpected PING request ID %s from upstream, expected %s",
-                            request_id, self.upstream.frdp_ping_request_id)
-                        return
-                    elapsed = time.perf_counter() - self.upstream.ping_sent
-                    # Do not warn or log data if we have just connected to
-                    # upstream or sent a client welcome.
-                    dolog = True
-                    if self.is_upstream_connected():
-                        time_since_connected = time.perf_counter() - self.upstream.connected_at
-                        if time_since_connected < 5.0:
-                            dolog = False
-                    if time.perf_counter() - self.last_client_connected < 5.0:
-                        dolog = False
-                    if dolog:
-                        self.upstream.frdp_ping_rtts.append(elapsed)
-                        if elapsed > self.config.performance.frdp_rtt_warning:
-                            self.logger.warning("SLOW: FRDP RTT to upstream is %.6f s", elapsed)
-                    # Stop processing: PONG should never be forwarded
-                    return
-                elif message_type == 'IDENT':
-                    # addon=FRANKENROUTER:IDENT:<sim name>:<router name>
-                    (simname, routername) = payload.split(':')
-                    self.logger.debug(
-                        "Got FRDP IDENT message from upstream: %s", line)
-                    self.upstream.simulator_name = simname
-                    self.upstream.router_name = routername
-                    self.upstream.display_name = f"I: {routername}"
-                    # Stop processing: IDENT should never be forwarded
-                    return
-                elif message_type == 'BANG':
-                    self.last_bang = time.perf_counter()
-                    # No return here, BANG should be propagated through the network
-                else:
-                    self.logger.critical("Unsupported FRDP message type %s (%s)",
-                                         message_type, line)
-                    # No need for further processing a FRANKENROUTER message,
-                    # it should not be forwarded upstream.
-                    return
+        (action, code, message, extra_data) = self.rules.route(line, sender)
 
-        if not self.variables.is_psx_keyword(key):
-            self.logger.info("NONPSX keyword %s from upstream: %s", key, line)
-
-        if key == 'load1':
-            self.last_load1 = time.perf_counter()
-
-        if key in [
-                'load1',
-                'load2',
-                'load3',
-        ]:
-            # Load messages: send to connected clients
-            self.logger.debug("Load message from upstream: %s", key)
-            await self.client_broadcast(line)
-        elif key in [
-                'bang',
-                'start',
-        ]:
-            # Should not be sent by upstream, ignore
-            pass
-        elif key in ["pleaseBeSoKindAndQuit"]:
-            # Forward to clients
-            self.logger.info(
-                "Forwarding %s from upstream to all clients", key)
-            await self.client_broadcast(key)
-        elif key in [
-                'exit',
-        ]:
-            # Shut down upstream connection cleanly
-            self.logger.info(
-                "Upstream sent exit message, sleeping %.1f s before reconnect",
-                self.args.upstream_reconnect_delay,
-            )
-            await self.close_upstream_connection()
-            await asyncio.sleep(self.args.upstream_reconnect_delay)
-        elif sep != "":
-            # Key-value message (including lexicon): store in
-            # state and send to connected clients
-            self.logger.debug("Storing key-value from upstream: %s=%s", key, value)
-            self.cache.update(key, value)
-            if key in self.variables.keywords_with_mode("NOLONG"):
-                # the "nolong" keywords are only sent to
-                # clients that have asked for them
-                await self.client_broadcast(line, islong=True)
-            elif key in self.variables.keywords_with_mode('START'):
-                if key not in self.variables.keywords_with_mode('ECON'):
-                    # START keywords that are not also ECON (e.g
-                    # Ws493 and Qi208) get special handling
-                    self.logger.debug(
-                        "START (non-ECON) keyword, handling with isonlystart: %s", key)
-                    await self.client_broadcast(line, isonlystart=True, key=key)
-            elif key == 'Qi191':
-                # Do not send Qi191 to PSX Sounds when bang sent
-                # recently (this variable causes PSX Sounds to play
-                # its gear pin sound)
-                if time.perf_counter() - self.last_bang < 2.0:
-                    await self.client_broadcast(line, exclude_name_regexp=r".*PSX Sound.*")
-            else:
-                await self.client_broadcast(line)
-        else:
-            self.logger.warning("Unhandled data from upstream: %s", line)
-
-    async def handle_message_from_client(self, message):  # pylint: disable=too-many-locals,too-many-return-statements,too-many-branches,too-many-statements
-        """Handle a message from a client."""
-        client_addr = message['sender']
-        if client_addr not in self.clients:
-            self.logger.warning("Discarding message from disconnected client %s", client_addr)
-            return
-        line = message['payload'].decode().splitlines()[0]
-        this_client = self.clients[client_addr]
-
-        self.logger.debug("From client %s: %s", client_addr, line)
-
-        # Log data from client
-        await this_client.from_stream(line)
-
-        key, sep, value = line.partition("=")
-
-        self.variable_stats_add(key, client_addr)
-
-        #
-        # FrankenRouter DiscoveryProtocol :)
-        #
-        if key == 'addon' and value.startswith("FRANKENROUTER:"):
-            (_, message_type, payload) = value.split(":", 2)
-            if message_type == 'CLIENTINFO':  # pylint: disable=no-else-return
-                # Payload is JSON data describing a PSX client
-                try:
-                    clientinfo = json.loads(payload)
-                except json.decoder.JSONDecodeError:
-                    self.logger.warning(
-                        "Got invalid CLIENTINFO data from %s: %s",
-                        client_addr, line)
-                else:
-                    self.logger.debug("Client info: %s", clientinfo)
-                    peername = (clientinfo['laddr'], clientinfo['lport'])
-                    if peername in self.clients:
-                        thisname = clientinfo['name']
-                        if len(thisname) > DISPLAY_NAME_MAXLEN:
-                            newname = thisname[:DISPLAY_NAME_MAXLEN]
-                            self.logger.warning(
-                                "Client name %s is too long, using %s",
-                                thisname, newname)
-                            thisname = newname
-                        self.logger.debug(
-                            "Setting name for %s to %s from CLIENTINFO data",
-                            peername, thisname)
-                        self.clients[peername].display_name = f"I:{thisname}"
-                    else:
-                        self.logger.warning(
-                            "Got CLIENTINFO data for non-connected client %s",
-                            peername)
-                # No further processing needed, and should not propagate upstream
-                return
-            elif message_type == 'IDENT':
-                # addon=FRANKENROUTER:IDENT:<sim name>:<router name>
-                (simname, routername) = payload.split(':')
-                self.logger.debug(
-                    "Got FRDP IDENT message from client %s: %s", client_addr, line)
-                this_client.simulator_name = simname
-                this_client.router_name = routername
-                this_client.display_name = f"I: {routername}"
-                # No further processing needed, and should not propagate upstream
-                return
-            elif message_type == 'PING':
-                self.logger.debug(
-                    "Got FRDP PING message from client %s: %s", client_addr, line)
-                request_id = payload
-                await self.client_broadcast(
-                    f"addon=FRANKENROUTER:PONG:{request_id}",
-                    include=[client_addr]
-                )
-                # store name and the fact that this client is a frankenrouter
-                this_client.is_frankenrouter = True
-                # No further processing needed, and should not propagate upstream
-                return
-            elif message_type == 'PONG':
-                self.logger.debug(
-                    "Got FRDP PONG message from client %s: %s", client_addr, line)
-                request_id = payload
-                if request_id != this_client.frdp_ping_request_id:
-                    self.logger.critical(
-                        "Got unexpected PING request ID %s from %s, expected %s",
-                        request_id, client_addr, this_client.frdp_ping_request_id)
-                    return
-                elapsed = time.perf_counter() - this_client.ping_sent
-                dolog = True
-                if self.is_upstream_connected():
-                    time_since_connected = time.perf_counter() - self.upstream.connected_at
-                    if time_since_connected < 5.0:
-                        dolog = False
-                if time.perf_counter() - self.last_client_connected < 5.0:
+        # Take actions based on RulesCode
+        if code == RulesCode.FRDP_PING:
+            self.logger.debug(
+                "Got FRDP PING message from %s, sending PONG: %s",
+                sender_hr, line)
+        elif code == RulesCode.FRDP_PONG:
+            frdp_rtt = extra_data['frdp_rtt']
+            self.logger.debug(
+                "Got FRDP PONG message from %s: %s",
+                sender_hr, line)
+            # Store RTT unless we're in a situation that we know innduce high RTT
+            dolog = True
+            if self.is_upstream_connected():
+                time_since_connected = time.perf_counter() - self.upstream.connected_at
+                if time_since_connected < 5.0:
                     dolog = False
-                if dolog:
-                    if elapsed > self.config.performance.frdp_rtt_warning:
-                        self.logger.warning(
-                            "SLOW: FRDP RTT to client %s is %.6f s", client_addr, elapsed)
-                    this_client.frdp_ping_rtts.append(elapsed)
-                # No further processing needed, and should not propagate upstream
-                return
-            elif message_type == 'AUTH':
-                # addon=FRANKENROUTER:AUTH:<<PASSWORD>>
-                password = payload
-                if password != "" and not this_client.has_access():
-                    self.logger.info("Auth token provided, checking...")
-                    # If client provided a password, try to use it to upgrade the connection
-                    this_client.update_access_level(password)
-                    if not this_client.has_access():
-                        self.logger.warning(
-                            "Client %s failed to authenticate, password used=%s",
-                            this_client.display_name, password)
-                        await self.close_client_connection(this_client, clean=False)
-                    else:
-                        await self.client_add_to_network(this_client)
-                        this_client.welcome_sent = True
-                        self.request_status_display()
+            if time.perf_counter() - self.last_client_connected < 5.0:
+                dolog = False
+            if dolog:
+                self.upstream.frdp_ping_rtts.append(frdp_rtt)
+                if frdp_rtt > self.config.performance.frdp_rtt_warning:
+                    self.logger.warning("SLOW: FRDP RTT to upstream is %.6f s", frdp_rtt)
+        elif code == RulesCode.FRDP_IDENT:
+            self.logger.debug(
+                "Got FRDP IDENT message from %s: %s",
+                sender_hr, line)
+        elif code == RulesCode.FRDP_BANG:
+            self.logger.debug(
+                "Got FRDP IDENT message from %s: %s",
+                sender_hr, line)
+        elif code == RulesCode.LOAD1:
+            self.logger.info("Got load1 message from %s", sender_hr)
+        elif code == RulesCode.LOAD2:
+            self.logger.info("Got load3 message from %s", sender_hr)
+        elif code == RulesCode.LOAD3:
+            self.logger.info("Got load3 message from %s", sender_hr)
+        elif code == RulesCode.START:
+            self.logger.info("Got start message from %s", sender_hr)
+        elif code == RulesCode.PBSKAQ:
+            self.logger.info("Got pleaseBeSoKindAndQuit message from %s", sender_hr)
+        elif code == RulesCode.EXIT:
+            self.logger.info("Got exit message from %s, closing connection", sender_hr)
+            if sender.upstream:
+                await self.close_upstream_connection()
+            else:
+                await self.close_client_connection(sender)
+        elif code == RulesCode.KEYVALUE_NORMAL:
+            self.logger.debug("Got normal key-value from %s: %s", sender_hr, line)
+        elif code == RulesCode.KEYVALUE_FILTERED_INGRESS:
+            self.logger.info(
+                "Keyword update from %s dropped due to ingress filter (%s): %s",
+                sender_hr, message, line)
+        elif code == RulesCode.KEYVALUE_FILTER_EGRESS:
+            self.logger.debug(
+                "Keyword update from %s needs egress filtering (%s): %s",
+                sender_hr, extra_data, line)
+        elif code == RulesCode.NOLONG:
+            self.logger.info("Got nolong from %s, toggled nolong flag", sender_hr)
+        elif code == RulesCode.MESSAGE_INVALID:
+            self.logger.warning("Got invalid message (%s): %s", message, line)
+        elif code == RulesCode.FRDP_CLIENTINFO:
+            self.logger.debug("Got FRDP CLIENTINFO: %s", line)
+        elif code == RulesCode.FRDP_AUTH_FAIL:
+            self.logger.warning("Client failed FRDP authentication: %s: %s", sender_hr, line)
+            # Disconnect clients that fail authentication
+            await self.close_client_connection(sender, clean=False)
+        elif code == RulesCode.FRDP_AUTH_OK:
+            self.logger.info("Client %s successfully authenticated: %s", sender_hr, line)
+        elif code == RulesCode.FRDP_AUTH_ALREADY_HAS_ACCESS:
+            self.logger.warning(
+                "Client %s successfully authenticated but already has access: %s",
+                sender_hr, line)
+        elif code == RulesCode.NAME_FROM_FRANKENROUTER:
+            self.logger.info("Client %s is a frankenrouter: %s", sender_hr, line)
+        elif code == RulesCode.NAME_LEARNED:
+            self.logger.info("Client name learned: %s: %s", sender_hr, line)
+        elif code == RulesCode.NAME_REJECTED:
+            self.logger.warning("Ignoring name change from frankenrouter %s: %s", sender_hr, line)
+        elif code == RulesCode.NONPSX:
+            self.logger.warning("Non-PSX keyword forwarded from %s: %s", sender_hr, line)
+        elif code == RulesCode.NOWRITE:
+            self.logger.debug("Dropping message from non-write client %s: %s", sender_hr, line)
+        elif code == RulesCode.DEMAND:
+            self.logger.debug("Got demand= message from %s: %s", sender_hr, line)
+        elif code == RulesCode.ADDON_FORWARDED:
+            self.logger.info("Non-frankenrouter addon message from %s forwarded: %s",
+                             sender_hr, line)
+        elif code == RulesCode.AGAIN:
+            self.logger.info("Keyword again from %s forwarded: %s", sender_hr, line)
+
+        # Take action
+        if action == RulesAction.DROP:
+            # No action needed
+            pass
+        elif action == RulesAction.UPSTREAM_ONLY:
+            self.logger.debug("sending to upstream only: %s", line)
+            await self.send_to_upstream(line, sender.peername)
+        elif action == RulesAction.NORMAL:
+            self.logger.debug("sending normally: %s", line)
+            if not sender.upstream:
+                await self.send_to_upstream(line, sender.peername)
+            if sender.upstream:
+                await self.client_broadcast(line)
+            else:
+                await self.client_broadcast(line, exclude=[sender.peername])
+        elif action == RulesAction.FILTER:
+            # There are several different types of filtering:
+            # - nolong: do not send NOLONG variables to clients is nolong=True
+            # - start: do not send unless the client has requested START variables
+            # - endpoint_name_regexp: do not send if endpoint name matches
+            # Only one filter type will be given by the ruleset.
+            if 'nolong' in extra_data:
+                self.logger.debug("sending with islong: %s", line)
+                if not sender.upstream:
+                    await self.send_to_upstream(line, sender.peername)
+                if sender.upstream:
+                    await self.client_broadcast(line, islong=True)
                 else:
-                    # Client provided no password or already have been
-                    # authenticated, so do nothing.
-                    pass
-                # No further processing needed, and should not propagate upstream
-                return
+                    await self.client_broadcast(line, exclude=[sender.peername], islong=True)
+            elif 'start' in extra_data:
+                self.logger.debug("sending with isonlystart: %s", line)
+                if not sender.upstream:
+                    await self.send_to_upstream(line, sender.peername)
+                if sender.upstream:
+                    await self.client_broadcast(
+                        line, isonlystart=True, key=extra_data['key'])
+                else:
+                    await self.client_broadcast(line, exclude=[sender.peername],
+                                                isonlystart=True, key=extra_data['key'])
+            elif 'endpoint_name_regexp' in extra_data:
+                self.logger.debug("sending with name regexp filter: %s", line)
+                regex = extra_data['endpoint_name_regexp']
+                if not sender.upstream:
+                    await self.send_to_upstream(line, sender.peername)
+                if sender.upstream:
+                    await self.client_broadcast(line, exclude_name_regexp=regex)
+                else:
+                    await self.client_broadcast(line, exclude=[sender.peername],
+                                                exclude_name_regexp=regex)
             else:
-                # Done handling FRANKENROUTER addon data - should not be forwarded
-                self.logger.critical("Unsupported FRDP message type %s (%s)", message_type, line)
-                return
-
-        # For initial detection of other frankenrouters, we
-        # send the "standard" name= keyword.
-        if key == 'name':
-            self.logger.debug("key is name for %s", line)
-            if re.match(r".*:FRANKEN.PY frankenrouter", value):
-                display_name = value.split(":")[0]
-                self.logger.info(
-                    "Client %s identified as frankenrouter %s",
-                    client_addr, display_name)
-                this_client.is_frankenrouter = True
-                this_client.display_name = f"R:{display_name}"
-                self.request_status_display()
-                # We should not send this upstream, so stop here
-                return
-
-        if key == 'nolong':
-            # Toggle nolong bit for this client, but do not send upstream
-            this_client.nolong = not this_client.nolong
-            self.logger.info(
-                "Client %s toggled nolong to %s", client_addr, this_client.nolong)
-            return
-
-        # Print non-PSX keywords
-        if not self.variables.is_psx_keyword(key):
-            self.logger.warning("NONPSX keyword %s from %s: %s", key, client_addr, line)
-
-        # Pick up name information from clients
-        # Note: we inhibit name changes on a connection from a
-        # frankenrouter as other clients are multiplexed on
-        # that connection.
-
-        # The community standard seems to be
-        # name=SHORTNAME:LONGNAME but no prefix
-
-        # Examples:
-        # name=VPLG:vPilot Plugin
-        # name=:PSX Sounds
-        # name=EFB1:PSX.NET EFB For Windows
-        # name=BACARS:BA ACARS Simulation
-
-        # So I will use e.g
-        # name=ICING:FRANKEN.PY frankenfreeze MSFS to PSX ice sync
-        # name=WIND:FRANKEN.PY frankenwind MSFS to PSX wind sync
-        # name=<simname>:FRANKEN.PY frankenrouter PSX router <routername>
-
-        if key == 'name' and value != "" and not this_client.is_frankenrouter:
-            learned_prefix = "L"
-            thisname = value
-            self.logger.debug("Checking %s against name regexps", value)
-            if re.match(r".*PSX.NET EFB.*", value):
-                thisname = value.split(":")[0]
-            elif re.match(r":PSX Sounds", value):
-                thisname = "PSX Sounds"
-            # name=MSFS Router:PSX.NET Modules
-            elif re.match(r"^MSFS Router", value):
-                thisname = "MSFS Router"
-            # name=BACARS:BA ACARS Simulation
-            elif re.match(r"^BACARS:", value):
-                thisname = "BACARS"
-            # name=VPLG:vPilot Plugin
-            elif re.match(r"VPLG:", value):
-                thisname = "vPilot"
-            # FRANKEN.PY clients
-            elif re.match(r".*:FRANKEN\.PY", value):
-                thisname = value.split(":")[0]
-                learned_prefix = "F"
-            if len(thisname) > DISPLAY_NAME_MAXLEN:
-                newname = thisname[:DISPLAY_NAME_MAXLEN]
-                self.logger.info(
-                    "Client %s name %s is too long, using %s",
-                    this_client.peername, thisname, newname)
-                thisname = newname
-            else:
-                self.logger.info(
-                    "Client %s identifies as %s, using that name",
-                    this_client.peername, thisname)
-            this_client.display_name = f"{learned_prefix}:{thisname}"
-            self.request_status_display()
-
-        if key == 'name':
-            self.logger.info(
-                "Not passing on name= keyword from %s to upstream", this_client.client_id)
-            return
-
-        allow_write = False
-        if this_client.can_write():
-            allow_write = True
-        elif key in ['demand']:
-            # read-only clients may still send demand=...
-            allow_write = True
-
-        if allow_write:
-            if key in ["bang"]:
-                # Forward to upstream but not other clients, but send
-                # a "bang warning" addon message first.  Note: since
-                # we don't get our own addon messages we also need to
-                # set self.last_bang
-                self.last_bang = time.perf_counter()
-                await self.send_to_upstream("addon=FRANKENROUTER:BANG:")
-                await self.client_broadcast("addon=FRANKENROUTER:BANG:")
-                await self.send_to_upstream(key, client_addr)
-            elif key in ["again"]:
-                # Forward to upstream but not other clients
-                await self.send_to_upstream(key, client_addr)
-            elif key in ["start"]:
-                # Send to upstream, not other clients
-                self.logger.debug("start received from %s, sending to upstream", client_addr)
-                await self.send_to_upstream(key, client_addr)
-                self.start_sent_at = time.perf_counter()
-            elif key in ["demand"]:
-                # Add to list for this client
-                this_client.demands.add(value)
-                self.logger.debug(
-                    "added %s to demand list for %s + send to upstream", value, client_addr)
-                await self.send_to_upstream(line, client_addr)
-            elif key in ["load1", "load2", "load3"]:
-                if key == 'load1':
-                    self.last_load1 = time.perf_counter()
-                # Forward to upstream and other clients
-                self.logger.debug("%s from %s", key, client_addr)
-                await self.send_to_upstream(key, client_addr)
-                await self.client_broadcast(key, exclude=[client_addr])
-            elif key in ["pleaseBeSoKindAndQuit"]:
-                # Forward to other clients
-                self.logger.info("Forwarding %s from %s to all clients", key, client_addr)
-                await self.client_broadcast(key, exclude=[client_addr])
-                if self.args.forward_please_be_so_kind_and_quit_upstream:
-                    self.logger.info("Forwarding %s from %s to upstream", key, client_addr)
-                    await self.send_to_upstream(key, client_addr)
-            elif key == 'exit':
-                # Shut down client connection cleanly
-                self.logger.info("Client %s sent exit message, closing", client_addr)
-                await self.close_client_connection(this_client, clean=True)
-                return
-            elif sep != "":
-                self.cache.update(key, value)
-                line = f"{key}={value}"
-                # Do not accept Qs119 from BACARS within 15s of
-                # connection. Prevents BACARS from printing some junk
-                # when it is started.
-                if key == 'Qs119':
-                    if time.perf_counter() - this_client.connected_at < 15.0:
-                        if re.match(r".*BACARS.*", this_client.display_name):
-                            self.logger.info(
-                                "Not accepting %s from just-connected BACARS %s",
-                                key, this_client.peername)
-                            return
-                # Send normally
-                await self.send_to_upstream(line, client_addr)
-                await self.client_broadcast(line, exclude=[client_addr])
-            else:
-                self.logger.warning("Unhandled data (%s) from client: %s", key, line)
-        else:
-            self.logger.info(
-                "Read-only client tried to send data, ignoring: %s",
-                line
-            )
+                self.logger.critical(
+                    "RulesAction.FILTER but no known filter type in extra_data: %s: %s",
+                    extra_data, line)
+                # A safe fallback is to send to all
+                await self.send_to_upstream(line, sender.peername)
+                await self.client_broadcast(line, exclude=[sender.peername])
 
     async def forwarder_task(self, messagequeue, name):  # pylint: disable=too-many-branches
         """Read messages from the queue and forward them."""
@@ -1671,9 +1416,19 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     raise SystemExit("Message queue has been shut down, this shuld not happen")  # pylint: disable=raise-missing-from
                 queuetime = time.perf_counter() - message['received_time']
                 if message['sender'] is None:
-                    await self.handle_message_from_upstream(message)
+                    if self.is_upstream_connected():
+                        await self.handle_message(self.upstream, message)
+                    else:
+                        self.logger.warning(
+                            "Dropping message from upstream - no longer connected: %s",
+                            message)
                 else:
-                    await self.handle_message_from_client(message)
+                    if message['sender'] in self.clients:
+                        await self.handle_message(self.clients[message['sender']], message)
+                    else:
+                        self.logger.warning(
+                            "Dropping message from %s - no longer connected: %s",
+                            message['sender'], message)
                 totaltime = time.perf_counter() - message['received_time']
                 print_delay_warning = False
                 if (
@@ -1681,28 +1436,18 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         queuetime > self.config.performance.queue_time_warning
                 ):
                     print_delay_warning = True
+                # Do not warn about delay if we just connected to upstream.
                 if self.is_upstream_connected():
-                    time_since_connected = time.perf_counter() - self.upstream.connected_at
-                    if time_since_connected < 5.0:
-                        # There is no point in warning about delays
-                        # while the upstream is sending us the initial
-                        # "welcome message" which includes all
-                        # variables.
+                    if time.perf_counter() - self.upstream.connected_at < 5.0:
                         print_delay_warning = False
+                # Do not warn about delay if a load1 was just sent
                 if time.perf_counter() - self.last_load1 < 5.0:
-                    # If we received (or sent) a load1 recently, do
-                    # not print warnings, for is takes ~1s to forward
-                    # the ~2400 keywords in a full load.
                     print_delay_warning = False
+                # Do not warn about delay if a bang was just sent
                 if time.perf_counter() - self.last_bang < 5.0:
-                    # If we received (or sent) a bang recently, do
-                    # not print warnings, for is takes ~1s to forward
-                    # the ~2400 keywords in a full load.
                     print_delay_warning = False
+                # Do not warn about delay if a client just connected
                 if time.perf_counter() - self.last_client_connected < 5.0:
-                    # If a client recently connected it is also
-                    # expected to see some delays due to the welcome
-                    # message.
                     print_delay_warning = False
                 if print_delay_warning:
                     self.logger.warning(
