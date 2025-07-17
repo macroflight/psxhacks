@@ -118,7 +118,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         }
         self.clients = {}
         self.upstream = None
-        self.upstream_pending_messages = []
         self.upstream_connections = 0
         self.log_traffic_filename = None
         self.start_time = int(time.time())
@@ -507,16 +506,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         welcome_keyword_count = len(client.welcome_keywords_sent)
         client.welcome_keywords_sent = set()
 
-        # Send pending messages
-        if len(client.pending_messages) > 0:
-            self.logger.debug(
-                "Sending %d held messages to client",
-                len(client.pending_messages)
-            )
-            for message in client.pending_messages:
-                await send_line(message)
-        client.pending_messages = []
-
         # Identify ourselves to the client (in case it's another
         # frankenrouter)
         await send_line(f"name=frankenrouter:{self.config.identity.simulator}")
@@ -723,11 +712,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         "Not sending START variable to %s: %s",
                         client.peername, line)
                     continue
-            if not client.welcome_sent:
-                self.logger.debug("Client %s not welcomed, adding to pending_messages: %s",
-                                  client.peername, line)
-                client.pending_messages.append(line)
-                continue
             send_to_clients.append(client)
 
         writes = []
@@ -745,10 +729,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
     async def send_to_upstream(self, line, client_addr=None):
         """Send a line to upstream."""
         if not self.is_upstream_connected():
-            self.upstream_pending_messages.append(line)
-            self.logger.info(
-                "Upstream is not connected, storing data for later send (%d entries): %s",
-                len(self.upstream_pending_messages), line)
+            self.logger.debug("Upstream is not connected, discarding data: %s",
+                              line)
             return
         await self.upstream.to_stream(line, log=True)
         self.logger.debug("To upstream from %s: %s", client_addr, line)
@@ -802,15 +784,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 for demand_var in clients_demand:
                     self.logger.debug("Sending demand=%s to upstream")
                     await self.send_to_upstream(f"demand={demand_var}")
-
-                if len(self.upstream_pending_messages) > 0:
-                    self.logger.debug(
-                        "Sending %d held messages to upstream",
-                        len(self.upstream_pending_messages)
-                    )
-                    for message in self.upstream_pending_messages:
-                        await self.send_to_upstream(message)
-                self.upstream_pending_messages = []
 
                 self.request_status_display()
 

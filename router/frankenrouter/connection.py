@@ -143,9 +143,6 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
         # Is the client waiting for the requested START keywords to arrive?
         self.waiting_for_start_keywords = False
 
-        # List of messages pending
-        self.pending_messages = []
-
         # List of variables this client has send demand= for
         self.demands = set()
 
