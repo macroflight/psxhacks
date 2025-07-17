@@ -1257,6 +1257,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
     async def handle_message_from_upstream(self, message):  # pylint: disable=too-many-branches,too-many-statements
         """Handle a message from upstream."""
+        if not self.is_upstream_connected():
+            self.logger.warning(
+                "Discarding queued message from upstream as upstream is not connected")
+            return
+
         line = message['payload'].decode().splitlines()[0]
         self.logger.debug("From upstream: %s", line)
         await self.upstream.from_stream(line)
