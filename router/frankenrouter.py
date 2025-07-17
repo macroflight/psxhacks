@@ -739,6 +739,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         """Upstream connector Task."""
         try:  # pylint: disable=too-many-nested-blocks
             while True:  # pylint: disable=too-many-nested-blocks
+                # Pause clients when we have no upstream connection
+                await self.pause_clients()
                 try:
                     reader, writer = await asyncio.open_connection(
                         self.config.upstream.host,
@@ -768,8 +770,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.logger.info("Assuming upstream is frankenrouter")
                     self.upstream.is_frankenrouter = True
 
-                self.request_status_display()
-
                 # Send our name (for when we connect to another router)
                 await self.send_to_upstream(f"name={self.config.identity.router}:FRANKEN.PY frankenrouter PSX router {self.config.identity.router} in {self.config.identity.simulator}")  # pylint: disable=line-too-long
 
@@ -785,6 +785,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.logger.debug("Sending demand=%s to upstream")
                     await self.send_to_upstream(f"demand={demand_var}")
 
+                # Connection complete, refresh status display
                 self.request_status_display()
 
                 # Wait for and process data from upstream connection
@@ -802,7 +803,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         )
                         await self.close_upstream_connection()
                         await asyncio.sleep(self.args.upstream_reconnect_delay)
-                        continue
+                        break
                     t_read_data = time.perf_counter()
                     if data == b'':
                         self.logger.info(
@@ -823,16 +824,17 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         'received_time': t_read_data,
                         'sender': None,
                     })
-                # Pause clients when we have no upstream connection
-                await self.pause_clients()
-        # Standard Task cleanup
+        # Task cleanup: close connection
         except asyncio.exceptions.CancelledError:
-            self.logger.info("Task %s was cancelled, cleanup and exit", name)
+            self.logger.info("Task %s was cancelled, close connection and exit", name)
+            self.shutting_down = True  # don't accept new connections
+            await self.close_upstream_connection()
             raise
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s, shutting down",
                                  exc, name)
             self.logger.critical(traceback.format_exc())
+            await self.close_upstream_connection()
             return
         # End of upstream_connector_task()
 
