@@ -390,7 +390,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         start_time = time.perf_counter()
         self.last_client_connected = start_time
 
-        async def send_if_unsent(key):
+        async def send_if_unsent(key, drain=False):
+            """Send key-value to client if not already sent."""
             if not self.cache.has_keyword(key):
                 self.logger.info("Keyword %s not in cache, cannot send", key)
                 return
@@ -406,12 +407,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         " after upstream connection", key)
                     return
                 line = f"{key}={cached_value}"
-                await client.to_stream(line)
+                await client.to_stream(line, drain=drain)
                 client.welcome_keywords_sent.add(key)
                 self.logger.debug("To %s: %s", client.peername, line)
 
-        async def send_line(line):
-            await client.to_stream(line)
+        async def send_line(line, drain=False):
+            """Send line unconditionally to client."""
+            await client.to_stream(line, drain=drain)
             self.logger.debug("To %s: %s", client.peername, line)
 
         #
@@ -422,7 +424,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # connection to the PSX main server.
         await send_line(f"id={client.client_id}")
 
-        # Send version and layout. If possible, use cache, it not,
+        # Send version and layout. If possible, use cache, if not,
         # make something up. Without at least version, PSX main
         # clients will not connect.
         if not self.cache.has_keyword('version'):
@@ -447,7 +449,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # FIXME: some variables always sent BEFORE load1?
         # "Qi138", "Qs440", "Qs439","Qs450",
 
-        await send_line("load1")
+        # This pauses the client. We use drain here to make sure this
+        # is not delayed by buffering.
+        await send_line("load1", drain=True)
 
         # Send "start" upstream
         self.logger.debug("Sending start upstream to get fresh data for client")
@@ -486,7 +490,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         for keyword in list(map(lambda x: f"Qi{x}", list(range(0, 32)))):
             await send_if_unsent(keyword)
 
-        await send_line("load2")
+        await send_line("load2", drain=True)
         for prefix in [
                 "Qi",
                 "Qh",
@@ -496,8 +500,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 if key.startswith(prefix):
                     await send_if_unsent(key)
 
-        await send_line("load3")
-        await send_if_unsent("metar")
+        await send_line("load3", drain=True)
+        await send_if_unsent("metar", drain=True)
 
         client.welcome_sent = True
         welcome_keyword_count = len(client.welcome_keywords_sent)
