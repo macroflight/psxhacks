@@ -211,6 +211,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             help=("Override config file setting for data logging")
         )
         parser.add_argument(
+            '--log-directory',
+            action='store', type=str, default=None,
+            help=("Override config file setting for log directory")
+        )
+        parser.add_argument(
             '--enable-variable-stats',
             action='store', type=bool, default=None,
             help="Enable variable stats (experimental)",
@@ -1889,6 +1894,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # Override with command line options
         if self.args.log_traffic is not None:
             self.config.log.traffic = self.args.log_traffic
+
+        if self.args.log_directory is not None:
+            self.config.log.directory = self.args.log_directory
 
         # Other things we need to set based on the config
         if self.config.listen.rest_api_port is None:
