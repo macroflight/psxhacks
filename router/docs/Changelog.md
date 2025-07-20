@@ -1,5 +1,11 @@
 # Changelog
 
+## 2025-07-20: version 0.7
+
+- Now has a single set of forwarding rules in a unit-testable module
+  (rules.py)
+- Various minor improvements
+
 ## 2025-07-12: version 0.6
 
 - Improve documentation
