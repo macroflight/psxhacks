@@ -18,7 +18,8 @@ The router is stable enough for long flights (16+ hours).
 - It makes it easier to switch your PSX sim from normal mode to shared
   cockpit mode.
 - It shows you which PSX main clients and addons are connected so you
-  can see if some part of the sim is not started or has crashed.
+  can see if some part of the sim is not started or has crashed. It
+  can also optionally warn if some expected client is not connected.
 - It provides logging of the PSX network traffic if you need to track
   down any problems, e.g in new addons.
 - It holds the client connection alive if the PSX main server (or a
@@ -198,7 +199,6 @@ frankenrouter_ident.py` in the router directory.
 
 ## Planned changes/new features
 
-- Warnings if a client listed in the configuration file is not connected
 - A way to reconfigure the router without restarting it (e.g to switch
   the connection from a local PSX main server to a remote shared
   cockpit master)
