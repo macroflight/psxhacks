@@ -100,6 +100,7 @@ class RulesCode(enum.Enum):
     LOAD1 = enum.auto()
     LOAD2 = enum.auto()
     LOAD3 = enum.auto()
+    BANG = enum.auto()
     EXIT = enum.auto()
     PBSKAQ = enum.auto()
     KEYVALUE_FILTERED_INGRESS = enum.auto()
@@ -107,7 +108,7 @@ class RulesCode(enum.Enum):
     KEYVALUE_NORMAL = enum.auto()
 
 
-class Rules():  # pylint: disable=too-few-public-methods
+class Rules():  # pylint: disable=too-many-public-methods
     """A routing ruleset."""
 
     def __init__(self, router):
@@ -383,6 +384,22 @@ class Rules():  # pylint: disable=too-few-public-methods
         """Handle the load1 keyword."""
         return self.myreturn(RulesAction.NORMAL, RulesCode.LOAD3)
 
+    def handle_bang(self):
+        """Handle the bang keyword.
+
+        - update self.router.last_bang
+
+        - send FRDP BANG message (so other frankenrouters learn a bang
+          has been sent somewhere in the network
+
+        - forward the bang
+
+        """
+        self.router.last_bang = time.perf_counter()
+        reply = "addon=FRANKENROUTER:BANG"
+        return self.myreturn(RulesAction.NORMAL, RulesCode.BANG,
+                             extra_data={"reply": reply})
+
     def handle_exit(self):
         """Handle the exit keyword.
 
@@ -474,6 +491,9 @@ class Rules():  # pylint: disable=too-few-public-methods
 
         if key == 'load3':
             return self.handle_load3()
+
+        if key == 'bang':
+            return self.handle_bang()
 
         if key == 'exit':
             return self.handle_exit()
