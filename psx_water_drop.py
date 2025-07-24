@@ -82,9 +82,18 @@ def psx_send_and_set(psx_variable, new_psx_value):
     PSX._set(psx_variable, new_psx_value)  # pylint: disable=protected-access
 
 
+# Do not allow a total ZFW higher than this
 MAX_ZFW = 290000.0
+
 MAX_WATER_LOAD = 74000  # kg
-REALISTIC_FILL_TIME_FULL_LOAD = 1800  # seconds
+
+# How long it takes to fill the water tanks on the ground with realistic speed
+REALISTIC_FILL_TIME_FULL_LOAD = 1200  # seconds
+
+# Allowable drop rate: max and min values
+DROP_RATE_MIN = 950  # kg/s
+DROP_RATE_MAX = 5700  # kg/s
+
 
 if __name__ == "__main__":
     print("""
@@ -153,7 +162,7 @@ Hint: it is possible to cheat and refill the water in the air :)
                     print("Will drop the entire load on trigger")
                     water_drop_per_trigger = water_load_kg
 
-                water_drop_rate = float(input('Water drop rate (kg/s) [valid: 950-4000]: '))
+                water_drop_rate = float(input(f"Water drop rate (kg/s) [valid: {DROP_RATE_MIN}-{DROP_RATE_MAX}]: "))  # pylint: disable=line-too-long
                 # "According to the company, the aircraft was capable of laying
                 # down a swath of fire retardant 3 mi (4.8 km) long"
                 # 3 miles at 140 kt == 77 seconds
@@ -166,13 +175,16 @@ Hint: it is possible to cheat and refill the water in the air :)
                 # from one load."
                 # 0.75 nm at 140 kt == 19s => 3840 kg/s
 
-                # So allow drop rates between 950 - 4000 kg/s
+                # https://aerowinx.com/board/index.php/topic,7773.new.html
+                # says drop rates up to 5700 kg/s should be possible.
 
-                if water_drop_rate > 4000:
-                    print("Maximum water drop rate is 4000 kg/s")
+                # So allow drop rates between 950 - 5700 kg/s
+
+                if water_drop_rate > DROP_RATE_MAX:
+                    print(f"Maximum water drop rate is {DROP_RATE_MAX} kg/s")
                     continue
-                if water_drop_rate < 950:
-                    print("Minimum water drop rate is 950 kg/s")
+                if water_drop_rate < DROP_RATE_MIN:
+                    print(f"Minimum water drop rate is {DROP_RATE_MIN} kg/s")
                     continue
 
                 water_fill_rate = str(input('Water fill rate - (R)ealistic or (F)ast: '))
