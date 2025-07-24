@@ -1266,9 +1266,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
         # Take actions based on RulesCode
         if code == RulesCode.FRDP_PING:
+            # Send reply given by rules.route()
+            if sender.upstream:
+                await self.send_to_upstream(extra_data['reply'], sender.peername)
+            else:
+                await self.client_broadcast(extra_data['reply'], include=[sender.peername])
             self.logger.debug(
                 "Got FRDP PING message from %s, sending PONG: %s",
-                sender_hr, line)
+                sender_hr, extra_data['reply'])
         elif code == RulesCode.FRDP_PONG:
             frdp_rtt = extra_data['frdp_rtt']
             self.logger.debug(
