@@ -831,6 +831,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         'received_time': t_read_data,
                         'sender': None,
                     })
+                    # Give other tasks a chance to do something (we
+                    # sometimes receive a large chunk of data from
+                    # upstream and don't want to block the router
+                    # while that is being ingested).
+                    await asyncio.sleep(0)
+
         # Task cleanup: close connection
         except asyncio.exceptions.CancelledError:
             self.logger.info("Task %s was cancelled, close connection and exit", name)
