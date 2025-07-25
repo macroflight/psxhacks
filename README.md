@@ -176,8 +176,11 @@ c:\fs\python\psxpython\Lib\site-packages\SimConnect\SimConnect.dll.
 
 ### Download Hoppie's psx.py
 
-- Create a directory where you will run the scripts from. I'm using c:\fs\psx\python.
-- Download https://www.hoppie.nl/psx/python/psx.py into that directory
+Most of my scripts requires Jeroen Hoppenbrouwers' `psx.py`
+module. For your convenience I'm including a copy of it in the
+repository.
+
+The original `psx.py` is available at https://www.hoppie.nl/psx/python/
 
 ## Running one of my scripts
 
