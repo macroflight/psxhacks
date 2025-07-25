@@ -6,6 +6,11 @@ LINTVENVDIR = $${HOME}/.venv-lint/$(osname)
 # in the repo but frequenly there anyway for testing.
 LINTFILES = $(shell find . -name '*.py' ! -name psx.py)
 
+PYCODESTYLEFILES = $(shell find . -name '*.py' ! -name psx.py)
+
+PYDOCSTYLEFILES = $(shell find . -name '*.py' | egrep -v '(psx.py|frankentow)')
+
+
 CONFIGFILES = config_examples/*
 
 MARKDOWNFILES = router/*.md
@@ -21,7 +26,7 @@ venv: $(LINTVENVDIR)/bin/activate
 
 $(LINTVENVDIR)/bin/activate:
 	$(info * LINT: Trying to setup a Python3 venv to install lint tools in)
-	test -d $(LINTVENVDIR) || (python3 -m venv $(LINTVENVDIR); . $(LINTVENVDIR)/bin/activate; pip install pylint pycodestyle pydocstyle)
+	test -d $(LINTVENVDIR) || (python3 -m venv $(LINTVENVDIR); . $(LINTVENVDIR)/bin/activate; pip install pylint pycodestyle pydocstyle pyproj)
 	touch $(LINTVENVDIR)/bin/activate
 
 pylint: venv
@@ -34,11 +39,11 @@ configlint: venv
 
 pycodestyle: venv
 	$(info * LINT: Running pycodestyle)
-	. $(LINTVENVDIR)/bin/activate; pycodestyle --max-line-length=99999 --ignore=W504,E722 $(LINTFILES)
+	. $(LINTVENVDIR)/bin/activate; pycodestyle --max-line-length=99999 --ignore=W504,E722 $(PYCODESTYLEFILES)
 
 pydocstyle: venv
 	$(info * LINT: Running pydocstyle)
-	. $(LINTVENVDIR)/bin/activate; pydocstyle --ignore=D104,D203,D213 $(LINTFILES)
+	. $(LINTVENVDIR)/bin/activate; pydocstyle --ignore=D104,D203,D213 $(PYDOCSTYLEFILES)
 
 markdownlint:
 	$(info * LINT: Running markdownlint)
