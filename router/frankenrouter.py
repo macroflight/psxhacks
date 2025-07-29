@@ -1281,6 +1281,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 sender_hr, line)
             # Store RTT unless we're in a situation that we know innduce high RTT
             dolog = True
+            if sender.upstream and not self.is_upstream_connected():
+                dolog = False
             if self.is_upstream_connected():
                 time_since_connected = time.perf_counter() - self.upstream.connected_at
                 if time_since_connected < 5.0:
@@ -1288,9 +1290,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             if time.perf_counter() - self.last_client_connected < 5.0:
                 dolog = False
             if dolog:
-                self.upstream.frdp_ping_rtts.append(frdp_rtt)
+                sender.frdp_ping_rtts.append(frdp_rtt)
                 if frdp_rtt > self.config.performance.frdp_rtt_warning:
-                    self.logger.warning("SLOW: FRDP RTT to upstream is %.6f s", frdp_rtt)
+                    self.logger.warning("SLOW: FRDP RTT to %s is %.6f s", sender_hr, frdp_rtt)
         elif code == RulesCode.FRDP_IDENT:
             self.logger.debug(
                 "Got FRDP IDENT message from %s: %s",
