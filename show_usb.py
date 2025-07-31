@@ -25,3 +25,5 @@ while True:
         elif event.type == pygame.JOYHATMOTION:
             joystick = joysticks[event.instance_id]
             print(f"Hat movement on \"{joystick.get_name()}\" hat {event.hat} to position {joystick.get_hat(event.hat)}")
+        else:
+            print(f"Other pygame event type {event.type}: {event}")
