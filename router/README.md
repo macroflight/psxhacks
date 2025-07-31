@@ -49,13 +49,9 @@ development.
 For Windows you probably want the [Windows installer
 (64-bit)](https://www.python.org/ftp/python/3.13.5/python-3.13.5-amd64.exe)
 
-A few extra Python modules are needed for the router:
+One extra Python module is needed for the router:
 
-- tomllib (for the configuration file)
 - aiohttp (for the REST API)
-
-The router itself needs some extra Python modules, but the script that
-identifies PSX clients by their window names does.
 
 You can either install these modules in your main Python installation,
 or use a [Python virtual
@@ -66,7 +62,6 @@ Example:
 ``` text
 python3 -m venv router1
 . router1/bin/activate
-pip install tomllib
 pip install aiohttp
 ```
 
