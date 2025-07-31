@@ -128,36 +128,50 @@ Gatefinder tool.
 
 ## What you need to run my Python scripts:
 
-- Python 3.10 or later (might work with earlier versions but not
+- Python 3.13 or later (might work with earlier versions but not
   tested) from https://www.python.org/
 - The Python-SimConnect Python module (https://pypi.org/project/SimConnect/)
 - Hoppie's psx.py module from https://www.hoppie.nl/psx/python/
 
-## Installing the needed things, my way
+If you already know how to use Python, just use your favorite way to
+install packages. If not, try to follow the recipe below:
 
 ### Install Python
-
-- Download the Python installer from python.org. The latest 3.x should
-  be OK, no need to use exactly 3.10.
-- Run the installer, install into C:\fs\python\310. No need to use this exact path.
+- Download the Python installer from python.org. You probably want to
+  use "Windows installer (64-bit)
+- Run the installer, install into `C:\fs\python\3.13.5`. You can choose
+  another path, if so - use that path below.
 
 ### Create a Python virtual environment
 
-Not strictly needed, you could install Python-SimConnect in the main
-Python installation instead, but I prefer to use one virtual
-environment per project so I can install just the packages I need.
+```
+c:\fs\python\3.13.5\python.exe -m venv c:\fs\psx\psxpython\venv-1
+c:\fs\psx\psxpython\venv-1\Scripts\pip install --upgrade pip
+```
 
-```
-c:\fs\python\310\python.exe -m venv c:\fs\python\psxpython
-c:\fs\python\psxpython\Scripts\python.exe -m pip install --upgrade pip
-```
+By using a virtual environments you can have multiple sets of Python
+packages of different versions installed, and you don't need to modify
+the globally installed Python (`C:\fs\python\3.13.5`).
+
+You can use another path than `c:\fs\psx\psxpython\venv-1` for your
+virtual environment. If so, adjust the paths below.
 
 ### Install Python packages into the virtual environment
 
 ```
-c:\fs\python\psxpython\Scripts\pip install SimConnect
-c:\fs\python\psxpython\Scripts\pip install pygame
+c:\fs\psx\psxpython\venv-1\Scripts\pip install SimConnect
+c:\fs\psx\psxpython\venv-1\Scripts\pip install pygame
+c:\fs\psx\psxpython\venv-1\Scripts\pip install aiohttp
 ```
+
+SimConnect is needed for scripts that talk to MSFS (e.g frankenwind.py).
+
+Pygame is needed for frankenusb.py.
+
+Aiohttp is needed by frankenrouter.py.
+
+Other modules might be needed by other scripts in the future, if so
+you can install them in the same way.
 
 ### Update SimConnect.dll in Python-SimConnect (probably not needed)
 
@@ -174,26 +188,31 @@ To solve this, I simply copied the latest SimConnect.dll file from the
 MSFS SDK ("C:\MSFS SDK\SimConnect SDK\lib\SimConnect.dll") to
 c:\fs\python\psxpython\Lib\site-packages\SimConnect\SimConnect.dll.
 
-### Download Hoppie's psx.py
+### Hoppie's psx.py
 
 Most of my scripts requires Jeroen Hoppenbrouwers' `psx.py`
 module. For your convenience I'm including a copy of it in the
-repository.
+repository, so you no longer need to downlo
 
 The original `psx.py` is available at https://www.hoppie.nl/psx/python/
 
 ## Running one of my scripts
 
 - Open a PowerShell window
-- Change to the directory where you keep the scripts (for me this is c:\fs\psx\python)
+- Change to the directory where you keep the scripts (for me this is c:\fs\psx\psxhacks)
 - Run the script using python.exe from the virtual environment.
 
 E.g
 
 ```
-cd c:\fs\psx\python
-c:\fs\python\psxpython\Scripts\python.exe comparator.py --debug
+cd c:\fs\psx\pschacks
+c:\fs\python\psxpython\venv-1\Scripts\python.exe frankenusb.py
 ```
+
+If you want a single icon to click or run from e.g Stream Deck, you
+can create a BAT script or PowerShell script and run those lines from
+there.
+
 
 ## Binary packages
 
@@ -206,7 +225,7 @@ Pros: Easier to install
 
 Cons: You cannot edit the Python script inside if you want to change
 something. You also cannot verify what the binary does, so you have to
-trust the developer...
+trust the developer... 
 
 You can find the binary packages on
 https://drive.google.com/drive/folders/1Eu1uJCNUiLkFg9Qq8YwPCiPd9V7D5FbA
@@ -219,6 +238,9 @@ PSX variable to monitor, e.g "show_psx.exe Tla".
 
 In order to use frankenusb.exe you probably need to edit
 frankenusb-frankensim.conf first.
+
+Also note that the binary packages are usually not updated unless
+someone asks for it.
 
 ## Short frankenusb tutorial if you use the binary package
 
