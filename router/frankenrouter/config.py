@@ -27,6 +27,8 @@ class _RouterConfigListen:  # pylint: disable=missing-class-docstring,too-few-pu
 
 class _RouterConfigUpstream:  # pylint: disable=missing-class-docstring,too-few-public-methods
     def __init__(self, data):
+        self.interactive = data.get('interactive', False)
+
         self.host = data.get('host', '127.0.0.1')
 
         self.port = data.get('port', 10747)
@@ -94,6 +96,8 @@ class _RouterConfigAccess:  # pylint: disable=missing-class-docstring,too-few-pu
 
         if self.match_ipv4 is not None:
             for network in self.match_ipv4:
+                if network == 'ANY':
+                    continue
                 try:
                     ipaddress.ip_network(network)
                 except ValueError as exc:
@@ -142,10 +146,11 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
     def __init__(self, config_file=None, config_data=None):
         """Initialize the class."""
         self.logger = logging.getLogger(__name__)
-
         if config_file is not None and config_data is not None:
             raise RouterConfigError("Cannot use both config_file and config_data")
-        if config_file:
+        if config_data is None:
+            config_data = ""
+        if config_file is not None:
             try:
                 with open(config_file, 'r', encoding='utf-8') as tomlfile:
                     config_data = tomlfile.read()

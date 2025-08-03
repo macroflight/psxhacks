@@ -167,7 +167,7 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
             return True
         return False
 
-    def update_access_level(self, client_password=None):
+    def update_access_level(self, client_password=None):  # pylint: disable=too-many-branches
         """Get the access level for connecting client."""
 
         def set_level(access):
@@ -196,11 +196,15 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
             matching_network = None
             if access.match_ipv4 is not None:
                 for elem in access.match_ipv4:
-                    network = ipaddress.ip_network(elem)
-                    if client_ip in network:
-                        self.logger.info("Match: %s in %s", client_ip, network)
+                    if elem == 'ANY':
                         valid_ip = True
-                        matching_network = network
+                        matching_network = elem
+                    else:
+                        network = ipaddress.ip_network(elem)
+                        if client_ip in network:
+                            self.logger.info("Match: %s in %s", client_ip, network)
+                            valid_ip = True
+                            matching_network = network
 
             self.logger.debug("Checking against %s, valid_password=%s, valid_ip=%s",
                               access, valid_password, valid_ip)

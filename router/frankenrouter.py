@@ -1642,12 +1642,95 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         """Start the proxy."""
         self.handle_args()
 
-        # Read the config file
-        try:
-            self.config = config.RouterConfig(self.args.config_file)
-        except config.RouterConfigError as exc:
-            raise SystemExit(
-                f"Failed to load config file {self.args.config_file}: {exc}") from exc
+        # If there is no config file, fallback to "dumb client mode"
+        if not os.path.exists(self.args.config_file):
+            # Use the default config
+            self.config = config.RouterConfig()
+            # Set sane defaults and ask the user to override them
+            print(f"""
+Configuration file {self.args.config_file} not found.
+If you want to use a config file, press Control-C now and create one.
+
+To run the router in "basic client mode", answer the questions below.
+
+HOWTO for temporarily converting your PSX sim to a shared cockpit
+slave sim:
+
+1: Open the Instructor window for your PSX main server.
+2: On the Network tab, click Stop and then choose "A main client" and click start
+3: Answer the questions below
+4: The router will start and connect to the shared cockpit master sim
+5: Verify that your sim is working. You will probably need to restart
+a few addons (the ones that does not automatically reconnect when the
+PSX main server or router is restarted).
+
+Note: choose a simulator name that let other shared cockpit users know
+who you are, e.g your PSX forum nickname
+
+Note: Router port should be 10747 unless you know better :)
+
+Upstream host should be the IP address or hostname you got from the
+owner of the shared cockpit master sim.
+
+Upstream port should be the port number you got from the owner of the
+shared cockpit master sim.
+
+Password: leave blank if the master sim does not use a
+password. Otherwise use the password given to you by the owner of the
+shared cockpit master sim.
+
+            """)
+
+            # Default to listen on 10747 for "dumb client mode" and connect to 10748
+            self.config.listen.port = 10747
+            self.config.upstream.port = 10748
+
+            while True:
+                self.config.identity.simulator = input(
+                    "The name of your simulator others will see (max 24 characters)? ")
+                if (
+                        len(self.config.identity.simulator) < 24 and
+                        len(self.config.identity.simulator) > 0
+                ):
+                    break
+            self.config.identity.router = self.config.identity.simulator
+
+            listen = input(f"Router port (press Enter for {self.config.listen.port})? ")
+            host = input(f"Upstream host (press Enter for {self.config.upstream.host})? ")
+            port = input(f"Upstream port (press Enter for {self.config.upstream.port})? ")
+            password = input(
+                f"Upstream password (press Enter for {self.config.upstream.password})? ")
+            if listen != "":
+                self.config.listen.port = int(listen)
+            if host != "":
+                self.config.upstream.host = host
+            if port != "":
+                self.config.upstream.port = int(port)
+            if password != "":
+                self.config.upstream.password = password
+
+        else:
+            # Read the config file
+            try:
+                self.config = config.RouterConfig(self.args.config_file)
+            except config.RouterConfigError as exc:
+                raise SystemExit(
+                    f"Failed to load config file {self.args.config_file}: {exc}") from exc
+
+        # In interactive mode, ask the user for upstream connection
+        # details
+        if self.config.upstream.interactive is True:
+            print("Interactive mode requested")
+            host = input(f"Upstream host (press Enter for {self.config.upstream.host})? ")
+            port = input(f"Upstream port (press Enter for {self.config.upstream.port})? ")
+            password = input(
+                f"Upstream password (press Enter for {self.config.upstream.password})? ")
+            if host != "":
+                self.config.upstream.host = host
+            if port != "":
+                self.config.upstream.port = int(port)
+            if password != "":
+                self.config.upstream.password = password
 
         # Override with command line options
         if self.args.log_traffic is not None:

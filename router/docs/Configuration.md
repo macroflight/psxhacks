@@ -68,6 +68,11 @@ addons will already be configured to connect to that port.
 - `password`: if set, use this password to auenthicate to the upstream
   router. Only use this if the upstream is a frankenrouter that has a
   password configured.
+- `interactive`: if set to `true`, the user will be asked on startup
+  if another host, port or password should be used. This is mostly
+  intended for a shared cockpit slave sim setup where you might want
+  to connect to different master sims without changing your config
+  file.
 
 Example:
 
@@ -95,7 +100,9 @@ directory = 'C:\fs\PSX\Routerlogs'
 
 - `variables`: The path to the Variables.txt file (from the Devel
   folder of your Aerowinx installation or [downloaded from the
-  Forum](https://aerowinx.com/assets/networkers/Variables.txt))
+  Forum](https://aerowinx.com/assets/networkers/Variables.txt)). If
+  the file is not found, the router will print a warning and try to
+  download a copy of the file from Aerowinx.
 
 Example:
 
@@ -139,7 +146,8 @@ displayed in the status display.
       the PSX network (but can send the demand keyword).
 - `match ipv4`: If is set, any client connecting from this list of
   IPv4 networks will match. Note: to allow just one IP and not a
-  larger network, use the IP/32 notation.
+  larger network, use the IP/32 notation. To allow any IP to connect,
+  set to `[ "ANY" ]`.
 - `match_password`: If set, the router requires that the client provides
   this password to be given access.
 
@@ -149,6 +157,11 @@ have both an approved IP address and provide the password.
 Example:
 
 ```text
+[[access]]
+display_name = "Any client"
+match_ipv4 = [ "ANY" ]
+level = "full"
+
 [[access]]
 display_name = "Any local client"
 match_ipv4 = [ "127.0.0.1/32", "192.168.86.34/32" ]

@@ -28,17 +28,35 @@ The router is stable enough for long flights (16+ hours).
 - Addons or whole sims can be connected in read-only mode (can read
   PSX traffic and request DEMAND mode variables).
 
+## Quickstart - connect your PSX sim to an existing shared cockpit setup
+
+- Download the latest binary package from [here](https://drive.google.com/drive/folders/1Eu1uJCNUiLkFg9Qq8YwPCiPd9V7D5FbA)
+- Extract frankenrouter.exe from the zip file
+- Run frankenrouter.exe
+- Follow the instructions on screen, which tells you to:
+    - Reconfigure your PSX main server to be a main client
+    - Enter your simulator name
+    - Enter the connection details for the shared cockpit master sim (IP, port, password)
+    - Restart addons that don't automatically connect to the router
+- Fly shared cockpit :)
+
 ## Installing
 
-For now we distribute the router as Python scripts. If there is enough
-interest we might provide a standalone binary or installer later.
+You can always find the latest version of the router in this
+repository in Python script format.
+
+For those not comfortable installing Python we also provide a
+standalone binary `frankenrouter.exe` (created with
+[pyinstaller](https://pyinstaller.org/)). This might not always be
+fully up to date. Reach out to macroflight if you would like the
+binary to be updated. You can find the binary packages [here](https://drive.google.com/drive/folders/1Eu1uJCNUiLkFg9Qq8YwPCiPd9V7D5FbA)
+
+To run the Python version of the router:
 
 - Clone the [psxhacks Git repository](https://github.com/macroflight/psxhacks)
     - Alternative if you don't have a Git client installed: download a
       ZIP of the repository usign the `Code` button's Download Zip
       option.
-- Download the Variables.txt file from [the PSX
-  Forum](https://aerowinx.com/assets/networkers/Variables.txt)
 - Install Python (see below)
 
 ### Python

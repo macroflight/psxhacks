@@ -23,7 +23,12 @@ class RouterCache():  # pylint: disable=too-few-public-methods
         try:
             with open(self.cache_file, 'r', encoding='utf-8') as statefile:
                 self.cache = json.load(statefile)
-                if isinstance(self.cache['version'], str):
+                if 'version' not in self.cache:
+                    # Bad data, reject cache
+                    self.logger.warning("Bad data in %s, starting with empty cache",
+                                        self.cache_file)
+                    self.cache = {}
+                elif isinstance(self.cache['version'], str):
                     self.logger.warning("Cache file is old format, starting with empty cache")
                     self.cache = {}
         except (FileNotFoundError, json.decoder.JSONDecodeError):

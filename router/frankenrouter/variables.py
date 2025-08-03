@@ -1,6 +1,8 @@
 """Read the PSX Variables.txt definition format."""
+import logging
 import re
 import unittest
+import urllib.request
 
 NETWORK_MODES = [
     'ECON',
@@ -46,6 +48,7 @@ class Variables():  # pylint: disable=too-few-public-methods
 
     def __init__(self, vfilepath=None, vfiledata=None):
         """Initialize the instance."""
+        self.logger = logging.getLogger(__name__)
         self.variables = {}
 
         if vfilepath is not None:
@@ -54,8 +57,18 @@ class Variables():  # pylint: disable=too-few-public-methods
             try:
                 with open(vfilepath, 'r', encoding='utf-8') as vfile:
                     self._init_from_data(vfile.read())
-            except FileNotFoundError as exc:
-                raise VariablesException("Variables.txt not found") from exc
+            except FileNotFoundError:
+                self.logger.warning(
+                    "%s not found, trying to download from Aerowinx",
+                    vfilepath)
+                try:
+                    urllib.request.urlretrieve(
+                        "https://aerowinx.com/assets/networkers/Variables.txt",
+                        "Variables.txt")
+                except urllib.error.URLError as exc2:
+                    raise VariablesException(
+                        "Failed to download Variables.txt from Aerowinx") from exc2
+                self.logger.info("Downloaded Variables.txt from Aerowinx")
         elif vfiledata is not None:
             self._init_from_data(vfiledata)
 
