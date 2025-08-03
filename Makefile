@@ -1,6 +1,6 @@
 # Note: needs e.g apt-get install python3-venv
 
-LINTVENVDIR = $${HOME}/.venv-lint/$(osname)
+LINTVENVDIR = $${HOME}/.venv-lint-psxhacks/$(osname)
 
 # Run pylint on all *_.py files except psx.py (which is not included
 # in the repo but frequenly there anyway for testing.
