@@ -1,5 +1,10 @@
 # Changelog
 
+## 2025-08-03: version 0.8
+
+- Simplify shared cockpit slave sim setup - no config file needed
+- Binary frankenrouter.exe available
+
 ## 2025-07-20: version 0.7
 
 - Now has a single set of forwarding rules in a unit-testable module
