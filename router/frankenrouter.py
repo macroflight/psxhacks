@@ -710,7 +710,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.logger.debug("isonlystart for %s", client.peername)
                 if client.is_frankenrouter:
                     # send
-                    pass
+                    client.welcome_keywords_sent.add(key)
                 elif client.waiting_for_start_keywords:
                     # send
                     client.welcome_keywords_sent.add(key)
