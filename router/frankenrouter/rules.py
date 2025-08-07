@@ -164,7 +164,8 @@ class Rules():  # pylint: disable=too-many-public-methods
         (simname, routername) = payload.split(':')
         self.sender.simulator_name = simname
         self.sender.router_name = routername
-        self.sender.display_name = f"I:{routername}"
+        self.sender.display_name = routername
+        self.sender.display_name_source = "FRDP IDENT"
         self.router.request_status_display()
         # Drop message
         return self.myreturn(RulesAction.DROP, RulesCode.FRDP_IDENT)
@@ -204,7 +205,8 @@ class Rules():  # pylint: disable=too-many-public-methods
                     "Client name %s is too long, using %s",
                     thisname, newname)
                 thisname = newname
-            self.router.clients[peername].display_name = f"I:{thisname}"
+            self.router.clients[peername].display_name = thisname
+            self.router.clients[peername].display_name_source = "FRDP CLIENTINFO"
             self.router.request_status_display()
         else:
             self.logger.warning(
@@ -300,7 +302,8 @@ class Rules():  # pylint: disable=too-many-public-methods
         if re.match(r".*:FRANKEN.PY frankenrouter", rest):
             display_name = rest.split(":")[0]
             self.sender.is_frankenrouter = True
-            self.sender.display_name = f"R:{display_name}"
+            self.sender.display_name = display_name
+            self.sender.display_name_source = "name message"
             return self.myreturn(RulesAction.DROP, RulesCode.NAME_FROM_FRANKENROUTER)
 
         if rest == "":
@@ -325,7 +328,8 @@ class Rules():  # pylint: disable=too-many-public-methods
             thisname = "vPilot"
         elif re.match(r".*:FRANKEN\.PY", rest):
             thisname = rest.split(":")[0]
-        self.sender.display_name = f"N:{thisname}"
+        self.sender.display_name = thisname
+        self.sender.display_name_source = "name message"
         self.router.request_status_display()
         return self.myreturn(RulesAction.DROP, RulesCode.NAME_LEARNED)
 
@@ -626,6 +630,7 @@ class TestRules(unittest.TestCase):
             self.simulator_name = 'UnknownSim'
             self.router_name = 'UnknownRouter'
             self.display_name = 'UnknownDisplay'
+            self.display_name_source = 'UnknownSource'
             self.is_frankenrouter = False
             self.upstream = False
             self.peername = None
@@ -713,7 +718,8 @@ class TestRules(unittest.TestCase):
         self.assertEqual(code, RulesCode.FRDP_IDENT)
         self.assertEqual(router.upstream.simulator_name, 'OtherSim')
         self.assertEqual(router.upstream.router_name, 'OtherRouter')
-        self.assertEqual(router.upstream.display_name, 'I:OtherRouter')
+        self.assertEqual(router.upstream.display_name, 'OtherRouter')
+        self.assertEqual(router.upstream.display_name_source, 'FRDP IDENT')
 
         # CLIENTINFO from upstream (not allowed)
         (action, code, *_) = rules.route(
@@ -778,7 +784,8 @@ class TestRules(unittest.TestCase):
         self.assertEqual(code, RulesCode.FRDP_IDENT)
         self.assertEqual(testpeer.simulator_name, 'SomeSim')
         self.assertEqual(testpeer.router_name, 'SomeRouter')
-        self.assertEqual(testpeer.display_name, 'I:SomeRouter')
+        self.assertEqual(testpeer.display_name, 'SomeRouter')
+        self.assertEqual(testpeer.display_name_source, 'FRDP IDENT')
 
         # CLIENTINFO from client
         json_payload = json.dumps({
@@ -790,7 +797,8 @@ class TestRules(unittest.TestCase):
             f"addon=FRANKENROUTER:CLIENTINFO:{json_payload}", testpeer)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.FRDP_CLIENTINFO)
-        self.assertEqual(testpeer.display_name, 'I:PSX Sounds')
+        self.assertEqual(testpeer.display_name, 'PSX Sounds')
+        self.assertEqual(testpeer.display_name_source, 'FRDP CLIENTINFO')
 
     def test_frdp_client_auth(self):  # pylint: disable=too-many-statements
         """Test FRDP messages from client."""
@@ -849,13 +857,15 @@ class TestRules(unittest.TestCase):
         (action, code, *_) = rules.route("name=somename:or:other", testpeer)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.NAME_LEARNED)
-        self.assertEqual(testpeer.display_name, 'N:somename:or:other')
+        self.assertEqual(testpeer.display_name, 'somename:or:other')
+        self.assertEqual(testpeer.display_name_source, 'name message')
 
         # known addon sending name=
         (action, code, *_) = rules.route("name=BACARS:BA ACARS Simulation", testpeer)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.NAME_LEARNED)
-        self.assertEqual(testpeer.display_name, 'N:BACARS')
+        self.assertEqual(testpeer.display_name, 'BACARS')
+        self.assertEqual(testpeer.display_name_source, 'name message')
 
     def test_demand(self):
         """Test demand messages."""

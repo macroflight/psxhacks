@@ -43,6 +43,7 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         self.is_closing = False
 
         self.display_name = 'unknown connection'
+        self.display_name_source = 'new connection'
 
         self.simulator_name = 'unknown sim'
         self.router_name = 'unknown router'
@@ -175,10 +176,12 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
                 self.logger.info("Setting %s for %s", NOACCESS_ACCESS_LEVEL, self.peername)
                 self.access_level = NOACCESS_ACCESS_LEVEL
                 self.display_name = 'auth pending'
+                self.display_name_source = 'new connection'
             else:
                 self.logger.info("Setting %s for %s", access.level, self.peername)
                 self.access_level = access.level
                 self.display_name = access.display_name
+                self.display_name_source = 'access config'
 
         client_ip = ipaddress.ip_address(self.ip)
         self.logger.info(

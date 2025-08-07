@@ -310,10 +310,21 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 ping_rtt_median = f"{(1000.0 * statistics.median(data.frdp_ping_rtts)):.1f}"
                 ping_rtt_max = f"{(1000.0 * max(data.frdp_ping_rtts)):.1f}"
 
+            if data.display_name_source == 'FDRP IDENT':
+                prefix = 'RI:'
+            elif data.display_name_source == 'FDRP CLIENTINFO':
+                prefix = 'CI:'
+            elif data.display_name_source == 'name message':
+                prefix = 'N:'
+            elif data.display_name_source == 'access config':
+                prefix = 'AC:'
+            else:
+                prefix = ''
+
             self.logger.info(
                 "%2d %-26s %-15s %5d %8s %7d %6d %6d %9d %9d %5s %5s",
                 data.client_id,
-                data.display_name,
+                f"{prefix}{data.display_name}",
                 data.ip,
                 data.port,
                 data.access_level,

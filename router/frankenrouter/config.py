@@ -82,6 +82,7 @@ class _RouterConfigPerformance:  # pylint: disable=missing-class-docstring,too-f
 class _RouterConfigAccess:  # pylint: disable=missing-class-docstring,too-few-public-methods
     def __init__(self, data):
         self.display_name = data.get('display_name', None)
+        self.display_name_source = 'access config'
         if self.display_name is None:
             raise RouterConfigError(f"An access rule must have a display_name: {data}")
 
