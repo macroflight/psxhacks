@@ -1339,6 +1339,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             await self.close_client_connection(sender, clean=False)
         elif code == RulesCode.FRDP_AUTH_OK:
             self.logger.info("Client %s successfully authenticated: %s", sender_hr, line)
+            await self.client_add_to_network(sender)
+            sender.welcome_sent = True
         elif code == RulesCode.FRDP_AUTH_ALREADY_HAS_ACCESS:
             self.logger.warning(
                 "Client %s successfully authenticated but already has access: %s",
