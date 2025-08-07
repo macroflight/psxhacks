@@ -226,6 +226,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             '--no-pause-clients',
             action='store_true',
         )
+        parser.add_argument(
+            '--upstream-interactive',
+            action='store_true',
+            help="Ask about upstream details before starting",
+        )
         self.args = parser.parse_args()
 
     def get_random_id(self, length=16):
@@ -1732,7 +1737,7 @@ shared cockpit master sim.
 
         # In interactive mode, ask the user for upstream connection
         # details
-        if self.config.upstream.interactive is True:
+        if self.config.upstream.interactive is True or self.args.upstream_interactive:
             print("Interactive mode requested")
             host = input(f"Upstream host (press Enter for {self.config.upstream.host})? ")
             port = input(f"Upstream port (press Enter for {self.config.upstream.port})? ")
