@@ -76,7 +76,7 @@ class MakeGateFinderDatabase():  # pylint: disable=too-few-public-methods
                parking.heading,
                parking.lonx,
                parking.laty,
-               parking.radius,
+               parking.radius
                from airport inner join parking where parking.airport_id is airport.airport_id;
         """)
 
