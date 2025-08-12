@@ -162,6 +162,7 @@ class Variables():  # pylint: disable=too-few-public-methods
                 'load1',
                 'load2',
                 'load3',
+                'keepalive',  # not PSX, but SimStack Switch sends this often
         ]:
             return True
         return False
