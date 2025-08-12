@@ -172,6 +172,14 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
         if 'access' in config:
             for elem in config['access']:
                 self.access.append(_RouterConfigAccess(elem))
+        else:
+            # Default to allow all clients to access router
+            self.logger.info("No [[access]] section in config, allowing all clients to connect.")
+            self.access.append(_RouterConfigAccess({
+                'display_name': 'all clients allowed',
+                'match_ipv4': [ 'ANY' ],
+                'level': 'full'
+            }))
         self.check = []
         if 'check' in config:
             for elem in config['check']:
