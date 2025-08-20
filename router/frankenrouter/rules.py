@@ -84,6 +84,7 @@ class RulesCode(enum.Enum):
     FRDP_PONG = enum.auto()
     FRDP_IDENT = enum.auto()
     FRDP_CLIENTINFO = enum.auto()
+    FRDP_ROUTERINFO = enum.auto()
     FRDP_AUTH_FAIL = enum.auto()
     FRDP_AUTH_OK = enum.auto()
     FRDP_AUTH_ALREADY_HAS_ACCESS = enum.auto()
@@ -161,12 +162,13 @@ class Rules():  # pylint: disable=too-many-public-methods
         Format:
         addon=FRANKENROUTER:IDENT:<sim name>:<router name>
         """
-        (simname, routername) = payload.split(':')
+        (simname, routername, uuid) = payload.split(':')
         self.sender.simulator_name = simname
         self.sender.router_name = routername
         self.sender.display_name = routername
+        self.sender.uuid = uuid
         self.sender.display_name_source = "FRDP IDENT"
-        self.router.request_status_display()
+        self.router.connection_state_changed()
         # Drop message
         return self.myreturn(RulesAction.DROP, RulesCode.FRDP_IDENT)
 
@@ -207,12 +209,37 @@ class Rules():  # pylint: disable=too-many-public-methods
                 thisname = newname
             self.router.clients[peername].display_name = thisname
             self.router.clients[peername].display_name_source = "FRDP CLIENTINFO"
-            self.router.request_status_display()
+            self.router.connection_state_changed()
         else:
             self.logger.warning(
                 "Got CLIENTINFO data for non-connected client %s", peername)
         # Drop message
         return self.myreturn(RulesAction.DROP, RulesCode.FRDP_CLIENTINFO)
+
+    def handle_addon_frankenrouter_routerinfo(self, payload):
+        """Handle a FRDP ROUTERINFO message.
+
+        Format:
+        addon=FRANKENROUTER:ROUTERINFO:<JSON data>
+
+        This message should be forwarded to the network, since we want
+        it to reach all frankenrouters.
+        """
+        try:
+            routerinfo = json.loads(payload)
+        except json.decoder.JSONDecodeError:
+            return self.myreturn(
+                RulesAction.DROP, RulesCode.MESSAGE_INVALID,
+                message=f"Invalid JSON data in FRDP ROUTERINFO message: {self.line}"
+            )
+        if 'uuid' not in routerinfo:
+            self.logger.warning("DISCARDING FRDP ROUTERINFO message without uuid: %s", self.line)
+            # Drop message
+            return self.myreturn(RulesAction.DROP, RulesCode.FRDP_ROUTERINFO)
+
+        self.router.routerinfo[routerinfo['uuid']] = routerinfo
+        # Forward message to network
+        return self.myreturn(RulesAction.NORMAL, RulesCode.FRDP_ROUTERINFO)
 
     def handle_addon_frankenrouter_auth(self, payload):
         """Handle FRDP AUTH message.
@@ -234,7 +261,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         self.sender.update_access_level(payload)
         if not self.sender.has_access():
             return self.myreturn(RulesAction.DROP, RulesCode.FRDP_AUTH_FAIL)
-        self.router.request_status_display()
+        self.router.connection_state_changed()
         return self.myreturn(RulesAction.DROP, RulesCode.FRDP_AUTH_OK)
 
     def handle_addon_frankenrouter(self, rest):  # pylint: disable=too-many-return-statements
@@ -250,6 +277,8 @@ class Rules():  # pylint: disable=too-many-public-methods
             # Store in router object and forward to network
             self.router.last_bang = time.perf_counter()
             return self.myreturn(RulesAction.NORMAL, RulesCode.FRDP_BANG)
+        if message_type == 'ROUTERINFO':
+            return self.handle_addon_frankenrouter_routerinfo(payload)
         if message_type == 'CLIENTINFO':
             return self.handle_addon_frankenrouter_clientinfo(payload)
         if message_type == 'AUTH':
@@ -330,7 +359,7 @@ class Rules():  # pylint: disable=too-many-public-methods
             thisname = rest.split(":")[0]
         self.sender.display_name = thisname
         self.sender.display_name_source = "name message"
-        self.router.request_status_display()
+        self.router.connection_state_changed()
         return self.myreturn(RulesAction.DROP, RulesCode.NAME_LEARNED)
 
     def handle_nolong(self):
@@ -617,7 +646,7 @@ class TestRules(unittest.TestCase):
         def variable_stats_add(self, *args):
             """Add dummy stats."""
 
-        def request_status_display(self, *args):
+        def connection_state_changed(self, *args):
             """Implement Dummy display."""
 
     class DummyConnection():  # pylint: disable=too-few-public-methods,too-many-instance-attributes
@@ -713,12 +742,13 @@ class TestRules(unittest.TestCase):
 
         # IDENT from upstream
         (action, code, *_) = rules.route(
-            "addon=FRANKENROUTER:IDENT:OtherSim:OtherRouter", router.upstream)
+            "addon=FRANKENROUTER:IDENT:OtherSim:OtherRouter:fakeuuid", router.upstream)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.FRDP_IDENT)
         self.assertEqual(router.upstream.simulator_name, 'OtherSim')
         self.assertEqual(router.upstream.router_name, 'OtherRouter')
         self.assertEqual(router.upstream.display_name, 'OtherRouter')
+        self.assertEqual(router.upstream.uuid, 'fakeuuid')
         self.assertEqual(router.upstream.display_name_source, 'FRDP IDENT')
 
         # CLIENTINFO from upstream (not allowed)
@@ -779,7 +809,7 @@ class TestRules(unittest.TestCase):
 
         # IDENT from client
         (action, code, *_) = rules.route(
-            "addon=FRANKENROUTER:IDENT:SomeSim:SomeRouter", testpeer)
+            "addon=FRANKENROUTER:IDENT:SomeSim:SomeRouter:fakeuuid", testpeer)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.FRDP_IDENT)
         self.assertEqual(testpeer.simulator_name, 'SomeSim')

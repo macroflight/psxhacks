@@ -277,6 +277,20 @@ upstream router                client router
 a router to another to suggest a display name for itself in the
 upstream router status display and logs.
 
+### FRDP ROUTERINFO
+
+`addon=FRANKENROUTER:ROUTERINFO:<JSON data>` is send by all
+frankenrouters in the network. Sinc addon messages are forwarded to
+the entire network, each router will have information about all other
+routers and will therefore have an updated view of connected clients,
+etc.
+
+Note: this differs from the CLIENTINFO messgage. CLIENTINFO is
+terminated by the first router that sees it and is used to set usable
+names for clients connected to that router.
+
+FIXME: document the JSON data format.
+
 ### FRDP CLIENTINFO
 
 `addon=FRANKENROUTER:CLIENTINFO:<JSON data>` can be sent by any client

@@ -47,6 +47,7 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
 
         self.simulator_name = 'unknown sim'
         self.router_name = 'unknown router'
+        self.uuid = None
 
         # Traffic counters
         self.messages_sent = 0

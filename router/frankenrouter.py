@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import itertools
+import json
 import logging
 import logging.handlers
 import math
@@ -15,6 +16,7 @@ import statistics
 import string
 import time
 import traceback
+import uuid
 import queue
 
 from aiohttp import web  # pylint: disable=import-error
@@ -41,10 +43,13 @@ PSX_DEFAULT_VERSION = '10.182 NG'
 UPSTREAM_WAITFOR = 5.0
 
 # Status display static config
-HEADER_LINE_LENGTH = 120
+HEADER_LINE_LENGTH = 114
 
 # How often to check the RTT to upstream and client frankenrouters
 FDRP_PING_INTERVAL = 5.0
+
+# How often to send FDRP ROUTERINFO (also sent after certain events, e.g client connects)
+FRDP_ROUTERINFO_INTERVAL = 60.0
 
 # Keep 300 seconds of RTT data for the statistics in the status display
 FDRP_KEEP_RTT_SAMPLES = 300
@@ -55,11 +60,20 @@ FDRP_KEEP_RTT_SAMPLES = 300
 VARIABLE_STATS_BUFFER_SIZE = 10000
 
 
+def trimstring(longname, maxlen=11, sep=".."):
+    """Shorten string."""
+    if not isinstance(longname, str):
+        return longname
+    length = int((maxlen - len(sep)) / 2)
+    return longname[:length] + sep + longname[-length:]
+
+
 class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-public-methods
     """Replaces the PSX USB subsystem."""
 
     def __init__(self):
         """Initialize the class."""
+        self.uuid = None
         self.args = None
         self.config = None
         self.logger = None
@@ -128,10 +142,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.next_client_id = 1
         self.starttime = time.perf_counter()
         self.status_display_requested = False
+        self.frdp_routerinfo_requested = False
         self.upstream_reconnect_requested = False
         self.longest_destination_string = 0
         self.variable_stats_buffer = []
         self.rules = Rules(self)
+
+        # We store FRDP ROUTERINFO data keyed by the sending router UUID
+        self.routerinfo = {}
 
         # Track when we last send the start keyword upstream
         self.start_sent_at = 0.0
@@ -142,9 +160,16 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # normally.
         self.last_client_connected = 0.0
 
-    def request_status_display(self):
-        """Reqeust a status display update."""
+        # Track when we last sent FRDP ROUTERINFO
+        self.last_frdp_routerinfo = 0.0
+
+    def connection_state_changed(self):
+        """Run when connection state has changed.
+
+        Used to trigger a status display update, etc.
+        """
         self.status_display_requested = asyncio.current_task().get_name()
+        self.frdp_routerinfo_requested = asyncio.current_task().get_name()
 
     def handle_args(self):  # pylint: disable=too-many-statements
         """Handle command line arguments."""
@@ -250,12 +275,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             return True
         return False
 
-    def print_status(self):
+    def print_status(self):  # pylint: disable=too-many-branches, too-many-statements
         """Print a multi-line status message."""
         # No complicated status output when we're shutting down
         self.logger.info("-" * HEADER_LINE_LENGTH)
         self.logger.info(
-            ("Router \"%s\" port %d, %d/%d msgs in queue from upstream/clients, uptime %d s" +
+            ("This router \"%s\" port %d, %d/%d queue upstream/clients, uptime %d s" +
              ", API port %s, cache=%s"),
             self.config.identity.simulator, self.config.listen.port,
             self.messagequeue_from_upstream.qsize(),
@@ -263,12 +288,15 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             int(time.perf_counter() - self.starttime),
             self.config.listen.rest_api_port, self.cache.get_size(),
         )
-        self.logger.info("Press Ctrl-C to shut down cleanly")
+        self.logger.info("Router UUID: %s - Press Ctrl-C to shut down cleanly",
+                         trimstring(self.uuid))
         if self.log_traffic_filename:
             self.logger.info("Logging traffic to %s", self.log_traffic_filename)
         upstreaminfo = "[NO UPSTREAM CONNECTION]"
         if self.is_upstream_connected():
-            upstreaminfo = f"UPSTREAM {self.upstream.ip}:{self.upstream.port}"
+            upstreaminfo = f"upstream is {self.upstream.ip}:{self.upstream.port}"
+            if self.upstream.uuid is not None:
+                upstreaminfo += f":{trimstring(self.upstream.uuid)}"
             upstreaminfo += f" {self.upstream.display_name}"
             if len(self.upstream.frdp_ping_rtts) > 0:
                 # Keep the last N samples
@@ -338,6 +366,37 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 ping_rtt_median,
                 ping_rtt_max,
             )
+        # Print information about other routers in the network
+        for routeruuid, info in self.routerinfo.items():  # pylint: disable=too-many-nested-blocks
+            if routeruuid != self.uuid:
+                upstream = None
+                for con in info['connections']:
+                    if con['upstream']:
+                        if con['uuid'] is None:
+                            upstream = "non-frankenrouter (probably PSX main server)"
+                        else:
+                            upstream = f"frankenrouter {con['display_name']}"
+                            upstream += f" ({trimstring(con['uuid'])})"
+                self.logger.info(
+                    "Remote router %s (%s) in sim %s, uptime %d s (data age %d s)",
+                    info['router_name'],
+                    trimstring(info['uuid']),
+                    info['simulator_name'],
+                    info['performance']['uptime'],
+                    int(time.time() - info['timestamp']),
+                )
+                if upstream is not None:
+                    self.logger.info(
+                        "--> upstream connection is %s",
+                        upstream)
+                for con in info['connections']:
+                    if not con['upstream']:
+                        self.logger.info("--> client %s is %s, connected time %s seconds",
+                                         con['client_id'],
+                                         con['display_name'],
+                                         con['connected_time'],
+                                         )
+
         self.logger.info("-" * HEADER_LINE_LENGTH)
 
     async def log_connect_evt(self, peername, clientid=None, disconnect=False):
@@ -552,7 +611,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         except KeyError:
             pass
         self.logger.info("Client connection %s closed", client.peername)
-        self.request_status_display()
+        self.connection_state_changed()
 
     async def close_upstream_connection(self):
         """Close an upstream connection."""
@@ -566,7 +625,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         await self.log_connect_evt(peername, disconnect=True)
         self.upstream = None
         self.logger.info("Closed upstream connection %s", peername)
-        self.request_status_display()
+        self.connection_state_changed()
 
     async def pause_clients(self):
         """Send load1 to pause clients."""
@@ -610,8 +669,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             # Get the client's initial access level based on IP
             this_client.update_access_level()
 
-            # New client connected, so print status
-            self.request_status_display()
+            # New client connected, so print status and send FRDP ROUTERINFO
+            self.connection_state_changed()
 
             # Add client to network (send welcome message, etc) if it
             # has access (i.e authenticated based on IP or password)
@@ -630,10 +689,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     await self.log_connect_evt(
                         this_client.peername, clientid=this_client.client_id, disconnect=True)
                     del self.clients[this_client.peername]
-                    self.request_status_display()
                     self.logger.warning("Client connection broke (%s) for %s",
                                         exc, this_client.peername)
-                    self.request_status_display()
+                    self.connection_state_changed()
                     return
                 t_read_data = time.perf_counter()
                 # The real PSX server will not close a client
@@ -674,7 +732,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                                  exc, this_client.peername)
             self.logger.critical(traceback.format_exc())
             await self.close_client_connection(this_client, clean=True)
-            self.request_status_display()
+            self.connection_state_changed()
             self.logger.info("Connection %s shut down", this_client.peername)
             return
         # END OF handle_new_connection_cb
@@ -683,6 +741,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self, line, exclude=None, include=None,
             islong=False, isonlystart=False,
             key=None, exclude_name_regexp=None,
+            ignore_access=False,
     ):  # pylint: disable=too-many-branches, too-many-arguments, too-many-positional-arguments
         """Send a line to connected clients.
 
@@ -705,7 +764,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         "Not sending to %s due to regexp match for %s against %s",
                         client.peername, client.display_name, exclude_name_regexp)
                     continue
-            if not client.has_access():
+            if not client.has_access() and not ignore_access:
                 self.logger.debug(
                     "Not sending to noaccess client %s", client.peername)
                 continue
@@ -808,8 +867,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.logger.debug("Sending demand=%s to upstream")
                     await self.send_to_upstream(f"demand={demand_var}")
 
-                # Connection complete, refresh status display
-                self.request_status_display()
+                # Connection complete, refresh status display and send FRDP ROUTERINFO
+                self.connection_state_changed()
 
                 # Wait for and process data from upstream connection
                 while self.is_upstream_connected():
@@ -1144,13 +1203,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 if self.is_upstream_connected() and self.upstream.is_frankenrouter:
                     if not self.upstream.frdp_ident_sent:
                         self.logger.info("Sending FRDP IDENT to upstream")
-                        await self.send_to_upstream(f"addon=FRANKENROUTER:IDENT:{self.config.identity.simulator}:{self.config.identity.router}")  # pylint: disable=line-too-long
+                        await self.send_to_upstream(f"addon=FRANKENROUTER:IDENT:{self.config.identity.simulator}:{self.config.identity.router}:{self.uuid}")  # pylint: disable=line-too-long
                         self.upstream.frdp_ident_sent = True
                 for peername, data in self.clients.items():
                     if data.is_frankenrouter and not data.frdp_ident_sent:
                         self.logger.info("Sending FRDP IDENT to %s", data.peername)
-                        await self.client_broadcast(f"addon=FRANKENROUTER:IDENT:{self.config.identity.simulator}:{self.config.identity.router}",  # pylint: disable=line-too-long
-                                                    include=[peername])
+                        await self.client_broadcast(f"addon=FRANKENROUTER:IDENT:{self.config.identity.simulator}:{self.config.identity.router}:{self.uuid}",  # pylint: disable=line-too-long
+                                                    include=[peername], ignore_access=True)
                         data.frdp_ident_sent = True
                 #
                 # FRDP AUTH
@@ -1161,6 +1220,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     if self.config.upstream.password and not self.upstream.frdp_auth_sent:
                         await self.send_to_upstream(f"addon=FRANKENROUTER:AUTH:{self.config.upstream.password}")  # pylint: disable=line-too-long
                         self.upstream.frdp_auth_sent = True
+                #
+                # FRDP ROUTERINFO
+                #
+                if (
+                        self.frdp_routerinfo_requested or
+                        time.perf_counter() - self.last_frdp_routerinfo > FRDP_ROUTERINFO_INTERVAL
+                ):
+                    await self.send_frdp_routerinfo()
 
         # Standard Task cleanup
         except asyncio.exceptions.CancelledError:
@@ -1172,6 +1239,43 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.critical(traceback.format_exc())
             return
         # End of frdp_send_task()
+
+    async def send_frdp_routerinfo(self):
+        """Send FRDP ROUTERINFO message."""
+        self.frdp_routerinfo_requested = False
+        payload = {
+            "timestamp": time.time(),
+            "router_name": self.config.identity.router,
+            "simulator_name": self.config.identity.simulator,
+            "uuid": self.uuid,
+            "performance": {
+                "uptime": int(time.perf_counter() - self.starttime),
+            },
+        }
+        payload['connections'] = []
+
+        conns = list(self.clients.values())
+        if self.is_upstream_connected():
+            conns.append(self.upstream)
+
+        for con in conns:
+            payload['connections'].append({
+                "upstream": con.upstream,
+                "uuid": con.uuid,
+                "client_id": con.client_id,
+                "is_frankenrouter": con.is_frankenrouter,
+                "display_name": con.display_name,
+                "connected_time": int(time.perf_counter() - con.connected_at),
+            })
+
+        payload_json = json.dumps(payload)
+        # Store our own routerinfo so we have all the data in the same place
+        self.routerinfo[self.uuid] = payload
+        # Send to network
+        await self.send_to_upstream(f"addon=FRANKENROUTER:ROUTERINFO:{payload_json}")
+        await self.client_broadcast(f"addon=FRANKENROUTER:ROUTERINFO:{payload_json}")
+        self.last_frdp_routerinfo = time.perf_counter()
+        # End of send_frdp_routerinfo()
 
     def print_client_warnings(self):
         """Print warnings about unexpected client counts."""
@@ -1254,6 +1358,17 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                             self.logger.info(
                                 "Housekeeping trimmed variable stats buffer from %d to %d",
                                 len_before, len_after)
+
+                    # Remove old routerinfo entries
+                    remove = set()
+                    for key, value in self.routerinfo.items():
+                        age = time.time() - value['timestamp']
+                        if age > 2 * FRDP_ROUTERINFO_INTERVAL:
+                            self.logger.info("Removing old routerinfo entry with age %d", age)
+                            remove.add(key)
+                    for key in remove:
+                        del self.routerinfo[key]
+
         # Standard Task cleanup
         except asyncio.exceptions.CancelledError:
             self.logger.info("Task %s was cancelled, cleanup and exit", name)
@@ -1349,6 +1464,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.warning("Got invalid message (%s): %s", message, line)
         elif code == RulesCode.FRDP_CLIENTINFO:
             self.logger.debug("Got FRDP CLIENTINFO: %s", line)
+        elif code == RulesCode.FRDP_ROUTERINFO:
+            self.logger.debug("Got FRDP ROUTERINFO: %s", line)
         elif code == RulesCode.FRDP_AUTH_FAIL:
             self.logger.warning("Client failed FRDP authentication: %s: %s", sender_hr, line)
             # Disconnect clients that fail authentication
@@ -1756,6 +1873,15 @@ shared cockpit master sim.
 
         if self.args.log_directory is not None:
             self.config.log.directory = self.args.log_directory
+
+        # Set our UUID (based on hostid and listen port as we want it
+        # to be stable but unique even if we run multiple routers on
+        # the same host). We will always use just the hex version of
+        # the UUID, so store that.
+        self.uuid = uuid.uuid3(
+            uuid.NAMESPACE_DNS,
+            str(uuid.getnode()) + str(self.config.listen.port)).hex
+        # self.uuid = str(uuid.getnode()) + str(self.config.listen.port)
 
         # Other things we need to set based on the config
         if self.config.listen.rest_api_port is None:
