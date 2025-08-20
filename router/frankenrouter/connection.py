@@ -150,9 +150,6 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
         # List of variables this client has send demand= for
         self.demands = set()
 
-        # Number of connected clients (for frankenrouter clients)
-        self.connected_clients = 0
-
         # Increase the write buffer a bit to fit a PSX welcome message
         self.writer.transport.set_write_buffer_limits(high=1048576, low=524288)
 

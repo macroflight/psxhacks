@@ -113,7 +113,7 @@ class _RouterConfigAccess:  # pylint: disable=missing-class-docstring,too-few-pu
                 "There must be an access_level in the access config")
         if self.level not in ['full', 'observer', 'blocked']:
             raise RouterConfigError(
-                "Invalid access level {self.level}")
+                f"Invalid access level {self.level}")
 
 
 class _RouterConfigCheck:  # pylint: disable=missing-class-docstring,too-few-public-methods
@@ -177,7 +177,7 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
             self.logger.info("No [[access]] section in config, allowing all clients to connect.")
             self.access.append(_RouterConfigAccess({
                 'display_name': 'all clients allowed',
-                'match_ipv4': [ 'ANY' ],
+                'match_ipv4': ['ANY'],
                 'level': 'full'
             }))
         self.check = []

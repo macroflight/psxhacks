@@ -280,11 +280,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 upstreaminfo = upstreaminfo + f", {self.upstream_connections - 1} reconnections"
         self.logger.info(upstreaminfo)
         self.logger.info(
-            "%-21s %-23s %5s %8s %7s %6s %6s %9s %9s %5s",
+            "%-21s %-23s %5s %8s %6s %6s %9s %9s %5s",
             f"{len(self.clients)} clients",
             "",
             "Local",
-            "",
             "",
             "Lines",
             "Lines",
@@ -293,13 +292,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             "FRDP RTT ms",
         )
         self.logger.info(
-            "%2s %-26s %-15s %5s %8s %7s %6s %6s %9s %9s %5s %5s",
+            "%2s %-26s %-15s %5s %8s %6s %6s %9s %9s %5s %5s",
             "id",
             "Name",
             "Client IP",
             "Port",
             "Access",
-            "Clients",
             "sent",
             "recvd",
             "sent",
@@ -327,13 +325,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 prefix = ''
 
             self.logger.info(
-                "%2d %-26s %-15s %5d %8s %7d %6d %6d %9d %9d %5s %5s",
+                "%2d %-26s %-15s %5d %8s %6d %6d %9d %9d %5s %5s",
                 data.client_id,
                 f"{prefix}{data.display_name}",
                 data.ip,
                 data.port,
                 data.access_level,
-                data.connected_clients,
                 data.messages_sent,
                 data.messages_received,
                 data.bytes_sent,
@@ -550,7 +547,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         await client.close(clean)
         # Destroy client connection object and log
         await self.log_connect_evt(client.peername, clientid=client.client_id, disconnect=True)
-        del self.clients[client.peername]
+        try:
+            del self.clients[client.peername]
+        except KeyError:
+            pass
         self.logger.info("Client connection %s closed", client.peername)
         self.request_status_display()
 
