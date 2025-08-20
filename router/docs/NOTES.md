@@ -193,6 +193,12 @@ To achieve this easily we will send some `addon=` data on the PSX
 network, using the prefix `addon=FRANKENROUTER:`. The whole setup is
 called FRDP - FrankenRouter Discovery Protocol.
 
+The next element in the message is the FRDP protocol version. This is
+needed to check that all routers connecting to the network has the
+same protocol version so they can understand eachother.
+
+`addon=FRANKENROUTER:<protocol version`
+
 In order to identify a router connecting to another router as a router
 (and also to be a good PSX network citizen), the connecting router
 will send `name=<simname>:FRANKEN.PY frankenrouter PSX router
@@ -223,7 +229,7 @@ upstream router                client router
 
 ### FRDP PING
 
-`addon=FRANKENROUTER:PING:<ID>` is sent by one router to another. ID
+`addon=FRANKENROUTER:<protocol version>:PING:<ID>` is sent by one router to another. ID
 is a random string used to make sure that we measure the latency
 correctly.
 
@@ -232,7 +238,7 @@ clients.
 
 ### FRDP PONG
 
-`addon=FRANKENROUTER:PONG:<ID>` is sent back by a router to another
+`addon=FRANKENROUTER:<protocol version>:PONG:<ID>` is sent back by a router to another
 router upon receiving a PING message. The ID should be the same as in
 the PING message.
 
@@ -241,7 +247,7 @@ clients.
 
 ### FRDP AUTH
 
-`addon=FRANKENROUTER:AUTH:<PASSWORD>` is sent by a router to another if
+`addon=FRANKENROUTER:<protocol version>:AUTH:<PASSWORD>` is sent by a router to another if
 password authentication is being used.
 
 If the password is accepted by the upstream router, the connection is
@@ -273,13 +279,15 @@ upstream router                client router
 
 ### FRDP IDENT
 
-`addon=FRANKENROUTER:IDENT:<simulator name>:<router name>` is sent by
-a router to another to suggest a display name for itself in the
-upstream router status display and logs.
+`addon=FRANKENROUTER:<protocol version>:IDENT:<simulator name>:<router name>:<uuid>` is
+sent by a frankenrouter to another frankenrouter to identify
+itself. The uuid is automatically generated based on host ID and
+listen port and used to ensure a unique router ID, even if someone
+accidentally use the same simulator and router name as another router.
 
 ### FRDP ROUTERINFO
 
-`addon=FRANKENROUTER:ROUTERINFO:<JSON data>` is send by all
+`addon=FRANKENROUTER:<protocol version>:ROUTERINFO:<JSON data>` is send by all
 frankenrouters in the network. Sinc addon messages are forwarded to
 the entire network, each router will have information about all other
 routers and will therefore have an updated view of connected clients,
@@ -293,7 +301,7 @@ FIXME: document the JSON data format.
 
 ### FRDP CLIENTINFO
 
-`addon=FRANKENROUTER:CLIENTINFO:<JSON data>` can be sent by any client
+`addon=FRANKENROUTER:<protocol version>:CLIENTINFO:<JSON data>` can be sent by any client
 to its upstream router to provide extra information about itself or
 other local clients. This is used by a helper script that identifies
 e.g running PSX instances by their window name and forwards that

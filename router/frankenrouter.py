@@ -148,6 +148,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.variable_stats_buffer = []
         self.rules = Rules(self)
 
+        # The FRDP protocol version. We bump this every time we make
+        # incompatble changes to the FRDP/FRANKENROUTER
+        # messages. Routers with a different version will be
+        # disconnected from the network.
+        self.frdp_version = 1
+
         # We store FRDP ROUTERINFO data keyed by the sending router UUID
         self.routerinfo = {}
 
@@ -1172,7 +1178,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                             "Sending FRDP ping to upstream, request_id is %s",
                             frdp_request_id)
                         await self.send_to_upstream(
-                            f"addon=FRANKENROUTER:PING:{frdp_request_id}")
+                            f"addon=FRANKENROUTER:{self.frdp_version}:PING:{frdp_request_id}")
                         self.upstream.ping_sent = time.perf_counter()
                         self.upstream.frdp_ping_request_id = frdp_request_id
                     #
@@ -1187,7 +1193,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                                 peername, frdp_request_id)
                             sendto.append(peername)
                             await self.client_broadcast(
-                                f"addon=FRANKENROUTER:PING:{frdp_request_id}",
+                                f"addon=FRANKENROUTER:{self.frdp_version}:PING:{frdp_request_id}",
                                 include=[peername])
                             data.ping_sent = time.perf_counter()
                             data.frdp_ping_request_id = frdp_request_id
@@ -1203,12 +1209,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 if self.is_upstream_connected() and self.upstream.is_frankenrouter:
                     if not self.upstream.frdp_ident_sent:
                         self.logger.info("Sending FRDP IDENT to upstream")
-                        await self.send_to_upstream(f"addon=FRANKENROUTER:IDENT:{self.config.identity.simulator}:{self.config.identity.router}:{self.uuid}")  # pylint: disable=line-too-long
+                        await self.send_to_upstream(f"addon=FRANKENROUTER:{self.frdp_version}:IDENT:{self.config.identity.simulator}:{self.config.identity.router}:{self.uuid}")  # pylint: disable=line-too-long
                         self.upstream.frdp_ident_sent = True
                 for peername, data in self.clients.items():
                     if data.is_frankenrouter and not data.frdp_ident_sent:
                         self.logger.info("Sending FRDP IDENT to %s", data.peername)
-                        await self.client_broadcast(f"addon=FRANKENROUTER:IDENT:{self.config.identity.simulator}:{self.config.identity.router}:{self.uuid}",  # pylint: disable=line-too-long
+                        await self.client_broadcast(f"addon=FRANKENROUTER:{self.frdp_version}:IDENT:{self.config.identity.simulator}:{self.config.identity.router}:{self.uuid}",  # pylint: disable=line-too-long
                                                     include=[peername], ignore_access=True)
                         data.frdp_ident_sent = True
                 #
@@ -1218,7 +1224,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 # another frankenrouter.
                 if self.is_upstream_connected() and self.upstream.is_frankenrouter:
                     if self.config.upstream.password and not self.upstream.frdp_auth_sent:
-                        await self.send_to_upstream(f"addon=FRANKENROUTER:AUTH:{self.config.upstream.password}")  # pylint: disable=line-too-long
+                        await self.send_to_upstream(f"addon=FRANKENROUTER:{self.frdp_version}:AUTH:{self.config.upstream.password}")  # pylint: disable=line-too-long
                         self.upstream.frdp_auth_sent = True
                 #
                 # FRDP ROUTERINFO
@@ -1272,8 +1278,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # Store our own routerinfo so we have all the data in the same place
         self.routerinfo[self.uuid] = payload
         # Send to network
-        await self.send_to_upstream(f"addon=FRANKENROUTER:ROUTERINFO:{payload_json}")
-        await self.client_broadcast(f"addon=FRANKENROUTER:ROUTERINFO:{payload_json}")
+        await self.send_to_upstream(
+            f"addon=FRANKENROUTER:{self.frdp_version}:ROUTERINFO:{payload_json}")
+        await self.client_broadcast(
+            f"addon=FRANKENROUTER:{self.frdp_version}:ROUTERINFO:{payload_json}")
         self.last_frdp_routerinfo = time.perf_counter()
         # End of send_frdp_routerinfo()
 
@@ -1500,6 +1508,15 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         if action == RulesAction.DROP:
             # No action needed
             pass
+        elif action == RulesAction.DISCONNECT:
+            if sender.upstream:
+                self.logger.critical(
+                    "Upstream router version mismatch, disconnecting %s", sender_hr)
+                await self.close_upstream_connection()
+            else:
+                self.logger.critical(
+                    "Client router version mismatch, disconnecting %s", sender_hr)
+                await self.close_client_connection(sender)
         elif action == RulesAction.UPSTREAM_ONLY:
             self.logger.debug("sending to upstream only: %s", line)
             await self.send_to_upstream(line, sender.peername)

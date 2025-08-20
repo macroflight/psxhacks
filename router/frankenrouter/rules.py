@@ -31,6 +31,8 @@ class RulesAction(enum.Enum):
 
     DROP: do not forward the message
 
+    DISCONNECT: do not forward, and disconnect client
+
     UPSTREAM_ONLY: sent message to upstream only
 
     NORMAL: send message to all endpoints (upstream and clients)
@@ -65,6 +67,7 @@ class RulesAction(enum.Enum):
     """
 
     DROP = enum.auto()
+    DISCONNECT = enum.auto()
     UPSTREAM_ONLY = enum.auto()
     NORMAL = enum.auto()
     FILTER = enum.auto()
@@ -126,9 +129,9 @@ class Rules():  # pylint: disable=too-many-public-methods
         """Handle an FRDP PING message.
 
         Format:
-        addon=FRANKENROUTER:PING:<unique request id>
+        addon=FRANKENROUTER:<protocol version>:PING:<unique request id>
         """
-        reply = f"addon=FRANKENROUTER:PONG:{payload}"
+        reply = f"addon=FRANKENROUTER:{self.router.frdp_version}:PONG:{payload}"
         self.sender.is_frankenrouter = True
         # Send PONG but do not forward the PING anywhere
         return self.myreturn(
@@ -139,7 +142,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         """Handle an FRDP PONG message.
 
         Format:
-        addon=FRANKENROUTER:PONG:<request id from PING message>
+        addon=FRANKENROUTER:<protocol version>:PONG:<request id from PING message>
         """
         expected_id = self.sender.frdp_ping_request_id
         if payload != expected_id:
@@ -160,7 +163,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         """Handle a FRDP IDENT message.
 
         Format:
-        addon=FRANKENROUTER:IDENT:<sim name>:<router name>
+        addon=FRANKENROUTER:<protocol version>:IDENT:<sim name>:<router name>
         """
         (simname, routername, uuid) = payload.split(':')
         self.sender.simulator_name = simname
@@ -176,7 +179,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         """Handle a FRDP CLIENTINFO message.
 
         Format:
-        addon=FRANKENROUTER:CLIENTINFO:<JSON data>
+        addon=FRANKENROUTER:<protocol version>:CLIENTINFO:<JSON data>
 
         JSON data example:
 
@@ -220,7 +223,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         """Handle a FRDP ROUTERINFO message.
 
         Format:
-        addon=FRANKENROUTER:ROUTERINFO:<JSON data>
+        addon=FRANKENROUTER:<protocol version>:ROUTERINFO:<JSON data>
 
         This message should be forwarded to the network, since we want
         it to reach all frankenrouters.
@@ -245,7 +248,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         """Handle FRDP AUTH message.
 
         Format:
-        addon=FRANKENROUTER:AUTH:<password>
+        addon=FRANKENROUTER:<protocol version>:AUTH:<password>
         """
         if self.sender.upstream:
             return self.myreturn(
@@ -298,6 +301,16 @@ class Rules():  # pylint: disable=too-many-public-methods
             addon = rest
             payload = ""
         if addon == 'FRANKENROUTER':
+            (version, payload) = payload.split(":", 1)
+            try:
+                version = int(version)
+            except ValueError:
+                version = 0  # e.g older versions that did not have the version field
+            if version != self.router.frdp_version:
+                return self.myreturn(
+                    RulesAction.DISCONNECT, RulesCode.MESSAGE_INVALID,
+                    message=f"FRDP version mismatch in message: {self.line}"
+                )
             return self.handle_addon_frankenrouter(payload)
 
         # Unhandled addon messages should be forwarded, but only from
@@ -429,7 +442,7 @@ class Rules():  # pylint: disable=too-many-public-methods
 
         """
         self.router.last_bang = time.perf_counter()
-        reply = "addon=FRANKENROUTER:BANG"
+        reply = "addon=FRANKENROUTER:{self.frdp_version}:BANG"
         return self.myreturn(RulesAction.NORMAL, RulesCode.BANG,
                              extra_data={"reply": reply})
 
@@ -642,6 +655,7 @@ class TestRules(unittest.TestCase):
             self.variables = TestRules.DummyVariables()
             self.cache = TestRules.DummyCache()
             self.last_load1 = 0.0
+            self.frdp_version = 1
 
         def variable_stats_add(self, *args):
             """Add dummy stats."""
@@ -727,7 +741,7 @@ class TestRules(unittest.TestCase):
         # PING from upstream
         router.upstream.ping_sent = time.perf_counter()
         (action, code, _, extra_data) = rules.route(
-            "addon=FRANKENROUTER:PING:54321", router.upstream)
+            "addon=FRANKENROUTER:1:PING:54321", router.upstream)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.FRDP_PING)
         self.assertTrue('reply' in extra_data)
@@ -735,14 +749,14 @@ class TestRules(unittest.TestCase):
         # PONG from upstream
         router.upstream.frdp_ping_request_id = "54321"
         (action, code, _, extra_data) = rules.route(
-            "addon=FRANKENROUTER:PONG:54321", router.upstream)
+            "addon=FRANKENROUTER:1:PONG:54321", router.upstream)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.FRDP_PONG)
         self.assertTrue('frdp_rtt' in extra_data)
 
         # IDENT from upstream
         (action, code, *_) = rules.route(
-            "addon=FRANKENROUTER:IDENT:OtherSim:OtherRouter:fakeuuid", router.upstream)
+            "addon=FRANKENROUTER:1:IDENT:OtherSim:OtherRouter:fakeuuid", router.upstream)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.FRDP_IDENT)
         self.assertEqual(router.upstream.simulator_name, 'OtherSim')
@@ -753,13 +767,13 @@ class TestRules(unittest.TestCase):
 
         # CLIENTINFO from upstream (not allowed)
         (action, code, *_) = rules.route(
-            "addon=FRANKENROUTER:CLIENTINFO:{}", router.upstream)
+            "addon=FRANKENROUTER:1:CLIENTINFO:{}", router.upstream)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.MESSAGE_INVALID)
 
         # AUTH from upstream (not allowed)
         (action, code, *_) = rules.route(
-            "addon=FRANKENROUTER:AUTH:mypassword", router.upstream)
+            "addon=FRANKENROUTER:1:AUTH:mypassword", router.upstream)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.MESSAGE_INVALID)
 
@@ -779,7 +793,7 @@ class TestRules(unittest.TestCase):
         testpeer.display_name = "Foobar"
 
         # BANG
-        (action, code, *_) = rules.route("addon=FRANKENROUTER:BANG", testpeer)
+        (action, code, *_) = rules.route("addon=FRANKENROUTER:1:BANG", testpeer)
         self.assertEqual(action, RulesAction.NORMAL)
         self.assertEqual(code, RulesCode.FRDP_BANG)
         self.assertTrue(router.last_bang > 0.0)
@@ -787,7 +801,7 @@ class TestRules(unittest.TestCase):
         # PING from client
         testpeer.ping_sent = time.perf_counter()
         (action, code, _, extra_data) = rules.route(
-            "addon=FRANKENROUTER:PING:12345", testpeer)
+            "addon=FRANKENROUTER:1:PING:12345", testpeer)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.FRDP_PING)
         self.assertTrue('reply' in extra_data)
@@ -795,7 +809,7 @@ class TestRules(unittest.TestCase):
         # PONG from client
         testpeer.frdp_ping_request_id = "12345"
         (action, code, _, extra_data) = rules.route(
-            "addon=FRANKENROUTER:PONG:12345", testpeer)
+            "addon=FRANKENROUTER:1:PONG:12345", testpeer)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.FRDP_PONG)
         self.assertTrue('frdp_rtt' in extra_data)
@@ -803,13 +817,13 @@ class TestRules(unittest.TestCase):
         # PONG from client with invalid ID
         testpeer.frdp_ping_request_id = "123456789"
         (action, code, *_) = rules.route(
-            "addon=FRANKENROUTER:PONG:12345", testpeer)
+            "addon=FRANKENROUTER:1:PONG:12345", testpeer)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.MESSAGE_INVALID)
 
         # IDENT from client
         (action, code, *_) = rules.route(
-            "addon=FRANKENROUTER:IDENT:SomeSim:SomeRouter:fakeuuid", testpeer)
+            "addon=FRANKENROUTER:1:IDENT:SomeSim:SomeRouter:fakeuuid", testpeer)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.FRDP_IDENT)
         self.assertEqual(testpeer.simulator_name, 'SomeSim')
@@ -824,7 +838,7 @@ class TestRules(unittest.TestCase):
             "name": "PSX Sounds"
         })
         (action, code, *_) = rules.route(
-            f"addon=FRANKENROUTER:CLIENTINFO:{json_payload}", testpeer)
+            f"addon=FRANKENROUTER:1:CLIENTINFO:{json_payload}", testpeer)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.FRDP_CLIENTINFO)
         self.assertEqual(testpeer.display_name, 'PSX Sounds')
@@ -849,7 +863,7 @@ class TestRules(unittest.TestCase):
         # AUTH success from client
         testpeer.access_level = NOACCESS_ACCESS_LEVEL
         (action, code, *_) = rules.route(
-            "addon=FRANKENROUTER:AUTH:mypassword", testpeer)
+            "addon=FRANKENROUTER:1:AUTH:mypassword", testpeer)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.FRDP_AUTH_OK)
         self.assertEqual(testpeer.access_level, 'full')
@@ -857,7 +871,7 @@ class TestRules(unittest.TestCase):
         # AUTH failure from client
         testpeer.access_level = NOACCESS_ACCESS_LEVEL
         (action, code, *_) = rules.route(
-            "addon=FRANKENROUTER:AUTH:badpassword", testpeer)
+            "addon=FRANKENROUTER:1:AUTH:badpassword", testpeer)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.FRDP_AUTH_FAIL)
         self.assertEqual(testpeer.access_level, NOACCESS_ACCESS_LEVEL)
@@ -865,7 +879,7 @@ class TestRules(unittest.TestCase):
         # AUTH already authenticated
         testpeer.access_level = 'full'
         (action, code, *_) = rules.route(
-            "addon=FRANKENROUTER:AUTH:mypassword", testpeer)
+            "addon=FRANKENROUTER:1:AUTH:mypassword", testpeer)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.FRDP_AUTH_ALREADY_HAS_ACCESS)
         self.assertEqual(testpeer.access_level, 'full')

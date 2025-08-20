@@ -49,6 +49,8 @@ class Script():
         self.logger = None
         self.psx_clients = {}
         self.psx_connection = None
+        # Keep this in sync with frankenrouter.py
+        self.frdp_version = 1
 
     def identify_clients(self):  # pylint: disable=too-many-locals,too-many-branches, too-many-statements
         """Identify PSX clients on this machine by their window name."""
@@ -149,7 +151,7 @@ class Script():
                     if self.psx_connection is not None:
                         for peername, data in psx_clients_new.items():
                             self.logger.debug("Sending data for %s to router: %s", peername, data)
-                            line = f"addon=FRANKENROUTER:CLIENTINFO:{json.dumps(data)}"
+                            line = f"addon=FRANKENROUTER:{self.frdp_version}:CLIENTINFO:{json.dumps(data)}"  # pylint: disable=line-too-long
                             self.psx_connection['writer'].write(
                                 line.encode() + PSX_PROTOCOL_SEPARATOR)
                             await self.psx_connection['writer'].drain()
