@@ -56,6 +56,15 @@ class _RouterConfigPsx:  # pylint: disable=missing-class-docstring,too-few-publi
             raise RouterConfigError("PSX Variables path must be a string")
 
 
+class _RouterConfigSharedinfo:  # pylint: disable=missing-class-docstring,too-few-public-methods
+    def __init__(self, data):
+        self.master = data.get('master', False)
+        self.seatmap = data.get('seatmap', {})
+        for value in self.seatmap.values():
+            if value not in ['LEFT', 'RIGHT', 'OBSERVER']:
+                raise RouterConfigError(f"Invalid seat {value}")
+
+
 class _RouterConfigPerformance:  # pylint: disable=missing-class-docstring,too-few-public-methods
     def __init__(self, data):
         self.write_buffer_warning = data.get('write_buffer_warning', 100000)
@@ -168,6 +177,7 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
         self.log = _RouterConfigLog(config.get('log', {}))
         self.psx = _RouterConfigPsx(config.get('psx', {}))
         self.performance = _RouterConfigPerformance(config.get('performance', {}))
+        self.sharedinfo = _RouterConfigSharedinfo(config.get('sharedinfo', {}))
         self.access = []
         if 'access' in config:
             for elem in config['access']:
@@ -218,6 +228,9 @@ traffic = true
 
 [psx]
 variables = 'C:\PSX\Variables.txt'
+
+[sharedinfo]
+seatmap = { 'frankensim' = 'LEFT', 'testsim' = 'RIGHT', 'obsim' = 'OBSERVER', 'frankentoo' = 'LEFT' }
 
 [[access]]
 display_name = 'CDUPAD'

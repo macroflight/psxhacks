@@ -155,29 +155,78 @@ that we get from the router's variable cache.
 The router has a (currently very small) REST API. You can enable it
 with `--api-port=<some port number>`.
 
-- GET /clients
-    - returns information about connected clients (very basic)
-- POST /upstream/set (provide host= and ip=)
-    - Force the router to connect to a different upstream PSX main
-      server or router.
+### GET /clients
 
-Example usage (change the upstream connection to 127.0.0.1 port 20747):
+Returns information about connected clients (very basic)
+
+Example usage:
 
 ``` text
-curl -d "host=127.0.0.1&port=20747" -X POST http://127.0.0.1:8080/upstream/set
-```
-
-Getting information from the router:
-
-``` text
-$ curl -s http://127.0.0.1:8080/clients | jq .
+$ curl -s http://127.0.0.1:8881/clients | jq .
 [
   {
     "ip": "127.0.0.1",
-    "port": 49680,
-    "identifier": "R:SlaveSim"
+    "port": 42674,
+    "display_name": "FilterClient1"
+  },
+  {
+    "ip": "127.0.0.1",
+    "port": 42690,
+    "display_name": "FilterClient2"
   }
 ]
+```
+
+### GET /upstream
+
+Return information about the current upstream connection,
+
+Example usage:
+
+``` text
+$ curl -s http://127.0.0.1:8881/upstream | jq .
+{
+  "connected": true,
+  "host": "127.0.0.1",
+  "port": 20747
+}
+```
+
+### POST /upstream/set
+
+Change upstream connection details (while router is running, does not
+affect the config file).
+
+Example usage (change the upstream connection to 127.0.0.1 port 20748):
+
+``` text
+curl -d "host=127.0.0.1&port=20748" -X POST http://127.0.0.1:8881/upstream
+```
+
+### GET /sharedinfo
+
+Return the latest SHAREDINFO data, e.g the seat map.
+
+Example usage:
+
+``` text
+$ curl -s http://127.0.0.1:8881/sharedinfo | jq .
+{
+  "filter-master": "LEFT",
+  "filter-client1": "RIGHT"
+}
+```
+
+### POST /sharedinfo
+
+Change parts of the SHAREDINFO data, e.g the seat map.
+
+Example usage:
+
+``` text
+$ curl -X POST http://127.0.0.1:8881/sharedinfo \
+     -H 'Content-Type: application/json' \
+     -d '{"seatmap": {"filter-master":"RIGHT", "filter-client2": "OBSERVER"}}'
 ```
 
 ## The addon that identifies PSX clients by their window name "frankenrouter_ident"

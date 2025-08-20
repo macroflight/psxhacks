@@ -48,8 +48,11 @@ HEADER_LINE_LENGTH = 114
 # How often to check the RTT to upstream and client frankenrouters
 FDRP_PING_INTERVAL = 5.0
 
-# How often to send FDRP ROUTERINFO (also sent after certain events, e.g client connects)
+# How often to send FDRP ROUTERINFO (also sent after certain events, e.g router connects to network)
 FRDP_ROUTERINFO_INTERVAL = 60.0
+
+# How often to send FDRP ROUTERINFO (also sent after certain events, e.g router connects to network)
+FRDP_SHAREDINFO_INTERVAL = 60.0
 
 # Keep 300 seconds of RTT data for the statistics in the status display
 FDRP_KEEP_RTT_SAMPLES = 300
@@ -143,6 +146,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.starttime = time.perf_counter()
         self.status_display_requested = False
         self.frdp_routerinfo_requested = False
+        self.frdp_sharedinfo_requested = False
         self.upstream_reconnect_requested = False
         self.longest_destination_string = 0
         self.variable_stats_buffer = []
@@ -157,6 +161,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # We store FRDP ROUTERINFO data keyed by the sending router UUID
         self.routerinfo = {}
 
+        # We store FRDP SHAREDINFO and the UUID of the master router
+        self.sharedinfo = {}
+        self.sharedinfo_master_router_uuid = None
+
         # Track when we last send the start keyword upstream
         self.start_sent_at = 0.0
 
@@ -166,8 +174,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # normally.
         self.last_client_connected = 0.0
 
-        # Track when we last sent FRDP ROUTERINFO
+        # Track when we last sent FRDP ROUTERINFO and SHAREDINFO
         self.last_frdp_routerinfo = 0.0
+        self.last_frdp_sharedinfo = 0.0
 
     def connection_state_changed(self):
         """Run when connection state has changed.
@@ -402,6 +411,16 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                                          con['display_name'],
                                          con['connected_time'],
                                          )
+
+        # Print seatinfo (to show SHAREDINFO data is being sent through network)
+        if 'seatmap' in self.sharedinfo:
+            for seat in ['LEFT', 'RIGHT', 'OBSERVER']:
+                sims = []
+                for sim, simseat in self.sharedinfo['seatmap'].items():
+                    if simseat == seat:
+                        sims.append(sim)
+                if len(sims) > 0:
+                    self.logger.info("Shared sim %s seat: %s", seat.lower(), ",".join(sims))
 
         self.logger.info("-" * HEADER_LINE_LENGTH)
 
@@ -1234,6 +1253,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         time.perf_counter() - self.last_frdp_routerinfo > FRDP_ROUTERINFO_INTERVAL
                 ):
                     await self.send_frdp_routerinfo()
+                #
+                # FRDP SHAREDINFO
+                #
+                if (
+                        self.frdp_sharedinfo_requested or
+                        time.perf_counter() - self.last_frdp_sharedinfo > FRDP_SHAREDINFO_INTERVAL
+                ):
+                    await self.send_frdp_sharedinfo()
 
         # Standard Task cleanup
         except asyncio.exceptions.CancelledError:
@@ -1284,6 +1311,29 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             f"addon=FRANKENROUTER:{self.frdp_version}:ROUTERINFO:{payload_json}")
         self.last_frdp_routerinfo = time.perf_counter()
         # End of send_frdp_routerinfo()
+
+    async def send_frdp_sharedinfo(self):
+        """Send FRDP SHAREDINFO message."""
+        self.frdp_sharedinfo_requested = False
+        if self.uuid is None:
+            return
+        if not self.config.sharedinfo.master:
+            self.logger.debug("Not the SHAREDINFO master, not sending")
+            return
+        payload = {
+            "master_uuid": self.uuid,
+            "seatmap": self.config.sharedinfo.seatmap,
+        }
+        payload_json = json.dumps(payload)
+        # Store our own sharedinfo so we have all the data in the same place
+        self.sharedinfo = payload
+        # Send to network
+        await self.send_to_upstream(
+            f"addon=FRANKENROUTER:{self.frdp_version}:SHAREDINFO:{payload_json}")
+        await self.client_broadcast(
+            f"addon=FRANKENROUTER:{self.frdp_version}:SHAREDINFO:{payload_json}")
+        self.last_frdp_sharedinfo = time.perf_counter()
+        # End of send_frdp_sharedinfo()
 
     def print_client_warnings(self):
         """Print warnings about unexpected client counts."""
@@ -1436,6 +1486,18 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.debug(
                 "Got FRDP IDENT message from %s: %s",
                 sender_hr, line)
+            # If IDENT received from client, send FRDP JOIN to network and include our own UUID
+            if not sender.upstream:
+                message = f"addon=FRANKENROUTER:{self.frdp_version}:JOIN"
+                message += f":{sender.simulator_name}:{sender.router_name}:{sender.uuid}"
+                message += f":{self.uuid}"
+                await self.send_to_upstream(message, sender.peername)
+                await self.client_broadcast(message, exclude=[sender.peername])
+                # Since we won't get our own JOIN, we need to trigger this here
+                self.frdp_sharedinfo_requested = True
+        elif code == RulesCode.FRDP_JOIN:
+            # A new router has joined the network
+            self.frdp_sharedinfo_requested = True
         elif code == RulesCode.FRDP_BANG:
             self.logger.debug(
                 "Got FRDP IDENT message from %s: %s",
@@ -1642,7 +1704,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 return web.Response(text=text)
 
             @routes.get('/clients')
-            async def handle_clients(_):
+            async def handle_clients_get(_):
                 clients = []
                 for client in self.clients.values():
                     clients.append({
@@ -1652,7 +1714,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     })
                 return web.json_response(clients)
 
-            @routes.post('/upstream/set')
+            @routes.post('/upstream')
             async def handle_upstream_set(request):
                 data = await request.post()
                 new_host = data.get('host')
@@ -1681,6 +1743,39 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.config.upstream.port)
                 self.upstream_reconnect_requested = True
                 return web.Response(text="Connecting to new host/port")
+
+            @routes.get('/upstream')
+            async def handle_upstream_get(_):
+                if self.is_upstream_connected():
+                    res = {
+                        'connected': True,
+                        'host': self.upstream.ip,
+                        'port': self.upstream.port,
+                    }
+                else:
+                    res = {
+                        'connected': False,
+                    }
+                return web.json_response(res)
+
+            @routes.get('/sharedinfo')
+            async def handle_sharedinfo(_):
+                return web.json_response(self.sharedinfo)
+
+            @routes.post('/sharedinfo')
+            async def handle_sharedinfo_seatmap(request):
+                data = await request.json()
+                changes = 0
+                new_seatmap = data.get('seatmap')
+                if new_seatmap:
+                    self.config.sharedinfo.seatmap = new_seatmap
+                    self.logger.info(
+                        "REST API changed seatmap to %s", self.config.sharedinfo.seatmap)
+                    changes += 1
+                if changes == 0:
+                    return web.Response(text="Nothing was changed")
+                self.frdp_sharedinfo_requested = True
+                return web.Response(text=f"{changes} SHAREDINFO variables changed")
 
             # Run the API
             app = web.Application()
@@ -1769,15 +1864,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
                 # Restart upstream connection if requested
                 if self.upstream_reconnect_requested:
-                    name = 'Upstream Connector'
-                    self.logger.info("Upstream reconnect requested")
-                    for task in self.tasks:
-                        if task.get_name() == name:
-                            self.logger.info("Restarting %s", name)
-                            self.upstream_reconnect_requested = False
-                            await asyncio.sleep(2.0)
-                            task.cancel(msg="Reconnecting")
-                            break
+                    self.logger.info("Reconnecting to upstream...")
+                    await self.close_upstream_connection()
+                    self.upstream_reconnect_requested = False
 
         # Standard Task cleanup
         except asyncio.exceptions.CancelledError:

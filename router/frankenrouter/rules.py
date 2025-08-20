@@ -86,8 +86,10 @@ class RulesCode(enum.Enum):
     FRDP_PING = enum.auto()
     FRDP_PONG = enum.auto()
     FRDP_IDENT = enum.auto()
+    FRDP_JOIN = enum.auto()
     FRDP_CLIENTINFO = enum.auto()
     FRDP_ROUTERINFO = enum.auto()
+    FRDP_SHAREDINFO = enum.auto()
     FRDP_AUTH_FAIL = enum.auto()
     FRDP_AUTH_OK = enum.auto()
     FRDP_AUTH_ALREADY_HAS_ACCESS = enum.auto()
@@ -164,7 +166,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         """Handle a FRDP IDENT message.
 
         Format:
-        addon=FRANKENROUTER:<protocol version>:IDENT:<sim name>:<router name>
+        addon=FRANKENROUTER:<protocol version>:IDENT:<sim name>:<router name>:<uuid>
         """
         (simname, routername, uuid) = payload.split(':')
         self.sender.simulator_name = simname
@@ -175,6 +177,17 @@ class Rules():  # pylint: disable=too-many-public-methods
         self.router.connection_state_changed()
         # Drop message
         return self.myreturn(RulesAction.DROP, RulesCode.FRDP_IDENT)
+
+    def handle_addon_frankenrouter_join(self, payload):
+        """Handle a FRDP JOIN message.
+
+        Format:
+        addon=FRANKENROUTER:<protocol version>:JOIN:<sim name>:<router name>:<uuid>:<upstream uuid>
+        """
+        # For now, we do nothing with this data
+        # (simname, routername, uuid, upstream_uuid) = payload.split(':')
+        self.logger.debug("Got FRDP JOIN from %s: %s", self.sender.peername, payload)
+        return self.myreturn(RulesAction.NORMAL, RulesCode.FRDP_JOIN)
 
     def handle_addon_frankenrouter_clientinfo(self, payload):
         """Handle a FRDP CLIENTINFO message.
@@ -245,6 +258,48 @@ class Rules():  # pylint: disable=too-many-public-methods
         # Forward message to network
         return self.myreturn(RulesAction.NORMAL, RulesCode.FRDP_ROUTERINFO)
 
+    def handle_addon_frankenrouter_sharedinfo(self, payload):
+        """Handle a FRDP SHAREDINFO message.
+
+        Format:
+        addon=FRANKENROUTER:<protocol version>:SHAREDINFO:<JSON data>
+
+        This message should be forwarded to the network, since we want
+        it to reach all frankenrouters.
+        """
+        try:
+            sharedinfo = json.loads(payload)
+        except json.decoder.JSONDecodeError:
+            return self.myreturn(
+                RulesAction.DROP, RulesCode.MESSAGE_INVALID,
+                message=f"Invalid JSON data in FRDP SHAREDINFO message: {self.line}"
+            )
+        if 'master_uuid' not in sharedinfo:
+            self.logger.warning(
+                "DISCARDING FRDP SHAREDINFO message without master_uuid: %s", self.line)
+            # Drop message
+            return self.myreturn(RulesAction.DROP, RulesCode.FRDP_SHAREDINFO)
+
+        # If we are supposed to be the master sim but we receive a
+        # SHAREDINFO message, complain, then decide who gets to be
+        # master (use highest UUID) and continue.
+        if self.router.config.sharedinfo.master:
+            self.logger.warning(
+                "SHAREDINFO message received from %s, but we are supposed to be the master",
+                sharedinfo['master_uuid'])
+            if self.router.uuid < sharedinfo['master_uuid']:
+                self.logger.warning("ur UUID is lower, relinquish master role for this session")
+                self.router.config.sharedinfo.master = False
+            else:
+                self.logger.warning("Our UUID is higher, keeping master role")
+
+        self.router.sharedinfo_master_uuid = sharedinfo['master_uuid']
+        for key in ['seatmap']:
+            if key in sharedinfo:
+                self.router.sharedinfo[key] = sharedinfo[key]
+        # Forward message to network
+        return self.myreturn(RulesAction.NORMAL, RulesCode.FRDP_SHAREDINFO)
+
     def handle_addon_frankenrouter_auth(self, payload):
         """Handle FRDP AUTH message.
 
@@ -277,12 +332,16 @@ class Rules():  # pylint: disable=too-many-public-methods
             return self.handle_addon_frankenrouter_pong(payload)
         if message_type == 'IDENT':
             return self.handle_addon_frankenrouter_ident(payload)
+        if message_type == 'JOIN':
+            return self.handle_addon_frankenrouter_join(payload)
         if message_type == 'BANG':
             # Store in router object and forward to network
             self.router.last_bang = time.perf_counter()
             return self.myreturn(RulesAction.NORMAL, RulesCode.FRDP_BANG)
         if message_type == 'ROUTERINFO':
             return self.handle_addon_frankenrouter_routerinfo(payload)
+        if message_type == 'SHAREDINFO':
+            return self.handle_addon_frankenrouter_sharedinfo(payload)
         if message_type == 'CLIENTINFO':
             return self.handle_addon_frankenrouter_clientinfo(payload)
         if message_type == 'AUTH':

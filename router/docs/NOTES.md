@@ -285,15 +285,50 @@ itself. The uuid is automatically generated based on host ID and
 listen port and used to ensure a unique router ID, even if someone
 accidentally use the same simulator and router name as another router.
 
+The IDENT message is never forwarded, but on receiving IDENT, the
+upstream frankenrouter will send an FRDP JOIN message to the network,
+which also includes the information about the upstream router, so the
+rest of the network learns where the new router has been connected.
+
+### FRDP JOIN
+
+`addon=FRANKENROUTER:<protocol version>:JOIN:<simulator name>:<router name>:<uuid>:<upstream router uuid>`
+
+Send by a frankenrouter when another frankenrouter connects and
+identifies itself using FRDP IDENT.
+
+### FRDP SHAREDINFO
+
+`addon=FRANKENROUTER:<protocol version>:SHAREDINFO:<JSON data>` is
+sent to the network by the "master router". The JSON data contains
+shared configuration for the entire shared cockpit setup. If not using
+shared cockpit, a master router is usually not needed.
+
+The master router is usually (but does not have to be) a router in the
+master sim in a shared cockpit setup.
+
+In order to send SHAREDINFO data to the network, the master router
+should have a `[sharedinfo]` section in its config file.
+
+There can be only one master router in the network. If a master router
+receives a SHAREDINFO message, it will check the UUID of the router
+that sent the SHAREDINFO message. The router with the highest UUID
+"wins" and the other one will stop sending SHAREDINFO. But there might
+still be a short period when duplicate SHAREDINFO messages are sent to
+the network, so try to avoid having two routers with `[sharedinfo]`
+in the config.
+
+FIXME: document the JSON data format.
+
 ### FRDP ROUTERINFO
 
-`addon=FRANKENROUTER:<protocol version>:ROUTERINFO:<JSON data>` is send by all
-frankenrouters in the network. Sinc addon messages are forwarded to
-the entire network, each router will have information about all other
-routers and will therefore have an updated view of connected clients,
-etc.
+`addon=FRANKENROUTER:<protocol version>:ROUTERINFO:<JSON data>` is
+send by all frankenrouters in the network. Since addon messages are
+forwarded to the entire network, each router will have information
+about all other routers and will therefore have an updated view of
+connected clients, etc.
 
-Note: this differs from the CLIENTINFO messgage. CLIENTINFO is
+Note: this differs from the CLIENTINFO message. CLIENTINFO is
 terminated by the first router that sees it and is used to set usable
 names for clients connected to that router.
 
