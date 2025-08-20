@@ -107,6 +107,7 @@ class RulesCode(enum.Enum):
     BANG = enum.auto()
     EXIT = enum.auto()
     PBSKAQ = enum.auto()
+    LAYOUT = enum.auto()
     KEYVALUE_FILTERED_INGRESS = enum.auto()
     KEYVALUE_FILTER_EGRESS = enum.auto()
     KEYVALUE_NORMAL = enum.auto()
@@ -414,8 +415,40 @@ class Rules():  # pylint: disable=too-many-public-methods
         return self.myreturn(RulesAction.UPSTREAM_ONLY, RulesCode.START)
 
     def handle_pbskaq(self):
-        """Handle the pleaseBeSoKindAndQuit keyword."""
+        """Handle the pleaseBeSoKindAndQuit keyword.
+
+        If the sender is a frankenrouter and its simulator_name is
+        different than ours, drop the message, otherwise forward it.
+
+        This ensures that layout commands from other simulators does
+        not affect us.
+
+
+        """
+        if self.sender.is_frankenrouter:
+            if self.router.config.identity.simulator != self.sender.simulator_name:
+                self.logger.info(
+                    "Dropping pleaseBeSoKindAndQuit command from %s",
+                    self.sender.simulator_name)
+                return self.myreturn(RulesAction.DROP, RulesCode.PBSKAQ)
         return self.myreturn(RulesAction.NORMAL, RulesCode.PBSKAQ)
+
+    def handle_layout(self):
+        """Handle the layout keyword.
+
+        If the sender is a frankenrouter and its simulator_name is
+        different than ours, drop the message, otherwise forward it.
+
+        This ensures that layout commands from other simulators does
+        not affect us.
+        """
+        if self.sender.is_frankenrouter:
+            if self.router.config.identity.simulator != self.sender.simulator_name:
+                self.logger.info(
+                    "Dropping layout command from %s: %s",
+                    self.sender.simulator_name, self.line)
+                return self.myreturn(RulesAction.DROP, RulesCode.LAYOUT)
+        return self.myreturn(RulesAction.NORMAL, RulesCode.LAYOUT)
 
     def handle_load1(self):
         """Handle the load1 keyword."""
@@ -528,6 +561,9 @@ class Rules():  # pylint: disable=too-many-public-methods
 
         if key == 'pleaseBeSoKindAndQuit':
             return self.handle_pbskaq()
+
+        if key == 'layout':
+            return self.handle_layout()
 
         if key == 'load1':
             return self.handle_load1()
