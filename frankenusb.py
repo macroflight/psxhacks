@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import importlib.util
 import logging
+import os
 import time
 from collections import defaultdict
 import pygame  # pylint: disable=import-error
@@ -70,6 +71,17 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             'SpdBrkLever',
             'Tiller',
         ]
+
+        # The interlock state for the PSX_THROTTLE and PSX_REVERSE
+        # axis types. The four elements represent the interlocks for
+        # engine #1, #2, #3 and #4.
+        #
+        # Allowed values:
+        # 'unlocked': no lock, any lever can take the lock
+        # 'throttle': only throttle axis may control Tla
+        # 'reverse':  only reverse axis may control Tla
+        self.psx_throttle_interlock = ['unlocked', 'unlocked', 'unlocked', 'unlocked']
+        self.psx_reverser_open = [False, False, False, False]
 
         # State for the TM Boeing throttle
 
@@ -306,6 +318,301 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             'value': psx_value,
         })
 
+    async def handle_axis_motion_psx_throttle(self, event, axis_config, is_reverse=False):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+        """Handle motion on an PSX_THROTTLE or PSX_REVERSE axis.
+
+        If is_reverse == True, handle as PSX_REVERSE
+
+        This axis type is intended work similar to the "Throttle" and
+        "Reverse" type in the native PSX USB interface.
+
+        You will almost always want to use this together with a
+        matching PSX_REVERSE axis.
+
+        USB values from -1.0 to +1.0 are converted to Tla values from
+        0 (forward idle) to 5000 (full throttle) for Throttle axes and
+        from -0 (forward idle) to -8925 (full reverse) for a reverse
+        axis.
+
+        There is an interlock that prevents both throttle and reverse
+        lever from being active at the same time. In order to use
+        reverse thrust, you first need to close the throttle.
+
+        Config variables:
+        -----------------
+        'psx variable': (mandatory, MUST be set to Tla)
+
+        'engine indexes' (mandatory, no default value) - list of the
+        engines this lever should control (0-3). E.g [0, 1] to control
+        engines #1 and #2. Must match the 'engine indexes' for the
+        reverse lever. Defaults to all engines: [0, 1, 2, 3]
+
+        'axis swap' (default: False) - set to True to swap the lever
+        direction
+
+        'axis min' (default: -1.0) - Change this if your USB axis (as
+        shown by e.g show_usb.py) does not go all the way down to
+        -1.0.
+
+        'axis max' - as axis min, but defaults to 1.0.
+
+        'static zones' (default: []) - same as for other axis types
+
+        'allow movement with at on' (default: False) - allow throttle
+        to control Tla even when the autothrottle is active.
+
+        """
+        axis_position = event.value
+
+        # Ensure mandatory variables are set in config
+        self.logger.debug(
+            "PSX_THROTTLE movement, interlocks: %s",
+            self.psx_throttle_interlock)
+        self.logger.debug(
+            "PSX_THROTTLE movement, reversers: %s",
+            self.psx_reverser_open)
+
+        assert 'engine indexes' in axis_config, "\"engine indexes\" missing from PSX_THROTTLE entry"
+
+        # Defaults
+        axis_near_idle_limit = 0.05
+        psx_reverse_full = -8925
+        psx_reverse_idle1 = -3000
+        psx_reverse_idle2 = -4600
+        psx_forward_idle = 0
+        psx_forward_full = 5000
+
+        idle_reverse_start = 0.335
+        nonidle_reverse_start = 0.500
+
+        if is_reverse:
+            my_interlock = 'reverse'
+        else:
+            my_interlock = 'throttle'
+
+        # Defaults that can be overridded by config
+        axis_swap = False
+        axis_min = -1.0
+        axis_max = 1.0
+        static_zones = []
+        allow_movement_with_at_on = False
+        if 'axis swap' in axis_config:
+            axis_swap = bool(axis_config['axis swap'])
+        if 'axis min' in axis_config:
+            axis_min = float(axis_config['axis min'])
+        if 'axis max' in axis_config:
+            axis_max = float(axis_config['axis max'])
+        if 'static zones' in axis_config:
+            static_zones = list(axis_config['static zones'])
+        if 'allow movement with at on' in axis_config:
+            allow_movement_with_at_on = bool(axis_config['allow movement with at on'])
+
+        # Apply static zones to pygame axis value
+        for zone in static_zones:
+            if zone[1] >= axis_position >= zone[0]:
+                self.logger.debug("In static zone: %s -> %s", axis_position, zone[2])
+                axis_position = zone[2]
+
+        # Swap axis if needed
+        if axis_swap:
+            axis_position = -axis_position
+
+        # Normalize (value from 0.0 to 1.0)
+        axis_normalized = (axis_position - axis_min) / (axis_max - axis_min)
+
+        self.logger.debug("axis_normalized is %.3f", axis_normalized)
+
+        # Now, for each axis we control, check if we are allowed to
+        # change the PSX Tla (and then do so). Also check if we should
+        # play the throttle sync sound (played when the autothrottle
+        # is active and the throttle axis is close to the PSX Tla)
+
+        # We set this to True if the axis value converted to a PSX Tla
+        # is close to the actual Tla. If we control more than one
+        # throttle, we play the sync sound as long as the axis is
+        # close to any of the PSX throttles.
+        axis_close_to_tla = False
+
+        # Get current PSX Tla value
+        try:
+            psx_tlas = self.psx.get('Tla').split(';')
+        except AttributeError:
+            # Safe default
+            psx_tlas = [0, 0, 0, 0]
+
+        # If we need to send a new Tla to PSX
+        update_psx_tla = False
+
+        for engine_index in axis_config['engine indexes']:
+
+            # Convert normalized axis position to a PSX Tla value
+            if is_reverse:
+                # The reverse axis is complicated...
+                #
+                # Reverse axis, PSX native behavior:
+                #
+                # When lifting handle:
+                # axis_normalized  result
+                # ----------------------------------
+                # 0.0              forward idle
+                #                  forward idle but Tla decreasing towards -3000
+                # 0.335            reversers open => idle reverse, Tla jumps from -3000 to -4600
+                # < no handle movement here>
+                # 0.5              engines start to spool up, Tla increasing from -4600
+                # 1.0              full reverse, Tla -8925
+                #
+                # When lowering handle:
+                # 1.0              full reverse
+                # 0.5              idle reverse
+                # 0.01             reversers close => forward idle
+                #
+                # How I think this works under the hood
+                # reversers open if lever more than 33% lifted
+                # reversers close if lever less than 1% lifted
+                # idle power until lever more than 50% lifted
+                # power increased from idle to full linearly as lever lifted from 50% to 100%
+                #
+
+                if not self.psx_reverser_open[engine_index]:
+                    # Reverser closed, open if lever more than 1/3 lifted
+                    if axis_normalized > idle_reverse_start:
+                        self.logger.debug("Opening reverser")
+                        self.psx_reverser_open[engine_index] = True
+                else:
+                    # Reverser open, close if lever less than 1% lifted
+                    if axis_normalized < axis_near_idle_limit:
+                        self.logger.debug("Closing reverser")
+                        self.psx_reverser_open[engine_index] = False
+
+                # Determine Tla based on axis position and if reverser is open
+                if axis_normalized < idle_reverse_start:
+                    if self.psx_reverser_open[engine_index]:
+                        self.logger.debug("Reverser open, reverse idle")
+                        psx_value = psx_reverse_idle2  # reverse idle
+                    else:
+                        self.logger.debug("Reverser closed, forward idle")
+                        # To get the PSX lever to animate, we need to
+                        # smoothly decrease Tla from 0 to -3000.
+                        psx_value = psx_reverse_idle1 * (axis_normalized / idle_reverse_start)
+                elif idle_reverse_start <= axis_normalized < nonidle_reverse_start:
+                    self.logger.debug("Plain reverse idle")
+                    psx_value = psx_reverse_idle2  # reverse idle
+                else:
+                    self.logger.debug("Proper reverse, axis_normalized=%.3f", axis_normalized)
+                    # 0.5 => -4600
+                    # 1.0 => -8925
+                    psx_range = psx_reverse_idle2 - psx_reverse_full  # 5925
+                    psx_value = int(psx_reverse_idle2 - 2 * psx_range * (axis_normalized - 0.5))
+
+                self.logger.debug(
+                    "Reverse mode for %s, psx_value=%d", engine_index, psx_value)
+            else:
+                # Throttle axis: Tla linear from 0 to 5000
+                psx_range = psx_forward_full - psx_forward_idle
+                psx_value = int(psx_forward_idle + psx_range * axis_normalized)
+                self.logger.debug(
+                    "Throttle mode for %d, psx_value=%d", engine_index, psx_value)
+
+            # Never send a value outside the expected range
+            psx_value = min(5000, psx_value)
+            psx_value = max(-8925, psx_value)
+
+            # Make sure we send integers
+            psx_value = int(psx_value)
+
+            # Figure out if we should update Tla
+            update_this_engine_tla = True
+
+            try:
+                this_tla = int(psx_tlas[engine_index])
+            except ValueError:
+                self.logger.warning("Failed to get Tla from PSX, ignoring axis movement")
+                continue
+
+            axis_near_idle = False
+            if axis_normalized < axis_near_idle_limit:
+                axis_near_idle = True
+
+            # Figure out if we should play the sync sound
+            if self.autothrottle_active():
+                tla_diff = abs(this_tla - psx_value)
+                if tla_diff < 100:
+                    self.logger.debug(
+                        "Axis close (diff=%d) to Tla for index %d, play sound",
+                        tla_diff, engine_index)
+                    axis_close_to_tla = True
+
+            if self.autothrottle_active():
+                if not allow_movement_with_at_on:
+                    update_this_engine_tla = False
+            else:
+                # Manual control
+                if self.psx_throttle_interlock[engine_index] == 'unlocked':
+                    # Take lock (and update Tla)
+                    self.logger.debug(
+                        "Interlock for index %d was unlocked, now taken by %s axis",
+                        engine_index, my_interlock)
+                    self.psx_throttle_interlock[engine_index] = my_interlock
+                elif self.psx_throttle_interlock[engine_index] == 'released':
+                    if axis_near_idle:
+                        # Take lock (and update Tla)
+                        self.logger.debug(
+                            "Interlock for index %d was released, now taken by %s axis",
+                            engine_index, my_interlock)
+                        self.psx_throttle_interlock[engine_index] = my_interlock
+                    else:
+                        # Do nothing
+                        self.logger.debug(
+                            "Interlock for index %d is released but axis not at zero (%d)",
+                            engine_index, psx_value)
+                        update_this_engine_tla = False
+                elif self.psx_throttle_interlock[engine_index] == my_interlock:
+                    # We have the lock, change Tla
+                    pass
+                else:
+                    # The other lever has the lock, do nothing
+                    self.logger.debug(
+                        "Interlock for engine index %d held by other axis",
+                        engine_index)
+                    update_this_engine_tla = False
+
+            # Update Tla if we are allowed to
+            if update_this_engine_tla:
+                update_psx_tla = True
+
+            # Release lock if we have it and Tla is near zero
+            if self.psx_throttle_interlock[engine_index] == my_interlock:
+                if axis_near_idle:
+                    self.logger.debug(
+                        "Axis near idle and we have interlock, releasing interlock for index %d",
+                        engine_index)
+                    self.psx_throttle_interlock[engine_index] = 'unlocked'
+
+        # If some throttle has moved, update PSX Tla
+        if update_psx_tla:
+            self.logger.debug("Sending Tla update to PSX for %s: %d",
+                              axis_config['engine indexes'], psx_value)
+            await self.psx_axis_queue.put({
+                'variable': axis_config['psx variable'],
+                'indexes': axis_config['engine indexes'],
+                'value': psx_value,
+            })
+
+        # Play sound if needed
+        soundfile = self.config_misc.get("THROTTLE_SYNC_SOUND", 'syncsound.wav')
+        if self.autothrottle_active():
+            if axis_close_to_tla:
+                if os.path.exists(soundfile):
+                    pygame.mixer.Sound(soundfile).play()
+                else:
+                    self.logger.critical("%s missing, cannot play throttle sync sound", soundfile)
+        self.logger.debug(
+            "PSX_THROTTLE movement END, interlocks: %s",
+            self.psx_throttle_interlock)
+        self.logger.debug(
+            "PSX_THROTTLE movement END, reversers: %s",
+            self.psx_reverser_open)
+
     async def handle_axis_motion_axis_set(self, event, axis_config):
         """Handle motion on an AXIS_SET axis.
 
@@ -452,7 +759,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 'value': psx_value,
             })
 
-    async def handle_axis_motion(self, event):
+    async def handle_axis_motion(self, event):  # pylint: disable=too-many-branches
         """Handle any axis motion."""
         try:
             joystick_name = self.joysticks[event.instance_id].get_name()
@@ -497,6 +804,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             await self.handle_axis_motion_speedbrake(event, axis_config)
         elif axis_config['axis type'] == 'AXIS_SET':
             await self.handle_axis_motion_axis_set(event, axis_config)
+        elif axis_config['axis type'] == 'AXIS_PSX_THROTTLE':
+            await self.handle_axis_motion_psx_throttle(event, axis_config, is_reverse=False)
+        elif axis_config['axis type'] == 'AXIS_PSX_REVERSE':
+            await self.handle_axis_motion_psx_throttle(event, axis_config, is_reverse=True)
         else:
             raise FrankenUsbException(f"Unknown axis type {axis_config['axis type']}")
 
