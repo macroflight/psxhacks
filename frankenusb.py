@@ -1359,6 +1359,11 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             try:
                 # If an event is available, process it
                 thisevent = self.psx_axis_queue.get_nowait()
+
+                # Inihibit updates of certain variables
+                if thisevent['variable'] in self.config_misc.get('DO_NOT_SEND_TO_PSX', []):
+                    self.logger.debug("Dropping %s update due to config", thisevent['variable'])
+                    continue
                 try:
                     elapsed = time.time() - self.psx_send_state[thisevent['variable']]['last sent']
                 except KeyError:
