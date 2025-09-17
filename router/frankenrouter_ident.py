@@ -102,28 +102,12 @@ class Script():
                     continue
                 title = get_window_title_by_handle(hwnd)
                 self.logger.debug("Title is %s", title)
-                if re.match(r".*Precision Simulator.*", title):
-                    if not re.match(r".*Instructor.*", title):
-                        title = re.sub(r" \[1\] - Precision Simulator", "", title)
-                        title = re.sub(r"CLIENT[0-9]* \| ", "", title)
-                        name = f"PSX: {title}"
-                elif re.match(r".*PSX.Bacars.*", title):
-                    name = "BACARS"
-                elif re.match(r".*PSX.NET.MSFS.Router.*", title):
-                    name = "PSX.NET.Router"
-                elif re.match(r".*vPilot.*", title):
-                    name = "vPilot"
-                elif re.match(r".*PSX.NET.EFB.*", title):
-                    name = "PSX.NET.EFB"
-                elif re.match(r".*PSX.NET.GateFinder.*", title):
+                if re.match(r".*PSX.NET.GateFinder.*", title):
                     name = "Gatefinder"
-                elif re.match(r".*PSX.NET.*", title):
-                    # self.logger.info("PSX.NET, really %s", title)
-                    name = "PSX.NET"
-                elif re.match(r".*PSX Sounds.*", title):
-                    name = "PSX Sounds"
                 elif re.match(r".*ACARS Printer.*", title):
                     name = "Printer"
+                elif re.match(r"^PSX.NET$", title):
+                    name = "PSX.NET"
                 else:
                     self.logger.debug(
                         "Non-identified client on %s:%s: %s",
