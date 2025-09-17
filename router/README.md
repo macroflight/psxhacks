@@ -177,6 +177,67 @@ $ curl -s http://127.0.0.1:8881/clients | jq .
 ]
 ```
 
+### GET /routerinfo
+
+Return all data received over the FRTP ROUTERINFO protocol, e.g
+connected clients, uptime, ...
+
+Example usage:
+
+``` text
+$ curl -s http://127.0.0.1:8881/routerinfo | jq .
+{
+  "d89cebbc5def3a548b2f771c5ad79da2": {
+    "timestamp": 1758090730.3745098,
+    "router_name": "filtermaster1",
+    "simulator_name": "FilterMaster",
+    "uuid": "d89cebbc5def3a548b2f771c5ad79da2",
+    "performance": {
+      "uptime": 200
+    },
+    "connections": [
+      {
+        "upstream": false,
+        "uuid": "45a4ec2cba7b31cdb197803cc2654555",
+        "client_id": 1,
+        "is_frankenrouter": true,
+        "display_name": "FilterClient2",
+        "connected_time": 197
+      },
+      {
+        "upstream": true,
+        "uuid": null,
+        "client_id": null,
+        "is_frankenrouter": false,
+        "display_name": "unknown connection",
+        "connected_time": 199
+      }
+    ],
+    "received": 1758090730.3745403
+  },
+  "45a4ec2cba7b31cdb197803cc2654555": {
+    "timestamp": 1758090713.9745913,
+    "router_name": "FilterClientRouter2",
+    "simulator_name": "FilterClient1",
+    "uuid": "45a4ec2cba7b31cdb197803cc2654555",
+    "performance": {
+      "uptime": 282
+    },
+    "connections": [
+      {
+        "upstream": true,
+        "uuid": "d89cebbc5def3a548b2f771c5ad79da2",
+        "client_id": null,
+        "is_frankenrouter": true,
+        "display_name": "filtermaster1",
+        "connected_time": 180
+      }
+    ],
+    "received": 1758090713.9748962
+  }
+}
+```
+
 ### GET /upstream
 
 Return information about the current upstream connection,

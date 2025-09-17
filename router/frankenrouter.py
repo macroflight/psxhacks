@@ -384,6 +384,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # Print information about other routers in the network
         for routeruuid, info in self.routerinfo.items():  # pylint: disable=too-many-nested-blocks
             if routeruuid != self.uuid:
+                clients = 0
+                for con in info['connections']:
+                    if not con['upstream']:
+                        clients += 1
                 upstream = None
                 for con in info['connections']:
                     if con['upstream']:
@@ -393,24 +397,18 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                             upstream = f"frankenrouter {con['display_name']}"
                             upstream += f" ({trimstring(con['uuid'])})"
                 self.logger.info(
-                    "Remote router %s (%s) in sim %s, uptime %d s (data age %d s)",
+                    "Remote %s (%s) in sim %s has %d clients, up %d s (data age %.0fs)",
                     info['router_name'],
                     trimstring(info['uuid']),
                     info['simulator_name'],
+                    clients,
                     info['performance']['uptime'],
-                    int(time.time() - info['timestamp']),
+                    time.time() - info['received']
                 )
                 if upstream is not None:
                     self.logger.info(
                         "--> upstream connection is %s",
                         upstream)
-                for con in info['connections']:
-                    if not con['upstream']:
-                        self.logger.info("--> client %s is %s, connected time %s seconds",
-                                         con['client_id'],
-                                         con['display_name'],
-                                         con['connected_time'],
-                                         )
 
         # Print seatinfo (to show SHAREDINFO data is being sent through network)
         if 'seatmap' in self.sharedinfo:
@@ -1304,6 +1302,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         payload_json = json.dumps(payload)
         # Store our own routerinfo so we have all the data in the same place
         self.routerinfo[self.uuid] = payload
+        # Fake the received timestamp
+        self.routerinfo[self.uuid]['received'] = time.time()
+
         # Send to network
         await self.send_to_upstream(
             f"addon=FRANKENROUTER:{self.frdp_version}:ROUTERINFO:{payload_json}")
@@ -1420,7 +1421,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     # Remove old routerinfo entries
                     remove = set()
                     for key, value in self.routerinfo.items():
-                        age = time.time() - value['timestamp']
+                        age = time.time() - value['received']
                         if age > 2 * FRDP_ROUTERINFO_INTERVAL:
                             self.logger.info("Removing old routerinfo entry with age %d", age)
                             remove.add(key)
@@ -1713,6 +1714,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         'display_name': client.display_name,
                     })
                 return web.json_response(clients)
+
+            @routes.get('/routerinfo')
+            async def handle_routerinfo_get(_):
+                return web.json_response(self.routerinfo)
 
             @routes.post('/upstream')
             async def handle_upstream_set(request):

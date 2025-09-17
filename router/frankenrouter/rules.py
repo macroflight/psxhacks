@@ -255,6 +255,9 @@ class Rules():  # pylint: disable=too-many-public-methods
             return self.myreturn(RulesAction.DROP, RulesCode.FRDP_ROUTERINFO)
 
         self.router.routerinfo[routerinfo['uuid']] = routerinfo
+        # Add received timestamp
+        self.router.routerinfo[routerinfo['uuid']]['received'] = time.time()
+
         # Forward message to network
         return self.myreturn(RulesAction.NORMAL, RulesCode.FRDP_ROUTERINFO)
 
