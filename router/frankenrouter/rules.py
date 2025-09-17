@@ -596,6 +596,12 @@ class Rules():  # pylint: disable=too-many-public-methods
         if key == 'name':
             return self.handle_name(value)
 
+        # PSX 10.184 added support for naming your PSX main clients,
+        # but it uses the keyword "clientName" rather than "name". For
+        # now, we will be handling clientName just as name.
+        if key == 'clientName':
+            return self.handle_name(value)
+
         if key == 'addon':
             return self.handle_addon(value)
 
