@@ -1,5 +1,10 @@
 # Changelog
 
+## 2025-09-19: version 0.9
+
+- Support for the PSX 10.184 clientName keyword
+- Improve multi-router support
+
 ## 2025-08-03: version 0.8
 
 - Simplify shared cockpit slave sim setup - no config file needed

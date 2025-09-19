@@ -32,11 +32,11 @@ from frankenrouter.rules import RulesAction, RulesCode, Rules
 __MYNAME__ = 'frankenrouter'
 __MY_DESCRIPTION__ = 'A PSX Router'
 
-VERSION = '0.8'
+VERSION = '0.9'
 
 # If we have no upstream connection and no cached data, assume this
 # version.
-PSX_DEFAULT_VERSION = '10.182 NG'
+PSX_DEFAULT_VERSION = '10.184 NG'
 
 # How long we wait for the upstream connection before accepting clients
 # and serving them cached data.
