@@ -1,3 +1,4 @@
+# pylint: disable=invalid-name
 """Workaround for 134.149 MHz bug.
 
 NOTE: as of 2023-123-16 this is no longer needed, see

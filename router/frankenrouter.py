@@ -887,7 +887,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                             demand_var, peername)
                         clients_demand.add(demand_var)
                 for demand_var in clients_demand:
-                    self.logger.debug("Sending demand=%s to upstream")
+                    self.logger.debug("Sending demand=%s to upstream", demand_var)
                     await self.send_to_upstream(f"demand={demand_var}")
 
                 # Connection complete, refresh status display and send FRDP ROUTERINFO
