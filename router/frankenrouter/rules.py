@@ -709,6 +709,18 @@ class Rules():  # pylint: disable=too-many-public-methods
                     RulesCode.KEYVALUE_FILTER_EGRESS,
                     extra_data={'endpoint_name_regexp': r".*PSX Sound.*"})
 
+        # Do not send Qs119 to downstream when bang sent
+        # recently. This prevents additional printouts of the same
+        # message e.g when someone saves a situ.
+        # Note: since data in response to a bang can only come from
+        # upstream, we only filter when the sender is upstream
+        if self.sender.upstream and key == 'Qs119':
+            if time.perf_counter() - self.router.last_bang < 2.0:
+                return self.myreturn(
+                    RulesAction.FILTER,
+                    RulesCode.KEYVALUE_FILTER_EGRESS,
+                    extra_data={'endpoint_name_regexp': r".*"})
+
         #
         # Send normally
         #
