@@ -678,6 +678,18 @@ class Rules():  # pylint: disable=too-many-public-methods
                         RulesCode.KEYVALUE_FILTERED_INGRESS,
                         message="filtered Qs119 from BACARS shortly after connection")
 
+        if not self.sender.upstream and key == 'Qi198':
+            # Filter elevation updates (usually from MSFS.Router) from
+            # downstream if the config option is set. We use this to
+            # supress elevation updates from simulators that will not
+            # be VATPRI, especially if they don't have the exact same
+            # scenery.
+            if self.router.config.psx.filter_elevation:
+                return self.myreturn(
+                    RulesAction.DROP,
+                    RulesCode.KEYVALUE_FILTERED_INGRESS,
+                    message="filtered Qi198 as filter_elevation is set")
+
         # Store key-value in router cache
         self.router.cache.update(key, value)
 

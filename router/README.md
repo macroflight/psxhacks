@@ -162,7 +162,7 @@ Returns information about connected clients (very basic)
 Example usage:
 
 ``` text
-$ curl -s http://127.0.0.1:8881/clients | jq .
+$ curl -s http://127.0.0.1:8747/clients | jq .
 [
   {
     "ip": "127.0.0.1",
@@ -185,7 +185,7 @@ connected clients, uptime, ...
 Example usage:
 
 ``` text
-$ curl -s http://127.0.0.1:8881/routerinfo | jq .
+$ curl -s http://127.0.0.1:8747/routerinfo | jq .
 {
   "d89cebbc5def3a548b2f771c5ad79da2": {
     "timestamp": 1758090730.3745098,
@@ -195,6 +195,7 @@ $ curl -s http://127.0.0.1:8881/routerinfo | jq .
     "performance": {
       "uptime": 200
     },
+    "filter_elevation": false,
     "connections": [
       {
         "upstream": false,
@@ -223,6 +224,7 @@ $ curl -s http://127.0.0.1:8881/routerinfo | jq .
     "performance": {
       "uptime": 282
     },
+    "filter_elevation": true,
     "connections": [
       {
         "upstream": true,
@@ -245,11 +247,12 @@ Return information about the current upstream connection,
 Example usage:
 
 ``` text
-$ curl -s http://127.0.0.1:8881/upstream | jq .
+$ curl -s http://127.0.0.1:8747/upstream | jq .
 {
   "connected": true,
   "host": "127.0.0.1",
-  "port": 20747
+  "port": 20747,
+  "password": "somesecrethuh"
 }
 ```
 
@@ -261,7 +264,7 @@ affect the config file).
 Example usage (change the upstream connection to 127.0.0.1 port 20748):
 
 ``` text
-curl -d "host=127.0.0.1&port=20748" -X POST http://127.0.0.1:8881/upstream
+curl -d "host=127.0.0.1&port=20748&password=somesecrethuh" -X POST http://127.0.0.1:8747/upstream
 ```
 
 ### GET /sharedinfo
@@ -271,7 +274,7 @@ Return the latest SHAREDINFO data, e.g the seat map.
 Example usage:
 
 ``` text
-$ curl -s http://127.0.0.1:8881/sharedinfo | jq .
+$ curl -s http://127.0.0.1:8747/sharedinfo | jq .
 {
   "filter-master": "LEFT",
   "filter-client1": "RIGHT"
@@ -285,7 +288,7 @@ Change parts of the SHAREDINFO data, e.g the seat map.
 Example usage:
 
 ``` text
-$ curl -X POST http://127.0.0.1:8881/sharedinfo \
+$ curl -X POST http://127.0.0.1:8747/sharedinfo \
      -H 'Content-Type: application/json' \
      -d '{"seatmap": {"filter-master":"RIGHT", "filter-client2": "OBSERVER"}}'
 ```

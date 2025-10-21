@@ -271,6 +271,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             action='store_true',
             help="Ask about upstream details before starting",
         )
+        parser.add_argument(
+            '--filter-elevation',
+            action='store_true',
+            help="Do not send elvation updates Qi198 to upstream"
+        )
         self.args = parser.parse_args()
 
     def get_random_id(self, length=16):
@@ -303,6 +308,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             int(time.perf_counter() - self.starttime),
             self.config.listen.rest_api_port, self.cache.get_size(),
         )
+        # Most sims will have elevation filtering ON, so show warning if off
+        if not self.config.psx.filter_elevation:
+            self.logger.info("Elevation filter: OFF")
         self.logger.info("Router UUID: %s - Press Ctrl-C to shut down cleanly",
                          trimstring(self.uuid))
         if self.log_traffic_filename:
@@ -1282,6 +1290,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             "performance": {
                 "uptime": int(time.perf_counter() - self.starttime),
             },
+            "filter_elevation": self.config.psx.filter_elevation,
         }
         payload['connections'] = []
 
@@ -1693,8 +1702,18 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.critical(traceback.format_exc())
         # End of forwarder_task()
 
-    async def api_task(self, name):
+    async def api_task(self, name):  # pylint:disable=too-many-locals,too-many-statements
         """REST API Task."""
+        filter_elevation_page = '''
+<html><head></head>
+<h1>PSX elevation injection filter (Qi198)</h1>
+Filter is <b>%s</b>
+<p><a href="/filter/elevation/toggle">Toggle filter<a>
+<p>When the filter is enabled, your MSFS is not trying to control the shared sim elevation.
+<p>Only enable the filter if your sim is the only connected sim or you connected to VATSIM as non-observer.
+</html>
+'''
+
         try:
             routes = web.RouteTableDef()
 
@@ -1718,6 +1737,21 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             @routes.get('/routerinfo')
             async def handle_routerinfo_get(_):
                 return web.json_response(self.routerinfo)
+
+            @routes.get('/filter/elevation/toggle')
+            async def handle_filter_elevation_toggle(_):
+                self.config.psx.filter_elevation = not self.config.psx.filter_elevation
+                status_text = "enabled" if self.config.psx.filter_elevation else "not enabled"
+                return web.json_response(
+                    text=filter_elevation_page % status_text,
+                    content_type='text/html')
+
+            @routes.get('/filter/elevation')
+            async def handle_filter_elevation_get(_):
+                status_text = "enabled" if self.config.psx.filter_elevation else "not enabled"
+                return web.json_response(
+                    text=filter_elevation_page % status_text,
+                    content_type='text/html')
 
             @routes.post('/upstream')
             async def handle_upstream_set(request):
@@ -1908,11 +1942,15 @@ To run the router in "basic client mode", answer the questions below.
 HOWTO for temporarily converting your PSX sim to a shared cockpit
 slave sim:
 
-1: Open the Instructor window for your PSX main server.
-2: On the Network tab, click Stop and then choose "A main client" and click start
-3: Answer the questions below
-4: The router will start and connect to the shared cockpit master sim
-5: Verify that your sim is working. You will probably need to restart
+1: Open the Instructor window for your PSX main server
+2: On the Network tab, click Stop
+3: Under Preferences > Basic, make sure "This client connects to:" is 127.0.0.1
+4: Under Preferences > Basic, make sure "On Port:" is 10747
+5: Answer the questions below
+6: The router will start and connect to the shared cockpit master sim
+7: Open the Instructor window for your PSX main server
+8: On the Network tab, choose "A main client" and click start (should now connect to router)
+9: Verify that your entire sim is working. You will probably need to restart
 a few addons (the ones that does not automatically reconnect when the
 PSX main server or router is restarted).
 
@@ -1931,11 +1969,21 @@ Password: leave blank if the master sim does not use a
 password. Otherwise use the password given to you by the owner of the
 shared cockpit master sim.
 
-            """)
+The "elevation filter" (prevents your MSFS from affecting the shared
+sim's elevation can be toggled by opening
+http://localhost:8747/filter/elevation in a web browser.
+""")
 
             # Default to listen on 10747 for "dumb client mode" and connect to 10748
             self.config.listen.port = 10747
+
+            # Default is to enable the REST API to allow for elevation filter control
+            self.config.listen.rest_api_port = 8747
+
             self.config.upstream.port = 10748
+
+            # Enable filtering of MSFS elevation data by default
+            self.config.psx.filter_elevation = True
 
             while True:
                 self.config.identity.simulator = input(
@@ -1990,6 +2038,9 @@ shared cockpit master sim.
 
         if self.args.log_directory is not None:
             self.config.log.directory = self.args.log_directory
+
+        if self.args.filter_elevation:
+            self.config.psx.filter_elevation = True
 
         # Set our UUID (based on hostid and listen port as we want it
         # to be stable but unique even if we run multiple routers on

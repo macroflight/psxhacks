@@ -103,12 +103,14 @@ directory = 'C:\fs\PSX\Routerlogs'
   Forum](https://aerowinx.com/assets/networkers/Variables.txt)). If
   the file is not found, the router will print a warning and try to
   download a copy of the file from Aerowinx.
+- `filter_elevation`: If true, Qi198 elevation injections from clients (usually PSX.MSFS.Router) will be filtered. This filter can be toggled during runtime using the REST API. 
 
 Example:
 
 ```text
 [psx]
 variables = 'C:\fs\PSX\Variables.txt
+filter_elevation = true
 ```
 
 ### `[[access]]`
