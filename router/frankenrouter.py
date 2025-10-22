@@ -1723,10 +1723,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             async def handle_upstream_set(request):
                 data = await request.post()
                 new_host = data.get('host')
+                new_password = data.get('password')
                 new_port = int(data.get('port'))
                 self.logger.info(
-                    "Got request to change upstream to %s:%s",
-                    new_host, new_port)
+                    "Got request to change upstream to %s:%s:%s",
+                    new_host, new_port, new_password)
                 self.logger.info(
                     "Current upstream is %s:%s (connected=%s)",
                     self.config.upstream.host,
@@ -1740,14 +1741,19 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 if new_port != self.config.upstream.port:
                     self.config.upstream.port = new_port
                     reconnect = True
+                if new_password != self.config.upstream.password:
+                    self.config.upstream.password = new_password
+                    reconnect = True
                 if not reconnect:
-                    return web.Response(text="Already connected to that host/port")
+                    return web.Response(text="Already connected to that host/port/password")
                 self.logger.info(
-                    "Will change upstream to %s:%s",
+                    "Will change upstream to %s:%s:%s",
                     self.config.upstream.host,
-                    self.config.upstream.port)
+                    self.config.upstream.port,
+                    self.config.upstream.password,
+                )
                 self.upstream_reconnect_requested = True
-                return web.Response(text="Connecting to new host/port")
+                return web.Response(text="Connecting to new host/port/password")
 
             @routes.get('/upstream')
             async def handle_upstream_get(_):
