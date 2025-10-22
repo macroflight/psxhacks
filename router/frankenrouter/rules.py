@@ -111,6 +111,7 @@ class RulesCode(enum.Enum):
     PBSKAQ = enum.auto()
     LAYOUT = enum.auto()
     KEYVALUE_FILTERED_INGRESS = enum.auto()
+    KEYVALUE_FILTERED_INGRESS_SILENT = enum.auto()
     KEYVALUE_FILTER_EGRESS = enum.auto()
     KEYVALUE_NORMAL = enum.auto()
 
@@ -683,11 +684,11 @@ class Rules():  # pylint: disable=too-many-public-methods
             # downstream if the config option is set. We use this to
             # supress elevation updates from simulators that will not
             # be VATPRI, especially if they don't have the exact same
-            # scenery.
+            # scenery. We use SILENT filtering since this will happen at 2Hz
             if self.router.config.psx.filter_elevation:
                 return self.myreturn(
                     RulesAction.DROP,
-                    RulesCode.KEYVALUE_FILTERED_INGRESS,
+                    RulesCode.KEYVALUE_FILTERED_INGRESS_SILENT,
                     message="filtered Qi198 as filter_elevation is set")
 
         # Store key-value in router cache

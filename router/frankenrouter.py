@@ -792,8 +792,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             if exclude_name_regexp is not None:
                 if re.match(exclude_name_regexp, client.display_name):
                     self.logger.info(
-                        "Not sending to %s due to regexp match for %s against %s",
-                        client.peername, client.display_name, exclude_name_regexp)
+                        "Not sending %s to %s due to regexp match for %s against %s",
+                        key, client.peername, client.display_name, exclude_name_regexp)
                     continue
             if not client.has_access() and not ignore_access:
                 self.logger.debug(
@@ -1533,6 +1533,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         elif code == RulesCode.KEYVALUE_FILTERED_INGRESS:
             self.logger.info(
                 "Keyword update from %s dropped due to ingress filter (%s): %s",
+                sender_hr, message, line)
+        elif code == RulesCode.KEYVALUE_FILTERED_INGRESS_SILENT:
+            self.logger.debug(
+                "Keyword update from %s dropped silently due to ingress filter (%s): %s",
                 sender_hr, message, line)
         elif code == RulesCode.KEYVALUE_FILTER_EGRESS:
             self.logger.debug(
