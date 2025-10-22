@@ -323,7 +323,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 upstreaminfo = upstreaminfo + f", {self.upstream_connections - 1} reconnections"
         self.logger.info(upstreaminfo)
         self.logger.info(
-            "%-21s %-23s %5s %8s %6s %6s %9s %9s %5s",
+            "%-21s %-23s %5s %8s %7s %7s %9s %9s %5s",
             f"{len(self.clients)} clients",
             "",
             "Local",
@@ -335,7 +335,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             "FRDP RTT ms",
         )
         self.logger.info(
-            "%2s %-26s %-15s %5s %8s %6s %6s %9s %9s %5s %5s",
+            "%2s %-26s %-15s %5s %8s %7s %7s %9s %9s %5s %5s",
             "id",
             "Name",
             "Client IP",
@@ -368,7 +368,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 prefix = ''
 
             self.logger.info(
-                "%2d %-26s %-15s %5d %8s %6d %6d %9d %9d %5s %5s",
+                "%2d %-26s %-15s %5d %8s %7d %7d %9d %9d %5s %5s",
                 data.client_id,
                 f"{prefix}{data.display_name}",
                 data.ip,
