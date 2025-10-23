@@ -711,11 +711,13 @@ class Rules():  # pylint: disable=too-many-public-methods
                     RulesCode.KEYVALUE_FILTER_EGRESS,
                     extra_data={'start': True, 'key': key})
 
-        # Do not send Qi191 to PSX Sounds when bang sent recently
-        # (this variable causes PSX Sounds to play its gear pin sound)
+        # Do not send Qi191 or Qi257 to PSX Sounds when bang sent
+        # recently (this variable causes PSX Sounds to play its gear
+        # pin and touchdown sounds).
+        #
         # Note: since data in response to a bang can only come from
         # upstream, we only filter when the sender is upstream
-        if self.sender.upstream and key == 'Qi191':
+        if self.sender.upstream and key in ['Qi191', 'Qi257']:
             if time.perf_counter() - self.router.last_bang < 2.0:
                 return self.myreturn(
                     RulesAction.FILTER,
