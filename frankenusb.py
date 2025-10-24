@@ -814,6 +814,9 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             if button_config['button type'] == "SET":
                 # Set a PSX variable to the value in config
                 self.psx_send_and_set(button_config['psx variable'], button_config['value'])
+            if button_config['button type'] == "SET_MULTI":
+                for (key, value) in button_config['psx variables']:
+                    self.psx_send_and_set(key, value)
             elif button_config['button type'] == "SET_ACCELERATED":
                 minimum_interval = button_config['minimum interval']
                 acceleration = button_config['acceleration']
@@ -855,6 +858,24 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                         new_value = button_config['max']
                 if new_value != value:
                     self.psx_send_and_set(button_config['psx variable'], new_value)
+            elif button_config['button type'] == 'INCREMENT_MULTI':
+                for (key, increment, minval, maxval, wrap) in button_config['psx variables']:
+                    cur = self.psx.get(key)
+                    self.logger.info("INCREMENT_MULTI got %s for %s", cur, key)
+                    value = int(cur)
+                    new_value = value + increment
+                    if new_value < minval:
+                        if wrap:
+                            new_value = maxval
+                        else:
+                            new_value = minval
+                    elif new_value > maxval:
+                        if wrap:
+                            new_value = minval
+                        else:
+                            new_value = maxval
+                    if new_value != value:
+                        self.psx_send_and_set(key, new_value)
             elif button_config['button type'] == 'BIGMOMPSH':
                 self.logger.debug("BIGMOMPSH event for %s", button_config['psx variable'])
                 value = int(self.psx.get(button_config['psx variable']))
@@ -1268,6 +1289,9 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 for _, action in data.items():
                     if 'psx variable' in action:
                         psx_variables.add(action['psx variable'])
+                    if 'psx variables' in action:
+                        for keytuple in  action['psx variables']:
+                            psx_variables.add(keytuple[0])
         self.logger.info("Subscribing to PSX variables %s", psx_variables)
         for psx_variable in psx_variables:
             self.psx.subscribe(psx_variable)
