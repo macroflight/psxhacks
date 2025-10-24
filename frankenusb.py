@@ -121,10 +121,6 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                             action='store', default="10747", type=str,
                             help='Port number of the main PSX server',
                             )
-        parser.add_argument('--fo',
-                            action='store_true',
-                            help='Use this in shared cockpit if you are the FO',
-                            )
         parser.add_argument('--long-press-limit',
                             action='store', default=0.5, type=float,
                             help='button presses longer than this are considered long',
@@ -1026,69 +1022,52 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             await handle_button_helper()
 
     def toggle_flight_control_lock(self):  # pylint: disable=too-many-branches
-        """Toggle the flight control lock and update status message."""
-        # Lock modes:
-        # 0 - no flight control lock
-        # 1 - captain's controls locked
-        # 2 - first officer's controls locked
-        # 3 - both controls locked
-        # 4 - unknown
-        # Note: for this to work both shared cockpit pilots must use
-        # frankenusb, and one must be started with the --fo option.
-        prefix = "AXLK:"
-        current_message = self.psx.get(MSG_TYPE_FLT_CTL_LOCK)
-        if current_message == '':
-            lock_mode = 0
-        elif current_message == f"({prefix} CP)":
-            lock_mode = 1
-        elif current_message == f"({prefix} FO)":
-            lock_mode = 2
-        elif current_message == f"({prefix} BOTH)":
-            lock_mode = 3
-        else:
-            self.logger.warning(
-                "Found unexpected %s value %s", MSG_TYPE_FLT_CTL_LOCK, current_message)
-            lock_mode = 4
+        """Toggle the flight control lock and update status message.
 
+        The local lock is always toggled when this function is called.
+
+        If the new state is enabled, we try to add our
+        EICAS_IDENTIFIER_LETTER to the lock status message (e.g "AXLK: M")
+
+        If the new state is disabled, we try to remove our
+        EICAS_IDENTIFIER_LETTER from the lock status message.
+        """
         # Toggle the actual lock
         if self.flight_control_lock_active:
             self.flight_control_lock_active = False
         else:
             self.flight_control_lock_active = True
 
-        # Update EICAS message
-        if self.args.fo:
-            # FO mode
-            if self.flight_control_lock_active:
-                # FO lock enabled
-                if lock_mode in [0, 2, 4]:
-                    new_message = f"({prefix} FO)"
-                else:
-                    new_message = f"({prefix} BOTH)"
-            else:
-                # FO lock disabled
-                if lock_mode in [1, 3]:
-                    new_message = f"({prefix} CP)"
-                else:  # 0, 2, 4
-                    new_message = ''
+
+        eicasletter = self.config_misc.get("EICAS_IDENTIFIER_LETTER", None)
+        if eicasletter is None:
+            self.logger.info("Flight control lock toggled to %s", self.flight_control_lock_active)
         else:
-            # Captain mode
+            if len(eicasletter) > 1:
+                raise FrankenUsbException(
+                    "EICAS_IDENTIFIER_LETTER cannot be more than one letter")
+
+            # Update EICAS message
+            prefix = "AXLK: "
+            current_message = self.psx.get(MSG_TYPE_FLT_CTL_LOCK)
+            letters = current_message.replace(prefix, "")
+
             if self.flight_control_lock_active:
-                # Captain's lock enabled
-                if lock_mode in [0, 1, 4]:
-                    new_message = f"({prefix} CP)"
-                else:  # 2, 3
-                    new_message = f"({prefix} BOTH)"
+                if eicasletter not in letters:
+                    letters = ''.join(sorted(letters + eicasletter))
+                    letters = "".join(set(letters))
             else:
-                # Captain's lock disabled
-                if lock_mode in [2, 3]:
-                    new_message = f"({prefix} FO)"
-                else:  # 0, 1, 4
-                    new_message = ''
-        self.logger.info(
-            "Flight control lock toggled. New value: %s. Message change from %s to %s",
-            self.flight_control_lock_active, current_message, new_message)
-        self.psx_send_and_set(MSG_TYPE_FLT_CTL_LOCK, new_message)
+                if eicasletter in letters:
+                    letters = letters.replace(eicasletter, "")
+            if letters == '':
+                new_message = ''
+            else:
+                new_message = prefix + letters
+
+            self.logger.info(
+                "Flight control lock toggled. New value: %s. Message change from %s to %s",
+                self.flight_control_lock_active, current_message, new_message)
+            self.psx_send_and_set(MSG_TYPE_FLT_CTL_LOCK, new_message)
 
     async def flight_phase_setup(self, phase):  # pylint: disable=too-many-statements
         """Flight phase change functions."""
