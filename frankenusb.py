@@ -814,7 +814,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             if button_config['button type'] == "SET":
                 # Set a PSX variable to the value in config
                 self.psx_send_and_set(button_config['psx variable'], button_config['value'])
-            if button_config['button type'] == "SET_MULTI":
+            elif button_config['button type'] == "SET_MULTI":
                 for (key, value) in button_config['psx variables']:
                     self.psx_send_and_set(key, value)
             elif button_config['button type'] == "SET_ACCELERATED":
