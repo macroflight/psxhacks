@@ -810,7 +810,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
     async def handle_button(self, event):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         """Handle button press/release."""
 
-        async def handle_button_helper():  # pylint: disable=too-many-branches,too-many-statements
+        async def handle_button_helper():  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
             if button_config['button type'] == "SET":
                 # Set a PSX variable to the value in config
                 self.psx_send_and_set(button_config['psx variable'], button_config['value'])
