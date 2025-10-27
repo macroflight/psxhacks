@@ -1059,7 +1059,6 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         else:
             self.flight_control_lock_active = True
 
-
         eicasletter = self.config_misc.get("EICAS_IDENTIFIER_LETTER", None)
         if eicasletter is None:
             self.logger.info("Flight control lock toggled to %s", self.flight_control_lock_active)
@@ -1290,7 +1289,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                     if 'psx variable' in action:
                         psx_variables.add(action['psx variable'])
                     if 'psx variables' in action:
-                        for keytuple in  action['psx variables']:
+                        for keytuple in action['psx variables']:
                             psx_variables.add(keytuple[0])
         self.logger.info("Subscribing to PSX variables %s", psx_variables)
         for psx_variable in psx_variables:
