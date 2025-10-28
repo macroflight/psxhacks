@@ -7,10 +7,18 @@ import time
 
 NOACCESS_ACCESS_LEVEL = 'noaccess'
 
+# The correct separator
 PSX_PROTOCOL_SEPARATOR = b'\r\n'
+
+# All supported separators
+SUPPORTED_PROTOCOL_SEPARATORS = (b'\r\n', b'\n\r', b'\r', b'\n')
 
 
 class ConnectionException(Exception):  # pylint: disable=too-few-public-methods
+    """A custom exception."""
+
+
+class ConnectionClosed(ConnectionException):  # pylint: disable=too-few-public-methods
     """A custom exception."""
 
 
@@ -27,6 +35,8 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         self.reader = reader
         self.writer = writer
         self.config = config
+
+        self.last_line_type = None
 
         self.upstream = False
         self.client_id = None
@@ -103,6 +113,39 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
                 await self.log_traffic(line, inbound=False)
             else:
                 await self.log_traffic(line, endpoints=[self.client_id], inbound=False)
+
+    async def read_line_from_stream(self):
+        r"""Read a single PSX messahe line from the stream.
+
+        Handle all possble combinations of newline:
+
+        Normal stream:
+        Qi123=12\r\n
+        Qi124=13\r\n
+
+        But we can also get streams with any combination of \r and \n...
+        """
+        try:
+            data = await self.reader.readuntil(SUPPORTED_PROTOCOL_SEPARATORS)
+        except asyncio.IncompleteReadError as exc:
+            # If we reached EOL before a separator was found, this
+            # happens, and we should return None
+            self.logger.debug("readuntil returned IncompleteReadError, probably disconnect")
+            raise ConnectionClosed from exc
+
+        self.logger.debug("readuntil returned: %s", data)
+        # Remove any newline components from the end of the string
+        data_no_newline = data.replace(b'\n', b'').replace(b'\r', b'')
+        self.logger.debug("with newlines removed: %s", data_no_newline)
+        if data_no_newline == b'':
+            # If the message is e.g Qi123=456\r\n, we will first get
+            # Qi123=456\r and then \n. So an empty separator can be ignored.
+            self.logger.debug("returning None")
+            return None
+        # Now add the correct newline and return
+        retval = data_no_newline + b'\r\n'
+        self.logger.debug("returning: %s", retval)
+        return retval
 
     async def from_stream(self, line):
         """Log data read from stream."""

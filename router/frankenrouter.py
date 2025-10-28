@@ -715,8 +715,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 # We know the protocol is text-based, so we can use
                 # readline()
                 try:
-                    data = await reader.readline()
-                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    data = await this_client.read_line_from_stream()
+                except connection.ConnectionClosed as exc:
                     await self.log_connect_evt(
                         this_client.peername, clientid=this_client.client_id, disconnect=True)
                     del self.clients[this_client.peername]
@@ -724,26 +724,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                                         exc, this_client.peername)
                     self.connection_state_changed()
                     return
-                t_read_data = time.perf_counter()
-                # The real PSX server will not close a client
-                # connection when it gets an empty line, just show an
-                # error in the GUI. But AFAIK no PSX addon will send
-                # empty lines, to this seems like a simple way to
-                # detect a connection closed by the client (which
-                # seems to be somewhat hard...)
-                if data == b"":
-                    self.logger.info("Got empty bytes object from %s, closing connection",
-                                     this_client.peername)
-                    await self.close_client_connection(this_client, clean=False)
-                    return
-                # Note: we can get a partial line at EOF, so discard
-                # data with no newline.
-                if not data.endswith(b'\n'):
-                    self.logger.warning(
-                        "Got partial line data from %s, discarding: %s",
-                        this_client.peername, data
-                    )
+                if data is None:
                     continue
+                t_read_data = time.perf_counter()
                 # Put message in queue
                 await self.messagequeue_from_clients.put({
                     'payload': data,
@@ -907,8 +890,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     # not be too long to handle as a single unit, so we can
                     # read one line at a time.
                     try:
-                        data = await reader.readline()
-                    except Exception as exc:  # pylint: disable=broad-exception-caught
+                        data = await self.upstream.read_line_from_stream()
+                    except connection.ConnectionClosed as exc:
                         self.logger.info(
                             "Upstream connection broke (%s), sleeping %.1f s before reconnect",
                             exc,
@@ -917,21 +900,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         await self.close_upstream_connection()
                         await asyncio.sleep(self.args.upstream_reconnect_delay)
                         break
-                    t_read_data = time.perf_counter()
-                    if data == b'':
-                        self.logger.info(
-                            "Upstream disconnected, sleeping %.1f s before reconnect",
-                            self.args.upstream_reconnect_delay,
-                        )
-                        await self.close_upstream_connection()
-                        await asyncio.sleep(self.args.upstream_reconnect_delay)
-                        break
-                    # Note: we can get a partial line at EOF, so discard
-                    # data with no newline.
-                    if not data.endswith(b'\n'):
-                        self.logger.warning(
-                            "Got partial line data from upstream, discarding: %s", data)
+                    if data is None:
                         continue
+                    t_read_data = time.perf_counter()
                     await self.messagequeue_from_upstream.put({
                         'payload': data,
                         'received_time': t_read_data,
