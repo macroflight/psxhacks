@@ -67,6 +67,8 @@ def trimstring(longname, maxlen=11, sep=".."):
     """Shorten string."""
     if not isinstance(longname, str):
         return longname
+    if len(longname) <= maxlen:
+        return longname
     length = int((maxlen - len(sep)) / 2)
     return longname[:length] + sep + longname[-length:]
 
@@ -378,7 +380,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.info(
                 "%2d %-26s %-15s %5d %8s %7d %7d %9d %9d %5s %5s",
                 data.client_id,
-                f"{prefix}{data.display_name}",
+                trimstring(f"{prefix}{data.display_name}", maxlen=25),
                 data.ip,
                 data.port,
                 data.access_level,
