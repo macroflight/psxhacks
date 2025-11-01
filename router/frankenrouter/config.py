@@ -55,6 +55,7 @@ class _RouterConfigPsx:  # pylint: disable=missing-class-docstring,too-few-publi
         if not isinstance(self.variables, str):
             raise RouterConfigError("PSX Variables path must be a string")
         self.filter_elevation = data.get('filter_elevation', True)
+        self.filter_traffic = data.get('filter_traffic', True)
 
 
 class _RouterConfigSharedinfo:  # pylint: disable=missing-class-docstring,too-few-public-methods

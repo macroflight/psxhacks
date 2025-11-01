@@ -718,6 +718,16 @@ class Rules():  # pylint: disable=too-many-public-methods
                     RulesCode.KEYVALUE_FILTERED_INGRESS_SILENT,
                     message="filtered Qi198 as filter_elevation is set")
 
+        if not self.sender.upstream and key in ['Qs450', 'Qs451']:
+            # Filter traffic injection from vPilot if filter is enabled
+            # We use SILENT filtering since this will happen often
+            if self.router.config.psx.filter_traffic:
+                if re.match(r".*vPilot.*", self.sender.display_name):
+                    return self.myreturn(
+                        RulesAction.DROP,
+                        RulesCode.KEYVALUE_FILTERED_INGRESS_SILENT,
+                        message=f"filtered {key} as filter_traffic is set")
+
         # Store key-value in router cache
         self.router.cache.update(key, value)
 

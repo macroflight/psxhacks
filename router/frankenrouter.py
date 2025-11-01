@@ -273,11 +273,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             action='store_true',
             help="Ask about upstream details before starting",
         )
-        parser.add_argument(
-            '--filter-elevation',
-            action='store_true',
-            help="Do not send elvation updates Qi198 to upstream"
-        )
         self.args = parser.parse_args()
 
     def get_random_id(self, length=16):
@@ -313,6 +308,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # Most sims will have elevation filtering ON, so show warning if off
         if not self.config.psx.filter_elevation:
             self.logger.info("Elevation filter: OFF")
+        if not self.config.psx.filter_traffic:
+            self.logger.info("Traffic filter: OFF")
         self.logger.info("Router UUID: %s - Press Ctrl-C to shut down cleanly",
                          trimstring(self.uuid))
         if self.log_traffic_filename:
@@ -1264,6 +1261,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 "uptime": int(time.perf_counter() - self.starttime),
             },
             "filter_elevation": self.config.psx.filter_elevation,
+            "filter_traffic": self.config.psx.filter_traffic,
         }
         payload['connections'] = []
 
@@ -1684,10 +1682,20 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         filter_elevation_page = '''
 <html><head></head>
 <h1>PSX elevation injection filter (Qi198)</h1>
-Filter is <b>%s</b>
+Elevation injection filter is <b>%s</b>
 <p><a href="/filter/elevation/toggle">Toggle filter<a>
 <p>When the filter is enabled, your MSFS is not trying to control the shared sim elevation.
 <p>Only enable the filter if your sim is the only connected sim or you connected to VATSIM as non-observer.
+</html>
+'''
+
+        filter_traffic_page = '''
+<html><head></head>
+<h1>PSX vPilot traffic injection filter (Qs450,Qs451)</h1>
+Filter is <b>%s</b>
+<p><a href="/filter/traffic/toggle">Toggle filter<a>
+<p>When the filter is enabled, your vPilot will not send traffic/TCAS data to the shared sim.
+<p>Only enable the filter if your sim is the only connected sim with PSX.NET.vPilot installed
 </html>
 '''
 
@@ -1728,6 +1736,21 @@ Filter is <b>%s</b>
                 status_text = "enabled" if self.config.psx.filter_elevation else "not enabled"
                 return web.json_response(
                     text=filter_elevation_page % status_text,
+                    content_type='text/html')
+
+            @routes.get('/filter/traffic/toggle')
+            async def handle_filter_traffic_toggle(_):
+                self.config.psx.filter_traffic = not self.config.psx.filter_traffic
+                status_text = "enabled" if self.config.psx.filter_traffic else "not enabled"
+                return web.json_response(
+                    text=filter_traffic_page % status_text,
+                    content_type='text/html')
+
+            @routes.get('/filter/traffic')
+            async def handle_filter_traffic_get(_):
+                status_text = "enabled" if self.config.psx.filter_traffic else "not enabled"
+                return web.json_response(
+                    text=filter_traffic_page % status_text,
                     content_type='text/html')
 
             @routes.post('/upstream')
@@ -1949,6 +1972,10 @@ shared cockpit master sim.
 The "elevation filter" (prevents your MSFS from affecting the shared
 sim's elevation can be toggled by opening
 http://localhost:8747/filter/elevation in a web browser.
+
+The "traffic filter" (prevents your vPilot from sending traffic/TCAS
+data to the shared sim can be toggled by opening
+http://localhost:8747/filter/traffic in a web browser.
 """)
 
             # Default to listen on 10747 for "dumb client mode" and connect to 10748
@@ -2015,9 +2042,6 @@ http://localhost:8747/filter/elevation in a web browser.
 
         if self.args.log_directory is not None:
             self.config.log.directory = self.args.log_directory
-
-        if self.args.filter_elevation:
-            self.config.psx.filter_elevation = True
 
         # Set our UUID (based on hostid and listen port as we want it
         # to be stable but unique even if we run multiple routers on
