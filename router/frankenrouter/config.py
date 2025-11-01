@@ -20,7 +20,7 @@ class _RouterConfigListen:  # pylint: disable=missing-class-docstring,too-few-pu
         if not isinstance(self.port, int):
             raise RouterConfigError("The listen port must be an integer")
 
-        self.rest_api_port = data.get('rest_api_port', None)
+        self.rest_api_port = data.get('rest_api_port', 8747)
         if not isinstance(self.port, int):
             raise RouterConfigError("The API port must be an integer")
 
@@ -54,7 +54,7 @@ class _RouterConfigPsx:  # pylint: disable=missing-class-docstring,too-few-publi
         self.variables = data.get('variables', 'Variables.txt')
         if not isinstance(self.variables, str):
             raise RouterConfigError("PSX Variables path must be a string")
-        self.filter_elevation = data.get('filter_elevation', False)
+        self.filter_elevation = data.get('filter_elevation', True)
 
 
 class _RouterConfigSharedinfo:  # pylint: disable=missing-class-docstring,too-few-public-methods
