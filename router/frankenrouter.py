@@ -153,6 +153,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.longest_destination_string = 0
         self.variable_stats_buffer = []
         self.rules = Rules(self)
+        self.blocklist = set()
 
         # The FRDP protocol version. We bump this every time we make
         # incompatble changes to the FRDP/FRANKENROUTER
@@ -674,6 +675,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # callback (see https://bugs.python.org/issue42526), so we
         # need to wrap the entire function in try-except.
         try:  # pylint: disable=too-many-nested-blocks
+
+            # Check blocklist first
+            this_ip = writer.get_extra_info('peername')[0]
+            if this_ip in self.blocklist:
+                self.logger.info("Blocking connection from blocked IP %s", this_ip)
+                return
+
             # Create the connection object (which needs our config
             # and a reference to the log function)
             this_client = connection.ClientConnection(
@@ -1836,6 +1844,29 @@ Filter is <b>%s</b>
                     return web.Response(text="Nothing was changed")
                 self.frdp_sharedinfo_requested = True
                 return web.Response(text=f"{changes} SHAREDINFO variables changed")
+
+            @routes.get('/blocklist')
+            async def handle_blocklist_get(_):
+                return web.json_response(list(self.blocklist))
+
+            @routes.get('/blocklist/reset')
+            async def handle_blocklist_reset(_):
+                self.blocklist = set()
+                return web.Response(text="Block list reset")
+
+            @routes.post('/blocklist/add')
+            async def handle_blocklist_post(request):
+                data = await request.post()
+                address = str(data.get('address'))
+                self.blocklist.add(address)
+                return web.json_response(list(self.blocklist))
+
+            @routes.post('/blocklist/remove')
+            async def handle_blocklist_post(request):
+                data = await request.post()
+                address = str(data.get('address'))
+                self.blocklist.remove(address)
+                return web.json_response(list(self.blocklist))
 
             # Run the API
             app = web.Application()
