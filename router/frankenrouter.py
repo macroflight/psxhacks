@@ -507,6 +507,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.logger.debug(
                     "Not sending DELTA variable %s to client", key)
                 return
+            if key in self.variables.keywords_with_mode('NOWELCOME'):
+                self.logger.debug(
+                    "Not sending NOWELCOME variable %s to client", key)
+                return
             if key not in client.welcome_keywords_sent:
                 cached_value = self.cache.get_value(key)
                 if cached_value is None:
