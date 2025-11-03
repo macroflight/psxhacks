@@ -1724,6 +1724,16 @@ Filter is <b>%s</b>
                     })
                 return web.json_response(clients)
 
+            @routes.post('/disconnect')
+            async def handle_client_disconnect(request):
+                data = await request.post()
+                client_id = int(data.get('client_id'))
+                for client in self.clients.values():
+                    if client.client_id == client_id:
+                        await self.close_client_connection(client)
+                        return web.Response(text=f"Client connection {client_id} closed")
+                return web.Response(text=f"Client connection {client_id} not found")
+
             @routes.get('/routerinfo')
             async def handle_routerinfo_get(_):
                 return web.json_response(self.routerinfo)
