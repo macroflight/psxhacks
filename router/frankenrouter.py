@@ -1718,6 +1718,7 @@ Filter is <b>%s</b>
                 for client in self.clients.values():
                     clients.append({
                         'ip': client.ip,
+                        'id': client.client_id,
                         'port': client.port,
                         'display_name': client.display_name,
                     })
