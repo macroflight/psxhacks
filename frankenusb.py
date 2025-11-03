@@ -4,7 +4,6 @@ import argparse
 import asyncio
 import importlib.util
 import logging
-import os
 import time
 from collections import defaultdict
 import pygame  # pylint: disable=import-error
@@ -595,13 +594,12 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             })
 
         # Play sound if needed
-        soundfile = self.config_misc.get("THROTTLE_SYNC_SOUND", 'syncsound.wav')
         if self.autothrottle_active():
             if axis_close_to_tla:
-                if os.path.exists(soundfile):
-                    pygame.mixer.Sound(soundfile).play()
-                else:
-                    self.logger.critical("%s missing, cannot play throttle sync sound", soundfile)
+                try:
+                    pygame.mixer.Sound(self.config_misc["THROTTLE_SYNC_SOUND"]).play()
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    self.logger.critical("Failed to play throttle sync sound: %s", exc)
         self.logger.debug(
             "PSX_THROTTLE movement END, interlocks: %s",
             self.psx_throttle_interlock)
@@ -745,7 +743,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             diff = abs(tla - psx_value)
             if diff < 100:
                 self.logger.info("Axis is close to Tla angle - diff=%s", diff)
-                pygame.mixer.Sound(self.config_misc["THROTTLE_SYNC_SOUND"]).play()
+                try:
+                    pygame.mixer.Sound(self.config_misc["THROTTLE_SYNC_SOUND"]).play()
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    self.logger.critical("Failed to play throttle sync sound: %s", exc)
             else:
                 self.logger.info("Axis is far from Tla angle - diff=%s", diff)
         else:
