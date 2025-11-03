@@ -306,13 +306,16 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             },
         }
 
-        def is_mastersim(name):
-            if name == 'FrankenMaster':
-                return True
-            return False
-
         for routerinfo in self.routerinfo.values():
-            if is_mastersim(routerinfo['simulator_name']):
+            # Is this router the master sim router?
+            is_mastersim = False
+            for this_connection in routerinfo['connections']:
+                if this_connection['upstream'] is True:
+                    if this_connection['is_frankenrouter'] is False:
+                        # This router's upstream is not a frankenrouter, so it is
+                        # likely a master sim
+                        is_mastersim = True
+            if is_mastersim:
                 continue
 
             if 'filter_elevation' not in routerinfo:
