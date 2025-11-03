@@ -293,7 +293,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             return True
         return False
 
-    def get_filter_status(self):
+    def get_filter_status(self):  # pylint: disable=too-many-branches
         """Return filter status for connected routers."""
         filterstatus = {
             'elevation': {
