@@ -293,9 +293,52 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             return True
         return False
 
-    def print_status(self):  # pylint: disable=too-many-branches, too-many-statements
+    def get_filter_status(self):
+        """Return filter status for connected routers."""
+        filterstatus = {
+            'elevation': {
+                'enabled': set(),
+                'disabled': set(),
+            },
+            'traffic': {
+                'enabled': set(),
+                'disabled': set(),
+            },
+        }
+
+        def is_mastersim(name):
+            if name == 'FrankenMaster':
+                return True
+            return False
+
+        for routerinfo in self.routerinfo.values():
+            if is_mastersim(routerinfo['simulator_name']):
+                continue
+
+            if 'filter_elevation' not in routerinfo:
+                self.logger.warning("No filter_elevation in routerinfo for %s",
+                                    routerinfo['simulator_name'])
+            else:
+                if routerinfo['filter_elevation'] is True:
+                    filterstatus['elevation']['enabled'].add(routerinfo['simulator_name'])
+                if routerinfo['filter_elevation'] is False:
+                    filterstatus['elevation']['disabled'].add(routerinfo['simulator_name'])
+
+            if 'filter_traffic' not in routerinfo:
+                self.logger.warning("No filter_traffic in routerinfo for %s",
+                                    routerinfo['simulator_name'])
+            else:
+                if routerinfo['filter_traffic'] is True:
+                    filterstatus['traffic']['enabled'].add(routerinfo['simulator_name'])
+                if routerinfo['filter_traffic'] is False:
+                    filterstatus['traffic']['disabled'].add(routerinfo['simulator_name'])
+
+        return filterstatus
+
+    def print_status(self):  # pylint: disable=too-many-branches, too-many-statements, too-many-locals
         """Print a multi-line status message."""
         # No complicated status output when we're shutting down
+        self.logger.info("")
         self.logger.info("-" * HEADER_LINE_LENGTH)
         self.logger.info(
             ("This router \"%s\" port %d, %d/%d queue upstream/clients, uptime %d s" +
@@ -306,11 +349,23 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             int(time.perf_counter() - self.starttime),
             self.config.listen.rest_api_port, self.cache.get_size(),
         )
-        # Most sims will have elevation filtering ON, so show warning if off
-        if not self.config.psx.filter_elevation:
-            self.logger.info("Elevation filter: OFF")
-        if not self.config.psx.filter_traffic:
-            self.logger.info("Traffic filter: OFF")
+
+        filterstatus = self.get_filter_status()
+
+        if len(filterstatus['elevation']['disabled']) > 1:
+            self.logger.info(
+                "!!! WARNING: more than one sim is sending MSFS elevation to PSX: %s",
+                filterstatus['elevation']['disabled'])
+        if len(filterstatus['elevation']['disabled']) < 1:
+            self.logger.info("!!! WARNING: no sim is sending MSFS elevation to PSX")
+
+        if len(filterstatus['traffic']['disabled']) > 1:
+            self.logger.info(
+                "!!! WARNING: more than one sim is sending vPilot traffic data: %s",
+                filterstatus['traffic']['disabled'])
+        if len(filterstatus['traffic']['disabled']) < 1:
+            self.logger.info("!!! WARNING: no sim is sending vPilot traffic data")
+
         self.logger.info("Router UUID: %s - Press Ctrl-C to shut down cleanly",
                          trimstring(self.uuid))
         if self.log_traffic_filename:
@@ -1749,6 +1804,7 @@ Filter is <b>%s</b>
             @routes.get('/filter/elevation/toggle')
             async def handle_filter_elevation_toggle(_):
                 self.config.psx.filter_elevation = not self.config.psx.filter_elevation
+                self.connection_state_changed()
                 status_text = "enabled" if self.config.psx.filter_elevation else "not enabled"
                 return web.json_response(
                     text=filter_elevation_page % status_text,
@@ -1764,6 +1820,7 @@ Filter is <b>%s</b>
             @routes.get('/filter/traffic/toggle')
             async def handle_filter_traffic_toggle(_):
                 self.config.psx.filter_traffic = not self.config.psx.filter_traffic
+                self.connection_state_changed()
                 status_text = "enabled" if self.config.psx.filter_traffic else "not enabled"
                 return web.json_response(
                     text=filter_traffic_page % status_text,
