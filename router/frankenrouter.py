@@ -1855,14 +1855,14 @@ Filter is <b>%s</b>
                 return web.Response(text="Block list reset")
 
             @routes.post('/blocklist/add')
-            async def handle_blocklist_post(request):
+            async def handle_blocklist_post_add(request):
                 data = await request.post()
                 address = str(data.get('address'))
                 self.blocklist.add(address)
                 return web.json_response(list(self.blocklist))
 
             @routes.post('/blocklist/remove')
-            async def handle_blocklist_post(request):
+            async def handle_blocklist_post_remove(request):
                 data = await request.post()
                 address = str(data.get('address'))
                 self.blocklist.remove(address)
