@@ -1011,11 +1011,17 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.logger.info("Upstream not connected, not listening yet...")
                 await asyncio.sleep(1.0)
 
-                self.proxy_server = await asyncio.start_server(
-                    self.handle_new_connection_cb,
-                    port=self.config.listen.port,
-                    limit=self.args.read_buffer_size
-                )
+                try:
+                    self.proxy_server = await asyncio.start_server(
+                        self.handle_new_connection_cb,
+                        port=self.config.listen.port,
+                        limit=self.args.read_buffer_size
+                    )
+                except OSError as exc:
+                    raise SystemExit(
+                        f"Failed to open port {self.config.listen.port}," +
+                        " check that you are not already running a router or PSX main server" +
+                        f" on port {self.config.listen.port}: {exc}") from exc
                 while True:  # wait forever
                     await asyncio.sleep(3600.0)
         # Task cleanup: close connections cleanly
@@ -2107,8 +2113,6 @@ http://localhost:8747/filter/traffic in a web browser.
             port = input(f"Upstream port (press Enter for {self.config.upstream.port})? ")
             password = input(
                 f"Upstream password (press Enter for {self.config.upstream.password})? ")
-            if listen != "":
-                self.config.listen.port = int(listen)
             if host != "":
                 self.config.upstream.host = host
             if port != "":
