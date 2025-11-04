@@ -2063,8 +2063,6 @@ PSX main server or router is restarted).
 Note: choose a simulator name that let other shared cockpit users know
 who you are, e.g your PSX forum nickname
 
-Note: Router port should be 10747 unless you know better :)
-
 Upstream host should be the IP address or hostname you got from the
 owner of the shared cockpit master sim.
 
@@ -2105,7 +2103,6 @@ http://localhost:8747/filter/traffic in a web browser.
                     break
             self.config.identity.router = self.config.identity.simulator
 
-            listen = input(f"Router port (press Enter for {self.config.listen.port})? ")
             host = input(f"Upstream host (press Enter for {self.config.upstream.host})? ")
             port = input(f"Upstream port (press Enter for {self.config.upstream.port})? ")
             password = input(
