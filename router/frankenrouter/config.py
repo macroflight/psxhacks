@@ -85,7 +85,7 @@ class _RouterConfigPerformance:  # pylint: disable=missing-class-docstring,too-f
         if not isinstance(self.monitor_delay_warning, float):
             raise RouterConfigError("performance monitor_delay_warning must be an float")
 
-        self.frdp_rtt_warning = data.get('frdp_rtt_warning', 0.1)
+        self.frdp_rtt_warning = data.get('frdp_rtt_warning', 0.2)
         if not isinstance(self.frdp_rtt_warning, float):
             raise RouterConfigError("performance frdp_rtt_warning must be an float")
 
