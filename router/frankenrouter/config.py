@@ -56,15 +56,12 @@ class _RouterConfigPsx:  # pylint: disable=missing-class-docstring,too-few-publi
             raise RouterConfigError("PSX Variables path must be a string")
         self.filter_elevation = data.get('filter_elevation', True)
         self.filter_traffic = data.get('filter_traffic', True)
+        self.filter_flight_controls = data.get('filter_flight_controls', True)
 
 
 class _RouterConfigSharedinfo:  # pylint: disable=missing-class-docstring,too-few-public-methods
     def __init__(self, data):
         self.master = data.get('master', False)
-        self.seatmap = data.get('seatmap', {})
-        for value in self.seatmap.values():
-            if value not in ['LEFT', 'RIGHT', 'OBSERVER']:
-                raise RouterConfigError(f"Invalid seat {value}")
 
 
 class _RouterConfigPerformance:  # pylint: disable=missing-class-docstring,too-few-public-methods
@@ -230,9 +227,6 @@ traffic = true
 
 [psx]
 variables = 'C:\PSX\Variables.txt'
-
-[sharedinfo]
-seatmap = { 'frankensim' = 'LEFT', 'testsim' = 'RIGHT', 'obsim' = 'OBSERVER', 'frankentoo' = 'LEFT' }
 
 [[access]]
 display_name = 'CDUPAD'

@@ -86,6 +86,10 @@ class RulesCode(enum.Enum):
     FRDP_PING = enum.auto()
     FRDP_PONG = enum.auto()
     FRDP_IDENT = enum.auto()
+    FRDP_MY_CONTROLS = enum.auto()
+    FRDP_ALL_CONTROL_LOCKS = enum.auto()
+    FRDP_NO_CONTROL_LOCKS = enum.auto()
+    FRDP_FLIGHTCONTROLS = enum.auto()
     FRDP_JOIN = enum.auto()
     FRDP_CLIENTINFO = enum.auto()
     FRDP_ROUTERINFO = enum.auto()
@@ -179,6 +183,74 @@ class Rules():  # pylint: disable=too-many-public-methods
         # Drop message
         return self.myreturn(RulesAction.DROP, RulesCode.FRDP_IDENT)
 
+    def handle_addon_frankenrouter_my_controls(self):
+        """Handle a FRDP MY_CONTROLS message.
+
+        Format:
+        addon=FRANKENROUTER:<protocol version>:MY_CONTROLS
+
+        When a router receives this, the message itself is dropped but
+        a new FLIGHTCONTROLS message is sent upstream. The master
+        router will then update the sharedinfo data which controls the
+        flight control filtering.
+        """
+        return self.myreturn(RulesAction.DROP, RulesCode.FRDP_MY_CONTROLS)
+
+    def handle_addon_frankenrouter_all_control_locks(self):
+        """Handle a FRDP ALL_CONTROL_LOCKS message.
+
+        Format:
+        addon=FRANKENROUTER:<protocol version>:ALL_CONTROL_LOCKS
+
+        When a router receives this, the message itself is dropped but
+        a new FLIGHTCONTROLS message is sent upstream. The master
+        router will then update the sharedinfo data which controls the
+        flight control filtering.
+        """
+        return self.myreturn(RulesAction.DROP, RulesCode.FRDP_ALL_CONTROL_LOCKS)
+
+    def handle_addon_frankenrouter_no_control_locks(self):
+        """Handle a FRDP NO_CONTROL_LOCKS message.
+
+        Format:
+        addon=FRANKENROUTER:<protocol version>:NO_CONTROL_LOCKS
+
+        When a router receives this, the message itself is dropped but
+        a new FLIGHTCONTROLS message is sent upstream. The master
+        router will then update the sharedinfo data which controls the
+        flight control filtering.
+        """
+        return self.myreturn(RulesAction.DROP, RulesCode.FRDP_NO_CONTROL_LOCKS)
+
+    def handle_addon_frankenrouter_flightcontrols(self, payload):
+        """Handle a FRDP FLIGHTCONTROLS message.
+
+        Format:
+        addon=FRANKENROUTER:<protocol version>:FLIGHTCONTROLS:<flying sim name>
+
+        For a visual indicator, we use Qs421="FreeMsgM"; Mode=ECON; Min=0; Max=16;
+
+        e.g
+        Qs421=PF: MACRO
+        Qs421=PF: ALL
+        Qs421=PF: NONE
+        """
+        # Update sharedinfo
+        if payload == 'NO_CONTROL_LOCKS':
+            self.router.sharedinfo['pilot_flying_simulator'] = "NO_CONTROL_LOCKS"
+            message = "Qs421=PF: ALL"
+        elif payload == 'ALL_CONTROL_LOCKS':
+            self.router.sharedinfo['pilot_flying_simulator'] = "ALL_CONTROL_LOCKS"
+            message = "Qs421=PF: NOONE"
+        else:
+            self.router.sharedinfo['pilot_flying_simulator'] = payload
+            ident = self.router.sharedinfo['pilot_flying_simulator'][:11].upper()
+            message = f"Qs421=PF: {ident}"
+        self.router.frdp_sharedinfo_requested = True
+
+        return self.myreturn(RulesAction.DROP, RulesCode.FRDP_FLIGHTCONTROLS,
+                             extra_data={'message': message})
+
     def handle_addon_frankenrouter_join(self, payload):
         """Handle a FRDP JOIN message.
 
@@ -271,6 +343,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         This message should be forwarded to the network, since we want
         it to reach all frankenrouters.
         """
+        self.logger.info("Handling SHAREDINFO data: %s", payload)
         try:
             sharedinfo = json.loads(payload)
         except json.decoder.JSONDecodeError:
@@ -284,10 +357,10 @@ class Rules():  # pylint: disable=too-many-public-methods
             # Drop message
             return self.myreturn(RulesAction.DROP, RulesCode.FRDP_SHAREDINFO)
 
-        # If we are supposed to be the master sim but we receive a
-        # SHAREDINFO message, complain, then decide who gets to be
-        # master (use highest UUID) and continue.
         if self.router.config.sharedinfo.master:
+            # If we are supposed to be the master sim but we receive a
+            # SHAREDINFO message, complain, then decide who gets to be
+            # master (use highest UUID) and continue.
             self.logger.warning(
                 "SHAREDINFO message received from %s, but we are supposed to be the master",
                 sharedinfo['master_uuid'])
@@ -297,8 +370,9 @@ class Rules():  # pylint: disable=too-many-public-methods
             else:
                 self.logger.warning("Our UUID is higher, keeping master role")
 
-        self.router.sharedinfo_master_uuid = sharedinfo['master_uuid']
-        for key in ['seatmap']:
+        # Merge data from sharedinfo package into our own variables
+        self.router.sharedinfo['master_uuid'] = sharedinfo['master_uuid']
+        for key in ['pilot_flying_simulator']:
             if key in sharedinfo:
                 self.router.sharedinfo[key] = sharedinfo[key]
         # Forward message to network
@@ -327,7 +401,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         self.router.connection_state_changed()
         return self.myreturn(RulesAction.DROP, RulesCode.FRDP_AUTH_OK)
 
-    def handle_addon_frankenrouter(self, rest):  # pylint: disable=too-many-return-statements
+    def handle_addon_frankenrouter(self, rest):  # pylint: disable=too-many-return-statements,too-many-branches
         """Handle FRANKENROUTER addon message."""
         (message_type, _, payload) = rest.partition(":")
         if message_type == 'PING':
@@ -336,6 +410,14 @@ class Rules():  # pylint: disable=too-many-public-methods
             return self.handle_addon_frankenrouter_pong(payload)
         if message_type == 'IDENT':
             return self.handle_addon_frankenrouter_ident(payload)
+        if message_type == 'MY_CONTROLS':
+            return self.handle_addon_frankenrouter_my_controls()
+        if message_type == 'ALL_CONTROL_LOCKS':
+            return self.handle_addon_frankenrouter_all_control_locks()
+        if message_type == 'NO_CONTROL_LOCKS':
+            return self.handle_addon_frankenrouter_no_control_locks()
+        if message_type == 'FLIGHTCONTROLS':
+            return self.handle_addon_frankenrouter_flightcontrols(payload)
         if message_type == 'JOIN':
             return self.handle_addon_frankenrouter_join(payload)
         if message_type == 'BANG':
@@ -562,7 +644,7 @@ class Rules():  # pylint: disable=too-many-public-methods
             return True
         return False
 
-    def route(self, line, sender):  # pylint: disable=too-many-return-statements,too-many-branches
+    def route(self, line, sender):  # pylint: disable=too-many-return-statements,too-many-branches, too-many-statements
         """Decide on routing, log, etc.
 
         line is a PSX network message string, e.g "Qi123=456"
@@ -667,6 +749,48 @@ class Rules():  # pylint: disable=too-many-public-methods
         #
         # Ingress filtering. Some variables we don't even want in the cache.
         #
+
+        # Ingress filter: flight controls
+        # Qs120="FltControls"; Mode=ECON; Min=5; Max=14;
+        # Qs357="Brakes"; Mode=ECON; Min=3; Max=9;
+        # Qs436="Tla"; Mode=ECON; Min=7; Max=23;
+        # Qh388="SpdBrkLever"; Mode=ECON; Min=0; Max=800;
+        # Qh426="Tiller"; Mode=ECON; Min=-999; Max=999;
+        if self.router.config.psx.filter_flight_controls:
+            if not self.sender.upstream and key in [
+                    'Qs120', 'Qs357', 'Qs436', 'Qh388', 'Qh426',
+            ]:
+                self.logger.info("FLIGHT CONTROL INPUT: %s", key)
+                flying = self.router.sharedinfo["pilot_flying_simulator"]
+                self.logger.info("pilot_flying_simulator is %s", flying)
+                if flying == 'NO_CONTROL_LOCKS':
+                    pass
+                elif flying == 'ALL_CONTROL_LOCKS':
+                    self.logger.info(
+                        "%s update dropped - all control locks in", key
+                    )
+                    return self.myreturn(
+                        RulesAction.DROP,
+                        RulesCode.KEYVALUE_FILTERED_INGRESS,
+                        message=(
+                            f"filtered flight control {key} as all control locks are in"
+                        )
+                    )
+                else:
+                    if flying != self.router.config.identity.simulator:
+                        # Someone else is pilot flying - filter flight controls
+                        self.logger.info(
+                            "%s update dropped - %s is pilot flying",
+                            key, flying
+                        )
+                        return self.myreturn(
+                            RulesAction.DROP,
+                            RulesCode.KEYVALUE_FILTERED_INGRESS,
+                            message=(
+                                f"filtered flight control {key} as we are not the " +
+                                f"flying sim {flying}"
+                            )
+                        )
 
         # Ingress filter: CPDLC message printouts from BACARS
         if not self.sender.upstream and key == 'Qs119':
@@ -812,7 +936,21 @@ class TestRules(unittest.TestCase):
             """Fake cache update."""
             self.cache[keyword] = value
 
-    class DummyFrankenrouter():  # pylint: disable=too-few-public-methods
+    class DummyConfigPsx():  # pylint: disable=too-few-public-methods
+        """Implement small parts of the router for unit testing."""
+
+        def __init__(self):
+            """Initialize the config."""
+            self.filter_flight_controls = False
+
+    class DummyConfig():  # pylint: disable=too-few-public-methods
+        """Implement small parts of the router for unit testing."""
+
+        def __init__(self):
+            """Initialize the config."""
+            self.psx = TestRules.DummyConfigPsx()
+
+    class DummyFrankenrouter():  # pylint: disable=too-few-public-methods,too-many-instance-attributes
         """Implement small parts of the router for unit testing."""
 
         def __init__(self):
@@ -824,6 +962,7 @@ class TestRules(unittest.TestCase):
             self.cache = TestRules.DummyCache()
             self.last_load1 = 0.0
             self.frdp_version = 1
+            self.config = TestRules.DummyConfig()
 
         def variable_stats_add(self, *args):
             """Add dummy stats."""

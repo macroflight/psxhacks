@@ -171,8 +171,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.routerinfo = {}
 
         # We store FRDP SHAREDINFO and the UUID of the master router
-        self.sharedinfo = {}
-        self.sharedinfo_master_router_uuid = None
+        self.sharedinfo = {
+            'master_uuid': None,
+            'pilot_flying_simulator': "NO_CONTROL_LOCKS",
+        }
 
         # Track when we last send the start keyword upstream
         self.start_sent_at = 0.0
@@ -486,16 +488,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.logger.info(
                         "--> upstream connection is %s",
                         upstream)
-
-        # Print seatinfo (to show SHAREDINFO data is being sent through network)
-        if 'seatmap' in self.sharedinfo:
-            for seat in ['LEFT', 'RIGHT', 'OBSERVER']:
-                sims = []
-                for sim, simseat in self.sharedinfo['seatmap'].items():
-                    if simseat == seat:
-                        sims.append(sim)
-                if len(sims) > 0:
-                    self.logger.info("Shared sim %s seat: %s", seat.lower(), ",".join(sims))
 
         self.logger.info("-" * HEADER_LINE_LENGTH)
 
@@ -1384,18 +1376,20 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         """Send FRDP SHAREDINFO message."""
         self.frdp_sharedinfo_requested = False
         if self.uuid is None:
+            self.logger.info("No own UUID, cannot send sharedinfo")
             return
         if not self.config.sharedinfo.master:
             self.logger.debug("Not the SHAREDINFO master, not sending")
             return
         payload = {
             "master_uuid": self.uuid,
-            "seatmap": self.config.sharedinfo.seatmap,
+            "pilot_flying_simulator": self.sharedinfo["pilot_flying_simulator"]
         }
         payload_json = json.dumps(payload)
         # Store our own sharedinfo so we have all the data in the same place
         self.sharedinfo = payload
         # Send to network
+        self.logger.info("Sending SHAREDINFO up and downstream")
         await self.send_to_upstream(
             f"addon=FRANKENROUTER:{self.frdp_version}:SHAREDINFO:{payload_json}")
         await self.client_broadcast(
@@ -1573,6 +1567,31 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 sender.frdp_ping_rtts.append(frdp_rtt)
                 if frdp_rtt > self.config.performance.frdp_rtt_warning:
                     self.logger.warning("SLOW: FRDP RTT to %s is %.6f s", sender_hr, frdp_rtt)
+        elif code == RulesCode.FRDP_MY_CONTROLS:
+            self.logger.info(
+                "Got FRDP MY_CONTROLS message from %s: %s",
+                sender_hr, line)
+            message = f"addon=FRANKENROUTER:{self.frdp_version}:FLIGHTCONTROLS"
+            message += f":{self.config.identity.simulator}"
+            await self.send_to_upstream(message, sender.peername)
+        elif code == RulesCode.FRDP_ALL_CONTROL_LOCKS:
+            self.logger.info(
+                "Got FRDP ALL_CONTROL_LOCKS message from %s: %s",
+                sender_hr, line)
+            message = f"addon=FRANKENROUTER:{self.frdp_version}:FLIGHTCONTROLS:ALL_CONTROL_LOCKS"
+            await self.send_to_upstream(message, sender.peername)
+        elif code == RulesCode.FRDP_NO_CONTROL_LOCKS:
+            self.logger.info(
+                "Got FRDP NO_CONTROL_LOCKS message from %s: %s",
+                sender_hr, line)
+            message = f"addon=FRANKENROUTER:{self.frdp_version}:FLIGHTCONTROLS:NO_CONTROL_LOCKS"
+            await self.send_to_upstream(message, sender.peername)
+        elif code == RulesCode.FRDP_FLIGHTCONTROLS:
+            self.logger.info(
+                "Got FRDP FLIGHTCONTROLS message from %s: %s",
+                sender_hr, line)
+            await self.send_to_upstream(extra_data['message'])
+            await self.client_broadcast(extra_data['message'])
         elif code == RulesCode.FRDP_IDENT:
             self.logger.debug(
                 "Got FRDP IDENT message from %s: %s",
@@ -1928,18 +1947,25 @@ Filter is <b>%s</b>
 
             @routes.get('/sharedinfo')
             async def handle_sharedinfo(_):
-                return web.json_response(self.sharedinfo)
+                res = self.sharedinfo
+                res['master_uuid'] = self.sharedinfo['master_uuid']
+                return web.json_response(res)
 
             @routes.post('/sharedinfo')
-            async def handle_sharedinfo_seatmap(request):
-                data = await request.json()
+            async def handle_sharedinfo_post(request):
+                # FIXME: refuse unless we are the sharedinfo master
+                data = await request.post()
+                new_simulator = data.get('pilot_flying_simulator')
                 changes = 0
-                new_seatmap = data.get('seatmap')
-                if new_seatmap:
-                    self.config.sharedinfo.seatmap = new_seatmap
+                if (
+                        new_simulator is not None and
+                        new_simulator != self.sharedinfo["pilot_flying_simulator"]
+                ):
                     self.logger.info(
-                        "REST API changed seatmap to %s", self.config.sharedinfo.seatmap)
+                        "REST API changed pilot flying simulator to %s",
+                        self.sharedinfo["pilot_flying_simulator"])
                     changes += 1
+                    self.sharedinfo["pilot_flying_simulator"] = new_simulator
                 if changes == 0:
                     return web.Response(text="Nothing was changed")
                 self.frdp_sharedinfo_requested = True
