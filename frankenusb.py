@@ -946,6 +946,12 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 self.towing_mode_toggle()
             elif button_config['button type'] == 'FLIGHT_CONTROL_LOCK_TOGGLE':
                 self.toggle_flight_control_lock()
+            elif button_config['button type'] == 'FLIGHT_CONTROL_MY_CONTROLS':
+                self.my_controls()
+            elif button_config['button type'] == 'FLIGHT_CONTROL_NO_CONTROL_LOCKS':
+                self.no_control_locks()
+            elif button_config['button type'] == 'FLIGHT_CONTROL_ALL_CONTROL_LOCKS':
+                self.all_control_locks()
             elif button_config['button type'] == 'TILLER_TOGGLE':
                 if self.aileron_tiller_active:
                     # Remove warning, centre aileron and tiller, disable tiller mode
@@ -1144,6 +1150,18 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 "Flight control lock toggled. New value: %s. Message change from %s to %s",
                 self.flight_control_lock_active, current_message, new_message)
             self.psx_send_and_set(MSG_TYPE_FLT_CTL_LOCK, new_message)
+
+    def my_controls(self):
+        """Send a message to PSX to release the flight control lock to me."""
+        self.psx.send("addon", "FRANKENROUTER:1:MY_CONTROLS")
+
+    def no_control_locks(self):
+        """Send a message to PSX to release all flight control locks."""
+        self.psx.send("addon", "FRANKENROUTER:1:NO_CONTROL_LOCKS")
+
+    def all_control_locks(self):
+        """Send a message to PSX to release all flight control locks."""
+        self.psx.send("addon", "FRANKENROUTER:1:ALL_CONTROL_LOCKS")
 
     async def flight_phase_setup(self, phase):  # pylint: disable=too-many-statements
         """Flight phase change functions."""
