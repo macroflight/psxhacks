@@ -62,6 +62,12 @@ FDRP_KEEP_RTT_SAMPLES = 300
 # messages will give us 1-15 minutes of data, should be enough.
 VARIABLE_STATS_BUFFER_SIZE = 10000
 
+# What to send to PSX to get it to start using its own elevation
+# database again, and how long to wait after the last elevation update
+# before sending it (seconds)
+PSX_RESUME_ELEVATION = "-999999"
+PSX_RESUME_ELEVATION_AFTER = 60
+
 
 def trimstring(longname, maxlen=11, sep=".."):
     """Shorten string."""
@@ -264,6 +270,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             '--enable-variable-stats',
             action='store_true',
             help="Enable variable stats (experimental)",
+        )
+        parser.add_argument(
+            '--disable-elevation-reset',
+            action='store_true',
+            help="Do not send Qi198=-9999999 to re-enable the PSX elevation database",
         )
         parser.add_argument(
             '--no-pause-clients',
@@ -1451,9 +1462,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             return
         # End of status_display_task()
 
-    async def housekeeping_task(self, name):
+    async def housekeeping_task(self, name):  # pylint: disable=too-many-branches
         """Miscellaneous housekeeping Task."""
-        try:
+        try:  # pylint: disable=too-many-nested-blocks
             last_run = 0.0
             while True:
                 await asyncio.sleep(1.0)
@@ -1462,6 +1473,29 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.logger.debug("Performing housekeeping")
                     # Write chache to disk
                     self.cache.write_to_file()
+
+                    # Switch back to PSX's internal elevation database
+                    # if no one is injecting elevation data into the
+                    # network. Only do this on the master sim router,
+                    # i.e a router whose upstream is connected but not
+                    # a frankenrouter.
+                    if self.is_upstream_connected() and not self.upstream.is_frankenrouter:
+                        try:
+                            time_since_elevation_injection = self.cache.get_age("Qi198")
+                            if time_since_elevation_injection > PSX_RESUME_ELEVATION_AFTER:
+                                if self.args.disable_elevation_reset:
+                                    self.logger.info(
+                                        "PSX elevation not reset due --disable-elevation-reset")
+                                else:
+                                    self.logger.warning(
+                                        "Qi198 not seen in %d s, enabling PSX elevation database",
+                                        PSX_RESUME_ELEVATION_AFTER
+                                    )
+                                    self.cache.update("Qi198", PSX_RESUME_ELEVATION)
+                                    await self.send_to_upstream(f"Qi198={PSX_RESUME_ELEVATION}")
+                        except routercache.RouterCacheException:
+                            # No Qi198 in cache yet
+                            pass
 
                     # Trim variable stats buffer
                     if self.args.enable_variable_stats:
