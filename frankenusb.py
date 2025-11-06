@@ -62,6 +62,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         # We use a button to toggle between reverse and normal mode for the throttles
         self.axis_reverse_mode = {}
 
+        # Temporary cache for the AXIS SET type. We need to keep track
+        # if e.g the flap lever axis is in sync with PSX.
+        self.axis_set_state = {}
+
         self.flight_control_lock_active = False
         self.flight_control_lock_variables = [
             'FltControls',
@@ -607,7 +611,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             "PSX_THROTTLE movement END, reversers: %s",
             self.psx_reverser_open)
 
-    async def handle_axis_motion_axis_set(self, event, axis_config):
+    async def handle_axis_motion_axis_set(self, event, axis_config):  # pylint: disable=too-many-branches
         """Handle motion on an AXIS_SET axis.
 
         This axis can be used for e.g the flap lever. Example:
@@ -623,8 +627,17 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             (0.50, 0.75, 5),
             (0.75, 1.00, 6),
         ],
+
+        Note: if the axis is out of sync with PSX nothing will happen
+        until you move the lever to be in sync again.
         """
         axis_position = event.value
+
+        if axis_config['psx variable'] not in self.axis_set_state:
+            self.axis_set_state[axis_config['psx variable']] = {
+                'state': 'UNKNOWN',
+                'psx': None,
+            }
 
         assert 'psx variable' in axis_config, "\"psx variable\" missing from AXIS set config"
         assert 'zones' in axis_config, "\"zones\" missing from AXIS set config"
@@ -635,8 +648,14 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             axis_position)
         psx_value = None
         (lowerlimit, upperlimit) = (0, 0)
+
+        psx_current_value = int(self.psx.get(axis_config['psx variable']))
+        (psx_current_lowerlimit, psx_current_upperlimit) = (0, 0)
+
         for zone in axis_config['zones']:
             (lowerlimit, upperlimit, this_value) = zone
+            if this_value == psx_current_value:
+                (psx_current_lowerlimit, psx_current_upperlimit) = (lowerlimit, upperlimit)
             if lowerlimit <= axis_position <= upperlimit:
                 psx_value = this_value
                 break
@@ -647,17 +666,53 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 axis_position)
             return
         psx_value = int(psx_value)
-        psx_current_value = int(self.psx.get(axis_config['psx variable']))
-        if psx_value != psx_current_value:
-            self.logger.info("Setting %s to %s (%f <= %f <= %f)",
-                             axis_config['psx variable'],
-                             psx_value,
-                             lowerlimit, axis_position, upperlimit)
-            await self.psx_axis_queue.put({
-                'variable': axis_config['psx variable'],
-                'indexes': [0],
-                'value': psx_value,
-            })
+
+        update_psx = False
+
+        # If the PSX value has been changed by something and we're not
+        # longer in sync, switch to UNSYNCED
+        if self.axis_set_state[axis_config['psx variable']]['state'] == 'SYNCED':
+            if psx_current_value != self.axis_set_state[axis_config['psx variable']]['psx']:
+                self.axis_set_state[axis_config['psx variable']]['state'] = 'UNSYNCED'
+                self.axis_set_state[axis_config['psx variable']]['psx'] = psx_current_value
+
+        if self.axis_set_state[axis_config['psx variable']]['state'] == 'UNKNOWN':
+            if psx_current_lowerlimit <= axis_position <= psx_current_upperlimit:
+                # axis inside range matching current PSX state - set
+                # SYNCED and save the PSX value we synced against
+                self.axis_set_state[axis_config['psx variable']]['state'] = 'SYNCED'
+                self.axis_set_state[axis_config['psx variable']]['psx'] = psx_current_value
+            else:
+                # Not synced
+                self.axis_set_state[axis_config['psx variable']]['state'] = 'UNSYNCED'
+                self.axis_set_state[axis_config['psx variable']]['psx'] = psx_current_value
+        elif self.axis_set_state[axis_config['psx variable']]['state'] == 'SYNCED':
+            if psx_current_lowerlimit <= axis_position <= psx_current_upperlimit:
+                # axis inside range matching current PSX state - do nothing
+                pass
+            else:
+                # Update PSX to match current position (axis has moved to next detent)
+                update_psx = True
+        elif self.axis_set_state[axis_config['psx variable']]['state'] == 'UNSYNCED':
+            if psx_current_lowerlimit <= axis_position <= psx_current_upperlimit:
+                # axis inside range matching current PSX state - set SYNCED
+                self.axis_set_state[axis_config['psx variable']]['state'] = 'SYNCED'
+            else:
+                # Still unsynced, do nothing
+                pass
+
+        if update_psx:
+            if psx_value != psx_current_value:
+                self.logger.info("Setting %s to %s (%f <= %f <= %f)",
+                                 axis_config['psx variable'],
+                                 psx_value,
+                                 lowerlimit, axis_position, upperlimit)
+                self.axis_set_state[axis_config['psx variable']]['psx'] = psx_value
+                await self.psx_axis_queue.put({
+                    'variable': axis_config['psx variable'],
+                    'indexes': [0],
+                    'value': psx_value,
+                })
 
     async def handle_throttle_reverse_button(self, mode, joystick_name, event, config, reverse):  # pylint:disable=too-many-arguments,too-many-locals,too-many-branches,too-many-positional-arguments,too-many-statements
         """Handle throttle with thrust reverser button."""
@@ -1408,6 +1463,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
     async def init_joysticks(self):
         """Initialize the joysticks."""
         self.logger.info("Initializing joysticks...")
+
+        self.logger.info("Dropping AXIS SET state...")
+        self.axis_set_state = {}
+
         self.joysticks = {}
         # Since the IDs might change, we need to empty the queue of any old events
         self.logger.info("Considering dropping events from queue")
