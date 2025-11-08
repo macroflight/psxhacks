@@ -102,9 +102,17 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
                 # Give others a chance to do something
                 await asyncio.sleep(0)
         except ConnectionResetError:
-            pass
+            self.logger.warning(
+                "Got ConnectionResetError on write to %s/%s, closing connection",
+                self.client_id, self.peername
+            )
+            self.close(clean=False)
         except BrokenPipeError:
-            pass
+            self.logger.warning(
+                "Got BrokenPipeError on write to %s/%s, closing connection",
+                self.client_id, self.peername
+            )
+            self.close(clean=False)
         else:
             self.messages_sent += 1
             self.bytes_sent += len(line) + 1
