@@ -1523,7 +1523,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                             state_ok = False
                         if len(filterstatus['traffic']['disabled']) < 1:
                             state_ok = False
-                        mcmessage = self.cache.get_value("Qs418")
+                        try:
+                            mcmessage = self.cache.get_value("Qs418")
+                        except routercache.RouterCacheException:
+                            mcmessage = ""
+
                         if not state_ok:
                             time_since_warning = time.perf_counter() - self.filter_warning_sent
                             if time_since_warning > FILTER_WARNING_INTERVAL:
@@ -2235,7 +2239,7 @@ http://localhost:8747/filter/traffic in a web browser.
 
             while True:
                 self.config.identity.simulator = input(
-                    "The name of your simulator others will see (max 24 characters)? ")
+                    "The name of your simulator others will see (PSCC: use your crew nick, e.g MACRO)? ")  # pylint: disable=line-too-long
                 if (
                         len(self.config.identity.simulator) < 24 and
                         len(self.config.identity.simulator) > 0
@@ -2243,10 +2247,10 @@ http://localhost:8747/filter/traffic in a web browser.
                     break
             self.config.identity.router = self.config.identity.simulator
 
-            host = input(f"Upstream host (press Enter for {self.config.upstream.host})? ")
-            port = input(f"Upstream port (press Enter for {self.config.upstream.port})? ")
+            host = input(f"Master sim router IP (press Enter for {self.config.upstream.host})? ")
+            port = input(f"master tim router port (press Enter for {self.config.upstream.port})? ")
             password = input(
-                f"Upstream password (press Enter for {self.config.upstream.password})? ")
+                f"Your password for the master sim (press Enter for {self.config.upstream.password})? ")  # pylint: disable=line-too-long
             if host != "":
                 self.config.upstream.host = host
             if port != "":
