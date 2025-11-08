@@ -1901,24 +1901,28 @@ the primary VATSIM connection (VATPRI).
             @routes.get('/filter/elevation/enable')
             async def handle_filter_elevation_enable(_):
                 self.config.psx.filter_elevation = True
+                self.logger.info("API: elevation filter enabled")
                 self.connection_state_changed()
                 raise web.HTTPFound('/filter')
 
             @routes.get('/filter/elevation/disable')
             async def handle_filter_elevation_disable(_):
                 self.config.psx.filter_elevation = False
+                self.logger.info("API: elevation filter disabled")
                 self.connection_state_changed()
                 raise web.HTTPFound('/filter')
 
             @routes.get('/filter/traffic/enable')
             async def handle_filter_traffic_enable(_):
                 self.config.psx.filter_traffic = True
+                self.logger.info("API: traffic filter enabled")
                 self.connection_state_changed()
                 raise web.HTTPFound('/filter')
 
             @routes.get('/filter/traffic/disable')
             async def handle_filter_traffic_disable(_):
                 self.config.psx.filter_traffic = False
+                self.logger.info("API: traffic filter disabled")
                 self.connection_state_changed()
                 raise web.HTTPFound('/filter')
 
