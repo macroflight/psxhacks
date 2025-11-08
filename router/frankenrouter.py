@@ -1999,6 +1999,7 @@ the primary VATSIM connection (VATPRI).
                     self.sharedinfo["pilot_flying_simulator"] = new_simulator
                 if changes == 0:
                     return web.Response(text="Nothing was changed")
+                self.logger.info("API: sharedinfo changed to %s", self.sharedinfo)
                 self.frdp_sharedinfo_requested = True
                 return web.Response(text=f"{changes} SHAREDINFO variables changed")
 
@@ -2009,12 +2010,14 @@ the primary VATSIM connection (VATPRI).
             @routes.get('/blocklist/reset')
             async def handle_blocklist_reset(_):
                 self.blocklist = set()
+                self.logger.info("API: blocklist was reset")
                 return web.Response(text="Block list reset")
 
             @routes.post('/blocklist/add')
             async def handle_blocklist_post_add(request):
                 data = await request.post()
                 address = str(data.get('address'))
+                self.logger.info("API: %s added to blocklist", address)
                 self.blocklist.add(address)
                 return web.json_response(list(self.blocklist))
 
@@ -2023,6 +2026,7 @@ the primary VATSIM connection (VATPRI).
                 data = await request.post()
                 address = str(data.get('address'))
                 self.blocklist.remove(address)
+                self.logger.info("API: %s removed from blocklist", address)
                 return web.json_response(list(self.blocklist))
 
             # Run the API
