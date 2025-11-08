@@ -68,6 +68,9 @@ VARIABLE_STATS_BUFFER_SIZE = 10000
 PSX_RESUME_ELEVATION = "-999999"
 PSX_RESUME_ELEVATION_AFTER = 60
 
+# How often to sent master caution if filter status is bad
+FILTER_WARNING_INTERVAL = 60
+
 
 def trimstring(longname, maxlen=11, sep=".."):
     """Shorten string."""
@@ -160,6 +163,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.variable_stats_buffer = []
         self.rules = Rules(self)
         self.blocklist = set()
+
+        # Keep track of when we last sent a filter state warning to EICAS
+        self.filter_warning_sent = 0
 
         # The FRDP protocol version. We bump this every time we make
         # incompatble changes to the FRDP/FRANKENROUTER
@@ -1469,7 +1475,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             return
         # End of status_display_task()
 
-    async def housekeeping_task(self, name):  # pylint: disable=too-many-branches
+    async def housekeeping_task(self, name):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
         """Miscellaneous housekeeping Task."""
         try:  # pylint: disable=too-many-nested-blocks
             last_run = 0.0
@@ -1485,7 +1491,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     # if no one is injecting elevation data into the
                     # network. Only do this on the master sim router,
                     # i.e a router whose upstream is connected but not
-                    # a frankenrouter.
+                    # a frankenrouter.a
                     if self.is_upstream_connected() and not self.upstream.is_frankenrouter:
                         try:
                             time_since_elevation_injection = self.cache.get_age("Qi198")
@@ -1503,6 +1509,39 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         except routercache.RouterCacheException:
                             # No Qi198 in cache yet
                             pass
+
+                    # Send master caution if the filter state is incorrect
+                    if self.is_upstream_connected() and not self.upstream.is_frankenrouter:
+                        message = "FRANKENROUTER"
+                        filterstatus = self.get_filter_status()
+                        state_ok = True
+                        if len(filterstatus['elevation']['disabled']) > 1:
+                            state_ok = False
+                        if len(filterstatus['elevation']['disabled']) < 1:
+                            state_ok = False
+                        if len(filterstatus['traffic']['disabled']) > 1:
+                            state_ok = False
+                        if len(filterstatus['traffic']['disabled']) < 1:
+                            state_ok = False
+                        mcmessage = self.cache.get_value("Qs418")
+                        if not state_ok:
+                            time_since_warning = time.perf_counter() - self.filter_warning_sent
+                            if time_since_warning > FILTER_WARNING_INTERVAL:
+                                # Send master caution
+                                # Qs418="FreeMsgW"; Mode=ECON; Min=0; Max=16;
+                                self.logger.warning("Filter state bad, sending MC")
+                                self.filter_warning_sent = time.perf_counter()
+                                self.cache.update("Qs418", message)
+                                await self.send_to_upstream(f"Qs418={message}")
+                                await self.client_broadcast(f"Qs418={message}")
+                        else:
+                            self.filter_warning_sent = 0
+                            if mcmessage == message:
+                                # Clear message (but not any other master caution we might have)
+                                self.logger.warning("Filter state OK, clearing MC")
+                                self.cache.update("Qs418", "")
+                                await self.send_to_upstream("Qs418=")
+                                await self.client_broadcast("Qs418=")
 
                     # Trim variable stats buffer
                     if self.args.enable_variable_stats:
@@ -1823,7 +1862,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         """REST API Task."""
         filter_page = '''
 <html><head></head>
-<h1>PSX filter control</h1>
+<h1>Frankenrouter filter control</h1>
 <hr>
 <p>Elevation filter is <b>{filter_status_elevation}</b> ({filter_status_description_elevation})
 <p><a href="/filter/elevation/{next_state_elevation}">{next_state_elevation} elevation filter</a>
