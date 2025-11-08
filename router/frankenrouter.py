@@ -366,24 +366,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.config.listen.rest_api_port, self.cache.get_size(),
         )
 
-        filterstatus = self.get_filter_status()
-
-        if len(filterstatus['elevation']['disabled']) > 1:
-            self.logger.info(
-                "!!! WARNING: more than one sim is sending MSFS elevation to PSX: %s",
-                filterstatus['elevation']['disabled'])
-        if len(filterstatus['elevation']['disabled']) < 1:
-            self.logger.info("!!! WARNING: no sim is sending MSFS elevation to PSX")
-
-        if len(filterstatus['traffic']['disabled']) > 1:
-            self.logger.info(
-                "!!! WARNING: more than one sim is sending vPilot traffic data: %s",
-                filterstatus['traffic']['disabled'])
-        if len(filterstatus['traffic']['disabled']) < 1:
-            self.logger.info("!!! WARNING: no sim is sending vPilot traffic data")
-
         self.logger.info("Router UUID: %s - Press Ctrl-C to shut down cleanly",
                          trimstring(self.uuid))
+        self.logger.info(
+            "Filters in this router: elevation filter is %s, traffic filter is %s",
+            "enabled" if self.config.psx.filter_elevation else "disabled",
+            "enabled" if self.config.psx.filter_traffic else "disabled",
+        )
         if self.log_traffic_filename:
             self.logger.info("Logging traffic to %s", self.log_traffic_filename)
         upstreaminfo = "[NO UPSTREAM CONNECTION]"
@@ -1090,6 +1079,29 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                              count,
                              )
 
+    def print_warnings(self):
+        """Print some important warnings."""
+        filterstatus = self.get_filter_status()
+        warnings = False
+        if len(filterstatus['elevation']['disabled']) > 1:
+            self.logger.info(
+                "!!! WARNING: more than one sim is sending MSFS elevation to PSX: %s",
+                filterstatus['elevation']['disabled'])
+            warnings = True
+        if len(filterstatus['elevation']['disabled']) < 1:
+            self.logger.info("!!! WARNING: no sim is sending MSFS elevation to PSX")
+            warnings = True
+        if len(filterstatus['traffic']['disabled']) > 1:
+            self.logger.info(
+                "!!! WARNING: more than one sim is sending vPilot traffic data: %s",
+                filterstatus['traffic']['disabled'])
+            warnings = True
+        if len(filterstatus['traffic']['disabled']) < 1:
+            self.logger.info("!!! WARNING: no sim is sending vPilot traffic data")
+            warnings = True
+        if warnings:
+            self.logger.info("!!! After filter change, warnings may remain for up to 60s")
+
     def print_aircraft_status(self):
         """Display a basic aircraft status line to verify sane data."""
         try:
@@ -1444,6 +1456,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.status_display_requested = False
                     self.print_client_warnings()
                     self.print_aircraft_status()
+                    self.print_warnings()
                     self.print_variable_stats()
         # Standard Task cleanup
         except asyncio.exceptions.CancelledError:
@@ -1808,23 +1821,22 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
     async def api_task(self, name):  # pylint:disable=too-many-locals,too-many-statements
         """REST API Task."""
-        filter_elevation_page = '''
+        filter_page = '''
 <html><head></head>
-<h1>PSX elevation injection filter (Qi198)</h1>
-Elevation injection filter is <b>%s</b>
-<p><a href="/filter/elevation/toggle">Toggle filter<a>
-<p>When the filter is enabled, your MSFS is not trying to control the shared sim elevation.
-<p>Only enable the filter if your sim is the only connected sim or you connected to VATSIM as non-observer.
-</html>
-'''
-
-        filter_traffic_page = '''
-<html><head></head>
-<h1>PSX vPilot traffic injection filter (Qs450,Qs451)</h1>
-Filter is <b>%s</b>
-<p><a href="/filter/traffic/toggle">Toggle filter<a>
-<p>When the filter is enabled, your vPilot will not send traffic/TCAS data to the shared sim.
-<p>Only enable the filter if your sim is the only connected sim with PSX.NET.vPilot installed
+<h1>PSX filter control</h1>
+<hr>
+<p>Elevation filter is <b>{filter_status_elevation}</b> ({filter_status_description_elevation})
+<p><a href="/filter/elevation/{next_state_elevation}">{next_state_elevation} elevation filter</a>
+<p>This filter should be enabled unless you are flying single-pilot or you are
+the primary VATSIM connection (VATPRI)
+<hr>
+<p>
+<p>Traffic (TCAS/traffic data from vPilot) filter is <b>{filter_status_traffic}</b> ({filter_status_description_traffic})
+<p><a href="/filter/traffic/{next_state_traffic}">{next_state_traffic} traffic filter</a>
+<p>
+<p>This filter should be enabled unless you are flying single-pilot or you are
+the primary VATSIM connection (VATPRI).
+<hr>
 </html>
 '''
 
@@ -1863,37 +1875,52 @@ Filter is <b>%s</b>
             async def handle_routerinfo_get(_):
                 return web.json_response(self.routerinfo)
 
-            @routes.get('/filter/elevation/toggle')
-            async def handle_filter_elevation_toggle(_):
-                self.config.psx.filter_elevation = not self.config.psx.filter_elevation
+            @routes.get('/filter')
+            async def handle_filter_get(_):
+                data = {}
+                if self.config.psx.filter_elevation:
+                    data["filter_status_elevation"] = "enabled"
+                    data["filter_status_description_elevation"] = "your sim is NOT sending elevation data"  # pylint: disable=line-too-long
+                    data["next_state_elevation"] = "disable"
+                else:
+                    data["filter_status_elevation"] = "disabled"
+                    data["filter_status_description_elevation"] = "your sim IS sending elevation data"  # pylint: disable=line-too-long
+                    data["next_state_elevation"] = "enable"
+                if self.config.psx.filter_traffic:
+                    data["filter_status_traffic"] = "enabled"
+                    data["filter_status_description_traffic"] = "your sim is NOT sending traffic data"  # pylint: disable=line-too-long
+                    data["next_state_traffic"] = "disable"
+                else:
+                    data["filter_status_traffic"] = "disabled"
+                    data["filter_status_description_traffic"] = "your sim IS sending traffic data"  # pylint: disable=line-too-long
+                    data["next_state_traffic"] = "enable"
+
+                html_page = filter_page.format(**data)
+                return web.json_response(text=html_page, content_type='text/html')
+
+            @routes.get('/filter/elevation/enable')
+            async def handle_filter_elevation_enable(_):
+                self.config.psx.filter_elevation = True
                 self.connection_state_changed()
-                status_text = "enabled" if self.config.psx.filter_elevation else "not enabled"
-                return web.json_response(
-                    text=filter_elevation_page % status_text,
-                    content_type='text/html')
+                raise web.HTTPFound('/filter')
 
-            @routes.get('/filter/elevation')
-            async def handle_filter_elevation_get(_):
-                status_text = "enabled" if self.config.psx.filter_elevation else "not enabled"
-                return web.json_response(
-                    text=filter_elevation_page % status_text,
-                    content_type='text/html')
-
-            @routes.get('/filter/traffic/toggle')
-            async def handle_filter_traffic_toggle(_):
-                self.config.psx.filter_traffic = not self.config.psx.filter_traffic
+            @routes.get('/filter/elevation/disable')
+            async def handle_filter_elevation_disable(_):
+                self.config.psx.filter_elevation = False
                 self.connection_state_changed()
-                status_text = "enabled" if self.config.psx.filter_traffic else "not enabled"
-                return web.json_response(
-                    text=filter_traffic_page % status_text,
-                    content_type='text/html')
+                raise web.HTTPFound('/filter')
 
-            @routes.get('/filter/traffic')
-            async def handle_filter_traffic_get(_):
-                status_text = "enabled" if self.config.psx.filter_traffic else "not enabled"
-                return web.json_response(
-                    text=filter_traffic_page % status_text,
-                    content_type='text/html')
+            @routes.get('/filter/traffic/enable')
+            async def handle_filter_traffic_enable(_):
+                self.config.psx.filter_traffic = True
+                self.connection_state_changed()
+                raise web.HTTPFound('/filter')
+
+            @routes.get('/filter/traffic/disable')
+            async def handle_filter_traffic_disable(_):
+                self.config.psx.filter_traffic = False
+                self.connection_state_changed()
+                raise web.HTTPFound('/filter')
 
             @routes.post('/upstream')
             async def handle_upstream_set(request):
