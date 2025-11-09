@@ -14,6 +14,7 @@ import random
 import re
 import statistics
 import string
+import textwrap
 import time
 import traceback
 import uuid
@@ -2071,6 +2072,34 @@ the primary VATSIM connection (VATPRI).
                 self.blocklist.remove(address)
                 self.logger.info("API: %s removed from blocklist", address)
                 return web.json_response(list(self.blocklist))
+
+            @routes.post('/print/message')
+            async def handle_print(request):
+                data = await request.post()
+                token = str(data.get('token'))
+                title = str(data.get('title'))
+                message = str(data.get('message'))
+                priority= str(data.get('priority'))
+                self.logger.info(
+                    "vPilot message: token=%s, title=%s, message=%s, priority=%s",
+                    token, title, message, priority)
+                text = f"Message from vPilot: {title}^{message}"
+
+                # FIXME: filter invalid characters
+
+                # Split lines longer than 40 chars on word limit
+                text = textwrap.wrap(text, width=40)
+
+                # Create ^-delimited string
+                text = '^'.join(text)
+
+                # Uppercase it
+                # text = text.upper()
+
+                self.cache.update("Qs119", text)
+                await self.send_to_upstream(f"Qs119={text}")
+                await self.client_broadcast(f"Qs119={text}")
+                return web.Response(text="OK")
 
             # Run the API
             app = web.Application()
