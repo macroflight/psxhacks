@@ -2079,22 +2079,32 @@ the primary VATSIM connection (VATPRI).
                 token = str(data.get('token'))
                 title = str(data.get('title'))
                 message = str(data.get('message'))
-                priority= str(data.get('priority'))
+                priority = str(data.get('priority'))
+
+                if re.match(
+                        r".*(Connected. Running version|Disconnected from network)",
+                        message
+                ):
+                    self.logger.info("%s message not printed: %s", title, message)
+                    return web.Response(text="OK")
+
                 self.logger.info(
                     "vPilot message: token=%s, title=%s, message=%s, priority=%s",
                     token, title, message, priority)
-                text = f"Message from vPilot: {title}^{message}"
 
                 # FIXME: filter invalid characters
 
                 # Split lines longer than 40 chars on word limit
-                text = textwrap.wrap(text, width=40)
+                text = textwrap.wrap(message, width=40)
 
                 # Create ^-delimited string
                 text = '^'.join(text)
 
+                # Add header line
+                text = f"From {title} via {self.config.identity.simulator}:^{text}"
+
                 # Uppercase it
-                # text = text.upper()
+                text = text.upper()
 
                 self.cache.update("Qs119", text)
                 await self.send_to_upstream(f"Qs119={text}")
