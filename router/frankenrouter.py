@@ -1889,6 +1889,27 @@ the primary VATSIM connection (VATPRI).
 </html>
 '''
 
+        upstream_page = '''
+<html>
+<head>
+<meta name="color-scheme" content="{rest_api_color_scheme}" />
+</head>
+<body>
+<h1>Frankenrouter connection control</h1>
+<hr>
+<form action="/upstream" method="post">
+<label for="host">IP address or hostname of master sim:</label><br>
+<input type="text" id="host" value="{host}" name="host"><br>
+<label for="port">Port number of master sim:</label><br>
+<input type="text" id="port" value="{port}" name="port"><br>
+<label for="password">Your password for the master sim:</label><br>
+<input type="text" id="password" value="{password}" name="password"><br>
+<p><input type="submit" value="Reconnect">
+</form>
+</body>
+</html>
+'''
+
         try:
             routes = web.RouteTableDef()
 
@@ -1976,6 +1997,20 @@ the primary VATSIM connection (VATPRI).
                 self.connection_state_changed()
                 raise web.HTTPFound('/filter')
 
+            @routes.get('/upstreamcontrol')
+            async def handle_upstream_get(_):
+                data = {}
+                data['rest_api_color_scheme'] = self.config.listen.rest_api_color_scheme
+                data["host"] = self.config.upstream.host
+                data["port"] = self.config.upstream.port
+                if self.config.upstream.password is None:
+                    data["password"] = ""
+                else:
+                    data["password"] = self.config.upstream.password
+
+                html_page = upstream_page.format(**data)
+                return web.json_response(text=html_page, content_type='text/html')
+
             @routes.post('/upstream')
             async def handle_upstream_set(request):
                 data = await request.post()
@@ -2010,10 +2045,10 @@ the primary VATSIM connection (VATPRI).
                     self.config.upstream.password,
                 )
                 self.upstream_reconnect_requested = True
-                return web.Response(text="Connecting to new host/port/password")
+                raise web.HTTPFound('/upstreamcontrol')
 
-            @routes.get('/upstream')
-            async def handle_upstream_get(_):
+            @routes.get('/upstream/get')
+            async def handle_upstreamcontrol_get(_):
                 if self.is_upstream_connected():
                     res = {
                         'connected': True,
