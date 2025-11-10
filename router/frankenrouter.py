@@ -1866,7 +1866,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
     async def api_task(self, name):  # pylint:disable=too-many-locals,too-many-statements
         """REST API Task."""
         filter_page = '''
-<html><head></head>
+<html>
+<head>
+<meta name="color-scheme" content="{rest_api_color_scheme}" />
+</head>
+<body>
 <h1>Frankenrouter filter control</h1>
 <hr>
 <p>Elevation filter is <b>{filter_status_elevation}</b> ({filter_status_description_elevation})
@@ -1881,6 +1885,7 @@ the primary VATSIM connection (VATPRI)
 <p>This filter should be enabled unless you are flying single-pilot or you are
 the primary VATSIM connection (VATPRI).
 <hr>
+</body>
 </html>
 '''
 
@@ -1922,6 +1927,7 @@ the primary VATSIM connection (VATPRI).
             @routes.get('/filter')
             async def handle_filter_get(_):
                 data = {}
+                data['rest_api_color_scheme'] = self.config.listen.rest_api_color_scheme
                 if self.config.psx.filter_elevation:
                     data["filter_status_elevation"] = "enabled"
                     data["filter_status_description_elevation"] = "your sim is NOT sending elevation data"  # pylint: disable=line-too-long
