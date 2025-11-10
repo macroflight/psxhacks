@@ -101,21 +101,20 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
                     await self.writer.drain()
                 # Give others a chance to do something
                 await asyncio.sleep(0)
-        except ConnectionResetError:
-            self.logger.warning(
+        except ConnectionResetError as exc:
+            self.logger.info(
                 "Got ConnectionResetError on write to %s/%s, closing connection",
                 self.client_id, self.peername
             )
-            self.close(clean=False)
-        except BrokenPipeError:
-            self.logger.warning(
+            raise ConnectionClosed from exc
+        except BrokenPipeError as exc:
+            self.logger.info(
                 "Got BrokenPipeError on write to %s/%s, closing connection",
                 self.client_id, self.peername
             )
-            self.close(clean=False)
-        else:
-            self.messages_sent += 1
-            self.bytes_sent += len(line) + 1
+            raise ConnectionClosed from exc
+        self.messages_sent += 1
+        self.bytes_sent += len(line) + 1
         if log:
             if self.upstream:
                 await self.log_traffic(line, inbound=False)
@@ -138,7 +137,10 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         except asyncio.IncompleteReadError as exc:
             # If we reached EOL before a separator was found, this
             # happens, and we should return None
-            self.logger.debug("readuntil returned IncompleteReadError, probably disconnect")
+            self.logger.info("readuntil returned IncompleteReadError, probably disconnect")
+            raise ConnectionClosed from exc
+        except ConnectionResetError as exc:
+            self.logger.info("readuntil returned ConnectionResetError, probably disconnect")
             raise ConnectionClosed from exc
 
         self.logger.debug("readuntil returned: %s", data)
