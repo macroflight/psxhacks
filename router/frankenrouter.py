@@ -1865,6 +1865,21 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
     async def api_task(self, name):  # pylint:disable=too-many-locals,too-many-statements
         """REST API Task."""
+        index_page = '''
+<html>
+<head>
+<meta name="color-scheme" content="{rest_api_color_scheme}" />
+</head>
+<body>
+<h1>Frankenrouter control</h1>
+<ul>
+<li><a href="/filter">Filter control</a>
+<li><a href="/upstream">Upstream control</a>
+</ul>
+</body>
+</html>
+'''
+
         filter_page = '''
 <html>
 <head>
@@ -1874,13 +1889,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 <h1>Frankenrouter filter control</h1>
 <hr>
 <p>Elevation filter is <b>{filter_status_elevation}</b> ({filter_status_description_elevation})
-<p><a href="/filter/elevation/{next_state_elevation}">{next_state_elevation} elevation filter</a>
+<p><a href="/api/filter/elevation/{next_state_elevation}">{next_state_elevation} elevation filter</a>
 <p>This filter should be enabled unless you are flying single-pilot or you are
 the primary VATSIM connection (VATPRI)
 <hr>
 <p>
 <p>Traffic (TCAS/traffic data from vPilot) filter is <b>{filter_status_traffic}</b> ({filter_status_description_traffic})
-<p><a href="/filter/traffic/{next_state_traffic}">{next_state_traffic} traffic filter</a>
+<p><a href="/api/filter/traffic/{next_state_traffic}">{next_state_traffic} traffic filter</a>
 <p>
 <p>This filter should be enabled unless you are flying single-pilot or you are
 the primary VATSIM connection (VATPRI).
@@ -1897,7 +1912,10 @@ the primary VATSIM connection (VATPRI).
 <body>
 <h1>Frankenrouter connection control</h1>
 <hr>
-<form action="/upstream" method="post">
+<p>Current upstream status: {status}
+
+<hr>
+<form action="/api/upstream" method="post">
 <label for="host">IP address or hostname of master sim:</label><br>
 <input type="text" id="host" value="{host}" name="host"><br>
 <label for="port">Port number of master sim:</label><br>
@@ -1914,12 +1932,13 @@ the primary VATSIM connection (VATPRI).
             routes = web.RouteTableDef()
 
             @routes.get('/')
-            async def handle(request):
-                name = request.match_info.get('name', "Anonymous")
-                text = "Hello, " + name
-                return web.Response(text=text)
+            async def handle_web(_):
+                data = {}
+                data['rest_api_color_scheme'] = self.config.listen.rest_api_color_scheme
+                html_page = index_page.format(**data)
+                return web.json_response(text=html_page, content_type='text/html')
 
-            @routes.get('/clients')
+            @routes.get('/api/clients')
             async def handle_clients_get(_):
                 clients = []
                 for client in self.clients.values():
@@ -1931,7 +1950,7 @@ the primary VATSIM connection (VATPRI).
                     })
                 return web.json_response(clients)
 
-            @routes.post('/disconnect')
+            @routes.post('/api/disconnect')
             async def handle_client_disconnect(request):
                 data = await request.post()
                 client_id = int(data.get('client_id'))
@@ -1941,12 +1960,12 @@ the primary VATSIM connection (VATPRI).
                         return web.Response(text=f"Client connection {client_id} closed")
                 return web.Response(text=f"Client connection {client_id} not found")
 
-            @routes.get('/routerinfo')
+            @routes.get('/api/routerinfo')
             async def handle_routerinfo_get(_):
                 return web.json_response(self.routerinfo)
 
             @routes.get('/filter')
-            async def handle_filter_get(_):
+            async def handle_web_filter_get(_):
                 data = {}
                 data['rest_api_color_scheme'] = self.config.listen.rest_api_color_scheme
                 if self.config.psx.filter_elevation:
@@ -1969,40 +1988,48 @@ the primary VATSIM connection (VATPRI).
                 html_page = filter_page.format(**data)
                 return web.json_response(text=html_page, content_type='text/html')
 
-            @routes.get('/filter/elevation/enable')
+            @routes.get('/api/filter/elevation/enable')
             async def handle_filter_elevation_enable(_):
                 self.config.psx.filter_elevation = True
                 self.logger.info("API: elevation filter enabled")
                 self.connection_state_changed()
                 raise web.HTTPFound('/filter')
 
-            @routes.get('/filter/elevation/disable')
+            @routes.get('/api/filter/elevation/disable')
             async def handle_filter_elevation_disable(_):
                 self.config.psx.filter_elevation = False
                 self.logger.info("API: elevation filter disabled")
                 self.connection_state_changed()
                 raise web.HTTPFound('/filter')
 
-            @routes.get('/filter/traffic/enable')
+            @routes.get('/api/filter/traffic/enable')
             async def handle_filter_traffic_enable(_):
                 self.config.psx.filter_traffic = True
                 self.logger.info("API: traffic filter enabled")
                 self.connection_state_changed()
                 raise web.HTTPFound('/filter')
 
-            @routes.get('/filter/traffic/disable')
+            @routes.get('/api/filter/traffic/disable')
             async def handle_filter_traffic_disable(_):
                 self.config.psx.filter_traffic = False
                 self.logger.info("API: traffic filter disabled")
                 self.connection_state_changed()
                 raise web.HTTPFound('/filter')
 
-            @routes.get('/upstreamcontrol')
-            async def handle_upstream_get(_):
+            @routes.get('/upstream')
+            async def handle_web_upstream_get(_):
                 data = {}
                 data['rest_api_color_scheme'] = self.config.listen.rest_api_color_scheme
                 data["host"] = self.config.upstream.host
                 data["port"] = self.config.upstream.port
+                if self.upstream:
+                    data["status"] = (
+                        f"connected to {self.config.upstream.host}" +
+                        f":{self.config.upstream.port}"
+                    )
+                else:
+                    data["status"] = "NOT CONNECTED"
+
                 if self.config.upstream.password is None:
                     data["password"] = ""
                 else:
@@ -2011,7 +2038,7 @@ the primary VATSIM connection (VATPRI).
                 html_page = upstream_page.format(**data)
                 return web.json_response(text=html_page, content_type='text/html')
 
-            @routes.post('/upstream')
+            @routes.post('/api/upstream')
             async def handle_upstream_set(request):
                 data = await request.post()
                 new_host = data.get('host')
@@ -2045,10 +2072,11 @@ the primary VATSIM connection (VATPRI).
                     self.config.upstream.password,
                 )
                 self.upstream_reconnect_requested = True
-                raise web.HTTPFound('/upstreamcontrol')
+                await asyncio.sleep(5)  # typical reconnect time
+                raise web.HTTPFound('/upstream')
 
-            @routes.get('/upstream/get')
-            async def handle_upstreamcontrol_get(_):
+            @routes.get('/api/upstream')
+            async def handle_upstream_get(_):
                 if self.is_upstream_connected():
                     res = {
                         'connected': True,
@@ -2061,13 +2089,13 @@ the primary VATSIM connection (VATPRI).
                     }
                 return web.json_response(res)
 
-            @routes.get('/sharedinfo')
+            @routes.get('/api/sharedinfo')
             async def handle_sharedinfo(_):
                 res = self.sharedinfo
                 res['master_uuid'] = self.sharedinfo['master_uuid']
                 return web.json_response(res)
 
-            @routes.post('/sharedinfo')
+            @routes.post('/api/sharedinfo')
             async def handle_sharedinfo_post(request):
                 # FIXME: refuse unless we are the sharedinfo master
                 data = await request.post()
@@ -2088,17 +2116,17 @@ the primary VATSIM connection (VATPRI).
                 self.frdp_sharedinfo_requested = True
                 return web.Response(text=f"{changes} SHAREDINFO variables changed")
 
-            @routes.get('/blocklist')
+            @routes.get('/api/blocklist')
             async def handle_blocklist_get(_):
                 return web.json_response(list(self.blocklist))
 
-            @routes.get('/blocklist/reset')
+            @routes.get('/api/blocklist/reset')
             async def handle_blocklist_reset(_):
                 self.blocklist = set()
                 self.logger.info("API: blocklist was reset")
                 return web.Response(text="Block list reset")
 
-            @routes.post('/blocklist/add')
+            @routes.post('/api/blocklist/add')
             async def handle_blocklist_post_add(request):
                 data = await request.post()
                 address = str(data.get('address'))
@@ -2106,7 +2134,7 @@ the primary VATSIM connection (VATPRI).
                 self.blocklist.add(address)
                 return web.json_response(list(self.blocklist))
 
-            @routes.post('/blocklist/remove')
+            @routes.post('/api/blocklist/remove')
             async def handle_blocklist_post_remove(request):
                 data = await request.post()
                 address = str(data.get('address'))
@@ -2114,7 +2142,7 @@ the primary VATSIM connection (VATPRI).
                 self.logger.info("API: %s removed from blocklist", address)
                 return web.json_response(list(self.blocklist))
 
-            @routes.post('/print/message')
+            @routes.post('/api/vpilotprint/message')
             async def handle_print(request):
                 data = await request.post()
                 token = str(data.get('token'))

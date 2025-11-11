@@ -1,4 +1,31 @@
-# The PSX protocol router "frankenrouter" REST API
+# The PSX protocol router "frankenrouter" REST API and web pages
+
+## Web pages
+
+The router has a few simple web pages that you can use to control some
+features of the router. This is not a replacement for the config file,
+the web pages are only intended for things that you often need to
+change while the router is running.
+
+If you http://127.0.0.1:8747/ you will get a start page with links to
+all available pages (replace 8747 with the API port number if you have
+changed it in the config file).
+
+### Mini web page: /filter
+
+If you open http://127.0.0.1:8747/filter you get a small control panel
+that lets see the status of the filter that prevents MSFS elevation
+data from being forwarded and the filter that prevents vPilot
+traffic/TCAS data from being forwarded. You can also toggle the filters
+from there.
+
+### Mini web page: /upstream
+
+If you open http://127.0.0.1:8747/upstream you get a small control
+panel that lets see the status of the upstream (master sim)
+connection. You can also choose to connect to another upstream without
+restarting the router.
+
 
 ## REST API
 
@@ -6,14 +33,14 @@ The router has a (currently very small) REST API. It is enabled by
 default and running on port 8747. You can change the port number or
 disable the API using the config file.
 
-### GET /clients
+### GET /api/clients
 
 Returns information about connected clients (very basic)
 
 Example usage:
 
 ``` text
-$ curl -s http://127.0.0.1:8747/clients | jq .
+$ curl -s http://127.0.0.1:8747/api/clients | jq .
 [
   {
     "ip": "127.0.0.1",
@@ -30,19 +57,19 @@ $ curl -s http://127.0.0.1:8747/clients | jq .
 ]
 ```
 
-### POST /disconnect
+### POST /api/disconnect
 
 Disconnect a client. The client_id parameter should be the "id"
-returned by the /clients call or shown in the router status output.
+returned by the /api/clients call or shown in the router status output.
 
 Example usage:
 
 ``` text
-$ curl -d "client_id=2" -X POST http://127.0.0.1:8747/disconnect
+$ curl -d "client_id=2" -X POST http://127.0.0.1:8747/api/disconnect
 Client connection 3 closed
 ```
 
-### GET /routerinfo
+### GET /api/routerinfo
 
 Return all data received over the FRTP ROUTERINFO protocol, e.g
 connected clients, uptime, ...
@@ -50,7 +77,7 @@ connected clients, uptime, ...
 Example usage:
 
 ``` text
-$ curl -s http://127.0.0.1:8747/routerinfo | jq .
+$ curl -s http://127.0.0.1:8747/api/routerinfo | jq .
 {
   "d89cebbc5def3a548b2f771c5ad79da2": {
     "timestamp": 1758090730.3745098,
@@ -105,14 +132,14 @@ $ curl -s http://127.0.0.1:8747/routerinfo | jq .
 }
 ```
 
-### GET /upstream
+### GET /api/upstream
 
 Return information about the current upstream connection,
 
 Example usage:
 
 ``` text
-$ curl -s http://127.0.0.1:8747/upstream | jq .
+$ curl -s http://127.0.0.1:8747/api/upstream | jq .
 {
   "connected": true,
   "host": "127.0.0.1",
@@ -121,7 +148,7 @@ $ curl -s http://127.0.0.1:8747/upstream | jq .
 }
 ```
 
-### POST /upstream/set
+### POST /api/upstream
 
 Change upstream connection details (while router is running, does not
 affect the config file).
@@ -129,36 +156,56 @@ affect the config file).
 Example usage (change the upstream connection to 127.0.0.1 port 20748):
 
 ``` text
-curl -d "host=127.0.0.1&port=20748&password=somesecrethuh" -X POST http://127.0.0.1:8747/upstream
+curl -d "host=127.0.0.1&port=20748&password=somesecrethuh" -X POST http://127.0.0.1:8747/api/upstream
 ```
 
-### GET /sharedinfo
+### GET /api/sharedinfo
 
 Return the latest SHAREDINFO data, e.g the seat map.
 
 Example usage:
 
 ``` text
-$ curl -s http://127.0.0.1:8747/sharedinfo | jq .
+$ curl -s http://127.0.0.1:8747/api/sharedinfo | jq .
 {
   "filter-master": "LEFT",
   "filter-client1": "RIGHT"
 }
 ```
 
-### Mini web page: /filter/elevation
+### GET /api/filter/elevation/enable
 
-If you open http://127.0.0.1:8747/filter/elevation you get a small
-control panel that lets see the status of the filter that prevents
-MSFS elevation data from being forwarded. You can also toggle the
-filter from here.
+Enable the router elevation injection filter.
 
-### Mini web page: /filter/traffic
+### GET /api/filter/elevation/disable
 
-If you open http://127.0.0.1:8747/filter/traffic you get a small
-control panel that lets see the status of the filter that prevents
-vPilot traffic/TCAS data from being forwarded. You can also toggle the
-filter from here.
+Disable the router elevation injection filter.
+
+### GET /api/filter/traffic/enable
+
+Enable the router traffic injection filter.
+
+### GET /api/filter/traffic/disable
+
+Disable the router traffic injection filter.
+
+### GET /api/blocklist
+
+Return the current IP blocklist.
+
+### POST /api/blocklist/add
+
+Add an entry to the IP blocklist.
+
+### POST /api/blocklist/remove
+
+Remove an entry from the IP blocklist.
+
+### POST /api/vpilotprint/message
+
+Only used from the vPilot plugin to print messages to PSX printer. Do
+not use for anything else.
+
 
 <!---
 https://github.com/markdownlint/markdownlint
