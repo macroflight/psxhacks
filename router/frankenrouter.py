@@ -95,8 +95,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.traffic_logger = None
         self.variables = None
         self.cache = None
-        self.last_load1 = 0.0
-        self.last_bang = 0.0
         self.messagequeue_from_upstream = asyncio.Queue(maxsize=0)
         self.messagequeue_from_clients = asyncio.Queue(maxsize=0)
         self.taskgroup = None
@@ -161,7 +159,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.frdp_sharedinfo_requested = False
         self.upstream_reconnect_requested = False
         self.longest_destination_string = 0
-        self.variable_stats_buffer = []
         self.rules = Rules(self)
         self.blocklist = set()
 
@@ -174,24 +171,36 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # disconnected from the network.
         self.frdp_version = 1
 
-        # We store FRDP ROUTERINFO data keyed by the sending router UUID
-        self.routerinfo = {}
-
-        # We store FRDP SHAREDINFO and the UUID of the master router
-        self.sharedinfo = {
-            'master_uuid': None,
-            'pilot_flying_simulator': "NO_CONTROL_LOCKS",
-        }
-
-        # Track when we last send the start keyword upstream
-        self.start_sent_at = 0.0
-
         # Track when we last started welcoming a client. We can then
         # use this timestamp to e.g filter out variables that some
         # clients might be sensitive to receiving while running
         # normally.
         self.last_client_connected = 0.0
 
+        # Variables that we re-initialize after upstream (re)connection
+        self.last_load1 = None
+        self.last_bang = None
+        self.variable_stats_buffer = None
+        self.routerinfo = None
+        self.sharedinfo = None
+        self.start_sent_at = None
+        self.last_frdp_routerinfo = None
+        self.last_frdp_sharedinfo = None
+
+        self.reset_after_upstream_connect()
+
+    def reset_after_upstream_connect(self):
+        """Re-initialize certain variables after upstream connection."""
+        self.last_load1 = 0.0
+        self.last_bang = 0.0
+        self.variable_stats_buffer = []
+        self.routerinfo = {}
+        self.sharedinfo = {
+            'master_uuid': None,
+            'pilot_flying_simulator': "NO_CONTROL_LOCKS",
+        }
+        # Track when we last send the start keyword upstream
+        self.start_sent_at = 0.0
         # Track when we last sent FRDP ROUTERINFO and SHAREDINFO
         self.last_frdp_routerinfo = 0.0
         self.last_frdp_sharedinfo = 0.0
@@ -335,6 +344,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         # This router's upstream is not a frankenrouter, so it is
                         # likely a master sim
                         is_mastersim = True
+                else:
+                    # Any router without an upstream connection can be
+                    # considered a master sim in this context.
+                    is_mastersim = True
+
             if is_mastersim:
                 continue
 
@@ -928,6 +942,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.upstream_connections += 1
                 self.logger.info("Connected to upstream: %s", self.upstream.peername)
                 await self.log_connect_evt(self.upstream.peername)
+
+                # Remove some information that might have come from another upstream
+                self.reset_after_upstream_connect()
 
                 if self.config.upstream.password:
                     # assume upstream is frankenrouter if we use --password
