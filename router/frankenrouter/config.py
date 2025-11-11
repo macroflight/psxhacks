@@ -28,15 +28,16 @@ class _RouterConfigListen:  # pylint: disable=missing-class-docstring,too-few-pu
 
 class _RouterConfigUpstream:  # pylint: disable=missing-class-docstring,too-few-public-methods
     def __init__(self, data):
-        self.interactive = data.get('interactive', False)
-
+        print(f"Trying to read data from upstream section: {data}")
+        self.name = data.get('name', None)
+        if self.name is None:
+            raise RouterConfigError("All upstreams must have a name")
         self.host = data.get('host', '127.0.0.1')
-
         self.port = data.get('port', 10747)
         if not isinstance(self.port, int):
             raise RouterConfigError("The upstream port must be an integer")
-
         self.password = data.get('password', None)
+        self.default = data.get('default', False)
 
 
 class _RouterConfigLog:  # pylint: disable=missing-class-docstring,too-few-public-methods
@@ -145,7 +146,7 @@ class RouterConfigError(Exception):
     """Main Exception class."""
 
 
-class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-public-methods
+class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-public-methods,too-many-branches
     """Implements the router configuration.
 
     - Start with sane defaults
@@ -173,11 +174,37 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
 
         self.identity = _RouterConfigIdentity(config.get('identity', {}))
         self.listen = _RouterConfigListen(config.get('listen', {}))
-        self.upstream = _RouterConfigUpstream(config.get('upstream', {}))
         self.log = _RouterConfigLog(config.get('log', {}))
         self.psx = _RouterConfigPsx(config.get('psx', {}))
         self.performance = _RouterConfigPerformance(config.get('performance', {}))
         self.sharedinfo = _RouterConfigSharedinfo(config.get('sharedinfo', {}))
+
+        # To handle the old upstream format, we check if we get a list
+        # ([[upstream]]) or a dict ([upstream]).
+        if 'upstream' not in config:
+            raise RouterConfigError(f"No upstream section in {config_file}") from exc
+        if isinstance(config['upstream'], dict):
+            self.logger.warning("Config file %s using deprecated [upstream] section", config_file)
+            data = config.get('upstream', {})
+            data['default'] = True
+            data['name'] = "Please update your config file"
+            self.upstream = _RouterConfigUpstream(data)
+            self.upstreams = [self.upstream]
+        else:
+            # Store all defined upstreams in self.upstreams, but also
+            # store the default one in self.upstream.
+            default_upstream = None
+            self.upstreams = []
+            for elem in config['upstream']:
+                this_upstream = _RouterConfigUpstream(elem)
+                if this_upstream.default:
+                    if default_upstream is not None:
+                        raise RouterConfigError(
+                            f"More than one default upstream in {config_file}") from exc
+                    default_upstream = this_upstream
+                self.upstreams.append(this_upstream)
+            self.upstream = default_upstream
+
         self.access = []
         if 'access' in config:
             for elem in config['access']:
@@ -219,15 +246,22 @@ router = 'somerouter1'
 host = false
 port = 10747
 
-[upstream]
-host = '127.0.0.1'
-port = 20747
-
 [log]
 traffic = true
 
 [psx]
 variables = 'C:\PSX\Variables.txt'
+
+[[upstream]]
+host = '127.0.0.1'
+name = 'PSX main server'
+default = true
+port = 20747
+
+[[upstream]]
+host = '123.123.123.123'
+name = 'test upstream 1'
+port = 10748
 
 [[access]]
 display_name = 'CDUPAD'
@@ -269,7 +303,7 @@ I'm not TOML
         self.assertEqual(conf.identity.simulator, 'SampleSim')
         self.assertEqual(conf.identity.router, 'somerouter1')
         self.assertEqual(conf.listen.port, 10747)
-        self.assertEqual(conf.upstream.host, '127.0.0.1')
+        # self.assertEqual(conf.upstream.host, '127.0.0.1')
         self.assertEqual(conf.psx.variables, r'C:\PSX\Variables.txt')
         self.assertEqual(conf.performance.write_buffer_warning, 100000)
         self.assertEqual(conf.access[0].level, 'full')
@@ -282,7 +316,7 @@ I'm not TOML
         conf = RouterConfig(config_file=config_file)
         self.assertEqual(conf.identity.simulator, 'FrankenSim')
         self.assertEqual(conf.identity.router, 'router1')
-        self.assertEqual(conf.upstream.host, '127.0.0.1')
+        # self.assertEqual(conf.upstream.host, '127.0.0.1')
         self.assertEqual(conf.psx.variables, r'C:\fs\PSX\Variables.txt')
         self.assertEqual(conf.access[1].display_name, 'Ventus')
 

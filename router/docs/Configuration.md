@@ -60,7 +60,18 @@ shared cockpit setup, you probably want to use port 10747, as your
 addons will already be configured to connect to that port.
 
 ### `[upstream]`
+DEPRECATED, use [[upstream]] instead
 
+### `[[upstream]]`
+
+This section can be listed several times in the file. Each one
+describes one upstream connection. An upstream connection can either
+be directly to a PSX main server, or to another frankenrouter.
+
+- `default`: set to true for the upstream that the router should
+  connect to on startup. In most cases, this will be a PSX main server
+  or other frankenrouter in your own sim.
+- `name`: a name that identifies this upstream connection
 - `host`: the upstream hostname or IP that the router should connect
   to.
 - `port`: the upstream port that the router should connect
@@ -68,18 +79,35 @@ addons will already be configured to connect to that port.
 - `password`: if set, use this password to auenthicate to the upstream
   router. Only use this if the upstream is a frankenrouter that has a
   password configured.
-- `interactive`: if set to `true`, the user will be asked on startup
-  if another host, port or password should be used. This is mostly
-  intended for a shared cockpit slave sim setup where you might want
-  to connect to different master sims without changing your config
-  file.
 
-Example:
+Example - just one upstream:
 
 ```text
-[upstream]
+[[upstream]]
+default = true
+name = "My local PSX main server"
 host = "127.0.0.1"
 port = 10747
+```
+
+Example - three upstreams
+
+```text
+[[upstream]]
+default = true
+name = "My local PSX main server"
+host = "127.0.0.1"
+port = 10747
+
+[[upstream]]
+name = "Macroflight's master sim"
+host = "123.123.123.123"
+port = 10748
+
+[[upstream]]
+name = "Voipmeister's master sim"
+host = "145.12.14.22"
+port = 10748
 ```
 
 ### `[log]`

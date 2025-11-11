@@ -2376,7 +2376,7 @@ http://localhost:8747/filter/traffic in a web browser.
 
         # In interactive mode, ask the user for upstream connection
         # details
-        if self.config.upstream.interactive is True or self.args.upstream_interactive:
+        if self.args.upstream_interactive:
             print("Interactive mode requested")
             host = input(f"Upstream host (press Enter for {self.config.upstream.host})? ")
             port = input(f"Upstream port (press Enter for {self.config.upstream.port})? ")

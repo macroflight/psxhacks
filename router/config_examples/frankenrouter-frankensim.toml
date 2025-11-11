@@ -9,15 +9,17 @@ router = "router1"
 port = 10747
 rest_api_port = 8080
 
-[upstream]
-host = "127.0.0.1"
-port = 20747
-
 [log]
 traffic = true
 
 [psx]
 variables = 'C:\fs\PSX\Variables.txt'
+
+[[upstream]]
+host = "127.0.0.1"
+name = "My PSX main server"
+default = true
+port = 20747
 
 [[access]]
 display_name = "Any local client"
