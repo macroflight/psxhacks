@@ -142,6 +142,9 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         except ConnectionResetError as exc:
             self.logger.info("readuntil returned ConnectionResetError, probably disconnect")
             raise ConnectionClosed from exc
+        except ConnectionAbortedError as exc:
+            self.logger.info("readuntil returned ConnectionAbortedError, probably disconnect")
+            raise ConnectionClosed from exc
 
         self.logger.debug("readuntil returned: %s", data)
         # Remove any newline components from the end of the string
