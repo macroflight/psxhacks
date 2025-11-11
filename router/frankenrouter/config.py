@@ -1,5 +1,6 @@
 """Frankrouter config class."""
 
+import copy
 import ipaddress
 import logging
 import os
@@ -201,7 +202,7 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
                     if default_upstream is not None:
                         raise RouterConfigError(
                             f"More than one default upstream in {config_file}") from exc
-                    default_upstream = this_upstream
+                    default_upstream = copy.deepcopy(this_upstream)
                 self.upstreams.append(this_upstream)
             self.upstream = default_upstream
 

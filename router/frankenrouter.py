@@ -1922,10 +1922,21 @@ the primary VATSIM connection (VATPRI).
 <input type="text" id="port" value="{port}" name="port"><br>
 <label for="password">Your password for the master sim:</label><br>
 <input type="text" id="password" value="{password}" name="password"><br>
-<p><input type="submit" value="Reconnect">
+<p><input type="submit" value="Reconnect using data entered above">
 </form>
+{presets}
 </body>
 </html>
+'''
+
+        upstream_page_preset_section = '''
+<hr>
+<form action="/api/upstream" method="post">
+<input type="hidden" id="host" value="{host}" name="host">
+<input type="hidden" id="port" value="{port}" name="port">
+<input type="hidden" id="password" value="{password}" name="password">
+<input type="submit" value="Switch to upstream {preset_name}: {host} port {port}">
+</form>
 '''
 
         try:
@@ -2034,6 +2045,16 @@ the primary VATSIM connection (VATPRI).
                     data["password"] = ""
                 else:
                     data["password"] = self.config.upstream.password
+
+                data["presets"] = ""
+                for upstream in self.config.upstreams:
+                    formatdata = {
+                        "preset_name": upstream.name,
+                        "host": upstream.host,
+                        "port": upstream.port,
+                        "password": upstream.password,
+                    }
+                    data['presets'] += upstream_page_preset_section.format(**formatdata)
 
                 html_page = upstream_page.format(**data)
                 return web.json_response(text=html_page, content_type='text/html')
