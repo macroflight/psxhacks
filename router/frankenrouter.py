@@ -1586,6 +1586,15 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     for key in remove:
                         del self.routerinfo[key]
 
+                    # Remove closed client connections
+                    clients_to_purge = []
+                    for peername, this_client in self.clients.items():
+                        if this_client.closed:
+                            clients_to_purge.append(peername)
+                    for peername in clients_to_purge:
+                        self.logger.info("Housekeeping removed disconnected client %s", peername)
+                        del clients_to_purge[peername]
+
         # Standard Task cleanup
         except asyncio.exceptions.CancelledError:
             self.logger.info("Task %s was cancelled, cleanup and exit", name)

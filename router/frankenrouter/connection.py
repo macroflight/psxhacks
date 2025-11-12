@@ -52,6 +52,11 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         # Set to True if the connection is being closed
         self.is_closing = False
 
+        # We set this to true when we close the connection from inside
+        # the class, then the router can detect that and remove the
+        # connection from its list.
+        self.closed = False
+
         self.display_name = 'unknown connection'
         self.display_name_source = 'new connection'
 
@@ -84,6 +89,9 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
 
         Also update traffic counters.
         """
+        if self.closed:
+            self.logger.info("Cannot send to closed connection %s", self.peername)
+            return
         try:
             if (
                     self.writer.transport.get_write_buffer_size() >
@@ -101,18 +109,15 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
                     await self.writer.drain()
                 # Give others a chance to do something
                 await asyncio.sleep(0)
-        except ConnectionResetError as exc:
+        except (ConnectionResetError, BrokenPipeError) as exc:
             self.logger.info(
-                "Got ConnectionResetError on write to %s/%s, closing connection",
+                "Got %s on write to %s/%s, closing connection",
+                type(exc).__name__,
                 self.client_id, self.peername
             )
-            raise ConnectionClosed from exc
-        except BrokenPipeError as exc:
-            self.logger.info(
-                "Got BrokenPipeError on write to %s/%s, closing connection",
-                self.client_id, self.peername
-            )
-            raise ConnectionClosed from exc
+            await self.close(clean=False)
+            return
+
         self.messages_sent += 1
         self.bytes_sent += len(line) + 1
         if log:
@@ -132,6 +137,9 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
 
         But we can also get streams with any combination of \r and \n...
         """
+        if self.closed:
+            self.logger.info("Cannot read from closed connection %s", self.peername)
+            return
         try:
             data = await self.reader.readuntil(SUPPORTED_PROTOCOL_SEPARATORS)
         except asyncio.IncompleteReadError as exc:
@@ -179,6 +187,7 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
             await self.writer.wait_closed()
         except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError) as exc:
             self.logger.warning("Exception when closing: %s", exc)
+        self.closed = True
 
 
 class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,too-many-instance-attributes
