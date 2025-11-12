@@ -389,8 +389,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.config.listen.rest_api_port, self.cache.get_size(),
         )
 
-        self.logger.info("Router UUID: %s - Press Ctrl-C to shut down cleanly",
-                         trimstring(self.uuid))
+        self.logger.info(
+            "Router version %s with UUID: %s - Press Ctrl-C to shut down cleanly",
+            __VERSION__,
+            trimstring(self.uuid)
+        )
         self.logger.info(
             "Filters in this router: elevation filter is %s, traffic filter is %s",
             "enabled" if self.config.psx.filter_elevation else "disabled",
