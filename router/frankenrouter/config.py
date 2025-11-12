@@ -183,7 +183,13 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
         # To handle the old upstream format, we check if we get a list
         # ([[upstream]]) or a dict ([upstream]).
         if 'upstream' not in config:
-            raise RouterConfigError(f"No upstream section in {config_file}") from exc
+            # With no config, use some sensible defaults
+            config['upstream'] = [{
+                "default": True,
+                "name": "Default upstream",
+                "host": "127.0.0.1",
+                "port": 10748,
+            }]
         if isinstance(config['upstream'], dict):
             self.logger.warning("Config file %s using deprecated [upstream] section", config_file)
             data = config.get('upstream', {})
