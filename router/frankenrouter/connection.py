@@ -89,6 +89,10 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
 
         Also update traffic counters.
         """
+        linelen = len(line)
+        if linelen <= 2:
+            self.logger.critical("Dropping too-short message: %s", line)
+            return
         if self.closed:
             self.logger.info("Cannot send to closed connection %s", self.peername)
             return
