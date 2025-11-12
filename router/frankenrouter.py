@@ -338,16 +338,18 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         for routerinfo in self.routerinfo.values():
             # Is this router the master sim router?
             is_mastersim = False
+            has_upstream = False
             for this_connection in routerinfo['connections']:
                 if this_connection['upstream'] is True:
+                    has_upstream = True
                     if this_connection['is_frankenrouter'] is False:
                         # This router's upstream is not a frankenrouter, so it is
                         # likely a master sim
                         is_mastersim = True
-                else:
-                    # Any router without an upstream connection can be
-                    # considered a master sim in this context.
-                    is_mastersim = True
+            if not has_upstream:
+                # Any router without an upstream connection can be
+                # considered a master sim in this context.
+                is_mastersim = True
 
             if is_mastersim:
                 continue
