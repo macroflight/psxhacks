@@ -2203,7 +2203,7 @@ the primary VATSIM connection (VATPRI).
                         r".*(Connected. Running version|Disconnected from network)",
                         message
                 ):
-                    self.logger.info("%s message not printed: %s", title, message)
+                    self.logger.info("vPilot title=%s message not printed: %s", title, message)
                     return web.Response(text="OK")
 
                 self.logger.info(
