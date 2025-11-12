@@ -33,7 +33,7 @@ from frankenrouter.rules import RulesAction, RulesCode, Rules
 __MYNAME__ = 'frankenrouter'
 __MY_DESCRIPTION__ = 'A PSX Router'
 
-VERSION = '0.9'
+__VERSION__ = '1.0.0'
 
 # If we have no upstream connection and no cached data, assume this
 # version.
@@ -1370,6 +1370,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         """Send FRDP ROUTERINFO message."""
         self.frdp_routerinfo_requested = False
         payload = {
+            "version": __VERSION__,
             "timestamp": time.time(),
             "router_name": self.config.identity.router,
             "simulator_name": self.config.identity.simulator,
@@ -2504,7 +2505,7 @@ http://localhost:8747/filter/traffic in a web browser.
                     self.logging_task(name="Logging"), name="Logging")
                 self.tasks.add(task)
                 await asyncio.sleep(0)
-                print(f"frankenrouter version {VERSION} starting")
+                print(f"frankenrouter version {__VERSION__} starting")
 
                 if self.config.log.traffic:
                     # Initialize traffic logging
