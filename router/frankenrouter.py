@@ -319,6 +319,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
     def is_client_connected(self, client_addr):
         """Return True if this client is connected."""
         if client_addr in self.clients:
+            if self.clients[client_addr].closed:
+                return False
             return True
         return False
 
@@ -1599,7 +1601,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                             clients_to_purge.append(peername)
                     for peername in clients_to_purge:
                         self.logger.info("Housekeeping removed disconnected client %s", peername)
-                        del clients_to_purge[peername]
+                        del self.clients[peername]
 
         # Standard Task cleanup
         except asyncio.exceptions.CancelledError:
