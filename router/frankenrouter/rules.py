@@ -606,6 +606,7 @@ class Rules():  # pylint: disable=too-many-public-methods
 
     def handle_load3(self):
         """Handle the load1 keyword."""
+        self.router.last_load3 = time.perf_counter()
         return self.myreturn(RulesAction.NORMAL, RulesCode.LOAD3)
 
     def handle_bang(self):
@@ -864,13 +865,28 @@ class Rules():  # pylint: disable=too-many-public-methods
                 extra_data={'nolong': True})
 
         # START keywords that are not also ECON (e.g Qs493 and Qi208)
-        # get special handling
+        # get special handling.
+
+        # During normal router operation, we assume a START variable
+        # is sent as a response from a "start" command, and then only
+        # that router client should get the START variables.
+
+        # However, during situ load START variables are sent, e.g
+        # Qs122, and then we must forward them to all clients. So we
+        # check the time since the last "load3" and if less than 5s,
+        # we forward the START variable.
         if key in self.router.variables.keywords_with_mode('START'):
             if key not in self.router.variables.keywords_with_mode('ECON'):
-                return self.myreturn(
-                    RulesAction.FILTER,
-                    RulesCode.KEYVALUE_FILTER_EGRESS,
-                    extra_data={'start': True, 'key': key})
+                time_since_load3 = time.perf_counter() - self.router.last_load3
+                self.logger.info(
+                    "START variable %s, time since load3 is %.1fs",
+                    key, time_since_load3
+                )
+                if time_since_load3 > 5.0:
+                    return self.myreturn(
+                        RulesAction.FILTER,
+                        RulesCode.KEYVALUE_FILTER_EGRESS,
+                        extra_data={'start': True, 'key': key})
 
         # Do not send Qi191 or Qi257 to PSX Sounds when bang sent
         # recently (this variable causes PSX Sounds to play its gear
@@ -961,6 +977,7 @@ class TestRules(unittest.TestCase):
             self.variables = TestRules.DummyVariables()
             self.cache = TestRules.DummyCache()
             self.last_load1 = 0.0
+            self.last_load3 = 0.0
             self.frdp_version = 1
             self.config = TestRules.DummyConfig()
 

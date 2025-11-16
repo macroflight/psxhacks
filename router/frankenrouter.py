@@ -179,6 +179,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
         # Variables that we re-initialize after upstream (re)connection
         self.last_load1 = None
+        self.last_load3 = 0.0
         self.last_bang = None
         self.variable_stats_buffer = None
         self.routerinfo = None
