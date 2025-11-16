@@ -33,7 +33,7 @@ from frankenrouter.rules import RulesAction, RulesCode, Rules
 __MYNAME__ = 'frankenrouter'
 __MY_DESCRIPTION__ = 'A PSX Router'
 
-__VERSION__ = '1.0.1'
+__VERSION__ = '1.0.2'
 
 # If we have no upstream connection and no cached data, assume this
 # version.
