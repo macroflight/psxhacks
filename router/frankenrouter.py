@@ -213,6 +213,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         """
         self.status_display_requested = asyncio.current_task().get_name()
         self.frdp_routerinfo_requested = asyncio.current_task().get_name()
+        self.frdp_sharedinfo_requested = asyncio.current_task().get_name()
 
     def handle_args(self):  # pylint: disable=too-many-statements
         """Handle command line arguments."""
@@ -338,7 +339,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             },
         }
 
-        for routerinfo in self.routerinfo.values():
+        for router_uuid, routerinfo in self.routerinfo.items():
             # Is this router the master sim router?
             is_mastersim = False
             has_upstream = False
@@ -355,11 +356,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 is_mastersim = True
 
             if is_mastersim:
-                continue
+                # If this router is the master sim AND there are other
+                # routers in the network, continue
+                if len(self.routerinfo) > 1:
+                    continue
 
             if 'filter_elevation' not in routerinfo:
-                self.logger.warning("No filter_elevation in routerinfo for %s",
-                                    routerinfo['simulator_name'])
+                self.logger.warning("No filter_elevation in routerinfo from %s (%s)",
+                                    router_uuid, routerinfo['simulator_name'])
             else:
                 if routerinfo['filter_elevation'] is True:
                     filterstatus['elevation']['enabled'].add(routerinfo['simulator_name'])
@@ -367,8 +371,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     filterstatus['elevation']['disabled'].add(routerinfo['simulator_name'])
 
             if 'filter_traffic' not in routerinfo:
-                self.logger.warning("No filter_traffic in routerinfo for %s",
-                                    routerinfo['simulator_name'])
+                self.logger.warning("No filter_traffic in routerinfo from %s (%s)",
+                                    router_uuid, routerinfo['simulator_name'])
             else:
                 if routerinfo['filter_traffic'] is True:
                     filterstatus['traffic']['enabled'].add(routerinfo['simulator_name'])
@@ -1696,10 +1700,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 await self.send_to_upstream(message, sender.peername)
                 await self.client_broadcast(message, exclude=[sender.peername])
                 # Since we won't get our own JOIN, we need to trigger this here
-                self.frdp_sharedinfo_requested = True
+                self.connection_state_changed()
         elif code == RulesCode.FRDP_JOIN:
             # A new router has joined the network
-            self.frdp_sharedinfo_requested = True
+            self.connection_state_changed()
         elif code == RulesCode.FRDP_BANG:
             self.logger.debug(
                 "Got FRDP IDENT message from %s: %s",
@@ -2169,7 +2173,7 @@ the primary VATSIM connection (VATPRI).
                 if changes == 0:
                     return web.Response(text="Nothing was changed")
                 self.logger.info("API: sharedinfo changed to %s", self.sharedinfo)
-                self.frdp_sharedinfo_requested = True
+                self.connection_state_changed()
                 return web.Response(text=f"{changes} SHAREDINFO variables changed")
 
             @routes.get('/api/blocklist')
