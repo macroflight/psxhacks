@@ -140,6 +140,10 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         Qi124=13\r\n
 
         But we can also get streams with any combination of \r and \n...
+
+        And apparently some addons add some NULL bytes in their
+        traffic. For now, we simply filter that out. Example from an
+        MCP 'Qi33= 073\x00\r'
         """
         if self.closed:
             self.logger.info("Cannot read from closed connection %s", self.peername)
@@ -159,6 +163,11 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
             raise ConnectionClosed from exc
 
         self.logger.debug("readuntil returned: %s", data)
+
+        if b'\x00' in data:
+            self.logger.warning("Stripping away NULL byte from %s", data)
+            data = data.replace(b'\x00', b'')
+
         # Remove any newline components from the end of the string
         data_no_newline = data.replace(b'\n', b'').replace(b'\r', b'')
         self.logger.debug("with newlines removed: %s", data_no_newline)
