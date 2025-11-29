@@ -87,12 +87,12 @@ class RouterCache():  # pylint: disable=too-few-public-methods
         if keyword[:2] in ['Qi', 'Qh']:
             try:
                 value = int(value)
-            except TypeError as exc:
+            except (TypeError, ValueError) as exc:
                 raise RouterCacheException("Wrong data type for {value}") from exc
         else:
             try:
                 value = str(value)
-            except TypeError as exc:
+            except (TypeError, ValueError) as exc:
                 raise RouterCacheException("Wrong data type for {value}") from exc
 
         if updated is None:
