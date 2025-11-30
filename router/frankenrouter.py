@@ -2416,7 +2416,7 @@ http://localhost:8747/filter/traffic in a web browser.
             self.config.identity.router = self.config.identity.simulator
 
             host = input(f"Master sim router IP (press Enter for {self.config.upstream.host})? ")
-            port = input(f"master tim router port (press Enter for {self.config.upstream.port})? ")
+            port = input(f"master sim router port (press Enter for {self.config.upstream.port})? ")
             password = input(
                 f"Your password for the master sim (press Enter for {self.config.upstream.password})? ")  # pylint: disable=line-too-long
             if host != "":
