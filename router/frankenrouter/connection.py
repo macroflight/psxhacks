@@ -60,6 +60,9 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         self.display_name = 'unknown connection'
         self.display_name_source = 'new connection'
 
+        self.client_provided_id = None
+        self.client_provided_display_name = None
+
         self.simulator_name = 'unknown sim'
         self.router_name = 'unknown router'
         self.uuid = None

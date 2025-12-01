@@ -501,23 +501,25 @@ class Rules():  # pylint: disable=too-many-public-methods
         if self.sender.is_frankenrouter:
             return self.myreturn(RulesAction.DROP, RulesCode.NAME_REJECTED,
                                  message=f"ignoring name keyword from frankenrouter: {self.line}")
-        # By default we use the entire name given
-        thisname = rest
-        # Certain known addons get a shorter or better display name
-        if re.match(r".*PSX.NET EFB.*", rest):
-            thisname = rest.split(":")[0]
-        elif re.match(r":PSX Sounds", rest):
-            thisname = "PSX Sounds"
-        elif re.match(r"^MSFS Router", rest):
-            thisname = "MSFS Router"
-        elif re.match(r"^BACARS:", rest):
-            thisname = "BACARS"
-        elif re.match(r"^VPLG:", rest):
-            thisname = "vPilot"
-        elif re.match(r".*:FRANKEN\.PY", rest):
-            thisname = rest.split(":")[0]
-        self.sender.display_name = thisname
+        # It seems that proper addons send name=<ID>:<display name>
+        # where ID is short and unique if there are several such
+        # clients in a sim. ID can sometimes be empty, e.g if not
+        # providing a custom ID to PSX Sounds. Display name is longer
+        # and more human-readable.
+
+        # Safe defaults
+        provided_display_name = rest
+        provided_id = ""
+
+        if ":" in rest:
+            (provided_id, provided_display_name) = rest.split(":", 1)
+
+        self.sender.display_name = provided_display_name
         self.sender.display_name_source = "name message"
+
+        self.sender.client_provided_id = provided_id
+        self.sender.client_provided_display_name = provided_display_name
+
         self.router.connection_state_changed()
         return self.myreturn(RulesAction.DROP, RulesCode.NAME_LEARNED)
 
@@ -1225,14 +1227,14 @@ class TestRules(unittest.TestCase):
         (action, code, *_) = rules.route("name=somename:or:other", testpeer)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.NAME_LEARNED)
-        self.assertEqual(testpeer.display_name, 'somename:or:other')
+        self.assertEqual(testpeer.display_name, 'or:other')
         self.assertEqual(testpeer.display_name_source, 'name message')
 
         # known addon sending name=
         (action, code, *_) = rules.route("name=BACARS:BA ACARS Simulation", testpeer)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.NAME_LEARNED)
-        self.assertEqual(testpeer.display_name, 'BACARS')
+        self.assertEqual(testpeer.display_name, 'BA ACARS Simulation')
         self.assertEqual(testpeer.display_name_source, 'name message')
 
     def test_demand(self):
