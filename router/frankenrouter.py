@@ -1997,6 +1997,8 @@ the primary VATSIM connection (VATPRI).
                         'id': client.client_id,
                         'port': client.port,
                         'display_name': client.display_name,
+                        'messages_sent': client.messages_sent,
+                        'messages_received': client.messages_received,
                     })
                 return web.json_response(clients)
 

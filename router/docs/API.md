@@ -46,13 +46,17 @@ $ curl -s http://127.0.0.1:8747/api/clients | jq .
     "ip": "127.0.0.1",
     "id": 3,
     "port": 42674,
-    "display_name": "FilterClient1"
+    "display_name": "FilterClient1",
+    "messages_sent": 5062,
+    "messages_received": 2
   },
   {
     "ip": "127.0.0.1",
     "id": 5,
     "port": 42690,
     "display_name": "FilterClient2"
+    "messages_sent": 123,
+    "messages_received": 456
   }
 ]
 ```
