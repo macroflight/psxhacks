@@ -37,6 +37,21 @@ disable the API using the config file.
 
 Returns information about connected clients (very basic)
 
+- ip: the IP address the client connected from
+- port: the source port of the client connection
+- id: unique client connection ID for this router, starts at 1 for the
+  first client that connects
+- display_name: a name that can come from many sources, e.g a name= or
+  clientName= message, the [[access]] config entry, etc. Used by the
+  text interface status display. Will always be a string.
+- messages_sent: how many PSX messages (lines) the router has sent to the client
+- messages_received: how many PSX messages (lines) the router has received from the client
+- client_provided_id: the first part of a name=ID:display_message from
+  the client. Will be null if no name= message received from client.
+- client_provided_display_name: the second part of a
+  name=ID:display_message from the client.  Will be null if no name=
+  message received from client.
+
 Example usage:
 
 ``` text
@@ -48,7 +63,9 @@ $ curl -s http://127.0.0.1:8747/api/clients | jq .
     "port": 42674,
     "display_name": "FilterClient1",
     "messages_sent": 5062,
-    "messages_received": 2
+    "messages_received": 2,
+    "client_provided_id": "FC1",
+    "client_provided_display_name": "FilterClient1"
   },
   {
     "ip": "127.0.0.1",
@@ -57,6 +74,8 @@ $ curl -s http://127.0.0.1:8747/api/clients | jq .
     "display_name": "FilterClient2"
     "messages_sent": 123,
     "messages_received": 456
+    "client_provided_id": null,
+    "client_provided_display_name": null
   }
 ]
 ```
