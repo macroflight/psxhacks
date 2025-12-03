@@ -28,6 +28,20 @@ The router is stable enough for long flights (16+ hours).
 - Addons or whole sims can be connected in read-only mode (can read
   PSX traffic and request DEMAND mode variables).
 
+## PSX network topology
+
+If you are planning to use the frankenrouter AND another type of PSX
+router (e.g SimStackSwitch or Hoppie's original PSX router) in the
+same sim, please talk to Macroflight first, as this is untested.
+
+If you are planning to connect more than one frankenrouter directly to
+your PSX main server, please talk to Macroflight first, as this is
+untested.
+
+Connecting one frankenrouter to the PSX main server and then more
+frankenrouters to the first frankenrouter is perfectly OK, this is
+done all the time when we use a shared cockpit setup.
+
 ## Quickstart - connect your PSX sim to an existing shared cockpit setup
 
 - Download the latest binary package from [here](https://drive.google.com/drive/folders/1Eu1uJCNUiLkFg9Qq8YwPCiPd9V7D5FbA)

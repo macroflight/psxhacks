@@ -111,6 +111,8 @@ class RulesCode(enum.Enum):
     LOAD2 = enum.auto()
     LOAD3 = enum.auto()
     BANG = enum.auto()
+    BANG_SYNTHETIC = enum.auto()
+    BANG_REJECTED = enum.auto()
     EXIT = enum.auto()
     PBSKAQ = enum.auto()
     LAYOUT = enum.auto()
@@ -330,9 +332,11 @@ class Rules():  # pylint: disable=too-many-public-methods
         self.router.routerinfo[routerinfo['uuid']] = routerinfo
         # Add received timestamp
         self.router.routerinfo[routerinfo['uuid']]['received'] = time.time()
-
-        # Forward message to network
-        return self.myreturn(RulesAction.NORMAL, RulesCode.FRDP_ROUTERINFO)
+        # Forward message to network but only to frankenrouters
+        return self.myreturn(
+            RulesAction.FILTER,
+            RulesCode.KEYVALUE_FILTER_EGRESS,
+            extra_data={'exclude_non_frankenrouter': True})
 
     def handle_addon_frankenrouter_sharedinfo(self, payload):
         """Handle a FRDP SHAREDINFO message.
@@ -343,7 +347,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         This message should be forwarded to the network, since we want
         it to reach all frankenrouters.
         """
-        self.logger.info("Handling SHAREDINFO data: %s", payload)
+        self.logger.debug("Handling SHAREDINFO data: %s", payload)
         try:
             sharedinfo = json.loads(payload)
         except json.decoder.JSONDecodeError:
@@ -375,8 +379,11 @@ class Rules():  # pylint: disable=too-many-public-methods
         for key in ['pilot_flying_simulator']:
             if key in sharedinfo:
                 self.router.sharedinfo[key] = sharedinfo[key]
-        # Forward message to network
-        return self.myreturn(RulesAction.NORMAL, RulesCode.FRDP_SHAREDINFO)
+        # Forward message to network but only to frankenrouters
+        return self.myreturn(
+            RulesAction.FILTER,
+            RulesCode.KEYVALUE_FILTER_EGRESS,
+            extra_data={'exclude_non_frankenrouter': True})
 
     def handle_addon_frankenrouter_auth(self, payload):
         """Handle FRDP AUTH message.
@@ -509,7 +516,7 @@ class Rules():  # pylint: disable=too-many-public-methods
 
         # Safe defaults
         provided_display_name = rest
-        provided_id = ""
+        provided_id = rest
 
         if ":" in rest:
             (provided_id, provided_display_name) = rest.split(":", 1)
@@ -622,7 +629,16 @@ class Rules():  # pylint: disable=too-many-public-methods
         - forward the bang
 
         """
+        # drop any bang from upstream
+        if self.sender.upstream:
+            self.logger.info("Dropped bang from upstream")
+            return self.myreturn(RulesAction.DROP, RulesCode.BANG_REJECTED)
+
         self.router.last_bang = time.perf_counter()
+        if not self.router.config.psx.forward_bang:
+            # Testing a new way to handle bang
+            return self.myreturn(RulesAction.DROP, RulesCode.BANG_SYNTHETIC)
+        # normal handling
         reply = "addon=FRANKENROUTER:{self.frdp_version}:BANG"
         return self.myreturn(RulesAction.NORMAL, RulesCode.BANG,
                              extra_data={"reply": reply})
@@ -880,7 +896,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         if key in self.router.variables.keywords_with_mode('START'):
             if key not in self.router.variables.keywords_with_mode('ECON'):
                 time_since_load3 = time.perf_counter() - self.router.last_load3
-                self.logger.info(
+                self.logger.debug(
                     "START variable %s, time since load3 is %.1fs",
                     key, time_since_load3
                 )

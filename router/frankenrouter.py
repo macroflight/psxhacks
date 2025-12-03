@@ -237,7 +237,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             help="How long to wait between upstream connection attempts.")
         parser.add_argument(
             '--status-interval',
-            type=int, action='store', default=10,
+            type=int, action='store', default=60,
             help="How often to print router status to terminal",
         )
         parser.add_argument(
@@ -574,13 +574,23 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             description = description[:(self.longest_destination_string - 3)] + "..."
         self.traffic_logger.info(fmt, direction, description, line)
 
-    async def client_add_to_network(self, client):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
-        """Add a client to the network."""
-        self.logger.info(
-            "Adding client %s to network (%d keywords)",
-            client.client_id, self.cache.get_size())
+    async def client_add_to_network(self, client, bang_reply=False):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
+        """Add a client to the network.
+
+        Also used to reply to a bang, in that case some information is
+        omitted, e.g version.
+        """
+        if bang_reply:
+            self.logger.info(
+                "Sending synthetic bang reply to client %s (cache has %d keywords)",
+                client.client_id, self.cache.get_size())
+        else:
+            self.logger.info(
+                "Adding client %s to network (cache has %d keywords)",
+                client.client_id, self.cache.get_size())
         start_time = time.perf_counter()
-        self.last_client_connected = start_time
+        if not bang_reply:
+            self.last_client_connected = start_time
 
         async def send_if_unsent(key, drain=False):
             """Send key-value to client if not already sent."""
@@ -616,38 +626,36 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # See notes_on_psx_router.md for notes on what we send here and why
         #
 
-        # Send a "fake" client id, rather than the id of the proxy's
-        # connection to the PSX main server.
-        await send_line(f"id={client.client_id}")
+        if not bang_reply:
+            # Send a "fake" client id, rather than the id of the proxy's
+            # connection to the PSX main server.
+            await send_line(f"id={client.client_id}")
 
-        # Send version and layout. If possible, use cache, if not,
-        # make something up. Without at least version, PSX main
-        # clients will not connect.
-        if not self.cache.has_keyword('version'):
-            self.cache.update('version', PSX_DEFAULT_VERSION)
-        if not self.cache.has_keyword('layout'):
-            self.cache.update('layout', 1)
-        for key in [
-                "version", "layout",
-        ]:
-            await send_if_unsent(key)
+            # Send version and layout. If possible, use cache, if not,
+            # make something up. Without at least version, PSX main
+            # clients will not connect.
+            if not self.cache.has_keyword('version'):
+                self.cache.update('version', PSX_DEFAULT_VERSION)
+            if not self.cache.has_keyword('layout'):
+                self.cache.update('layout', 1)
+            for key in [
+                    "version", "layout",
+            ]:
+                await send_if_unsent(key)
 
-        # Send the Lexicon
-        for prefix in [
-                "Ls",
-                "Lh",
-                "Li",
-        ]:
-            for key in self.cache.get_keywords():
-                if key.startswith(prefix):
-                    await send_if_unsent(key)
+            # Send the Lexicon
+            for prefix in [
+                    "Ls",
+                    "Lh",
+                    "Li",
+            ]:
+                for key in self.cache.get_keywords():
+                    if key.startswith(prefix):
+                        await send_if_unsent(key)
 
-        # FIXME: some variables always sent BEFORE load1?
-        # "Qi138", "Qs440", "Qs439","Qs450",
-
-        # This pauses the client. We use drain here to make sure this
-        # is not delayed by buffering.
-        await send_line("load1", drain=True)
+            # This pauses the client. We use drain here to make sure this
+            # is not delayed by buffering.
+            await send_line("load1", drain=True)
 
         # Send "start" upstream
         self.logger.debug("Sending start upstream to get fresh data for client")
@@ -696,22 +704,27 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 if key.startswith(prefix):
                     await send_if_unsent(key)
 
-        await send_line("load3", drain=True)
-        await send_if_unsent("metar", drain=True)
+        if not bang_reply:
+            await send_line("load3", drain=True)
+            await send_if_unsent("metar", drain=True)
+            # Identify ourselves to the client (in case it's another
+            # frankenrouter)
+            await send_line(f"name=frankenrouter:{self.config.identity.simulator}")
 
         client.welcome_sent = True
         welcome_keyword_count = len(client.welcome_keywords_sent)
         client.welcome_keywords_sent = set()
-
-        # Identify ourselves to the client (in case it's another
-        # frankenrouter)
-        await send_line(f"name=frankenrouter:{self.config.identity.simulator}")
-
-        frdp_rtt = time.perf_counter() - start_time
-        self.logger.info(
-            "Added client %s in %.1f ms (%d keywords, %.0f/s)",
-            client.client_id, frdp_rtt * 1000,
-            welcome_keyword_count, welcome_keyword_count / frdp_rtt)
+        send_time = time.perf_counter() - start_time
+        if not bang_reply:
+            self.logger.info(
+                "Added client %s in %.1f ms (%d keywords, %.0f/s)",
+                client.client_id, send_time * 1000,
+                welcome_keyword_count, welcome_keyword_count / send_time)
+        else:
+            self.logger.info(
+                "Sent synthetic bang reply to client %s in %.1f ms (%d keywords, %.0f/s)",
+                client.client_id, send_time * 1000,
+                welcome_keyword_count, welcome_keyword_count / send_time)
 
     async def close_client_connection(self, client, clean=True):
         """Close a client connection and remove client data."""
@@ -849,6 +862,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self, line, exclude=None, include=None,
             islong=False, isonlystart=False,
             key=None, exclude_name_regexp=None,
+            exclude_non_frankenrouter=False,
             ignore_access=False,
     ):  # pylint: disable=too-many-branches, too-many-arguments, too-many-positional-arguments
         """Send a line to connected clients.
@@ -870,8 +884,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 if re.match(exclude_name_regexp, client.display_name):
                     self.logger.info(
                         "Not sending %s to %s due to regexp match for %s against %s",
-                        key, client.peername, client.display_name, exclude_name_regexp)
+                        line, client.peername, client.display_name, exclude_name_regexp)
                     continue
+            if not client.is_frankenrouter and exclude_non_frankenrouter:
+                self.logger.debug(
+                    "Not sending to non-frankenrouter client %s: %s", client.peername, line)
+                continue
             if not client.has_access() and not ignore_access:
                 self.logger.debug(
                     "Not sending to noaccess client %s", client.peername)
@@ -1413,11 +1431,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # Fake the received timestamp
         self.routerinfo[self.uuid]['received'] = time.time()
 
-        # Send to network
+        # Send to network (upstream and any connected frankenrouters)
         await self.send_to_upstream(
             f"addon=FRANKENROUTER:{self.frdp_version}:ROUTERINFO:{payload_json}")
         await self.client_broadcast(
-            f"addon=FRANKENROUTER:{self.frdp_version}:ROUTERINFO:{payload_json}")
+            f"addon=FRANKENROUTER:{self.frdp_version}:ROUTERINFO:{payload_json}",
+            exclude_non_frankenrouter=True)
         self.last_frdp_routerinfo = time.perf_counter()
         # End of send_frdp_routerinfo()
 
@@ -1437,12 +1456,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         payload_json = json.dumps(payload)
         # Store our own sharedinfo so we have all the data in the same place
         self.sharedinfo = payload
-        # Send to network
-        self.logger.info("Sending SHAREDINFO up and downstream")
+        # Send to network (upstream and any connected frankenrouters)
+        self.logger.debug("Sending SHAREDINFO up and downstream")
         await self.send_to_upstream(
             f"addon=FRANKENROUTER:{self.frdp_version}:SHAREDINFO:{payload_json}")
         await self.client_broadcast(
-            f"addon=FRANKENROUTER:{self.frdp_version}:SHAREDINFO:{payload_json}")
+            f"addon=FRANKENROUTER:{self.frdp_version}:SHAREDINFO:{payload_json}",
+            exclude_non_frankenrouter=True)
         self.last_frdp_sharedinfo = time.perf_counter()
         # End of send_frdp_sharedinfo()
 
@@ -1705,8 +1725,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             # A new router has joined the network
             self.connection_state_changed()
         elif code == RulesCode.FRDP_BANG:
-            self.logger.debug(
-                "Got FRDP IDENT message from %s: %s",
+            self.logger.info(
+                "Got FRDP BANG message from %s: %s",
                 sender_hr, line)
         elif code == RulesCode.LOAD1:
             self.logger.info("Got load1 message from %s", sender_hr)
@@ -1775,6 +1795,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                              sender_hr, line)
         elif code == RulesCode.AGAIN:
             self.logger.info("Keyword again from %s forwarded: %s", sender_hr, line)
+        elif code == RulesCode.BANG_SYNTHETIC:
+            self.logger.info("Sending synthetic bang reply to %s", sender_hr)
+            await self.client_add_to_network(sender, bang_reply=True)
 
         # Take action
         if action == RulesAction.DROP:
@@ -1834,6 +1857,15 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 else:
                     await self.client_broadcast(line, exclude=[sender.peername],
                                                 exclude_name_regexp=regex)
+            elif 'exclude_non_frankenrouter' in extra_data:
+                self.logger.debug("sending with exclude_non_frankenrouter: %s", line)
+                if not sender.upstream:
+                    await self.send_to_upstream(line, sender.peername)
+                if sender.upstream:
+                    await self.client_broadcast(line, exclude_non_frankenrouter=True)
+                else:
+                    await self.client_broadcast(line, exclude=[sender.peername],
+                                                exclude_non_frankenrouter=True)
             else:
                 self.logger.critical(
                     "RulesAction.FILTER but no known filter type in extra_data: %s: %s",
