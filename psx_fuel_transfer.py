@@ -7,6 +7,9 @@ import time
 from psx import Client
 # pylint: disable=missing-function-docstring,global-statement,invalid-name
 
+__MY_CLIENT_ID__ = 'FUELXFR'
+__MY_DISPLAY_NAME__ = 'FrankenPump'
+
 PSX = None
 CONNECTED = False
 
@@ -16,7 +19,7 @@ def setup():
     global CONNECTED
     print("Simulation started")
     CONNECTED = True
-    PSX.send("name", "FuelXfer:FRANKEN.PY fuel transfer script")
+    PSX.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
 
 
 def teardown():

@@ -8,6 +8,9 @@ import signal
 import SimConnect  # pylint: disable=import-error
 import psx  # pylint: disable=unused-import
 
+__MY_CLIENT_ID__ = 'WIND'
+__MY_DISPLAY_NAME__ = 'FrankenWind'
+
 
 class FrankenWindException(Exception):
     """FrankenWind exception.
@@ -172,7 +175,7 @@ class FrankenWind():  # pylint: disable=too-many-instance-attributes
         def connected(key, value):
             self.logger.info("Connected to PSX %s %s as #%s", key, value, self.psx.get('id'))
             self.psx_connected = True
-            self.psx.send("name", "WIND:FRANKEN.PY frankenwind MSFS to PSX wind sync")
+            self.psx.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
 
         self.psx = psx.Client()
         # self.psx.logger = self.logger.debug  # .info to see traffic

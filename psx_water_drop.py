@@ -6,6 +6,9 @@ import threading
 import time
 from psx import Client
 
+__MY_CLIENT_ID__ = 'WATERDROP'
+__MY_DISPLAY_NAME__ = 'Water drop script'
+
 PSX = None
 CONNECTED = False
 TRIGGERED = False
@@ -16,7 +19,7 @@ def setup():
     global CONNECTED
     print("Simulation started")
     CONNECTED = True
-    PSX.send("name", "WaterDrop:FRANKEN.PY water drop script")
+    PSX.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
 
 
 def teardown():

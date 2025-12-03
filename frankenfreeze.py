@@ -9,6 +9,9 @@ import time
 import SimConnect  # pylint: disable=import-error
 import psx  # pylint: disable=unused-import
 
+__MY_CLIENT_ID__ = 'ICING'
+__MY_DISPLAY_NAME__ = 'FrankenFreeze'
+
 
 class FrankenFreezeException(Exception):
     """FrankenFreeze exception.
@@ -318,7 +321,7 @@ class FrankenFreeze():  # pylint: disable=too-many-instance-attributes
         def connected(key, value):
             self.logger.info("Connected to PSX %s %s as #%s", key, value, self.psx.get('id'))
             self.psx_connected = True
-            self.psx.send("name", "ICING:FRANKEN.PY frankenfreeze MSFS to PSX ice sync")
+            self.psx.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
 
         self.psx = psx.Client()
         # self.psx.logger = self.logger.debug  # .info to see traffic

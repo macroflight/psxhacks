@@ -1,6 +1,7 @@
 """Read the PSX Variables.txt definition format."""
 import logging
 import re
+import traceback
 import unittest
 import urllib.request
 
@@ -50,10 +51,11 @@ class VariablesException(Exception):
 class Variables():  # pylint: disable=too-few-public-methods
     """A definition of PSX network variables."""
 
-    def __init__(self, vfilepath=None, vfiledata=None):
+    def __init__(self, config, vfilepath=None, vfiledata=None):
         """Initialize the instance."""
         self.logger = logging.getLogger(__name__)
         self.variables = {}
+        self.config = config
 
         if vfilepath is not None:
             # Read the standard Variables.txt file from the PSX
@@ -73,6 +75,11 @@ class Variables():  # pylint: disable=too-few-public-methods
                     raise VariablesException(
                         "Failed to download Variables.txt from Aerowinx") from exc2
                 self.logger.info("Downloaded Variables.txt from Aerowinx")
+            except Exception:  # pylint: disable=broad-exception-caught
+                msg = f"Unhandled exception: {traceback.format_exc()}"
+                if self.config.identity.stop_minded:
+                    raise SystemExit(f"{msg}\nRouter is stop-minded so shutting down now")  # pylint: disable=raise-missing-from
+                self.logger.critical("%s\nRouter is go-minded so trying to continue", msg)
         elif vfiledata is not None:
             self._init_from_data(vfiledata)
 
@@ -216,13 +223,13 @@ Qs411="CduRteCa"; Mode=ECON; Min=15; Max=50000;
     def test_bad_input(self):
         """A few tests with invalid input data."""
         with self.assertRaises(VariablesException):
-            Variables(vfiledata=self.bad_data_1)
+            Variables(None, vfiledata=self.bad_data_1)
         with self.assertRaises(AssertionError):
-            Variables(vfiledata=self.bad_data_2)
+            Variables(None, vfiledata=self.bad_data_2)
 
     def test_good_input(self):
         """A few tests with valid input data."""
-        me = Variables(vfiledata=self.good_data_1)
+        me = Variables(None, vfiledata=self.good_data_1)
         self.assertEqual(
             me.variables,
             {
@@ -242,7 +249,7 @@ Qs411="CduRteCa"; Mode=ECON; Min=15; Max=50000;
             }
         )
 
-        me = Variables(vfiledata=self.good_data_2)
+        me = Variables(None, vfiledata=self.good_data_2)
         self.assertEqual(len(me.variables.keys()), 10)
         self.assertEqual(me.keywords_with_mode("DELTA"), ['Qs468'])
         self.assertEqual(me.keywords_with_mode("START"), ['Qs493'])
@@ -252,14 +259,14 @@ Qs411="CduRteCa"; Mode=ECON; Min=15; Max=50000;
 
     def test_keyword(self):
         """Test the PSX keyword check."""
-        me = Variables()
+        me = Variables(None)
         self.assertEqual(me.is_psx_keyword("Gurka"), False)
         self.assertEqual(me.is_psx_keyword("demand"), True)
         self.assertEqual(me.is_psx_keyword("Qs123"), True)
 
     def test_keyword_sort(self):
         """Test the PSX keyword sort."""
-        me = Variables()
+        me = Variables(None)
         self.assertEqual(
             me.sort_psx_keywords(["Qs1", "Qs100", "Qs999", "Qs42"]),
             ["Qs1", "Qs42", "Qs100", "Qs999"])

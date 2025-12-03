@@ -240,7 +240,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         # Update sharedinfo
         if payload == 'NO_CONTROL_LOCKS':
             self.router.sharedinfo['pilot_flying_simulator'] = "NO_CONTROL_LOCKS"
-            message = "Qs421=PF: ALL"
+            message = "Qs421="
         elif payload == 'ALL_CONTROL_LOCKS':
             self.router.sharedinfo['pilot_flying_simulator'] = "ALL_CONTROL_LOCKS"
             message = "Qs421=PF: NOONE"
@@ -450,7 +450,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         try:
             (addon, payload) = rest.split(":", 1)
         except ValueError:
-            self.logger.warning("Got addon message without payload from %s", rest)
+            self.logger.debug("Got unsupported addon message: %s", rest)
             addon = rest
             payload = ""
         if addon == 'FRANKENROUTER':
@@ -482,17 +482,12 @@ class Rules():  # pylint: disable=too-many-public-methods
         name=EFB1:PSX.NET EFB For Windows
         name=BACARS:BA ACARS Simulation
 
-        name=ICING:FRANKEN.PY frankenfreeze MSFS to PSX ice sync
-        name=WIND:FRANKEN.PY frankenwind MSFS to PSX wind sync
-        name=<simname>:FRANKEN.PY frankenrouter PSX router <routername>
-
         If frankenrouter: set is_frankenrouter and display_name
 
         else: set short display name based on the name given (we often
         have to clean it up a little)
 
         Using the prefix "R" for frankenrouters
-        Using the prefix "N" prefix for other names learned from name= messages
         """
         if re.match(r".*:FRANKEN.PY frankenrouter", rest):
             display_name = rest.split(":")[0]
@@ -779,13 +774,13 @@ class Rules():  # pylint: disable=too-many-public-methods
             if not self.sender.upstream and key in [
                     'Qs120', 'Qs357', 'Qs436', 'Qh388', 'Qh426',
             ]:
-                self.logger.info("FLIGHT CONTROL INPUT: %s", key)
+                self.logger.debug("FLIGHT CONTROL INPUT: %s", key)
                 flying = self.router.sharedinfo["pilot_flying_simulator"]
-                self.logger.info("pilot_flying_simulator is %s", flying)
+                self.logger.debug("pilot_flying_simulator is %s", flying)
                 if flying == 'NO_CONTROL_LOCKS':
                     pass
                 elif flying == 'ALL_CONTROL_LOCKS':
-                    self.logger.info(
+                    self.logger.debug(
                         "%s update dropped - all control locks in", key
                     )
                     return self.myreturn(
@@ -798,7 +793,7 @@ class Rules():  # pylint: disable=too-many-public-methods
                 else:
                     if flying != self.router.config.identity.simulator:
                         # Someone else is pilot flying - filter flight controls
-                        self.logger.info(
+                        self.logger.debug(
                             "%s update dropped - %s is pilot flying",
                             key, flying
                         )

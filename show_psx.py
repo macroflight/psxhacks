@@ -4,6 +4,9 @@ import asyncio
 import sys
 from psx import Client
 
+__MY_CLIENT_ID__ = 'SHOWPSX'
+__MY_DISPLAY_NAME__ = 'Show contents of PSX keyword'
+
 
 def psx_setup():
     """Run when connected to PSX."""
@@ -13,7 +16,7 @@ def psx_setup():
 def psx_teardown():
     """Run when disconnected from PSX."""
     print("Simulation stopped")
-    psx.send("name", "show_psx:FRANKEN.PY script that shows a PSX variable")
+    psx.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
 
 
 def print_change(key, value):

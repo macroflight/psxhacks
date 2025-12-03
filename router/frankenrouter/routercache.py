@@ -2,6 +2,7 @@
 import json
 import logging
 import time
+import traceback
 import unittest
 
 
@@ -12,11 +13,12 @@ class RouterCacheException(Exception):
 class RouterCache():  # pylint: disable=too-few-public-methods
     """A cache for PSX network variables."""
 
-    def __init__(self, cache_file):
+    def __init__(self, cache_file, config):
         """Initialize the instance."""
         self.logger = logging.getLogger(__name__)
         self.cache = {}
         self.cache_file = cache_file
+        self.config = config
 
     def read_from_file(self):
         """Read cached data from file, for use e.g before PSX main server started."""
@@ -36,6 +38,11 @@ class RouterCache():  # pylint: disable=too-few-public-methods
                 "Failed to load data from %s found, you might need to reconnect some clients",
                 self.cache_file)
             self.cache = {}
+        except Exception:  # pylint: disable=broad-exception-caught
+            msg = f"Unhandled exception: {traceback.format_exc()}"
+            if self.config.identity.stop_minded:
+                raise SystemExit(f"{msg}\nRouter is stop-minded so shutting down now")  # pylint: disable=raise-missing-from
+            self.logger.critical("%s\nRouter is go-minded so trying to continue", msg)
 
     def write_to_file(self):
         """Write state cache from file."""
@@ -108,7 +115,7 @@ class TestVariablesParser(unittest.TestCase):
 
     def test_basic_cache(self):
         """A few tests of the cache."""
-        me = RouterCache("dummy.json")
+        me = RouterCache("dummy.json", None)
         self.assertEqual(me.get_size(), 0)
         me.update("Qs123", 456)
         me.update("Qs128", "somestring")

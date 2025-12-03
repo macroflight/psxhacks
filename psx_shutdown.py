@@ -7,6 +7,9 @@ import threading
 import time
 from psx import Client
 
+__MY_CLIENT_ID__ = 'SHUTDOWN'
+__MY_DISPLAY_NAME__ = 'Shutdown PSX clients'
+
 PSX = None
 CONNECTED = False
 
@@ -16,7 +19,7 @@ def setup():
     global CONNECTED
     print("Simulation started")
     CONNECTED = True
-    PSX.send("name", "Shutdown:FRANKEN.PY shutdown script")
+    PSX.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
 
 
 def teardown():

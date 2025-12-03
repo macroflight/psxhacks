@@ -13,6 +13,8 @@ import SimConnect  # pylint: disable=import-error
 import psx
 
 __MYNAME__ = 'psx_msfs_sync_checker'
+__MY_CLIENT_ID__ = 'SYNCCHK'
+__MY_DISPLAY_NAME__ = 'PSX-MSFS sync check'
 __MY_DESCRIPTION__ = 'Verify PSX and MSFS are in sync'
 
 
@@ -187,7 +189,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
             """Run when connected to PSX."""
             self.logger.info("PSX CONNECTED")
             self.psx_connected = True
-            self.psx.send("name", f"SYNCCHECK:FRANKEN.PY {__MYNAME__}")
+            self.psx.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
 
         def disconnected():
             """Run when we are disconnected from PSX."""

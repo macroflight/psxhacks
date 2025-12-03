@@ -831,6 +831,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                                         exc, this_client.peername)
                     self.connection_state_changed()
                     return
+                except Exception:  # pylint: disable=broad-exception-caught
+                    msg = f"Unhandled exception: {traceback.format_exc()}"
+                    if self.config.identity.stop_minded:
+                        raise SystemExit(f"{msg}\nRouter is stop-minded so shutting down now")  # pylint: disable=raise-missing-from
+                    self.logger.critical("%s\nRouter is go-minded so trying to continue", msg)
+
                 if data is None:
                     continue
                 t_read_data = time.perf_counter()
@@ -957,13 +963,18 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     )
                 # At least on Windows we get OSError after ~30s if the
                 # upstream is down or unreachable
-                except (ConnectionRefusedError, OSError):
+                except (ConnectionError, OSError):
                     self.logger.warning(
                         "Upstream connection refused, sleeping %.1f s before retry",
                         self.args.upstream_reconnect_delay,
                     )
                     await asyncio.sleep(self.args.upstream_reconnect_delay)
                     continue
+                except Exception:  # pylint: disable=broad-exception-caught
+                    msg = f"Unhandled exception: {traceback.format_exc()}"
+                    if self.config.identity.stop_minded:
+                        raise SystemExit(f"{msg}\nRouter is stop-minded so shutting down now")  # pylint: disable=raise-missing-from
+                    self.logger.critical("%s\nRouter is go-minded so trying to continue", msg)
                 # Create the connection object (which needs our config
                 # and a reference to the log function)
                 self.upstream = connection.UpstreamConnection(
@@ -1015,6 +1026,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         await self.close_upstream_connection()
                         await asyncio.sleep(self.args.upstream_reconnect_delay)
                         break
+                    except Exception:  # pylint: disable=broad-exception-caught
+                        msg = f"Unhandled exception: {traceback.format_exc()}"
+                        if self.config.identity.stop_minded:
+                            raise SystemExit(f"{msg}\nRouter is stop-minded so shutting down now")  # pylint: disable=raise-missing-from
+                        self.logger.critical("%s\nRouter is go-minded so trying to continue", msg)
                     if data is None:
                         continue
                     t_read_data = time.perf_counter()
@@ -1162,6 +1178,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             acft_state = self.cache.get_value('Qs121')
         except routercache.RouterCacheException:
             return
+
         if acft_state is not None:
             PiBaHeAlTas = acft_state.split(';')
             pitch = math.degrees(float(PiBaHeAlTas[0]) / 1000000)
@@ -1578,7 +1595,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                             mcmessage = self.cache.get_value("Qs418")
                         except routercache.RouterCacheException:
                             mcmessage = ""
-
                         if not state_ok:
                             time_since_warning = time.perf_counter() - self.filter_warning_sent
                             if time_since_warning > FILTER_WARNING_INTERVAL:
@@ -2328,6 +2344,11 @@ the primary VATSIM connection (VATPRI).
                             self.logger.info("--> in invalid state, result not available")
                         except asyncio.CancelledError:
                             self.logger.info("--> has been cancelled")
+                        except Exception:  # pylint: disable=broad-exception-caught
+                            msg = f"Unhandled exception: {traceback.format_exc()}"
+                            if self.config.identity.stop_minded:
+                                raise SystemExit(f"{msg}\nRouter is stop-minded so shutting down now")  # pylint: disable=raise-missing-from, line-too-long
+                            self.logger.critical("%s\nRouter is go-minded so trying to continue", msg)  # pylint: disable=line-too-long
                         exc = task.exception()
                         if exc is not None:
                             self.logger.info("--> ended with exception: %s", exc)
@@ -2506,11 +2527,11 @@ http://localhost:8747/filter/traffic in a web browser.
             self.subsystems['REST API']['start'] = False
 
         # Get information from Variables.txt
-        self.variables = variables.Variables(vfilepath=self.config.psx.variables)
+        self.variables = variables.Variables(self.config, vfilepath=self.config.psx.variables)
 
         # Initialize the router cache
         self.cache = routercache.RouterCache(
-            f"frankenrouter-{self.config.identity.router}.cache.json")
+            f"frankenrouter-{self.config.identity.router}.cache.json", self)
         if not self.args.no_state_cache_file:
             self.cache.read_from_file()
 
@@ -2570,6 +2591,12 @@ http://localhost:8747/filter/traffic in a web browser.
         except asyncio.CancelledError:  # instead of KeyboardInterrupt
             print("Router stopped.")
             raise
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            msg = f"Unhandled exception: {traceback.format_exc()}"
+            if self.config.identity.stop_minded:
+                raise SystemExit(f"{msg}\nRouter is stop-minded so shutting down now")  # pylint: disable=raise-missing-from
+            self.logger.critical("%s\nRouter is go-minded so trying to continue", msg)
+
         self.logger.info("All tasks ended, shutting down")
 
 

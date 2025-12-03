@@ -13,6 +13,7 @@ class _RouterConfigIdentity:  # pylint: disable=missing-class-docstring,too-few-
     def __init__(self, data):
         self.simulator = data.get('simulator', "Unknown Sim")
         self.router = data.get('router', "Unknown Router")
+        self.stop_minded = data.get('stop_minded', False)
 
 
 class _RouterConfigListen:  # pylint: disable=missing-class-docstring,too-few-public-methods

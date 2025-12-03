@@ -4,6 +4,7 @@ import asyncio
 import ipaddress
 import logging
 import time
+import traceback
 
 NOACCESS_ACCESS_LEVEL = 'noaccess'
 
@@ -116,7 +117,7 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
                     await self.writer.drain()
                 # Give others a chance to do something
                 await asyncio.sleep(0)
-        except (ConnectionResetError, BrokenPipeError) as exc:
+        except ConnectionError as exc:
             self.logger.info(
                 "Got %s on write to %s/%s, closing connection",
                 type(exc).__name__,
@@ -124,6 +125,11 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
             )
             await self.close(clean=False)
             return
+        except Exception:  # pylint: disable=broad-exception-caught
+            msg = f"Unhandled exception: {traceback.format_exc()}"
+            if self.config.identity.stop_minded:
+                raise SystemExit(f"{msg}\nRouter is stop-minded so shutting down now")  # pylint: disable=raise-missing-from
+            self.logger.critical("%s\nRouter is go-minded so trying to continue", msg)
 
         self.messages_sent += 1
         self.bytes_sent += len(line) + 1
@@ -158,12 +164,14 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
             # happens, and we should return None
             self.logger.info("readuntil returned IncompleteReadError, probably disconnect")
             raise ConnectionClosed from exc
-        except ConnectionResetError as exc:
-            self.logger.info("readuntil returned ConnectionResetError, probably disconnect")
+        except (ConnectionError, OSError) as exc:
+            self.logger.info("readuntil returned %s, probably disconnect", exc)
             raise ConnectionClosed from exc
-        except ConnectionAbortedError as exc:
-            self.logger.info("readuntil returned ConnectionAbortedError, probably disconnect")
-            raise ConnectionClosed from exc
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            msg = f"Unhandled exception: {traceback.format_exc()}"
+            if self.config.identity.stop_minded:
+                raise SystemExit(f"{msg}\nRouter is stop-minded so shutting down now")  # pylint: disable=raise-missing-from
+            self.logger.critical("%s\nRouter is go-minded so trying to continue", msg)
 
         self.logger.debug("readuntil returned: %s", data)
 
@@ -201,8 +209,14 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
                 await asyncio.sleep(0.5)
             self.writer.close()
             await self.writer.wait_closed()
-        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError) as exc:
+        except ConnectionError as exc:
             self.logger.warning("Exception when closing: %s", exc)
+        except Exception:  # pylint: disable=broad-exception-caught
+            msg = f"Unhandled exception: {traceback.format_exc()}"
+            if self.config.identity.stop_minded:
+                raise SystemExit(f"{msg}\nRouter is stop-minded so shutting down now")  # pylint: disable=raise-missing-from
+            self.logger.critical("%s\nRouter is go-minded so trying to continue", msg)
+
         self.closed = True
 
 

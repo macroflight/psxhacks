@@ -39,6 +39,9 @@ traffic, etc.)
   is located in.
 - `router`: a name describing the router. If you only have one router
   in your sim, you can use the same name as for the simulator.
+- `stop_minded`: if you want the router to stop if encountering
+  unhandled but not necessarily fatal problems, set this to
+  true. Useful for e.g router development.
 
 Example:
 
@@ -47,6 +50,7 @@ Example:
 [identity]
 simulator = "FrankenSim"
 router = "router1"
+stop_minded = false
 ```
 
 ### `[listen]`

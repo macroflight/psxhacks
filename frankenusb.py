@@ -9,6 +9,10 @@ from collections import defaultdict
 import pygame  # pylint: disable=import-error
 import psx  # pylint: disable=unused-import
 
+__MY_CLIENT_ID__ = 'USB'
+__MY_DISPLAY_NAME__ = 'FrankenUSB'
+__MY_DESCRIPTION__ = '(partial)Replacement for PSX USB controller subsystem'
+
 # Avail message categories
 # Qs418="FreeMsgW"; master warning + message in red on upper EICAS
 # Qs419="FreeMsgC"; yellow caution on upper EICAS
@@ -96,7 +100,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         """Handle command line arguments."""
         parser = argparse.ArgumentParser(
             prog='frankenusb',
-            description='(partial)Replacement for PSX USB controller subsystem',
+            description=__MY_DESCRIPTION__,
             epilog='Good luck!')
         parser.add_argument('--config-file',
                             action='store', default="frankenusb-frankensim.conf")
@@ -1321,7 +1325,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             self.psx_connected = True
             self.aileron_tiller_active = False
             self.logger.info("Connected to PSX")
-            self.psx.send("name", "FrankenUSB:FRANKEN.PY USB subsystem")
+            self.psx.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
 
         def teardown():
             self.logger.info("Disconnected from PSX, tearing down")
