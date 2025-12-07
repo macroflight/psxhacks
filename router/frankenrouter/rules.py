@@ -99,6 +99,7 @@ class RulesCode(enum.Enum):
     FRDP_AUTH_ALREADY_HAS_ACCESS = enum.auto()
     NAME_FROM_FRANKENROUTER = enum.auto()
     NAME_LEARNED = enum.auto()
+    NAME_NOCHANGE = enum.auto()
     NAME_REJECTED = enum.auto()
     NOLONG = enum.auto()
     NONPSX = enum.auto()
@@ -516,14 +517,26 @@ class Rules():  # pylint: disable=too-many-public-methods
         if ":" in rest:
             (provided_id, provided_display_name) = rest.split(":", 1)
 
-        self.sender.display_name = provided_display_name
-        self.sender.display_name_source = "name message"
+        name_changed = False
 
-        self.sender.client_provided_id = provided_id
-        self.sender.client_provided_display_name = provided_display_name
+        if provided_display_name != self.sender.display_name:
+            name_changed = True
+            self.sender.display_name = provided_display_name
+            self.sender.display_name_source = "name message"
 
-        self.router.connection_state_changed()
-        return self.myreturn(RulesAction.DROP, RulesCode.NAME_LEARNED)
+        if provided_id != self.sender.client_provided_id:
+            name_changed = True
+            self.sender.client_provided_id = provided_id
+
+        if provided_display_name != self.sender.client_provided_display_name:
+            name_changed = True
+            self.sender.client_provided_display_name = provided_display_name
+
+        if name_changed:
+            self.router.connection_state_changed()
+            return self.myreturn(RulesAction.DROP, RulesCode.NAME_LEARNED)
+        else:
+            return self.myreturn(RulesAction.DROP, RulesCode.NAME_NOCHANGE)
 
     def handle_nolong(self):
         """Handle the nolong keyword."""
@@ -1011,6 +1024,8 @@ class TestRules(unittest.TestCase):
             self.router_name = 'UnknownRouter'
             self.display_name = 'UnknownDisplay'
             self.display_name_source = 'UnknownSource'
+            self.client_provided_id = None
+            self.client_provided_display_name = None
             self.is_frankenrouter = False
             self.upstream = False
             self.peername = None
