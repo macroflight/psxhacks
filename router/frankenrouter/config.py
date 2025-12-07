@@ -70,6 +70,16 @@ class _RouterConfigSharedinfo:  # pylint: disable=missing-class-docstring,too-fe
         self.master = data.get('master', False)
 
 
+class _RouterConfigFiltering:  # pylint: disable=missing-class-docstring,too-few-public-methods
+    def __init__(self, data):
+        self.tiller = data.get('tiller', False)
+        self.tiller_smallest_movement = data.get('tiller_smallest_movement', 10)
+        self.tiller_center = data.get('tiller_center', 25)
+        if self.tiller_center < 2 * self.tiller_smallest_movement:
+            raise RouterConfigError(
+                "tiller_center too small in relation to tiller_smallest_movemeent")
+
+
 class _RouterConfigPerformance:  # pylint: disable=missing-class-docstring,too-few-public-methods
     def __init__(self, data):
         self.write_buffer_warning = data.get('write_buffer_warning', 100000)
@@ -158,7 +168,7 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
     - Override certain settings using command line arguments.
     """
 
-    def __init__(self, config_file=None, config_data=None):
+    def __init__(self, config_file=None, config_data=None):  # pylint: disable=too-many-statements
         """Initialize the class."""
         self.logger = logging.getLogger(__name__)
         if config_file is not None and config_data is not None:
@@ -182,6 +192,7 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
         self.psx = _RouterConfigPsx(config.get('psx', {}))
         self.performance = _RouterConfigPerformance(config.get('performance', {}))
         self.sharedinfo = _RouterConfigSharedinfo(config.get('sharedinfo', {}))
+        self.filtering = _RouterConfigFiltering(config.get('filtering', {}))
 
         # To handle the old upstream format, we check if we get a list
         # ([[upstream]]) or a dict ([upstream]).

@@ -778,6 +778,22 @@ class Rules():  # pylint: disable=too-many-public-methods
         # Ingress filtering. Some variables we don't even want in the cache.
         #
 
+        # Temporary tiller filtering
+        # https://aerowinx.com/board/index.php/topic,7858.0.html
+        if key == 'Qh426':
+            if self.router.config.filtering.tiller:
+                current_value = self.router.cache.get_value(key)
+                change = abs(current_value - int(value))
+                off_center = abs(int(value))
+                if (
+                        change < self.router.config.filtering.tiller_smallest_movement and
+                        off_center > self.router.config.filtering.tiller_center
+                ):
+                    return self.myreturn(
+                        RulesAction.DROP,
+                        RulesCode.KEYVALUE_FILTERED_INGRESS,
+                        message="filtered Qh426/Tiller")
+
         # Ingress filter: flight controls
         # Qs120="FltControls"; Mode=ECON; Min=5; Max=14;
         # Qs357="Brakes"; Mode=ECON; Min=3; Max=9;
