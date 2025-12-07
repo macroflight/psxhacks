@@ -45,7 +45,7 @@ PSX_DEFAULT_VERSION = '10.184 NG'
 UPSTREAM_WAITFOR = 5.0
 
 # Status display static config
-HEADER_LINE_LENGTH = 114
+HEADER_LINE_LENGTH = 126
 
 # How often to check the RTT to upstream and client frankenrouters
 FDRP_PING_INTERVAL = 5.0
@@ -432,7 +432,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 upstreaminfo = upstreaminfo + f", {self.upstream_connections - 1} reconnections"
         self.logger.info(upstreaminfo)
         self.logger.info(
-            "%-21s %-23s %5s %8s %7s %7s %9s %9s %5s",
+            "%-34s %-23s %5s %8s %7s %7s %9s %9s %5s",
             f"{len(self.clients)} clients",
             "",
             "Local",
@@ -444,8 +444,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             "FRDP RTT ms",
         )
         self.logger.info(
-            "%2s %-26s %-15s %5s %8s %7s %7s %9s %9s %5s %5s",
+            "%2s %-12s %-26s %-15s %5s %8s %7s %7s %9s %9s %5s %5s",
             "id",
+            "CID",
             "Name",
             "Client IP",
             "Port",
@@ -477,8 +478,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 prefix = ''
 
             self.logger.info(
-                "%2d %-26s %-15s %5d %8s %7d %7d %9d %9d %5s %5s",
+                "%2d %-12s %-26s %-15s %5d %8s %7d %7d %9d %9d %5s %5s",
                 data.client_id,
+                data.client_provided_id,
                 trimstring(f"{prefix}{data.display_name}", maxlen=25),
                 data.ip,
                 data.port,
