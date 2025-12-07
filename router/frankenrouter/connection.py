@@ -115,8 +115,6 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
                 self.writer.write(line.encode() + PSX_PROTOCOL_SEPARATOR)
                 if drain:
                     await self.writer.drain()
-                # Give others a chance to do something
-                await asyncio.sleep(0)
         except ConnectionError as exc:
             self.logger.info(
                 "Got %s on write to %s/%s, closing connection",

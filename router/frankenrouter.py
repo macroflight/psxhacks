@@ -615,6 +615,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 line = f"{key}={cached_value}"
                 await client.to_stream(line, drain=drain)
                 client.welcome_keywords_sent.add(key)
+                # Allow other coroutines to run while we're welcoming
+                # a client (which can take hundreds of ms)
+                if len(client.welcome_keywords_sent) % 100 == 0:
+                    await asyncio.sleep(0)
                 self.logger.debug("To %s: %s", client.peername, line)
 
         async def send_line(line, drain=False):
