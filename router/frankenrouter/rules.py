@@ -22,6 +22,7 @@ import unittest
 import time
 
 from .connection import NOACCESS_ACCESS_LEVEL
+from .routercache import RouterCacheTypeError
 
 DISPLAY_NAME_MAXLEN = 24
 
@@ -535,8 +536,8 @@ class Rules():  # pylint: disable=too-many-public-methods
         if name_changed:
             self.router.connection_state_changed()
             return self.myreturn(RulesAction.DROP, RulesCode.NAME_LEARNED)
-        else:
-            return self.myreturn(RulesAction.DROP, RulesCode.NAME_NOCHANGE)
+
+        return self.myreturn(RulesAction.DROP, RulesCode.NAME_NOCHANGE)
 
     def handle_nolong(self):
         """Handle the nolong keyword."""
@@ -880,7 +881,12 @@ class Rules():  # pylint: disable=too-many-public-methods
                         message=f"filtered {key} as filter_traffic is set")
 
         # Store key-value in router cache
-        self.router.cache.update(key, value)
+        try:
+            self.router.cache.update(key, value)
+        except RouterCacheTypeError as exc:
+            return self.myreturn(
+                RulesAction.DROP, RulesCode.MESSAGE_INVALID,
+                message=f"Wrong datatype in message, dropping it: {exc}")
 
         # The "nolong" keywords are only sent to clients that have
         # asked for them (using the "nolong" keyword)

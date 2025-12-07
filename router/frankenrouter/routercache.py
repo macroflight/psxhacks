@@ -10,6 +10,10 @@ class RouterCacheException(Exception):
     """A custom exception."""
 
 
+class RouterCacheTypeError(Exception):
+    """A custom exception."""
+
+
 class RouterCache():  # pylint: disable=too-few-public-methods
     """A cache for PSX network variables."""
 
@@ -95,12 +99,12 @@ class RouterCache():  # pylint: disable=too-few-public-methods
             try:
                 value = int(value)
             except (TypeError, ValueError) as exc:
-                raise RouterCacheException("Wrong data type for {value}") from exc
+                raise RouterCacheTypeError(f"Wrong data type for {keyword}={value}") from exc
         else:
             try:
                 value = str(value)
             except (TypeError, ValueError) as exc:
-                raise RouterCacheException("Wrong data type for {value}") from exc
+                raise RouterCacheTypeError(f"Wrong data type for  {keyword}={value}") from exc
 
         if updated is None:
             updated = time.perf_counter()
