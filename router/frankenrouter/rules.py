@@ -822,7 +822,7 @@ class Rules():  # pylint: disable=too-many-public-methods
 
         # Ingress filter: CPDLC message printouts from BACARS
         if not self.sender.upstream and key == 'Qs119':
-            if re.match(r".*BACARS.*", self.sender.display_name):
+            if re.match(r".*(BACARS|BA ACARS).*", self.sender.display_name):
                 cpdlc_regexp_suffixes = [
                     r'CURRENT ATC UNIT',
                     r'LOGON ACCEPTED',
@@ -852,7 +852,7 @@ class Rules():  # pylint: disable=too-many-public-methods
             # connection. This prevents BACARS from printing some junk
             # when it is started.
             if time.perf_counter() - self.sender.connected_at < 15.0:
-                if re.match(r".*BACARS.*", self.sender.display_name):
+                if re.match(r".*(BACARS|BA ACARS).*", self.sender.display_name):
                     return self.myreturn(
                         RulesAction.DROP,
                         RulesCode.KEYVALUE_FILTERED_INGRESS,
