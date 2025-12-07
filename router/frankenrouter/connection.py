@@ -56,6 +56,8 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         # the class, then the router can detect that and remove the
         # connection from its list.
         self.closed = False
+        # Set to True once we have printed one warning
+        self.closed_warned = False
 
         self.display_name = 'unknown connection'
         self.display_name_source = 'new connection'
@@ -104,7 +106,11 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
             self.logger.critical("Dropping too-short message: %s", line)
             return False
         if self.closed:
-            self.logger.info("Cannot send to closed connection %s", self.peername)
+            if self.closed_warned:
+                self.logger.debug("Cannot send to closed connection %s", self.peername)
+            else:
+                self.logger.info("Cannot send to closed connection %s", self.peername)
+                self.closed_warned = True
             return False
         try:
             # Check if the client buffer is growing too much
@@ -179,7 +185,11 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         MCP 'Qi33= 073\x00\r'
         """
         if self.closed:
-            self.logger.info("Cannot read from closed connection %s", self.peername)
+            if self.closed_warned:
+                self.logger.debug("Cannot read from closed connection %s", self.peername)
+            else:
+                self.logger.info("Cannot read from closed connection %s", self.peername)
+                self.closed_warned = True
             return
         try:
             data = await self.reader.readuntil(SUPPORTED_PROTOCOL_SEPARATORS)
