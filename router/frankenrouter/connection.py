@@ -97,6 +97,10 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
 
         Also update traffic counters.
         """
+        # Experimental: do not use drain() - maybe this will work better?
+        if self.router.config.performance.inhibit_drain:
+            drain = False
+
         t_start = time.perf_counter()
         if line is None:
             self.logger.critical("Not sending message=None to stream")

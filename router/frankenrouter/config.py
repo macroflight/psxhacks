@@ -101,6 +101,7 @@ class _RouterConfigPerformance:  # pylint: disable=missing-class-docstring,too-f
         self.frdp_rtt_warning = data.get('frdp_rtt_warning', 0.2)
         if not isinstance(self.frdp_rtt_warning, float):
             raise RouterConfigError("performance frdp_rtt_warning must be an float")
+        self.inhibit_drain = data.get('inhibit_drain', False)
 
 
 class _RouterConfigAccess:  # pylint: disable=missing-class-docstring,too-few-public-methods
