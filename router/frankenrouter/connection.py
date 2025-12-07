@@ -93,14 +93,19 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
 
         Also update traffic counters.
         """
+        t_start = time.perf_counter()
+        if line is None:
+            self.logger.critical("Not sending message=None to stream")
+            return False
         linelen = len(line)
         if linelen <= 2:
             self.logger.critical("Dropping too-short message: %s", line)
-            return
+            return False
         if self.closed:
             self.logger.info("Cannot send to closed connection %s", self.peername)
-            return
+            return False
         try:
+            # Check if the client buffer is growing too much
             if (
                     self.writer.transport.get_write_buffer_size() >
                     self.config.performance.write_buffer_warning
@@ -111,10 +116,10 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
                     self.config.performance.write_buffer_warning,
                     self.peername
                 )
-            if line is not None:
-                self.writer.write(line.encode() + PSX_PROTOCOL_SEPARATOR)
-                if drain:
-                    await self.writer.drain()
+            # Encode and send
+            self.writer.write(line.encode() + PSX_PROTOCOL_SEPARATOR)
+            if drain:
+                await self.writer.drain()
         except ConnectionError as exc:
             self.logger.info(
                 "Got %s on write to %s/%s, closing connection",
@@ -129,6 +134,7 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
                 raise SystemExit(f"{msg}\nRouter is stop-minded so shutting down now")  # pylint: disable=raise-missing-from
             self.logger.critical("%s\nRouter is go-minded so trying to continue", msg)
 
+        t_send = time.perf_counter() - t_start
         self.messages_sent += 1
         self.bytes_sent += len(line) + 1
         if log:
@@ -136,6 +142,11 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
                 await self.log_traffic(line, inbound=False)
             else:
                 await self.log_traffic(line, endpoints=[self.client_id], inbound=False)
+        t_logged = time.perf_counter() - t_send
+        return {
+            'send time': t_send,
+            'log time': t_log
+        }
 
     async def read_line_from_stream(self):
         r"""Read a single PSX messahe line from the stream.
