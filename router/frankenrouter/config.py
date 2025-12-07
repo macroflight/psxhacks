@@ -45,6 +45,12 @@ class _RouterConfigUpstream:  # pylint: disable=missing-class-docstring,too-few-
 class _RouterConfigLog:  # pylint: disable=missing-class-docstring,too-few-public-methods
     def __init__(self, data):
         self.traffic = data.get('traffic', False)
+        self.traffic_max_size = data.get('traffic_max_size', 0)
+        self.traffic_keep_versions = data.get('traffic_keep_versions', 1)
+
+        self.output_max_size = data.get('output_max_size', 0)
+        self.output_keep_versions = data.get('output_keep_versions', 1)
+
         if not isinstance(self.traffic, bool):
             raise RouterConfigError("The traffic setting must be true or false")
 

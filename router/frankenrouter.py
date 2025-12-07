@@ -1233,7 +1233,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             console_handler = logging.StreamHandler()
             console_handler.setFormatter(console_formatter)
 
-            file_handler = logging.FileHandler(router_log_file)
+            file_handler = logging.handlers.RotatingFileHandler(
+                router_log_file,
+                maxBytes=self.config.log.output_max_size,
+                backupCount=self.config.log.output_keep_versions
+            )
             file_handler.setFormatter(file_formatter)
 
             self.logger.setLevel(logging.INFO)
@@ -1298,7 +1302,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
             file_formatter = logging.Formatter("%(asctime)s: %(message)s")
 
-            file_handler = logging.FileHandler(self.log_traffic_filename)
+            file_handler = logging.handlers.RotatingFileHandler(
+                self.log_traffic_filename,
+                maxBytes=self.config.log.traffic_max_size,
+                backupCount=self.config.log.traffic_keep_versions,
+            )
             file_handler.setFormatter(file_formatter)
 
             self.traffic_logger.setLevel(logging.DEBUG)

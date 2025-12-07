@@ -119,6 +119,14 @@ port = 10748
 - `traffic`: if set to true, the router will write all traffic data to
   a log file.
 - `directory`: set to the directory where the traffic log file should be written
+- `traffic_max_size`: if set to a non-zero integer, the traffic log
+  file will be rotated before reaching this size (bytes).
+- `traffic_keep_versions`: controls how many versions of the traffic
+  log file will be kept after being rotated.
+- `output_max_size`: as traffic_max, size, but for the router status
+  output log.
+- `output_keep_versions`: as traffic_keep_versjons, but for the router
+  status output log.
 
 Example:
 
