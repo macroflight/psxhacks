@@ -1,6 +1,7 @@
 """A PSX router connection class."""
 
 import asyncio
+import collections
 import ipaddress
 import logging
 import time
@@ -26,16 +27,14 @@ class ConnectionClosed(ConnectionException):  # pylint: disable=too-few-public-m
 class Connection():  # pylint: disable=too-many-instance-attributes,too-few-public-methods
     """A connection to the PSX router."""
 
-    def __init__(self, reader, writer, config, log_traffic):
+    def __init__(self, reader, writer, router):
         """Initialize the instance."""
         self.logger = logging.getLogger(__name__)
-
-        # Reference to function used to log traffic to file
-        self.log_traffic = log_traffic
+        # Reference to main router object
+        self.router = router
 
         self.reader = reader
         self.writer = writer
-        self.config = config
 
         self.last_line_type = None
 
@@ -88,7 +87,10 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         # True if we have sent an FRDP IDENT message already
         self.frdp_ident_sent = False
 
-    async def to_stream(self, line, log=True, drain=True):
+        # Statistics buffer for write performance
+        self.message_write_times = collections.deque(maxlen=100)
+
+    async def to_stream(self, line, log=True, drain=True):  # pylint: disable=too-many-branches
         """Write data to a stream and optionally to a log file.
 
         Also update traffic counters.
@@ -108,12 +110,12 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
             # Check if the client buffer is growing too much
             if (
                     self.writer.transport.get_write_buffer_size() >
-                    self.config.performance.write_buffer_warning
+                    self.router.config.performance.write_buffer_warning
             ):
                 self.logger.warning(
                     "Write buffer %d > %d for %s",
                     self.writer.transport.get_write_buffer_size(),
-                    self.config.performance.write_buffer_warning,
+                    self.router.config.performance.write_buffer_warning,
                     self.peername
                 )
             # Encode and send
@@ -130,7 +132,7 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
             return
         except Exception:  # pylint: disable=broad-exception-caught
             msg = f"Unhandled exception: {traceback.format_exc()}"
-            if self.config.identity.stop_minded:
+            if self.router.config.identity.stop_minded:
                 raise SystemExit(f"{msg}\nRouter is stop-minded so shutting down now")  # pylint: disable=raise-missing-from
             self.logger.critical("%s\nRouter is go-minded so trying to continue", msg)
 
@@ -139,17 +141,30 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         self.bytes_sent += len(line) + 1
         if log:
             if self.upstream:
-                await self.log_traffic(line, inbound=False)
+                await self.router.log_traffic(line, inbound=False)
             else:
-                await self.log_traffic(line, endpoints=[self.client_id], inbound=False)
-        t_logged = time.perf_counter() - t_send
-        return {
-            'send time': t_send,
-            'log time': t_log
-        }
+                await self.router.log_traffic(line, endpoints=[self.client_id], inbound=False)
+        # Update stats for this connection
+        self.message_write_times.append(t_send)
+        # Update stats for the router as a whole
+        self.router.message_write_times.append(t_send)
+        # Add message to bucket for this second
+        now = int(time.time())
+        if len(self.router.writes_counter) == 0:
+            self.router.writes_counter.appendleft({
+                'second': now,
+                'count': 0
+            })
+        elif self.router.writes_counter[0]['second'] != now:
+            self.router.writes_counter.appendleft({
+                'second': now,
+                'count': 1
+            })
+        self.router.writes_counter[0]['count'] += 1
+        return True
 
     async def read_line_from_stream(self):
-        r"""Read a single PSX messahe line from the stream.
+        r"""Read a single PSX message line from the stream.
 
         Handle all possble combinations of newline:
 
@@ -178,7 +193,7 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
             raise ConnectionClosed from exc
         except Exception as exc:  # pylint: disable=broad-exception-caught
             msg = f"Unhandled exception: {traceback.format_exc()}"
-            if self.config.identity.stop_minded:
+            if self.router.config.identity.stop_minded:
                 raise SystemExit(f"{msg}\nRouter is stop-minded so shutting down now")  # pylint: disable=raise-missing-from
             self.logger.critical("%s\nRouter is go-minded so trying to continue", msg)
 
@@ -206,9 +221,9 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         self.messages_received += 1
         self.bytes_received += len(line) + 1
         if self.upstream:
-            await self.log_traffic(line)
+            await self.router.log_traffic(line)
         else:
-            await self.log_traffic(line, endpoints=[self.client_id])
+            await self.router.log_traffic(line, endpoints=[self.client_id])
 
     async def close(self, clean=True):
         """Close a server connection and remove server data."""
@@ -222,7 +237,7 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
             self.logger.warning("Exception when closing: %s", exc)
         except Exception:  # pylint: disable=broad-exception-caught
             msg = f"Unhandled exception: {traceback.format_exc()}"
-            if self.config.identity.stop_minded:
+            if self.router.config.identity.stop_minded:
                 raise SystemExit(f"{msg}\nRouter is stop-minded so shutting down now")  # pylint: disable=raise-missing-from
             self.logger.critical("%s\nRouter is go-minded so trying to continue", msg)
 
@@ -232,9 +247,9 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
 class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,too-many-instance-attributes
     """A connection to the PSX router."""
 
-    def __init__(self, reader, writer, config, log_traffic):
+    def __init__(self, reader, writer, router):
         """Initialize the instance."""
-        super().__init__(reader, writer, config, log_traffic)
+        super().__init__(reader, writer, router)
         self.access_level = NOACCESS_ACCESS_LEVEL
 
         # The client ID generated by the router
@@ -289,7 +304,7 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
         self.logger.info(
             "Checking access level for client %s. ip=%s, password=%s",
             self.peername, client_ip, client_password)
-        for access in self.config.access:
+        for access in self.router.config.access:
             # 1: check password and IP
             valid_password = False
             if access.match_password is not None:
@@ -346,9 +361,9 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
 class UpstreamConnection(Connection):  # pylint: disable=too-few-public-methods
     """A connection to an upstream router or PSX main server."""
 
-    def __init__(self, reader, writer, config, log_traffic):
+    def __init__(self, reader, writer, router):
         """Initialize the instance."""
-        super().__init__(reader, writer, config, log_traffic)
+        super().__init__(reader, writer, router)
 
         self.upstream = True
 
@@ -361,5 +376,5 @@ class UpstreamConnection(Connection):  # pylint: disable=too-few-public-methods
 #
 def test_connection(self):
     """Very basic test."""
-    me = ClientConnection(None, None, None, None)
+    me = ClientConnection(None, None, None)
     self.assertEqual(me.nolong, False)

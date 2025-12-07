@@ -3,6 +3,7 @@
 from __future__ import annotations
 import argparse
 import asyncio
+import collections
 import itertools
 import json
 import logging
@@ -189,6 +190,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.last_frdp_sharedinfo = None
 
         self.reset_after_upstream_connect()
+
+        # Statistics buffer for network write and log performance
+        self.message_write_times = collections.deque(maxlen=1000)
+        self.log_times = collections.deque(maxlen=1000)
+
+        self.writes_counter = collections.deque(maxlen=60)
+        self.message_counter = collections.deque(maxlen=60)
 
     def reset_after_upstream_connect(self):
         """Re-initialize certain variables after upstream connection."""
@@ -541,6 +549,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
     async def log_traffic(self, line, endpoints=None, inbound=True):
         """Write to optional log file."""
+        t_start = time.perf_counter()
 
         def make_clientlist(clients):
             """Make a compact client list from a list of integers."""
@@ -573,6 +582,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.longest_destination_string = len(description)
             description = description[:(self.longest_destination_string - 3)] + "..."
         self.traffic_logger.info(fmt, direction, description, line)
+        t_log = time.perf_counter() - t_start
+        self.log_times.append(t_log)
 
     async def client_add_to_network(self, client, bang_reply=False):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         """Add a client to the network.
@@ -785,8 +796,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             # Create the connection object (which needs our config
             # and a reference to the log function)
             this_client = connection.ClientConnection(
-                reader, writer,
-                self.config, self.log_traffic)
+                reader, writer, self)
             this_client.client_id = self.next_client_id
             self.next_client_id += 1
             self.clients[this_client.peername] = this_client
@@ -982,8 +992,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 # Create the connection object (which needs our config
                 # and a reference to the log function)
                 self.upstream = connection.UpstreamConnection(
-                    reader, writer,
-                    self.config, self.log_traffic)
+                    reader, writer, self)
                 self.upstream_connections += 1
                 self.logger.info("Connected to upstream: %s", self.upstream.peername)
                 await self.log_connect_evt(self.upstream.peername)
@@ -1672,6 +1681,20 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.logger.debug("Message from %s: %s", sender_hr, line)
         await sender.from_stream(line)
 
+        # Add message to bucket for this second
+        now = int(time.time())
+        if len(self.message_counter) == 0:
+            self.message_counter.appendleft({
+                'second': now,
+                'count': 0
+            })
+        elif self.message_counter[0]['second'] != now:
+            self.message_counter.appendleft({
+                'second': now,
+                'count': 1
+            })
+        self.message_counter[0]['count'] += 1
+
         (action, code, message, extra_data) = self.rules.route(line, sender)
 
         # Take actions based on RulesCode
@@ -2040,11 +2063,53 @@ the primary VATSIM connection (VATPRI).
                 html_page = index_page.format(**data)
                 return web.json_response(text=html_page, content_type='text/html')
 
+            @routes.get('/api/stats')
+            async def handle_stats_get(request):
+                params = request.rel_url.query
+                history = 0
+                try:
+                    history = int(params['history'])
+                except (KeyError, ValueError):
+                    pass
+                response = {
+                    'upstream_queue': self.messagequeue_from_upstream.qsize(),
+                    'client_queue': self.messagequeue_from_clients.qsize(),
+                }
+                if len(self.message_write_times) > 0:
+                    response['write_times_ms'] = {
+                        'max': 1000 * max(self.message_write_times),
+                        'median': 1000 * statistics.median(self.message_write_times),
+                        'mean': 1000 * statistics.mean(self.message_write_times),
+                        'stdev': 1000 * statistics.stdev(self.message_write_times),
+                    }
+                if len(self.log_times) > 0:
+                    response['log_times_ms'] = {
+                        'max': 1000 * max(self.log_times),
+                        'median': 1000 * statistics.median(self.log_times),
+                        'mean': 1000 * statistics.mean(self.log_times),
+                        'stdev': 1000 * statistics.stdev(self.log_times),
+                    }
+                if len(self.writes_counter) > 0:
+                    response['writes_per_second'] = {
+                        'last': self.writes_counter[0]['count'],
+                    }
+                    if history > 0:
+                        response['writes_per_second']['history'] = list(
+                            self.writes_counter)[:history]
+                if len(self.message_counter) > 0:
+                    response['messages_per_second'] = {
+                        'last': self.message_counter[0]['count'],
+                    }
+                    if 'history' in params:
+                        response['messages_per_second']['history'] = list(
+                            self.message_counter)[:history]
+                return web.json_response(response)
+
             @routes.get('/api/clients')
             async def handle_clients_get(_):
                 clients = []
                 for client in self.clients.values():
-                    clients.append({
+                    thisclient = {
                         'ip': client.ip,
                         'id': client.client_id,
                         'port': client.port,
@@ -2053,7 +2118,16 @@ the primary VATSIM connection (VATPRI).
                         'messages_received': client.messages_received,
                         'client_provided_id': client.client_provided_id,
                         'client_provided_display_name': client.client_provided_display_name,
-                    })
+                        'write_buffer_size': client.writer.transport.get_write_buffer_size(),
+                    }
+                    if len(client.message_write_times) > 0:
+                        thisclient['write_times_ms'] = {
+                            'max': 1000 * max(client.message_write_times),
+                            'median': 1000 * statistics.median(client.message_write_times),
+                            'mean': 1000 * statistics.mean(client.message_write_times),
+                            'stdev': 1000 * statistics.stdev(client.message_write_times),
+                        }
+                    clients.append(thisclient)
                 return web.json_response(clients)
 
             @routes.post('/api/disconnect')
@@ -2198,6 +2272,9 @@ the primary VATSIM connection (VATPRI).
                         'connected': True,
                         'host': self.upstream.ip,
                         'port': self.upstream.port,
+                        'display_name': self.upstream.display_name,
+                        'messages_sent': self.upstream.messages_sent,
+                        'messages_received': self.upstream.messages_received,
                     }
                 else:
                     res = {

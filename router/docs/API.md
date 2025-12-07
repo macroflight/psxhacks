@@ -33,9 +33,51 @@ The router has a (currently very small) REST API. It is enabled by
 default and running on port 8747. You can change the port number or
 disable the API using the config file.
 
+### GET /api/stats
+
+Returns some basic performance statistics, including
+
+- upstream and client queue length
+- time taken to write network data to clients (max, median, mean, stdev)
+- time taken to write traffic log entries (max, median, mean, stdev)
+- writes to clients per second (add the history param and you get the last 60s)
+- received messages per second (add the history param and you get the last 60s)
+
+Note: the number of received messages is what we read, but since most
+messages are forwarded to all connected clients the number of writes
+is usually hich higher.
+
+Example:
+
+```text
+$ curl -s "http://127.0.0.1:8747/api/stats" | jq .
+{
+  "upstream_queue": 0,
+  "client_queue": 0,
+  "write_times_ms": {
+    "max": 0.1556980423629284,
+    "median": 0.011681986507028341,
+    "mean": 0.01822532818187028,
+    "stdev": 0.014659556388030985
+  },
+  "log_times_ms": {
+    "max": 0.1443460350856185,
+    "median": 0.04162697587162256,
+    "mean": 0.04298254556488246,
+    "stdev": 0.00994319622434591
+  },
+  "writes_per_second": {
+    "last": 3391
+  },
+  "messages_per_second": {
+    "last": 340
+  }
+}
+```
+
 ### GET /api/clients
 
-Returns information about connected clients (very basic)
+Returns information about connected clients, including
 
 - ip: the IP address the client connected from
 - port: the source port of the client connection
@@ -51,6 +93,7 @@ Returns information about connected clients (very basic)
 - client_provided_display_name: the second part of a
   name=ID:display_message from the client.  Will be null if no name=
   message received from client.
+- write_times_ms: statisticts on the time it took to write the messages to the client network connection
 
 Example usage:
 
