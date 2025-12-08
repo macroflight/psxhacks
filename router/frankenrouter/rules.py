@@ -24,8 +24,6 @@ import time
 from .connection import NOACCESS_ACCESS_LEVEL
 from .routercache import RouterCacheTypeError
 
-DISPLAY_NAME_MAXLEN = 24
-
 
 class RulesAction(enum.Enum):
     """The action the router needs to take for a message.
@@ -294,14 +292,7 @@ class Rules():  # pylint: disable=too-many-public-methods
             )
         peername = (clientinfo['laddr'], clientinfo['lport'])
         if peername in self.router.clients:
-            thisname = clientinfo['name']
-            if len(thisname) > DISPLAY_NAME_MAXLEN:
-                newname = thisname[:DISPLAY_NAME_MAXLEN]
-                self.logger.warning(
-                    "Client name %s is too long, using %s",
-                    thisname, newname)
-                thisname = newname
-            self.router.clients[peername].display_name = thisname
+            self.router.clients[peername].display_name = clientinfo['name']
             self.router.clients[peername].display_name_source = "FRDP CLIENTINFO"
             self.router.connection_state_changed()
         else:

@@ -478,9 +478,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 prefix = ''
 
             self.logger.info(
-                "%2d %-12s %-26s %-15s %5d %8s %7d %7d %9d %9d %5s %5s",
+                "%2d %-12s %-25s %-15s %5d %8s %7d %7d %9d %9d %5s %5s",
                 data.client_id,
-                data.client_provided_id,
+                trimstring(data.client_provided_id, maxlen=12),
                 trimstring(f"{prefix}{data.display_name}", maxlen=25),
                 data.ip,
                 data.port,
