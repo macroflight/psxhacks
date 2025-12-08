@@ -1282,11 +1282,23 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
     async def traffic_logging_task(self, name):
         """Handle traffic logging."""
         try:
-            # If using traffic logging, open that log file
-            self.log_traffic_filename = os.path.join(
-                self.config.log.directory,
-                f"{self.config.identity.router}-traffic-{self.start_time}.psxnet.log"
-            )
+            if self.config.log.traffic_max_size > 0:
+                # In order to use log rotation to keep the disk from
+                # filling up with traffic logs, we need to use a fixed
+                # log file name that doesn't change every time the
+                # router is started.
+                self.log_traffic_filename = os.path.join(
+                    self.config.log.directory,
+                    f"{self.config.identity.router}-traffic.psxnet.log"
+                )
+            else:
+                # If not using log rotation, we use the old default
+                # behavior, one traffic log per router start that has
+                # the router start time in the filename
+                self.log_traffic_filename = os.path.join(
+                    self.config.log.directory,
+                    f"{self.config.identity.router}-traffic-{self.start_time}.psxnet.log"
+                )
 
             self.traffic_logger = logging.getLogger(f"{__MYNAME__}-traffic")
 
