@@ -1215,11 +1215,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.config.log.directory,
                 f"frankenrouter-{self.config.identity.router}.log"
             )
-            if os.path.exists(router_log_file):
-                if os.path.exists(router_log_file + ".OLD"):
-                    os.unlink(router_log_file + ".OLD")
-                os.rename(router_log_file, router_log_file + ".OLD")
-
             self.logger = logging.getLogger(__MYNAME__)
 
             log_queue = queue.Queue(maxsize=0)
