@@ -805,33 +805,6 @@ class Rules():  # pylint: disable=too-many-public-methods
                             )
                         )
 
-        # Ingress filter: CPDLC message printouts from BACARS
-        if not self.sender.upstream and key == 'Qs119':
-            if re.match(r".*(BACARS|BA ACARS).*", self.sender.display_name):
-                cpdlc_regexp_suffixes = [
-                    r'CURRENT ATC UNIT',
-                    r'LOGON ACCEPTED',
-                    r'CLIMB TO',
-                    r'ATC SERVICE TERMINATED',
-                    r'LOGOFF',
-                    r'STANDBY',
-                    r'PROCEED DIRECT',
-                    r'HANDOVER',
-                    r'MAINTAIN',
-                    r'DESCEND TO',
-                    r'CONTACT',
-                    r'.*REQUEST REJECTED',
-                ]
-                for suffix in cpdlc_regexp_suffixes:
-                    # Filter out known CPDLC messages. Typical format:
-                    # Qs119=[...] 2054Z^CURRENT ATC UNIT^_^EDWA^_^BREMEN RADAR CTR
-                    regex = r'.* [0-9][0-9][0-9][0-9]Z\^' + suffix
-                    if re.match(regex, line):
-                        return self.myreturn(
-                            RulesAction.DROP,
-                            RulesCode.KEYVALUE_FILTERED_INGRESS,
-                            message="filtered Qs119 from BACARS due to CPDLC content")
-
         if not self.sender.upstream and key == 'Qs119':
             # Do not accept Qs119 from BACARS within 15s of
             # connection. This prevents BACARS from printing some junk
