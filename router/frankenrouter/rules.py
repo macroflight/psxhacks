@@ -806,10 +806,10 @@ class Rules():  # pylint: disable=too-many-public-methods
                         )
 
         if not self.sender.upstream and key == 'Qs119':
-            # Do not accept Qs119 from BACARS within 15s of
-            # connection. This prevents BACARS from printing some junk
-            # when it is started.
-            if time.perf_counter() - self.sender.connected_at < 15.0:
+            # Do not accept Qs119 from BACARS shortly after BACARS
+            # connects. This prevents BACARS from printing some junk
+            # (the partial ATIS) when started.
+            if time.perf_counter() - self.sender.connected_at < 30.0:
                 if re.match(r".*(BACARS|BA ACARS).*", self.sender.display_name):
                     return self.myreturn(
                         RulesAction.DROP,
@@ -1402,7 +1402,7 @@ class TestRules(unittest.TestCase):
         self.assertEqual(code, RulesCode.KEYVALUE_FILTERED_INGRESS)
 
         # Qs119 from BACARS more than 15s after connecting
-        testpeer.connected_at = time.perf_counter() - 20.0
+        testpeer.connected_at = time.perf_counter() - 31.0
         (action, code, *_) = rules.route("Qs119=junk printout", testpeer)
         self.assertEqual(action, RulesAction.NORMAL)
         self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
