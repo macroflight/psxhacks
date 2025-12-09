@@ -181,7 +181,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # Variables that we re-initialize after upstream (re)connection
         self.last_load1 = None
         self.last_load3 = 0.0
-        self.last_bang = None
         self.variable_stats_buffer = None
         self.routerinfo = None
         self.sharedinfo = None
@@ -201,7 +200,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
     def reset_after_upstream_connect(self):
         """Re-initialize certain variables after upstream connection."""
         self.last_load1 = 0.0
-        self.last_bang = 0.0
         self.variable_stats_buffer = []
         self.routerinfo = {}
         self.sharedinfo = {
@@ -1784,10 +1782,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         elif code == RulesCode.FRDP_JOIN:
             # A new router has joined the network
             self.connection_state_changed()
-        elif code == RulesCode.FRDP_BANG:
-            self.logger.info(
-                "Got FRDP BANG message from %s: %s",
-                sender_hr, line)
         elif code == RulesCode.LOAD1:
             self.logger.info("Got load1 message from %s", sender_hr)
         elif code == RulesCode.LOAD2:
@@ -1855,7 +1849,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                              sender_hr, line)
         elif code == RulesCode.AGAIN:
             self.logger.info("Keyword again from %s forwarded: %s", sender_hr, line)
-        elif code == RulesCode.BANG_SYNTHETIC:
+        elif code == RulesCode.BANG:
             self.logger.info("Sending synthetic bang reply to %s", sender_hr)
             await self.client_add_to_network(sender, bang_reply=True)
 
@@ -1971,9 +1965,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         print_delay_warning = False
                 # Do not warn about delay if a load1 was just sent
                 if time.perf_counter() - self.last_load1 < 5.0:
-                    print_delay_warning = False
-                # Do not warn about delay if a bang was just sent
-                if time.perf_counter() - self.last_bang < 5.0:
                     print_delay_warning = False
                 # Do not warn about delay if a client just connected
                 if time.perf_counter() - self.last_client_connected < 5.0:

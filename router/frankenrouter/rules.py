@@ -81,7 +81,6 @@ class RulesCode(enum.Enum):
 
     MESSAGE_INVALID = enum.auto()
     FALLBACK_RULE = enum.auto()
-    FRDP_BANG = enum.auto()
     FRDP_PING = enum.auto()
     FRDP_PONG = enum.auto()
     FRDP_IDENT = enum.auto()
@@ -111,7 +110,6 @@ class RulesCode(enum.Enum):
     LOAD2 = enum.auto()
     LOAD3 = enum.auto()
     BANG = enum.auto()
-    BANG_SYNTHETIC = enum.auto()
     BANG_REJECTED = enum.auto()
     EXIT = enum.auto()
     PBSKAQ = enum.auto()
@@ -420,10 +418,6 @@ class Rules():  # pylint: disable=too-many-public-methods
             return self.handle_addon_frankenrouter_flightcontrols(payload)
         if message_type == 'JOIN':
             return self.handle_addon_frankenrouter_join(payload)
-        if message_type == 'BANG':
-            # Store in router object and forward to network
-            self.router.last_bang = time.perf_counter()
-            return self.myreturn(RulesAction.NORMAL, RulesCode.FRDP_BANG)
         if message_type == 'ROUTERINFO':
             return self.handle_addon_frankenrouter_routerinfo(payload)
         if message_type == 'SHAREDINFO':
@@ -619,29 +613,13 @@ class Rules():  # pylint: disable=too-many-public-methods
         return self.myreturn(RulesAction.NORMAL, RulesCode.LOAD3)
 
     def handle_bang(self):
-        """Handle the bang keyword.
-
-        - update self.router.last_bang
-
-        - send FRDP BANG message (so other frankenrouters learn a bang
-          has been sent somewhere in the network
-
-        - forward the bang
-
-        """
+        """Handle the bang keyword."""
         # drop any bang from upstream
         if self.sender.upstream:
             self.logger.info("Dropped bang from upstream")
             return self.myreturn(RulesAction.DROP, RulesCode.BANG_REJECTED)
-
-        self.router.last_bang = time.perf_counter()
-        if not self.router.config.psx.forward_bang:
-            # Testing a new way to handle bang
-            return self.myreturn(RulesAction.DROP, RulesCode.BANG_SYNTHETIC)
-        # normal handling
-        reply = "addon=FRANKENROUTER:{self.frdp_version}:BANG"
-        return self.myreturn(RulesAction.NORMAL, RulesCode.BANG,
-                             extra_data={"reply": reply})
+        # this will generate a synthetic bang reply from cached data
+        return self.myreturn(RulesAction.DROP, RulesCode.BANG)
 
     def handle_exit(self):
         """Handle the exit keyword.
@@ -927,31 +905,6 @@ class Rules():  # pylint: disable=too-many-public-methods
                         RulesCode.KEYVALUE_FILTER_EGRESS,
                         extra_data={'start': True, 'key': key})
 
-        # Do not send Qi191 or Qi257 to PSX Sounds when bang sent
-        # recently (this variable causes PSX Sounds to play its gear
-        # pin and touchdown sounds).
-        #
-        # Note: since data in response to a bang can only come from
-        # upstream, we only filter when the sender is upstream
-        if self.sender.upstream and key in ['Qi191', 'Qi257']:
-            if time.perf_counter() - self.router.last_bang < 2.0:
-                return self.myreturn(
-                    RulesAction.FILTER,
-                    RulesCode.KEYVALUE_FILTER_EGRESS,
-                    extra_data={'endpoint_name_regexp': r".*PSX Sound.*"})
-
-        # Do not send Qs119 to downstream when bang sent
-        # recently. This prevents additional printouts of the same
-        # message e.g when someone saves a situ.
-        # Note: since data in response to a bang can only come from
-        # upstream, we only filter when the sender is upstream
-        if self.sender.upstream and key == 'Qs119':
-            if time.perf_counter() - self.router.last_bang < 2.0:
-                return self.myreturn(
-                    RulesAction.FILTER,
-                    RulesCode.KEYVALUE_FILTER_EGRESS,
-                    extra_data={'endpoint_name_regexp': r".*"})
-
         #
         # Send normally
         #
@@ -1012,7 +965,6 @@ class TestRules(unittest.TestCase):
             """Initialize the instance."""
             self.upstream = None
             self.clients = {}
-            self.last_bang = 0.0
             self.variables = TestRules.DummyVariables()
             self.cache = TestRules.DummyCache()
             self.last_load1 = 0.0
@@ -1156,12 +1108,6 @@ class TestRules(unittest.TestCase):
         testpeer = router.clients[('127.0.0.1', 12345)]
         testpeer.access_level = 'full'
         testpeer.display_name = "Foobar"
-
-        # BANG
-        (action, code, *_) = rules.route("addon=FRANKENROUTER:1:BANG", testpeer)
-        self.assertEqual(action, RulesAction.NORMAL)
-        self.assertEqual(code, RulesCode.FRDP_BANG)
-        self.assertTrue(router.last_bang > 0.0)
 
         # PING from client
         testpeer.ping_sent = time.perf_counter()
@@ -1515,27 +1461,6 @@ class TestRules(unittest.TestCase):
         self.assertEqual(code, RulesCode.KEYVALUE_FILTER_EGRESS)
         self.assertTrue('start' in extra_data)
         self.assertTrue('key' in extra_data)
-
-        # Qi191 to PSX Sounds from upstream near-bang
-        router.last_bang = time.perf_counter()
-        (action, code, _, extra_data) = rules.route("Qi191=trigger for sound", router.upstream)
-        self.assertEqual(action, RulesAction.FILTER)
-        self.assertEqual(code, RulesCode.KEYVALUE_FILTER_EGRESS)
-        self.assertTrue('endpoint_name_regexp' in extra_data)
-
-        # Qi191 to PSX Sounds from upstream far from bang
-        router.last_bang = 0.0
-        (action, code, _, extra_data) = rules.route("Qi191=trigger for sound", router.upstream)
-        self.assertEqual(action, RulesAction.NORMAL)
-        self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
-        self.assertIsNone(extra_data)
-
-        # Qi191 to PSX Sounds from client near-bang
-        router.last_bang = time.perf_counter()
-        (action, code, _, extra_data) = rules.route("Qi191=trigger for sound", testpeer)
-        self.assertEqual(action, RulesAction.NORMAL)
-        self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
-        self.assertIsNone(extra_data)
 
     def test_route(self):
         """Test routing."""
