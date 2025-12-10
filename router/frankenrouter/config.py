@@ -30,7 +30,6 @@ class _RouterConfigListen:  # pylint: disable=missing-class-docstring,too-few-pu
 
 class _RouterConfigUpstream:  # pylint: disable=missing-class-docstring,too-few-public-methods
     def __init__(self, data):
-        print(f"Trying to read data from upstream section: {data}")
         self.name = data.get('name', None)
         if self.name is None:
             raise RouterConfigError("All upstreams must have a name")
