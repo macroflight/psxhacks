@@ -680,20 +680,23 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         all_start_keywords = set(self.variables.keywords_with_mode('START'))
         all_econ_keywords = set(self.variables.keywords_with_mode('ECON'))
         expected_start_keywords = all_start_keywords - all_econ_keywords
+        fresh_start_keywords = set()
         while True:
             await asyncio.sleep(0.010)
-            now = time.perf_counter()
-            missing = len(expected_start_keywords - client.welcome_keywords_sent)
+            for key in expected_start_keywords:
+                if self.cache.get_age(key) < 1.0:
+                    fresh_start_keywords.add(key)
+            missing = len(expected_start_keywords - fresh_start_keywords)
             if missing <= 0:
                 self.logger.info("All expected START keywords received, continuing")
                 break
-            waited = now - self.start_sent_at
+            waited = time.perf_counter() - self.start_sent_at
             if waited > 1.0:
                 self.logger.warning(
                     "Waited %.1f s for START data, missing %d of %d (%s), continuing anyway",
                     waited, missing,
                     len(expected_start_keywords),
-                    expected_start_keywords - client.welcome_keywords_sent)
+                    expected_start_keywords - fresh_start_keywords)
                 break
         client.waiting_for_start_keywords = False
 
@@ -740,6 +743,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 "Sent synthetic bang reply to client %s in %.1f ms (%d keywords, %.0f/s)",
                 client.client_id, send_time * 1000,
                 welcome_keyword_count, welcome_keyword_count / send_time)
+        delayed = len(client.messages_to_send_after_welcome)
+        if delayed > 0:
+            self.logger.info(
+                "Sending %d delayed messages to client %s now",
+                delayed, client.client_id)
+            for line in client.messages_to_send_after_welcome:
+                await send_line(line)
 
     async def close_client_connection(self, client, clean=True):
         """Close a client connection and remove client data."""
@@ -891,15 +901,28 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         clients in that list.
 
         If include is provided, send to those clients.
+
+        If a client is busy receiving its welcome message, we save the
+        messages we would have sent to it, and then send that once the
+        client welcome message has been sent.
         """
         if exclude and include:
             self.logger.critical(
                 "client_broadcast called with both include and exclude - not supported")
             return
 
+        # List of client we should send this message to now
         send_to_clients = []
-
+        # List of clients whose messages we should queue for later sending
+        queue_to_clients = []
+        
         for client in self.clients.values():  # pylint: disable=too-many-nested-blocks
+            if not client.welcome_sent:
+                self.logger.debug(
+                    "Delaying message since %s is being welcomed: %s",
+                    client.peername, line)
+                queue_to_clients.append(client)
+                continue
             if exclude_name_regexp is not None:
                 if re.match(exclude_name_regexp, client.display_name):
                     self.logger.info(
@@ -949,6 +972,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 writes.append(client.to_stream(line, log=False))
                 sent_to_clients.append(client.client_id)
             await asyncio.gather(*writes, return_exceptions=True)
+        if len(queue_to_clients) > 0:
+            for client in queue_to_clients:
+                client.messages_to_send_after_welcome.append(line)
 
         # Log traffic
         if len(sent_to_clients) > 0:

@@ -281,6 +281,10 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
         # Is the client waiting for the requested START keywords to arrive?
         self.waiting_for_start_keywords = False
 
+        # Queue of messages we need to send after the client has been
+        # welcomed.
+        self.messages_to_send_after_welcome = []
+
         # List of variables this client has send demand= for
         self.demands = set()
 
