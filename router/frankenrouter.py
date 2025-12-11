@@ -894,7 +894,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             key=None, exclude_name_regexp=None,
             exclude_non_frankenrouter=False,
             ignore_access=False,
-    ):  # pylint: disable=too-many-branches, too-many-arguments, too-many-positional-arguments
+    ):  # pylint: disable=too-many-branches, too-many-arguments, too-many-positional-arguments, too-many-locals, too-many-statements
         """Send a line to connected clients.
 
         If exclude is provided, send to all connected clients except
@@ -915,7 +915,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         send_to_clients = []
         # List of clients whose messages we should queue for later sending
         queue_to_clients = []
-        
+
         for client in self.clients.values():  # pylint: disable=too-many-nested-blocks
             if not client.welcome_sent:
                 self.logger.debug(
@@ -951,15 +951,29 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     client.peername, line)
                 continue
             if isonlystart:
+                # A pure START keyword should only be sent to normal
+                # clients during the client welcome or when we load a
+                # situ.
                 self.logger.debug("isonlystart for %s", client.peername)
+
+                in_situ_load = False
+                now = time.perf_counter()
+                if (now - self.last_load1) < (now - self.last_load3):
+                    in_situ_load = True
+
                 if client.is_frankenrouter:
-                    # send
+                    # Always send to other frankenrouters
                     client.welcome_keywords_sent.add(key)
                 elif client.waiting_for_start_keywords:
-                    # send
+                    # Send to clients who are getting welcomed
                     client.welcome_keywords_sent.add(key)
+                elif in_situ_load:
+                    # Send to clients if load1 seen more recently than
+                    # load3, i.e when we're in the middle of a situ
+                    # load.
+                    self.logger.info("In situ load, sending START variable %s to client", key)
                 else:
-                    self.logger.debug(
+                    self.logger.info(
                         "Not sending START variable to %s: %s",
                         client.peername, line)
                     continue
