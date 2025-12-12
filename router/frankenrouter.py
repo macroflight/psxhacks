@@ -712,7 +712,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         for keyword in list(map(lambda x: f"Qi{x}", list(range(0, 32)))):
             await send_if_unsent(keyword)
 
-        await send_line("load2", drain=True)
+        if not bang_reply:
+            await send_line("load2", drain=True)
+
         for prefix in [
                 "Qi",
                 "Qh",
