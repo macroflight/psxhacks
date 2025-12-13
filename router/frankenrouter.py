@@ -608,9 +608,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             if not self.cache.has_keyword(key):
                 self.logger.info("Keyword %s not in cache, cannot send", key)
                 return
-            if key in self.variables.keywords_with_mode('DELTA'):
+            if (
+                    key in self.variables.keywords_with_mode('DELTA') and
+                    key not in self.variables.keywords_with_mode('ECON')
+            ):
                 self.logger.debug(
-                    "Not sending DELTA variable %s to client", key)
+                    "Not sending pure DELTA variable %s to client", key)
                 return
             if key not in client.welcome_keywords_sent:
                 cached_value = self.cache.get_value(key)

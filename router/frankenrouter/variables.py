@@ -41,6 +41,9 @@ ADDITIONAL_MODES = {
     # client welcome since we don't want the latest message printed
     # just because we reconnect the printer client
     "Qs119": ['INIT_EMPTY'],
+    # Qi262 seems to be sent during client welcome despite being a
+    # DELTA variable
+    "Qi262": ['ECON'],
 }
 
 
