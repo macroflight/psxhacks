@@ -178,6 +178,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # normally.
         self.last_client_connected = 0.0
 
+        # Track when we last sent a bang reply (mostly to not complain
+        # about forwarding delays since they are expected during a
+        # bang reply)
+        self.last_bang = 0.0
+
         # Variables that we re-initialize after upstream (re)connection
         self.last_load1 = None
         self.last_load3 = 0.0
@@ -601,7 +606,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 client.client_id, self.cache.get_size())
         client.pause_forwarding = True
         start_time = time.perf_counter()
-        if not bang_reply:
+        if bang_reply:
+            self.last_bang = start_time
+        else:
             self.last_client_connected = start_time
 
         async def send_if_unsent(key, drain=False):
@@ -924,7 +931,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
         for client in self.clients.values():  # pylint: disable=too-many-nested-blocks
             if client.pause_forwarding:
-                self.logger.info(
+                self.logger.debug(
                     "Delaying message since forwarding for %s is paused: %s",
                     client.peername, line)
                 queue_to_clients.append(client)
@@ -2013,6 +2020,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     print_delay_warning = False
                 # Do not warn about delay if a client just connected
                 if time.perf_counter() - self.last_client_connected < 5.0:
+                    print_delay_warning = False
+                # Do not warn about delay if we just sent a bang reply
+                if time.perf_counter() - self.last_bang < 5.0:
                     print_delay_warning = False
                 if print_delay_warning:
                     self.logger.warning(
