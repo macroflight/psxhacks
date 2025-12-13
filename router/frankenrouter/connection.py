@@ -285,6 +285,8 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
         # welcomed.
         self.messages_to_send_after_welcome = []
 
+        self.pause_forwarding = False
+
         # List of variables this client has send demand= for
         self.demands = set()
 

@@ -599,6 +599,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.info(
                 "Adding client %s to network (cache has %d keywords)",
                 client.client_id, self.cache.get_size())
+        client.pause_forwarding = True
         start_time = time.perf_counter()
         if not bang_reply:
             self.last_client_connected = start_time
@@ -748,6 +749,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 "Sent synthetic bang reply to client %s in %.1f ms (%d keywords, %.0f/s)",
                 client.client_id, send_time * 1000,
                 welcome_keyword_count, welcome_keyword_count / send_time)
+        client.pause_forwarding = False
         delayed = len(client.messages_to_send_after_welcome)
         if delayed > 0:
             self.logger.info(
@@ -843,7 +845,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             # has access (i.e authenticated based on IP or password)
             if this_client.has_access():
                 await self.client_add_to_network(this_client)
-                this_client.welcome_sent = True
 
             # Wait for data from client
             while self.is_client_connected(this_client.peername):
@@ -922,9 +923,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         queue_to_clients = []
 
         for client in self.clients.values():  # pylint: disable=too-many-nested-blocks
-            if not client.welcome_sent:
-                self.logger.debug(
-                    "Delaying message since %s is being welcomed: %s",
+            if client.pause_forwarding:
+                self.logger.info(
+                    "Delaying message since forwarding for %s is paused: %s",
                     client.peername, line)
                 queue_to_clients.append(client)
                 continue
@@ -968,10 +969,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
                 if client.is_frankenrouter:
                     # Always send to other frankenrouters
-                    client.welcome_keywords_sent.add(key)
+                    pass
                 elif client.waiting_for_start_keywords:
                     # Send to clients who are getting welcomed
-                    client.welcome_keywords_sent.add(key)
+                    pass
                 elif in_situ_load:
                     # Send to clients if load1 seen more recently than
                     # load3, i.e when we're in the middle of a situ
@@ -1872,7 +1873,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         elif code == RulesCode.FRDP_AUTH_OK:
             self.logger.info("Client %s successfully authenticated: %s", sender_hr, line)
             await self.client_add_to_network(sender)
-            sender.welcome_sent = True
         elif code == RulesCode.FRDP_AUTH_ALREADY_HAS_ACCESS:
             self.logger.warning(
                 "Client %s successfully authenticated but already has access: %s",
