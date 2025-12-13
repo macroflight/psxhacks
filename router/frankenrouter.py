@@ -986,7 +986,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     # load.
                     self.logger.info("In situ load, sending START variable %s to client", key)
                 else:
-                    self.logger.info(
+                    self.logger.debug(
                         "Not sending START variable to %s: %s",
                         client.peername, line)
                     continue
