@@ -984,7 +984,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     # Send to clients if load1 seen more recently than
                     # load3, i.e when we're in the middle of a situ
                     # load.
-                    self.logger.info("In situ load, sending START variable %s to client", key)
+                    self.logger.debug(
+                        "In situ load, sending START variable %s to client",
+                        key)
                 else:
                     self.logger.debug(
                         "Not sending START variable to %s: %s",
