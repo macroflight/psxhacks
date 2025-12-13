@@ -612,10 +612,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.logger.debug(
                     "Not sending DELTA variable %s to client", key)
                 return
-            if key in self.variables.keywords_with_mode('NOWELCOME'):
-                self.logger.debug(
-                    "Not sending NOWELCOME variable %s to client", key)
-                return
             if key not in client.welcome_keywords_sent:
                 cached_value = self.cache.get_value(key)
                 if cached_value is None:
@@ -623,6 +619,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         "%s not found in router cache, client restart might be needed" +
                         " after upstream connection", key)
                     return
+                if key in self.variables.keywords_with_mode('INIT_EMPTY'):
+                    self.logger.info(
+                        "Sending empty variable %s to client", key)
+                    cached_value = ""
                 line = f"{key}={cached_value}"
                 await client.to_stream(line, drain=drain)
                 client.welcome_keywords_sent.add(key)

@@ -39,8 +39,8 @@ ADDITIONAL_MODES = {
     "Qs412": ['NOLONG'],
     # Qs119 is the printer message. We want to inhibit this in the
     # client welcome since we don't want the latest message printed
-    # just because we reconnect the printer clietn
-    "Qs119": ['NOWELCOME'],
+    # just because we reconnect the printer client
+    "Qs119": ['INIT_EMPTY'],
 }
 
 
