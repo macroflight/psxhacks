@@ -1,5 +1,11 @@
 # Changelog
 
+## 2025-12-18: version 1.1.2
+
+- Minor bug fixes, e.g fixing situ load and save that was broken when
+  we optimized some things in 1.1.0
+- Remove some unwanted debug output.
+
 ## 2025-12-08: version 1.1.0
 
 - Stop sending (the rather long) FDRP ROUTERINFO and SHAREDINFO
