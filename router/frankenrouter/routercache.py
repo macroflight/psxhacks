@@ -76,11 +76,13 @@ class RouterCache():  # pylint: disable=too-few-public-methods
             f"get_cached_variable got request for uncached keyword {keyword}")
 
     def get_age(self, keyword):
-        """Return the time in seconds since the keyword value was updated."""
+        """Return the time in seconds since the keyword value was updated.
+
+        If variable not in cache return a very old age.
+        """
         if keyword in self.cache:
             return time.perf_counter() - self.cache[keyword]['updated']
-        raise RouterCacheException(
-            f"get_cached_variable_age got request for uncached keyword {keyword}")
+        return float(365 * 24 * 3600)
 
     def get_keywords(self):
         """Return a list of all keywords in the cache."""
