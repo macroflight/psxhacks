@@ -2154,20 +2154,23 @@ the primary VATSIM connection (VATPRI).
                         'mean': 1000 * statistics.mean(self.log_times),
                         'stdev': 1000 * statistics.stdev(self.log_times),
                     }
-                if len(self.writes_counter) > 0:
+                # If we have writes_per_second data for a full second, add it.
+                # Note: self.writes_counter[0] is the current
+                # (incomplete) second so we don't use that
+                if len(self.writes_counter) > 1:
                     response['writes_per_second'] = {
-                        'last': self.writes_counter[0]['count'],
+                        'last': self.writes_counter[1]['count'],
                     }
                     if history > 0:
                         response['writes_per_second']['history'] = list(
-                            self.writes_counter)[:history]
-                if len(self.message_counter) > 0:
+                            self.writes_counter)[1:history]
+                if len(self.message_counter) > 1:
                     response['messages_per_second'] = {
-                        'last': self.message_counter[0]['count'],
+                        'last': self.message_counter[1]['count'],
                     }
-                    if 'history' in params:
+                    if history > 0:
                         response['messages_per_second']['history'] = list(
-                            self.message_counter)[:history]
+                            self.message_counter)[1:history]
                 return web.json_response(response)
 
             @routes.get('/api/clients')
