@@ -1727,6 +1727,18 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         self.logger.info("Housekeeping removed disconnected client %s", peername)
                         del self.clients[peername]
 
+                    # Trim client stats buffers
+                    now = time.time()
+                    for peername, this_client in self.clients.items():
+                        for bucket in list(this_client.received_stats):
+                            bucket_age = now - bucket
+                            if bucket_age > 60:
+                                del this_client.received_stats[bucket]
+                        for bucket in list(this_client.sent_stats):
+                            bucket_age = now - bucket
+                            if bucket_age > 60:
+                                del this_client.sent_stats[bucket]
+
         # Standard Task cleanup
         except asyncio.exceptions.CancelledError:
             self.logger.info("Task %s was cancelled, cleanup and exit", name)
@@ -2195,6 +2207,14 @@ the primary VATSIM connection (VATPRI).
                             'mean': 1000 * statistics.mean(client.message_write_times),
                             'stdev': 1000 * statistics.stdev(client.message_write_times),
                         }
+                    bucket = int(time.time() - 1.0)  # the last full second
+                    if bucket in client.received_stats:
+                        thisclient['received_messages_per_second'] = client.received_stats[bucket]['received_messages']  # pylint: disable=line-too-long
+                        thisclient['received_bytes_per_second'] = client.received_stats[bucket]['received_bytes']  # pylint: disable=line-too-long
+                    if bucket in client.sent_stats:
+                        thisclient['sent_messages_per_second'] = client.sent_stats[bucket]['sent_messages']  # pylint: disable=line-too-long
+                        thisclient['sent_bytes_per_second'] = client.sent_stats[bucket]['sent_bytes']  # pylint: disable=line-too-long
+
                     clients.append(thisclient)
                 return web.json_response(clients)
 

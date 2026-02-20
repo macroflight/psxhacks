@@ -92,7 +92,12 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         # Statistics buffer for write performance
         self.message_write_times = collections.deque(maxlen=100)
 
-    async def to_stream(self, line, log=True, drain=True):  # pylint: disable=too-many-branches
+        # Generic stats buffer (dict keyed by time, second resolution for 1s buckets)
+        # We purge this data in the housekeeping function
+        self.received_stats = {}
+        self.sent_stats = {}
+
+    async def to_stream(self, line, log=True, drain=True):  # pylint: disable=too-many-branches,too-many-statements
         """Write data to a stream and optionally to a log file.
 
         Also update traffic counters.
@@ -154,6 +159,17 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
                 await self.router.log_traffic(line, inbound=False)
             else:
                 await self.router.log_traffic(line, endpoints=[self.client_id], inbound=False)
+
+        # Add to bucket
+        now = int(time.time())
+        if now not in self.sent_stats:
+            self.sent_stats[now] = {
+                'sent_messages': 0,
+                'sent_bytes': 0,
+            }
+        self.sent_stats[now]['sent_messages'] += 1
+        self.sent_stats[now]['sent_bytes'] += len(line) + 1
+
         # Update stats for this connection
         self.message_write_times.append(t_send)
         # Update stats for the router as a whole
@@ -234,6 +250,16 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         """Log data read from stream."""
         self.messages_received += 1
         self.bytes_received += len(line) + 1
+
+        now = int(time.time())
+        if now not in self.received_stats:
+            self.received_stats[now] = {
+                'received_messages': 0,
+                'received_bytes': 0,
+            }
+        self.received_stats[now]['received_messages'] += 1
+        self.received_stats[now]['received_bytes'] += len(line) + 1
+
         if self.upstream:
             await self.router.log_traffic(line)
         else:

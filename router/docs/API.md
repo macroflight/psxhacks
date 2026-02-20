@@ -93,7 +93,8 @@ Returns information about connected clients, including
 - client_provided_display_name: the second part of a
   name=ID:display_message from the client.  Will be null if no name=
   message received from client.
-- write_times_ms: statisticts on the time it took to write the messages to the client network connection
+- write_times_ms: statistics on the time it took to write the messages to the client network connection
+- {sent,received}_{messages,bytes}_per_second: the number of messages/lines and bytes sent and received to/from this client in the last second
 
 Example usage:
 
@@ -102,23 +103,45 @@ $ curl -s http://127.0.0.1:8747/api/clients | jq .
 [
   {
     "ip": "127.0.0.1",
-    "id": 3,
-    "port": 42674,
-    "display_name": "FilterClient1",
-    "messages_sent": 5062,
-    "messages_received": 2,
-    "client_provided_id": "FC1",
-    "client_provided_display_name": "FilterClient1"
+    "id": 1,
+    "port": 59010,
+    "display_name": "Any client",
+    "messages_sent": 7331,
+    "messages_received": 919,
+    "client_provided_id": null,
+    "client_provided_display_name": null,
+    "write_buffer_size": 0,
+    "write_times_ms": {
+      "max": 0.4057720070704818,
+      "median": 0.26617999537847936,
+      "mean": 0.2465257907169871,
+      "stdev": 0.08400699068860676
+    },
+    "received_messages_per_second": 2,
+    "received_bytes_per_second": 34,
+    "sent_messages_per_second": 10,
+    "sent_bytes_per_second": 256
   },
   {
     "ip": "127.0.0.1",
-    "id": 5,
-    "port": 42690,
-    "display_name": "FilterClient2"
-    "messages_sent": 123,
-    "messages_received": 456
+    "id": 2,
+    "port": 59026,
+    "display_name": "Any client",
+    "messages_sent": 7758,
+    "messages_received": 461,
     "client_provided_id": null,
-    "client_provided_display_name": null
+    "client_provided_display_name": null,
+    "write_buffer_size": 0,
+    "write_times_ms": {
+      "max": 0.2514460065867752,
+      "median": 0.10796901187859476,
+      "mean": 0.1130780583480373,
+      "stdev": 0.05268164591428481
+    },
+    "received_messages_per_second": 1,
+    "received_bytes_per_second": 103,
+    "sent_messages_per_second": 11,
+    "sent_bytes_per_second": 187
   }
 ]
 ```
