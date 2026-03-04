@@ -66,6 +66,11 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         # We use a button to toggle between reverse and normal mode for the throttles
         self.axis_reverse_mode = {}
 
+        # This keeps track of whether the thrustaxis is latched to
+        # the USB axis
+        self.thrustaxis_latch_state = {}
+        self.thrustaxis_last_update = {}
+
         # Temporary cache for the AXIS SET type. We need to keep track
         # if e.g the flap lever axis is in sync with PSX.
         self.axis_set_state = {}
@@ -719,7 +724,27 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 })
 
     async def handle_throttle_reverse_button(self, mode, joystick_name, event, config, reverse):  # pylint:disable=too-many-arguments,too-many-locals,too-many-branches,too-many-positional-arguments,too-many-statements
-        """Handle throttle with thrust reverser button."""
+        """Handle throttle with thrust reverser button.
+
+        This axis type also has the new latch/unlatch behavior.
+
+        If the physical throttle is too far from the PSX one, moving
+        the physical throttle will not do anything until it gets close
+        enough to the PSX one, then it will "latch" on to the PSX
+        throttle. WHen this happens the THROTTLE_LATCH_SOUND sound
+        file will be played (if defined in the config file).
+
+        If something else (e.g the autothrottle or another pilot)
+        moves the PSX throttle and you then move your hardware
+        throttle and it is now too far from the PSX throttle, the
+        throttle will become "unlatched" and the
+        THROTTLE_UNLATCH_SOUND will be played (if defined in the
+        config file). Then unlatched, the physical throttle will not
+        affect the PSX one until it is close enough again.
+
+        Hopefully this behavior will feel more natural. If not, let me
+        know and I will change it back.
+        """
         if 'axis min' in config:
             axis_min = config['axis min']
         else:
@@ -728,6 +753,58 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             axis_max = config['axis max']
         else:
             axis_max = 1.0
+
+        # The latch will engage when physical lever this close to PSX throttle
+        latch_engage_limit = 200
+
+        # The latch will disengage when the lever is moved and the PSX
+        # throttle is more than this far from where *we* last moved it
+        # to.
+        latch_disengage_limit = 500
+        # If we last sent an update to PSX less than this long ago, do
+        # not unlatch. This helps prevent erroneous unlatching when
+        # the lever is moved quickly.
+        latch_disengage_limit_time = 0.2
+
+        def time_since_we_updated_tla():
+            return time.time() - self.psx_send_state['Tla']['last sent']
+
+        def get_last_update():
+            res = self.thrustaxis_last_update[joystick_name][thrustaxis]
+            self.logger.debug(
+                "get_last_update for %s => %s",
+                thrustaxis, res)
+            return res
+
+        def set_last_update(value):
+            self.logger.debug(
+                "set_last_update for %s to %s",
+                thrustaxis, value)
+            self.thrustaxis_last_update[joystick_name][thrustaxis] = value
+
+        def get_latch_state():
+            res = self.thrustaxis_latch_state[joystick_name][thrustaxis]
+            self.logger.debug(
+                "get_latch_state for %s => %s",
+                thrustaxis, res)
+            return res
+
+        def set_latch_state(value):
+            if value != self.thrustaxis_latch_state[joystick_name][thrustaxis]:
+                self.logger.info(
+                    "set_latch_state for %s to %s",
+                    thrustaxis, value)
+                self.thrustaxis_latch_state[joystick_name][thrustaxis] = value
+                if value:
+                    try:
+                        pygame.mixer.Sound(self.config_misc["THROTTLE_LATCH_SOUND"]).play()
+                    except Exception as exc:  # pylint: disable=broad-exception-caught
+                        self.logger.critical("Failed to play throttle latch sound: %s", exc)
+                else:
+                    try:
+                        pygame.mixer.Sound(self.config_misc["THROTTLE_UNLATCH_SOUND"]).play()
+                    except Exception as exc:  # pylint: disable=broad-exception-caught
+                        self.logger.critical("Failed to play throttle unlatch sound: %s", exc)
 
         def get_axis_mode(axis):
             if joystick_name not in self.axis_reverse_mode:
@@ -741,6 +818,14 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
 
         def set_axis_mode(axis, mode):
             self.axis_reverse_mode[joystick_name][axis] = mode
+
+        def printstate():
+            index0 = axis_config['engine indexes'][0]
+            tla = int(self.psx.get('Tla').split(';')[index0])
+            self.logger.info(
+                "thrustaxis=%s, PSX Tla: %.0f, last update: %.0f, latched=%s",
+                thrustaxis, tla, get_last_update(), get_latch_state()
+            )
 
         if mode == 'button':
             axis_position = self.joystick_get_axis_position(joystick_name, config['axis'])
@@ -756,14 +841,53 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 self.logger.info("Set axis mode for axis %s to reverse", config['axis'])
                 set_axis_mode(config['axis'], 'reverse')
                 reverse = True
+                # Also move PSX Tla to reverse idle
+                await self.psx_axis_queue.put({
+                    'variable': axis_config['psx variable'],
+                    'indexes': axis_config['engine indexes'],
+                    'value': axis_config['psx reverse idle']
+                })
             else:
                 self.logger.info("Set axis mode for axis %s to normal", config['axis'])
                 set_axis_mode(config['axis'], 'normal')
                 reverse = False
-        else:
-            reverse = bool(get_axis_mode(event.axis) == 'reverse')
-            axis_position = event.value
-            axis_config = config
+                # Also move PSX Tla to forward idle
+                await self.psx_axis_queue.put({
+                    'variable': axis_config['psx variable'],
+                    'indexes': axis_config['engine indexes'],
+                    'value': axis_config['psx idle']
+                })
+            return
+
+        # Normal (non-button) mode
+        reverse = bool(get_axis_mode(event.axis) == 'reverse')
+        axis_position = event.value
+        axis_config = config
+        thrustaxis = axis_config['engine indexes'][0]
+
+        self.logger.debug(
+            "Handling axis movement for %s to %s",
+            thrustaxis, event)
+
+        # Initialize data on first movement
+        if joystick_name not in self.thrustaxis_last_update:
+            self.logger.info("Initializing last update for %s", joystick_name)
+            self.thrustaxis_last_update[joystick_name] = {}
+        if thrustaxis not in self.thrustaxis_last_update[joystick_name]:
+            # Defaults to current PSX throttle position
+            tla = int(self.psx.get('Tla').split(';')[axis_config['engine indexes'][0]])
+            self.logger.info("Initializing %s on %s to %s", thrustaxis, joystick_name, tla)
+            self.thrustaxis_last_update[joystick_name][thrustaxis] = tla
+
+        if joystick_name not in self.thrustaxis_latch_state:
+            self.logger.info("Initializing latch state for %s", joystick_name)
+            self.thrustaxis_latch_state[joystick_name] = {}
+        if thrustaxis not in self.thrustaxis_latch_state[joystick_name]:
+            # Default to unlatched
+            self.logger.info("Initializing %s on %s to False", thrustaxis, joystick_name)
+            self.thrustaxis_latch_state[joystick_name][thrustaxis] = False
+
+        printstate()
 
         # Apply static zones to pygame axis value
         if 'static zones' in axis_config:
@@ -795,25 +919,67 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             psx_value = min(psx_max, psx_value)
             psx_value = max(psx_min, psx_value)
 
-        if self.autothrottle_active():
-            self.logger.info("Throttle movement to %s, but A/T active, blocking", psx_value)
-            tla = int(self.psx.get('Tla').split(';')[axis_config['engine indexes'][0]])
-            self.logger.info("This Tla is %s", tla)
-            diff = abs(tla - psx_value)
-            if diff < 100:
-                self.logger.info("Axis is close to Tla angle - diff=%s", diff)
-                try:
-                    pygame.mixer.Sound(self.config_misc["THROTTLE_SYNC_SOUND"]).play()
-                except Exception as exc:  # pylint: disable=broad-exception-caught
-                    self.logger.critical("Failed to play throttle sync sound: %s", exc)
+        # Determine if axis is latched or not
+
+        # Get current PSX value (for the first of the thrust levers we
+        # control with this axis)
+        tla = int(self.psx.get('Tla').split(';')[axis_config['engine indexes'][0]])
+
+        diff_psx_vs_newinput = abs(tla - psx_value)
+        diff_psx_vs_lastinput = abs(tla - get_last_update())
+        if diff_psx_vs_newinput < latch_engage_limit:
+            # If the new lever position is close enough to the PSX lever
+            # position, ensure lever is latched
+            if get_latch_state():
+                self.logger.debug(
+                    "Physical lever ta=%s close to PSX lever (%.0f), LATCHED",
+                    thrustaxis, diff_psx_vs_newinput)
             else:
-                self.logger.info("Axis is far from Tla angle - diff=%s", diff)
+                self.logger.info(
+                    "Physical lever ta=%s close to PSX lever (%.0f), LATCHING",
+                    thrustaxis, diff_psx_vs_newinput)
+                set_latch_state(True)
+        elif diff_psx_vs_lastinput > latch_disengage_limit:
+            # If the new lever position is far enough from the last
+            # lever position that WE sent (note that A/T or another
+            # pilot could move the PSX lever), ensure lever is
+            # unlatched
+            if get_latch_state():
+                tsu = time_since_we_updated_tla()
+                if tsu > latch_disengage_limit_time:
+                    self.logger.info(
+                        "Physical lever ta=%s far from last position we sent (%.0f), UNLATCHING",
+                        thrustaxis, diff_psx_vs_lastinput)
+                    set_latch_state(False)
+                else:
+                    self.logger.info(
+                        "Physical lever ta=%s far from last position we sent (%.0f) " +
+                        "but last send was just %.2fs ago, REMAIN LATCHED",
+                        thrustaxis, diff_psx_vs_lastinput, tsu)
+            else:
+                self.logger.debug(
+                    "Physical lever ta=%s far from last position we sent (%.0f), UNLATCHED",
+                    thrustaxis, diff_psx_vs_lastinput)
         else:
-            await self.psx_axis_queue.put({
-                'variable': axis_config['psx variable'],
-                'indexes': axis_config['engine indexes'],
-                'value': psx_value,
-            })
+            self.logger.debug(
+                "No change in lever state (%.0f, %0.f)",
+                diff_psx_vs_newinput, diff_psx_vs_lastinput)
+
+        # Consider moving the PSX thrust lever
+        if get_latch_state():
+            if self.autothrottle_active():
+                self.logger.info("Axis latched but A/T active, not moving PSX throttle(s)")
+            else:
+                self.logger.debug("Axis latched, moving PSX throttle(s)")
+                await self.psx_axis_queue.put({
+                    'variable': axis_config['psx variable'],
+                    'indexes': axis_config['engine indexes'],
+                    'value': psx_value,
+                })
+                set_last_update(psx_value)
+        else:
+            self.logger.debug("Axis not latched, NOT moving PSX throttle(s)")
+        self.logger.debug("EXITING!")
 
     async def handle_axis_motion(self, event):  # pylint: disable=too-many-branches
         """Handle any axis motion."""
