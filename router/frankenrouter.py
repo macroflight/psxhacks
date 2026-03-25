@@ -2405,7 +2405,7 @@ the primary VATSIM connection (VATPRI).
             async def handle_blocklist_post_remove(request):
                 data = await request.post()
                 address = str(data.get('address'))
-                self.blocklist.remove(address)
+                self.blocklist.discard(address)
                 self.logger.info("API: %s removed from blocklist", address)
                 return web.json_response(list(self.blocklist))
 
