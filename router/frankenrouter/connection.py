@@ -243,7 +243,7 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         self.logger.debug("returning: %s", retval)
         return retval
 
-    async def from_stream(self, line):
+    def from_stream(self, line):
         """Log data read from stream."""
         self.messages_received += 1
         self.bytes_received += len(line) + len(PSX_PROTOCOL_SEPARATOR)

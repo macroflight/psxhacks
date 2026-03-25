@@ -1753,7 +1753,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         line = msg['payload'].rstrip(b'\r\n').decode()
 
         self.logger.debug("Message from %s: %s", sender_hr, line)
-        await sender.from_stream(line)
+        sender.from_stream(line)
 
         # Add message to bucket for this second
         now = int(time.time())
