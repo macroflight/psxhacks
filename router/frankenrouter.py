@@ -1749,7 +1749,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # Human-readable sender description
         sender_hr = "upstream" if sender.upstream else sender.peername
 
-        line = msg['payload'].decode().splitlines()[0]
+        # Extract the line without line separators (any combo of \n and \r)
+        line = msg['payload'].rstrip(b'\r\n').decode()
+
         self.logger.debug("Message from %s: %s", sender_hr, line)
         await sender.from_stream(line)
 
