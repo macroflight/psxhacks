@@ -1419,7 +1419,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                             frdp_request_id)
                         await self.send_to_upstream(
                             f"addon=FRANKENROUTER:{self.frdp_version}:PING:{frdp_request_id}")
-                        self.upstream.ping_sent = time.perf_counter()
+                        self.upstream.frdp_ping_sent = time.perf_counter()
                         self.upstream.frdp_ping_request_id = frdp_request_id
                     #
                     # Send FRDP ping to any frankenrouter clients
@@ -1435,7 +1435,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                             await self.client_broadcast(
                                 f"addon=FRANKENROUTER:{self.frdp_version}:PING:{frdp_request_id}",
                                 include=[peername])
-                            data.ping_sent = time.perf_counter()
+                            data.frdp_ping_sent = time.perf_counter()
                             data.frdp_ping_request_id = frdp_request_id
                     # Update timestamp
                     last_ping = time.perf_counter()

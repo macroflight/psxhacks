@@ -159,7 +159,7 @@ class Rules():  # pylint: disable=too-many-public-methods
                 RulesCode.MESSAGE_INVALID,
                 message=f"Unexpected ID {payload}, expected {expected_id}"
             )
-        frdp_rtt = time.perf_counter() - self.sender.ping_sent
+        frdp_rtt = time.perf_counter() - self.sender.frdp_ping_sent
         # FIXME: ignore RTT numbers in a period after upstream or a
         # client has connected (10s?)
         self.sender.frdp_ping_rtts.append(frdp_rtt)
@@ -956,7 +956,7 @@ class TestRules(unittest.TestCase):
 
         def __init__(self):
             """Initialize the connection."""
-            self.ping_sent = 0.0
+            self.frdp_ping_sent = 0.0
             self.frdp_ping_rtts = []
             self.simulator_name = 'UnknownSim'
             self.router_name = 'UnknownRouter'
@@ -1029,7 +1029,7 @@ class TestRules(unittest.TestCase):
         }
 
         # PING from upstream
-        router.upstream.ping_sent = time.perf_counter()
+        router.upstream.frdp_ping_sent = time.perf_counter()
         (action, code, _, extra_data) = rules.route(
             "addon=FRANKENROUTER:1:PING:54321", router.upstream)
         self.assertEqual(action, RulesAction.DROP)
@@ -1083,7 +1083,7 @@ class TestRules(unittest.TestCase):
         testpeer.display_name = "Foobar"
 
         # PING from client
-        testpeer.ping_sent = time.perf_counter()
+        testpeer.frdp_ping_sent = time.perf_counter()
         (action, code, _, extra_data) = rules.route(
             "addon=FRANKENROUTER:1:PING:12345", testpeer)
         self.assertEqual(action, RulesAction.DROP)
