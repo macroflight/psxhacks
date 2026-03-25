@@ -2295,7 +2295,7 @@ the primary VATSIM connection (VATPRI).
                         "preset_name": upstream.name,
                         "host": upstream.host,
                         "port": upstream.port,
-                        "password": upstream.password,
+                        "password": upstream.password if upstream.password is not None else "",
                     }
                     data['presets'] += upstream_page_preset_section.format(**formatdata)
 
