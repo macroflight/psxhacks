@@ -824,15 +824,15 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 await self.close_client_connection(this_client, clean=False)
                 return
 
+            # Get the client's initial access level based on IP
+            this_client.update_access_level()
+
             if self.clients[this_client.peername].access_level == 'blocked':
                 self.logger.warning(
                     "Blocked client %s connected, closing connection", this_client.ip)
                 await this_client.to_stream("bye now")
                 await self.close_client_connection(this_client, clean=False)
                 return
-
-            # Get the client's initial access level based on IP
-            this_client.update_access_level()
 
             # New client connected, so print status and send FRDP ROUTERINFO
             self.connection_state_changed()
