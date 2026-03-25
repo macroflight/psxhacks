@@ -22,7 +22,7 @@ import unittest
 import time
 
 from .connection import NOACCESS_ACCESS_LEVEL
-from .routercache import RouterCacheTypeError
+from .routercache import RouterCacheException, RouterCacheTypeError
 
 
 class RulesAction(enum.Enum):
@@ -756,7 +756,10 @@ class Rules():  # pylint: disable=too-many-public-methods
         # https://aerowinx.com/board/index.php/topic,7858.0.html
         if key == 'Qh426':
             if self.router.config.filtering.tiller:
-                current_value = self.router.cache.get_value(key)
+                try:
+                    current_value = self.router.cache.get_value(key)
+                except RouterCacheException:
+                    current_value = int(value)
                 change = abs(current_value - int(value))
                 off_center = abs(int(value))
                 if (
