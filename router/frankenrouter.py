@@ -2138,14 +2138,14 @@ the primary VATSIM connection (VATPRI).
                     'upstream_queue': self.messagequeue_from_upstream.qsize(),
                     'client_queue': self.messagequeue_from_clients.qsize(),
                 }
-                if len(self.message_write_times) > 0:
+                if len(self.message_write_times) > 1:
                     response['write_times_ms'] = {
                         'max': 1000 * max(self.message_write_times),
                         'median': 1000 * statistics.median(self.message_write_times),
                         'mean': 1000 * statistics.mean(self.message_write_times),
                         'stdev': 1000 * statistics.stdev(self.message_write_times),
                     }
-                if len(self.log_times) > 0:
+                if len(self.log_times) > 1:
                     response['log_times_ms'] = {
                         'max': 1000 * max(self.log_times),
                         'median': 1000 * statistics.median(self.log_times),
@@ -2186,7 +2186,7 @@ the primary VATSIM connection (VATPRI).
                         'client_provided_display_name': client.client_provided_display_name,
                         'write_buffer_size': client.writer.transport.get_write_buffer_size(),
                     }
-                    if len(client.message_write_times) > 0:
+                    if len(client.message_write_times) > 1:
                         thisclient['write_times_ms'] = {
                             'max': 1000 * max(client.message_write_times),
                             'median': 1000 * statistics.median(client.message_write_times),
