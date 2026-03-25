@@ -225,7 +225,7 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
                 if this_upstream.default:
                     if default_upstream is not None:
                         raise RouterConfigError(
-                            f"More than one default upstream in {config_file}") from exc
+                            f"More than one default upstream in {config_file}")
                     default_upstream = copy.deepcopy(this_upstream)
                 self.upstreams.append(this_upstream)
             self.upstream = default_upstream
