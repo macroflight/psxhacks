@@ -1743,7 +1743,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         msg is a PSX network message from the queue (dict)
         """
         # Human-readable sender description
-        sender_hr = "upstream" if sender.upstream is None else sender.peername
+        sender_hr = "upstream" if sender.upstream else sender.peername
 
         line = msg['payload'].decode().splitlines()[0]
         self.logger.debug("Message from %s: %s", sender_hr, line)
