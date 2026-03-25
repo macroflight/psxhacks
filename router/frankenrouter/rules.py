@@ -441,6 +441,11 @@ class Rules():  # pylint: disable=too-many-public-methods
             addon = rest
             payload = ""
         if addon == 'FRANKENROUTER':
+            if ':' not in payload:
+                return self.myreturn(
+                    RulesAction.DROP, RulesCode.MESSAGE_INVALID,
+                    message=f"Malformed FRANKENROUTER addon message: {self.line}"
+                )
             (version, payload) = payload.split(":", 1)
             try:
                 version = int(version)
