@@ -69,7 +69,7 @@ class RouterCache():  # pylint: disable=too-few-public-methods
         return False
 
     def get_value(self, keyword):
-        """Return the value of the cached variable, or None if not in cache."""
+        """Return the value of the cached variable, or raise exception if not in cache."""
         if keyword in self.cache:
             return self.cache[keyword]['value']
         raise RouterCacheException(

@@ -620,8 +620,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     "Not sending pure DELTA variable %s to client", key)
                 return
             if key not in client.welcome_keywords_sent:
-                cached_value = self.cache.get_value(key)
-                if cached_value is None:
+                try:
+                    cached_value = self.cache.get_value(key)
+                except routercache.RouterCacheException:
                     self.logger.warning(
                         "%s not found in router cache, client restart might be needed" +
                         " after upstream connection", key)
