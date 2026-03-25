@@ -2504,9 +2504,10 @@ the primary VATSIM connection (VATPRI).
                             if self.config.identity.stop_minded:
                                 raise SystemExit(f"{msg}\nRouter is stop-minded so shutting down now")  # pylint: disable=raise-missing-from, line-too-long
                             self.logger.critical("%s\nRouter is go-minded so trying to continue", msg)  # pylint: disable=line-too-long
-                        exc = task.exception()
-                        if exc is not None:
-                            self.logger.info("--> ended with exception: %s", exc)
+                        else:
+                            exc = task.exception()
+                            if exc is not None:
+                                self.logger.info("--> ended with exception: %s", exc)
                     else:
                         # self.logger.debug("Task %s running", task.get_name())
                         running.append(task.get_name())
