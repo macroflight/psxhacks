@@ -164,12 +164,12 @@ class Variables():  # pylint: disable=too-few-public-methods
         if len(keyword) < 2:
             return False
         if keyword[0] == 'Q':
-            if keyword[1] in ['h', 's', 'd', 'i']:
+            if keyword[1] in {'h', 's', 'd', 'i'}:
                 return True
         elif keyword[0] == 'L':
-            if keyword[1] in ['s', 'i', 'h']:
+            if keyword[1] in {'s', 'i', 'h'}:
                 return True
-        elif keyword in [
+        elif keyword in {
                 'exit',
                 'cduC',
                 'cduL',
@@ -189,7 +189,7 @@ class Variables():  # pylint: disable=too-few-public-methods
                 'load2',
                 'load3',
                 'keepalive',  # not PSX, but SimStack Switch sends this often
-        ]:
+        }:
             return True
         return False
 
