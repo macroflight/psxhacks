@@ -294,6 +294,11 @@ class Rules():  # pylint: disable=too-many-public-methods
                 RulesAction.DROP, RulesCode.MESSAGE_INVALID,
                 message=f"Invalid JSON data in FRDP CLIENTINFO message: {self.line}"
             )
+        if not all(k in clientinfo for k in ('laddr', 'lport', 'name')):
+            return self.myreturn(
+                RulesAction.DROP, RulesCode.MESSAGE_INVALID,
+                message=f"Missing required fields in FRDP CLIENTINFO message: {self.line}"
+            )
         peername = (clientinfo['laddr'], clientinfo['lport'])
         if peername in self.router.clients:
             self.router.clients[peername].display_name = clientinfo['name']
