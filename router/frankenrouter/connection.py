@@ -97,15 +97,11 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         self.received_stats = {}
         self.sent_stats = {}
 
-    async def to_stream(self, line, log=True, drain=True):  # pylint: disable=too-many-branches,too-many-statements
+    async def to_stream(self, line, log=True, drain=False):  # pylint: disable=too-many-branches,too-many-statements
         """Write data to a stream and optionally to a log file.
 
         Also update traffic counters.
         """
-        # Experimental: do not use drain() - maybe this will work better?
-        if self.router.config.performance.inhibit_drain:
-            drain = False
-
         t_start = time.perf_counter()
         if line is None:
             self.logger.critical("Not sending message=None to stream")
