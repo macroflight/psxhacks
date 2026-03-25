@@ -577,11 +577,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         direction = 'DATA TO  '
         if inbound:
             direction = 'DATA FROM'
+        self.longest_destination_string = max(
+            self.longest_destination_string, len(description))
         fmt = f"%s [%-{self.longest_destination_string}s] %s"
-        if len(description) > self.longest_destination_string:
-            # make it longer then
-            self.longest_destination_string = len(description)
-            description = description[:(self.longest_destination_string - 3)] + "..."
         self.traffic_logger.info(fmt, direction, description, line)
         t_log = time.perf_counter() - t_start
         self.log_times.append(t_log)
