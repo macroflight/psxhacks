@@ -918,6 +918,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # List of clients whose messages we should queue for later sending
         queue_to_clients = []
 
+        compiled_regexp = re.compile(exclude_name_regexp) if exclude_name_regexp is not None else None  # pylint: disable=line-too-long
         for client in self.clients.values():  # pylint: disable=too-many-nested-blocks
             if client.pause_forwarding:
                 self.logger.debug(
@@ -925,8 +926,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     client.peername, line)
                 queue_to_clients.append(client)
                 continue
-            if exclude_name_regexp is not None:
-                if re.match(exclude_name_regexp, client.display_name):
+            if compiled_regexp is not None:
+                if compiled_regexp.match(client.display_name):
                     self.logger.info(
                         "Not sending %s to %s due to regexp match for %s against %s",
                         line, client.peername, client.display_name, exclude_name_regexp)
