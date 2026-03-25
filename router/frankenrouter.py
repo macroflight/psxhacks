@@ -289,7 +289,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         )
         parser.add_argument(
             '--log-traffic',
-            action='store', type=bool, default=None,
+            action='store_true',
             help=("Override config file setting for data logging")
         )
         parser.add_argument(
@@ -2663,8 +2663,8 @@ http://localhost:8747/filter/traffic in a web browser.
                 self.config.upstream.password = password
 
         # Override with command line options
-        if self.args.log_traffic is not None:
-            self.config.log.traffic = self.args.log_traffic
+        if self.args.log_traffic:
+            self.config.log.traffic = True
 
         if self.args.log_directory is not None:
             self.config.log.directory = self.args.log_directory
