@@ -171,7 +171,6 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         # Update stats for the router as a whole
         self.router.message_write_times.append(t_send)
         # Add message to bucket for this second
-        now = int(time.time())
         if len(self.router.writes_counter) == 0:
             self.router.writes_counter.appendleft({
                 'second': now,
