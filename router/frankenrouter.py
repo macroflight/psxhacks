@@ -1838,7 +1838,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         elif code == RulesCode.LOAD1:
             self.logger.info("Got load1 message from %s", sender_hr)
         elif code == RulesCode.LOAD2:
-            self.logger.info("Got load3 message from %s", sender_hr)
+            self.logger.info("Got load2 message from %s", sender_hr)
         elif code == RulesCode.LOAD3:
             self.logger.info("Got load3 message from %s", sender_hr)
         elif code == RulesCode.START:
