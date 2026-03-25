@@ -759,6 +759,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 delayed, client.client_id)
             for line in client.messages_to_send_after_welcome:
                 await send_line(line)
+            client.messages_to_send_after_welcome = []
 
     async def close_client_connection(self, client, clean=True):
         """Close a client connection and remove client data."""
