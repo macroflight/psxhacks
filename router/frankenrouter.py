@@ -2715,7 +2715,6 @@ http://localhost:8747/filter/traffic in a web browser.
                     print(f"config: check/{i}/regexp = {rule.regexp}")
                     print(f"config: check/{i}/limit_min = {rule.limit_min}")
                     print(f"config: check/{i}/limit_max = {rule.limit_max}")
-                    print(f"config: check/{i}/comment = {rule.comment}")
                 except AttributeError as exc:
                     print(f"Missing attribute - continuing: {exc}")
                 i += 1
