@@ -152,9 +152,9 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         self.bytes_sent += len(line) + len(PSX_PROTOCOL_SEPARATOR)
         if log:
             if self.upstream:
-                await self.router.log_traffic(line, inbound=False)
+                self.router.log_traffic(line, inbound=False)
             else:
-                await self.router.log_traffic(line, endpoints=[self.client_id], inbound=False)
+                self.router.log_traffic(line, endpoints=[self.client_id], inbound=False)
 
         # Add to bucket
         now = int(time.time())
@@ -258,9 +258,9 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         self.received_stats[now]['received_bytes'] += len(line) + len(PSX_PROTOCOL_SEPARATOR)
 
         if self.upstream:
-            await self.router.log_traffic(line)
+            self.router.log_traffic(line)
         else:
-            await self.router.log_traffic(line, endpoints=[self.client_id])
+            self.router.log_traffic(line, endpoints=[self.client_id])
 
     async def close(self, clean=True):
         """Close a server connection and remove server data."""

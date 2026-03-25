@@ -548,7 +548,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             }
         )
 
-    async def log_traffic(self, line, endpoints=None, inbound=True):
+    def log_traffic(self, line, endpoints=None, inbound=True):
         """Write to optional log file."""
         t_start = time.perf_counter()
 
@@ -996,7 +996,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
         # Log traffic
         if len(sent_to_clients) > 0:
-            await self.log_traffic(line, sent_to_clients, inbound=False)
+            self.log_traffic(line, sent_to_clients, inbound=False)
 
     async def send_to_upstream(self, line, client_addr=None):
         """Send a line to upstream."""
@@ -1067,6 +1067,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.connection_state_changed()
 
                 # Wait for and process data from upstream connection
+                upstream_messages_read = 0
                 while self.is_upstream_connected():
                     # We know the protocol is line-oriented and the lines will
                     # not be too long to handle as a single unit, so we can
@@ -1095,11 +1096,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         'received_time': t_read_data,
                         'sender': None,
                     })
+                    upstream_messages_read += 1
                     # Give other tasks a chance to do something (we
                     # sometimes receive a large chunk of data from
                     # upstream and don't want to block the router
-                    # while that is being ingested).
-                    await asyncio.sleep(0)
+                    # while that is being ingested). Yield every 10
+                    # messages.
+                    if upstream_messages_read % 10 == 0:
+                        await asyncio.sleep(0)
 
         # Task cleanup: close connection
         except asyncio.exceptions.CancelledError:
