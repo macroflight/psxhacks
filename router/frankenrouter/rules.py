@@ -1232,14 +1232,13 @@ class TestRules(unittest.TestCase):
 
         testpeer = router.clients[('127.0.0.1', 12345)]
 
-        # demand from client
-        (action, code, *_) = rules.route("demand=Qs325", testpeer)
+        # again from client
+        (action, code, *_) = rules.route("again", testpeer)
         self.assertEqual(action, RulesAction.UPSTREAM_ONLY)
-        self.assertEqual(code, RulesCode.DEMAND)
-        self.assertTrue('Qs325' in testpeer.demands)
+        self.assertEqual(code, RulesCode.AGAIN)
 
-        # demand from upstream
-        (action, code, *_) = rules.route("demand=Qs325", router.upstream)
+        # again from upstream
+        (action, code, *_) = rules.route("again", router.upstream)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.MESSAGE_INVALID)
 
