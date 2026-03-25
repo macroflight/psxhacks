@@ -829,7 +829,7 @@ class Rules():  # pylint: disable=too-many-public-methods
             # connects. This prevents BACARS from printing some junk
             # (the partial ATIS) when started.
             if time.perf_counter() - self.sender.connected_at < 30.0:
-                if re.match(r".*(BACARS|BA ACARS).*", self.sender.display_name):
+                if 'BACARS' in self.sender.display_name or 'BA ACARS' in self.sender.display_name:
                     return self.myreturn(
                         RulesAction.DROP,
                         RulesCode.KEYVALUE_FILTERED_INGRESS,
@@ -851,7 +851,7 @@ class Rules():  # pylint: disable=too-many-public-methods
             # Filter traffic injection from vPilot if filter is enabled
             # We use SILENT filtering since this will happen often
             if self.router.config.psx.filter_traffic:
-                if re.match(r".*vPilot.*", self.sender.display_name):
+                if "vPilot" in self.sender.display_name:
                     return self.myreturn(
                         RulesAction.DROP,
                         RulesCode.KEYVALUE_FILTERED_INGRESS_SILENT,
