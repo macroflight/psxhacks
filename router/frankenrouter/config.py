@@ -157,7 +157,7 @@ class _RouterConfigCheck:  # pylint: disable=missing-class-docstring,too-few-pub
                 raise RouterConfigError(
                     f"Invalid check regexp {self.regexp}: {exc}") from exc
         self.limit_min = data.get('limit_min', None)
-        self.limit_max = data.get('limit_min', None)
+        self.limit_max = data.get('limit_max', None)
 
 
 class RouterConfigError(Exception):
