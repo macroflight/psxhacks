@@ -23,7 +23,7 @@ class _RouterConfigListen:  # pylint: disable=missing-class-docstring,too-few-pu
             raise RouterConfigError("The listen port must be an integer")
 
         self.rest_api_port = data.get('rest_api_port', 8747)
-        if not isinstance(self.port, int):
+        if not isinstance(self.rest_api_port, int):
             raise RouterConfigError("The API port must be an integer")
         self.rest_api_color_scheme = data.get('rest_api_color_scheme', 'dark')
 
