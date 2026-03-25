@@ -2374,7 +2374,7 @@ the primary VATSIM connection (VATPRI).
                 ):
                     self.logger.info(
                         "REST API changed pilot flying simulator to %s",
-                        self.sharedinfo["pilot_flying_simulator"])
+                        new_simulator)
                     changes += 1
                     self.sharedinfo["pilot_flying_simulator"] = new_simulator
                 if changes == 0:
