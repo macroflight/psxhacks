@@ -1923,12 +1923,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             await self.send_to_upstream(line, sender.peername)
         elif action == RulesAction.NORMAL:
             self.logger.debug("sending normally: %s", line)
-            if not sender.upstream:
-                await self.send_to_upstream(line, sender.peername)
             if sender.upstream:
                 await self.client_broadcast(line)
             else:
-                await self.client_broadcast(line, exclude=[sender.peername])
+                await asyncio.gather(
+                    self.send_to_upstream(line, sender.peername),
+                    self.client_broadcast(line, exclude=[sender.peername]),
+                )
+
         elif action == RulesAction.FILTER:
             # There are several different types of filtering:
             # - nolong: do not send NOLONG variables to clients is nolong=True
@@ -1937,41 +1939,45 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             # Only one filter type will be given by the ruleset.
             if 'nolong' in extra_data:
                 self.logger.debug("sending with islong: %s", line)
-                if not sender.upstream:
-                    await self.send_to_upstream(line, sender.peername)
                 if sender.upstream:
                     await self.client_broadcast(line, islong=True)
                 else:
-                    await self.client_broadcast(line, exclude=[sender.peername], islong=True)
+                    await asyncio.gather(
+                        self.send_to_upstream(line, sender.peername),
+                        self.client_broadcast(line, exclude=[sender.peername], islong=True),
+                    )
             elif 'start' in extra_data:
                 self.logger.debug("sending with isonlystart: %s", line)
-                if not sender.upstream:
-                    await self.send_to_upstream(line, sender.peername)
                 if sender.upstream:
                     await self.client_broadcast(
                         line, isonlystart=True, key=extra_data['key'])
                 else:
-                    await self.client_broadcast(line, exclude=[sender.peername],
-                                                isonlystart=True, key=extra_data['key'])
+                    await asyncio.gather(
+                        self.send_to_upstream(line, sender.peername),
+                        self.client_broadcast(line, exclude=[sender.peername],
+                                              isonlystart=True, key=extra_data['key']),
+                    )
             elif 'endpoint_name_regexp' in extra_data:
                 self.logger.debug("sending with name regexp filter: %s", line)
                 regex = extra_data['endpoint_name_regexp']
-                if not sender.upstream:
-                    await self.send_to_upstream(line, sender.peername)
                 if sender.upstream:
                     await self.client_broadcast(line, exclude_name_regexp=regex)
                 else:
-                    await self.client_broadcast(line, exclude=[sender.peername],
-                                                exclude_name_regexp=regex)
+                    await asyncio.gather(
+                        self.send_to_upstream(line, sender.peername),
+                        self.client_broadcast(line, exclude=[sender.peername],
+                                              exclude_name_regexp=regex),
+                    )
             elif 'exclude_non_frankenrouter' in extra_data:
                 self.logger.debug("sending with exclude_non_frankenrouter: %s", line)
-                if not sender.upstream:
-                    await self.send_to_upstream(line, sender.peername)
                 if sender.upstream:
                     await self.client_broadcast(line, exclude_non_frankenrouter=True)
                 else:
-                    await self.client_broadcast(line, exclude=[sender.peername],
-                                                exclude_non_frankenrouter=True)
+                    await asyncio.gather(
+                        self.send_to_upstream(line, sender.peername),
+                        self.client_broadcast(line, exclude=[sender.peername],
+                                              exclude_non_frankenrouter=True),
+                    )
             else:
                 self.logger.critical(
                     "RulesAction.FILTER but no known filter type in extra_data: %s: %s",
