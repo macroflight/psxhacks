@@ -1984,7 +1984,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         """Read messages from the queue and forward them."""
         try:
             while True:
-                await asyncio.sleep(0)
                 try:
                     message = await messagequeue.get()
                 except asyncio.QueueShutDown:
