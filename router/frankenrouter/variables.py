@@ -78,6 +78,12 @@ class Variables():  # pylint: disable=too-few-public-methods
                     raise VariablesException(
                         "Failed to download Variables.txt from Aerowinx") from exc2
                 self.logger.info("Downloaded Variables.txt from Aerowinx")
+                try:
+                    with open("Variables.txt", 'r', encoding='utf-8') as vfile:
+                        self._init_from_data(vfile.read())
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    raise SystemExit(
+                        "Downloaded Variables.txt from Aerowinx but failed to read it") from exc
             except Exception:  # pylint: disable=broad-exception-caught
                 msg = f"Unhandled exception: {traceback.format_exc()}"
                 if self.config.identity.stop_minded:
