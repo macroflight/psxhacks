@@ -173,7 +173,13 @@ class Rules():  # pylint: disable=too-many-public-methods
         Format:
         addon=FRANKENROUTER:<protocol version>:IDENT:<sim name>:<router name>:<uuid>
         """
-        (simname, routername, uuid) = payload.split(':')
+        try:
+            (simname, routername, uuid) = payload.split(':')
+        except ValueError:
+            return self.myreturn(
+                RulesAction.DROP, RulesCode.MESSAGE_INVALID,
+                message=f"Malformed FRDP IDENT payload: {self.line}"
+            )
         self.sender.simulator_name = simname
         self.sender.router_name = routername
         self.sender.display_name = routername
