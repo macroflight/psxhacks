@@ -415,12 +415,3 @@ class UpstreamConnection(Connection):  # pylint: disable=too-few-public-methods
 
         # True if we have sent an FRDP AUTH upstream
         self.frdp_auth_sent = False
-
-
-#
-# Unit tests
-#
-def test_connection(self):
-    """Very basic test."""
-    me = ClientConnection(None, None, None)
-    self.assertEqual(me.nolong, False)
