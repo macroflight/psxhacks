@@ -60,6 +60,11 @@ class Variables():  # pylint: disable=too-few-public-methods
         self.variables = {}
         self.config = config
 
+        # Since the mode of keywords does not change while the router
+        # runs, and the lookup function we used earlier was very
+        # expensive, we have switched to a cache created on startup.
+        self._mode_cache = {}
+
         if vfilepath is not None:
             # Read the standard Variables.txt file from the PSX
             # install (Developers/Variables.txt) or the Forum.
@@ -94,14 +99,15 @@ class Variables():  # pylint: disable=too-few-public-methods
 
     def keywords_with_mode(self, mode):
         """Return list of keywords that have this network mode."""
-        results = []
-        for keyword, props in self.variables.items():
-            if props['mode'] == mode:
-                results.append(keyword)
-            elif 'additional_modes' in props:
-                if mode in props['additional_modes']:
-                    results.append(keyword)
-        return results
+        if mode not in self._mode_cache:
+            # build cache entry (only on first call per mode)
+            results = set()
+            for keyword, props in self.variables.items():
+                if props['mode'] == mode or (
+                        'additional_modes' in props and mode in props['additional_modes']):
+                    results.add(keyword)
+            self._mode_cache[mode] = results
+        return self._mode_cache[mode]
 
     def _init_from_data(self, data):  # pylint: disable=too-many-branches
         """Initialize from data."""
@@ -260,11 +266,11 @@ Qs411="CduRteCa"; Mode=ECON; Min=15; Max=50000;
 
         me = Variables(None, vfiledata=self.good_data_2)
         self.assertEqual(len(me.variables.keys()), 10)
-        self.assertEqual(me.keywords_with_mode("DELTA"), ['Qs468'])
-        self.assertEqual(me.keywords_with_mode("START"), ['Qs493'])
-        self.assertEqual(me.keywords_with_mode("NOLONG"), ['Qs411'])
+        self.assertEqual(me.keywords_with_mode("DELTA"), {'Qs468'})
+        self.assertEqual(me.keywords_with_mode("START"), {'Qs493'})
+        self.assertEqual(me.keywords_with_mode("NOLONG"), {'Qs411'})
         self.assertEqual(me.keywords_with_mode("ECON"),
-                         ['Qs0', 'Qs1', 'Qs2', 'Qs3', 'Qs6', 'Qs7', 'Qs8', 'Qs493', 'Qs411'])
+                         {'Qs0', 'Qs1', 'Qs2', 'Qs3', 'Qs6', 'Qs7', 'Qs8', 'Qs493', 'Qs411'})
 
     def test_keyword(self):
         """Test the PSX keyword check."""
