@@ -48,16 +48,16 @@ UPSTREAM_WAITFOR = 5.0
 HEADER_LINE_LENGTH = 126
 
 # How often to check the RTT to upstream and client frankenrouters
-FDRP_PING_INTERVAL = 5.0
+FRDP_PING_INTERVAL = 5.0
 
-# How often to send FDRP ROUTERINFO (also sent after certain events, e.g router connects to network)
+# How often to send FRDP ROUTERINFO (also sent after certain events, e.g router connects to network)
 FRDP_ROUTERINFO_INTERVAL = 60.0
 
-# How often to send FDRP ROUTERINFO (also sent after certain events, e.g router connects to network)
+# How often to send FRDP ROUTERINFO (also sent after certain events, e.g router connects to network)
 FRDP_SHAREDINFO_INTERVAL = 60.0
 
 # Keep 300 seconds of RTT data for the statistics in the status display
-FDRP_KEEP_RTT_SAMPLES = 300
+FRDP_KEEP_RTT_SAMPLES = 300
 
 # A PSX main server instance in cruise will generate ~12 messages per
 # second (measured during 1.5h flight). Keeping data on the last 10000
@@ -423,7 +423,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             upstreaminfo += f" {self.upstream.display_name}"
             if len(self.upstream.frdp_ping_rtts) > 0:
                 # Keep the last N samples
-                self.upstream.frdp_ping_rtts = self.upstream.frdp_ping_rtts[-FDRP_KEEP_RTT_SAMPLES:]
+                self.upstream.frdp_ping_rtts = self.upstream.frdp_ping_rtts[-FRDP_KEEP_RTT_SAMPLES:]
                 ping_rtt_median = statistics.median(self.upstream.frdp_ping_rtts)
                 ping_rtt_max = max(self.upstream.frdp_ping_rtts)
                 upstreaminfo = upstreaminfo + f", FRDP RTT median/max: {(ping_rtt_median * 1000):.1f}/{(ping_rtt_max * 1000):.1f} ms"  # pylint: disable=line-too-long
@@ -461,13 +461,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             ping_rtt_median = "-"
             ping_rtt_max = "-"
             if len(data.frdp_ping_rtts) > 0:
-                data.frdp_ping_rtts = data.frdp_ping_rtts[-FDRP_KEEP_RTT_SAMPLES:]
+                data.frdp_ping_rtts = data.frdp_ping_rtts[-FRDP_KEEP_RTT_SAMPLES:]
                 ping_rtt_median = f"{(1000.0 * statistics.median(data.frdp_ping_rtts)):.1f}"
                 ping_rtt_max = f"{(1000.0 * max(data.frdp_ping_rtts)):.1f}"
 
-            if data.display_name_source == 'FDRP IDENT':
+            if data.display_name_source == 'FRDP IDENT':
                 prefix = 'RI:'
-            elif data.display_name_source == 'FDRP CLIENTINFO':
+            elif data.display_name_source == 'FRDP CLIENTINFO':
                 prefix = 'CI:'
             elif data.display_name_source == 'name message':
                 prefix = 'N:'
@@ -1394,7 +1394,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 # FRDP PING
                 #
                 elapsed_since_ping = time.perf_counter() - last_ping
-                if elapsed_since_ping > FDRP_PING_INTERVAL:
+                if elapsed_since_ping > FRDP_PING_INTERVAL:
                     #
                     # Send FRDP ping to upstream if it is a frankenrouter
                     #

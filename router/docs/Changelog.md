@@ -8,7 +8,7 @@
 
 ## 2025-12-08: version 1.1.0
 
-- Stop sending (the rather long) FDRP ROUTERINFO and SHAREDINFO
+- Stop sending (the rather long) FRDP ROUTERINFO and SHAREDINFO
   messages to non-frankenrouter clients. This caused problems for some
   embedded clients with limited cpu or memory. However, this also
   means that you now need to be a little careful when using multiple
