@@ -2698,7 +2698,7 @@ http://localhost:8747/filter/traffic in a web browser.
 
         # Initialize the router cache
         self.cache = routercache.RouterCache(
-            f"frankenrouter-{self.config.identity.router}.cache.json", self)
+            f"frankenrouter-{self.config.identity.router}.cache.json", self.config)
         if not self.args.no_state_cache_file:
             self.cache.read_from_file()
 
