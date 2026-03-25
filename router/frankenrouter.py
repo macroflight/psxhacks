@@ -740,7 +740,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         client.welcome_sent = True
         welcome_keyword_count = len(client.welcome_keywords_sent)
         client.welcome_keywords_sent = set()
-        send_time = time.perf_counter() - start_time
+        send_time = max(time.perf_counter() - start_time, 1e-9)  # protect against div by 0
         if not bang_reply:
             self.logger.info(
                 "Added client %s in %.1f ms (%d keywords, %.0f/s)",
