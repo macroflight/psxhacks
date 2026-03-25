@@ -308,10 +308,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             help="Do not send Qi198=-9999999 to re-enable the PSX elevation database",
         )
         parser.add_argument(
-            '--no-pause-clients',
-            action='store_true',
-        )
-        parser.add_argument(
             '--upstream-interactive',
             action='store_true',
             help="Ask about upstream details before starting",
@@ -797,13 +793,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.logger.info("Closed upstream connection %s", peername)
         self.connection_state_changed()
 
-    async def pause_clients(self):
-        """Send load1 to pause clients."""
-        if self.args.no_pause_clients:
-            self.logger.info("Pausing clients")
-            await self.client_broadcast("load1")
-            self.last_load1 = time.perf_counter()
-
     async def handle_new_connection_cb(self, reader, writer):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         """Handle a new client connection."""
         # asyncio will intentionally not propagate exceptions from a
@@ -1023,7 +1012,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         try:  # pylint: disable=too-many-nested-blocks
             while True:  # pylint: disable=too-many-nested-blocks
                 # Pause clients when we have no upstream connection
-                await self.pause_clients()
                 try:
                     reader, writer = await asyncio.open_connection(
                         self.config.upstream.host,
@@ -1159,8 +1147,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.shutting_down = True  # don't accept new connections
             self.logger.info("Proxy server shutting down its client connections")
             closures = []
-            # Pause clients before closing connections
-            await self.pause_clients()
             for this_client in self.clients.values():
                 closures.append(self.close_client_connection(this_client, clean=True))
             await asyncio.gather(*closures)
