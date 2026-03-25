@@ -153,7 +153,7 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
 
         t_send = time.perf_counter() - t_start
         self.messages_sent += 1
-        self.bytes_sent += len(line) + 1
+        self.bytes_sent += len(line) + len(PSX_PROTOCOL_SEPARATOR)
         if log:
             if self.upstream:
                 await self.router.log_traffic(line, inbound=False)
@@ -168,7 +168,7 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
                 'sent_bytes': 0,
             }
         self.sent_stats[now]['sent_messages'] += 1
-        self.sent_stats[now]['sent_bytes'] += len(line) + 1
+        self.sent_stats[now]['sent_bytes'] += len(line) + len(PSX_PROTOCOL_SEPARATOR)
 
         # Update stats for this connection
         self.message_write_times.append(t_send)
@@ -242,14 +242,14 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
             self.logger.debug("returning None")
             return None
         # Now add the correct newline and return
-        retval = data_no_newline + b'\r\n'
+        retval = data_no_newline + PSX_PROTOCOL_SEPARATOR
         self.logger.debug("returning: %s", retval)
         return retval
 
     async def from_stream(self, line):
         """Log data read from stream."""
         self.messages_received += 1
-        self.bytes_received += len(line) + 1
+        self.bytes_received += len(line) + len(PSX_PROTOCOL_SEPARATOR)
 
         now = int(time.time())
         if now not in self.received_stats:
@@ -258,7 +258,7 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
                 'received_bytes': 0,
             }
         self.received_stats[now]['received_messages'] += 1
-        self.received_stats[now]['received_bytes'] += len(line) + 1
+        self.received_stats[now]['received_bytes'] += len(line) + len(PSX_PROTOCOL_SEPARATOR)
 
         if self.upstream:
             await self.router.log_traffic(line)
