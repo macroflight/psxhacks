@@ -1543,8 +1543,8 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
 
         # We need to subscribe to PSX variables included in the config
         psx_variables = set()
-        for _, data in self.config.items():
-            for _, data in data.items():
+        for _, data_outer in self.config.items():
+            for _, data in data_outer.items():
                 for _, action in data.items():
                     if 'psx variable' in action:
                         psx_variables.add(action['psx variable'])
