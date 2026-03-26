@@ -195,7 +195,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         heading = int(towing[3:6])
         self.logger.debug("Current towing heading: %s", heading)
         heading_new = heading + increment
-        if heading_new > 360:
+        if heading_new >= 360:
             heading_new -= 360
         if heading_new < 0:
             heading_new += 360
@@ -224,7 +224,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
     def towing_mode_toggle(self):
         """Toggle the towing mode (start/stop).
 
-        Towing is a string of six digits. Wee care about digit 2 and 3 (20=stop, 80=start)
+        Towing is a string of six digits. Wee care about digit 2 and 3
         We never use auto.
         """
         towing = str(self.psx.get('Towing'))
