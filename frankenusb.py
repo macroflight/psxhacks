@@ -884,7 +884,11 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             self.thrustaxis_last_update[joystick_name] = {}
         if thrustaxis not in self.thrustaxis_last_update[joystick_name]:
             # Defaults to current PSX throttle position
-            tla = int(self.psx.get('Tla').split(';')[axis_config['engine indexes'][0]])
+            try:
+                tla = int(self.psx.get('Tla').split(';')[axis_config['engine indexes'][0]])
+            except AttributeError:
+                # Safe default
+                tla = 0
             self.logger.info("Initializing %s on %s to %s", thrustaxis, joystick_name, tla)
             self.thrustaxis_last_update[joystick_name][thrustaxis] = tla
 
