@@ -561,19 +561,6 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                         "Interlock for index %d was unlocked, now taken by %s axis",
                         engine_index, my_interlock)
                     self.psx_throttle_interlock[engine_index] = my_interlock
-                elif self.psx_throttle_interlock[engine_index] == 'released':
-                    if axis_near_idle:
-                        # Take lock (and update Tla)
-                        self.logger.debug(
-                            "Interlock for index %d was released, now taken by %s axis",
-                            engine_index, my_interlock)
-                        self.psx_throttle_interlock[engine_index] = my_interlock
-                    else:
-                        # Do nothing
-                        self.logger.debug(
-                            "Interlock for index %d is released but axis not at zero (%d)",
-                            engine_index, psx_value)
-                        update_this_engine_tla = False
                 elif self.psx_throttle_interlock[engine_index] == my_interlock:
                     # We have the lock, change Tla
                     pass
