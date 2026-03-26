@@ -598,8 +598,8 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
 
         # If some throttle has moved, update PSX Tla
         if update_psx_tla:
-            self.logger.debug("Sending Tla update to PSX for %s: %d",
-                              axis_config['engine indexes'], psx_value)
+            self.logger.debug("Sending Tla update to PSX for %s",
+                              axis_config['engine indexes'])
             await self.psx_axis_queue.put({
                 'variable': axis_config['psx variable'],
                 'indexes': axis_config['engine indexes'],
