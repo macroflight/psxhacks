@@ -1488,6 +1488,9 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         Source: https://aerowinx.com/board/index.php/topic,4408.msg72250.html#msg72250
         """
         afds = self.psx.get("Afds")
+        if afds is None:
+            # No data from PSX yet, assume A/T off
+            return False
         atmode = int(afds.split(';')[0])
         if atmode in [0, 21]:
             return False
