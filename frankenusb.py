@@ -167,18 +167,18 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 return joystick.get_button(button)
         return False
 
-    def centre_ailerons_and_tiller(self):
+    async def centre_ailerons_and_tiller(self):
         """Send events to PSX that centres the aileron and tiller.
 
         Used whenever we switch tiller mode on and off.
         """
         self.logger.info("centreing aileron and tiller")
-        self.psx_axis_queue.put({
+        await self.psx_axis_queue.put({
             'variable': 'Tiller',
             'indexes': [0],
             'value': 0,
         })
-        self.psx_axis_queue.put({
+        await self.psx_axis_queue.put({
             'variable': 'FltControls',
             'indexes': [1],
             'value': 0,
@@ -1126,12 +1126,12 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 if self.aileron_tiller_active:
                     # Remove warning, centre aileron and tiller, disable tiller mode
                     self.psx.send(MSG_TYPE_TILLER, "")
-                    self.centre_ailerons_and_tiller()
+                    await self.centre_ailerons_and_tiller()
                     self.aileron_tiller_active = False
                 else:
                     # Display warning message, centre aileron and tiller, enable tiller mode
                     self.psx.send(MSG_TYPE_TILLER, "TILLER ACTIVE")
-                    self.centre_ailerons_and_tiller()
+                    await self.centre_ailerons_and_tiller()
                     # Enable tiller mode
                     self.aileron_tiller_active = True
             elif button_config['button type'] == 'ACTION_FLIGHT_PHASE_TRIGGER':
