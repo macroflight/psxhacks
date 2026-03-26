@@ -1065,6 +1065,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 else:
                     await self.handle_throttle_reverse_button(
                         'button', joystick_name, event, button_config, True)
+            elif button_config['button type'] == "REVERSE_TOGGLE":
+                if direction == 'down':
+                    await self.handle_throttle_reverse_button(
+                        'button', joystick_name, event, button_config, None)
             elif button_config['button type'] == 'INCREMENT':
                 value = int(self.psx.get(button_config['psx variable']))
                 increment = int(button_config['increment'])
