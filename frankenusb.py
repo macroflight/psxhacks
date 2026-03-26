@@ -665,7 +665,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             (lowerlimit, upperlimit, this_value) = zone
             if this_value == psx_current_value:
                 (psx_current_lowerlimit, psx_current_upperlimit) = (lowerlimit, upperlimit)
-            if lowerlimit <= axis_position <= upperlimit:
+            if lowerlimit <= axis_position < upperlimit:
                 psx_value = this_value
                 break
         if psx_value is None:
@@ -686,7 +686,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 self.axis_set_state[axis_config['psx variable']]['psx'] = psx_current_value
 
         if self.axis_set_state[axis_config['psx variable']]['state'] == 'UNKNOWN':
-            if psx_current_lowerlimit <= axis_position <= psx_current_upperlimit:
+            if psx_current_lowerlimit <= axis_position < psx_current_upperlimit:
                 # axis inside range matching current PSX state - set
                 # SYNCED and save the PSX value we synced against
                 self.axis_set_state[axis_config['psx variable']]['state'] = 'SYNCED'
@@ -696,14 +696,14 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 self.axis_set_state[axis_config['psx variable']]['state'] = 'UNSYNCED'
                 self.axis_set_state[axis_config['psx variable']]['psx'] = psx_current_value
         elif self.axis_set_state[axis_config['psx variable']]['state'] == 'SYNCED':
-            if psx_current_lowerlimit <= axis_position <= psx_current_upperlimit:
+            if psx_current_lowerlimit <= axis_position < psx_current_upperlimit:
                 # axis inside range matching current PSX state - do nothing
                 pass
             else:
                 # Update PSX to match current position (axis has moved to next detent)
                 update_psx = True
         elif self.axis_set_state[axis_config['psx variable']]['state'] == 'UNSYNCED':
-            if psx_current_lowerlimit <= axis_position <= psx_current_upperlimit:
+            if psx_current_lowerlimit <= axis_position < psx_current_upperlimit:
                 # axis inside range matching current PSX state - set SYNCED
                 self.axis_set_state[axis_config['psx variable']]['state'] = 'SYNCED'
             else:
@@ -712,7 +712,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
 
         if update_psx:
             if psx_value != psx_current_value:
-                self.logger.info("Setting %s to %s (%f <= %f <= %f)",
+                self.logger.info("Setting %s to %s (%f <= %f < %f)",
                                  axis_config['psx variable'],
                                  psx_value,
                                  lowerlimit, axis_position, upperlimit)
