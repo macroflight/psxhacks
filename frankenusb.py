@@ -1155,9 +1155,8 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 self.logger.debug("Sending to PSX: %s => 1", psx_variable)
                 self.psx_send_and_set(psx_variable, 1)
             elif button_config['button type'] == 'TMBOEING_ROTARY':
-                # If action == start: do nothing
                 if direction == 'down':
-                    self.logger.debug("action==start, no action")
+                    self.logger.debug("direction==down, no action")
                     return
                 # Find out how long the "button" was pressed for
                 try:
