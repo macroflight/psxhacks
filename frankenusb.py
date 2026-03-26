@@ -837,7 +837,16 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 self.logger.info("Cannot toggle reverse, lever position %s", axis_position)
                 return
 
-            if get_axis_mode(config['axis']) == 'normal':
+            # BUtton pressed, and the reverse parameter given decides what we do now:
+            # reverse == None - TOGGLE reverse
+            # reverse == True - enable reverse
+            # reverse == False - disable reverse
+            if reverse is None:
+                new_reverse = bool(get_axis_mode(config['axis']) == 'normal')
+            else:
+                new_reverse = reverse
+
+            if new_reverse:
                 self.logger.info("Set axis mode for axis %s to reverse", config['axis'])
                 set_axis_mode(config['axis'], 'reverse')
                 reverse = True
