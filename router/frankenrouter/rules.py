@@ -250,6 +250,7 @@ class Rules():  # pylint: disable=too-many-public-methods
             message = "Qs421=PF: NOONE"
         else:
             self.router.sharedinfo['pilot_flying_simulator'] = payload
+            # We limit the length of the sim identifier so it fits on EICAS
             ident = self.router.sharedinfo['pilot_flying_simulator'][:11].upper()
             message = f"Qs421=PF: {ident}"
         self.router.frdp_sharedinfo_requested = True
@@ -896,6 +897,23 @@ class Rules():  # pylint: disable=too-many-public-methods
                         RulesAction.FILTER,
                         RulesCode.KEYVALUE_FILTER_EGRESS,
                         extra_data={'start': True, 'key': key})
+
+        # This is not strictly a filter, but we snoop on the incoming
+        # messages and if we see Qh400="ApDisc" from downstream with a
+        # value of 1 (someone pushed the A/P disconnect button in this
+        # sim), we take the same action as if someone had sent the MY
+        # CONTROLS message, but still forward the message normally.
+        if not self.sender.upstream and key == 'Qh400' and value == "1":
+            if self.router.config.psx.filter_flight_controls_ap_disc:
+                # Note to future self: since RulesCode.KEYVALUE_NORMAL
+                # does nothing, we can omit using it here and instead
+                # use RulesCode.FRDP_MY_CONTROLS. If that was not the
+                # case or is changed in the future, we could modify
+                # the RulesCode.KEYVALUE_NORMAL handling to accept an
+                # optional parameter which contains a message to send
+                # onto the network (e.g the MY_CONTROLS message)
+                self.logger.info("A/P disconnect pressed, sending the MY_CONTROLS message")
+                return self.myreturn(RulesAction.NORMAL, RulesCode.FRDP_MY_CONTROLS)
 
         #
         # Send normally

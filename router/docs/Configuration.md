@@ -157,7 +157,15 @@ directory = 'C:\fs\PSX\Routerlogs'
   filter certain flight control axes (e.g rudder). The filtering can
   be controlled by e.g an USB button mapped through frankenusb. For a
   shared cockpit setup, the master sim frankenrouter must have this
-  set to false.
+  set to false. This should be set to false for a master sim router or
+  when you use a router as the central component of a large sim
+  without using shared cockpit.
+- `filter_flight_controls_ap_disc`: defaults to false. If set to true,
+  pressing the A/P disconnect button on the yoke will turn off the
+  flight control axis lock in your router and turn it on in all other
+  slave sim routers, i.e giving you control. This can be handy if you
+  don't use frankenusb for your controls but still wants to use the
+  flight control lock.
 
 Example:
 
