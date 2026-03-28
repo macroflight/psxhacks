@@ -2462,7 +2462,7 @@ the primary VATSIM connection (VATPRI).
             # Run the API
             app = web.Application()
             app.add_routes(routes)
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             handler = app.make_handler()
             await loop.create_server(
                 handler,
