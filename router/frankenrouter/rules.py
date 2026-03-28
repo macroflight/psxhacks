@@ -24,6 +24,18 @@ import time
 from .connection import NOACCESS_ACCESS_LEVEL
 from .routercache import RouterCacheException, RouterCacheTypeError
 
+# Create a frozen set here rather than a list that gets recreated for
+# each message:
+# Qs120="FltControls"; Mode=ECON; Min=5; Max=14;
+# Qs357="Brakes"; Mode=ECON; Min=3; Max=9;
+# Qs436="Tla"; Mode=ECON; Min=7; Max=23;
+# Qh388="SpdBrkLever"; Mode=ECON; Min=0; Max=800;
+# Qh426="Tiller"; Mode=ECON; Min=-999; Max=999;
+FLIGHT_CONTROL_INPUT_KEYWORDS = frozenset({'Qs120', 'Qs357', 'Qs436', 'Qh388', 'Qh426'})
+
+# Same for teh traffic keywords
+TRAFFIC_KEYWORDS = frozenset({'Qs450', 'Qs451'})
+
 
 class RulesAction(enum.Enum):
     """The action the router needs to take for a message.
@@ -784,15 +796,8 @@ class Rules():  # pylint: disable=too-many-public-methods
                         message="filtered Qh426/Tiller")
 
         # Ingress filter: flight controls
-        # Qs120="FltControls"; Mode=ECON; Min=5; Max=14;
-        # Qs357="Brakes"; Mode=ECON; Min=3; Max=9;
-        # Qs436="Tla"; Mode=ECON; Min=7; Max=23;
-        # Qh388="SpdBrkLever"; Mode=ECON; Min=0; Max=800;
-        # Qh426="Tiller"; Mode=ECON; Min=-999; Max=999;
         if self.router.config.psx.filter_flight_controls:
-            if not self.sender.upstream and key in [
-                    'Qs120', 'Qs357', 'Qs436', 'Qh388', 'Qh426',
-            ]:
+            if not self.sender.upstream and key in FLIGHT_CONTROL_INPUT_KEYWORDS:
                 self.logger.debug("FLIGHT CONTROL INPUT: %s", key)
                 flying = self.router.sharedinfo["pilot_flying_simulator"]
                 self.logger.debug("pilot_flying_simulator is %s", flying)
@@ -848,7 +853,7 @@ class Rules():  # pylint: disable=too-many-public-methods
                     RulesCode.KEYVALUE_FILTERED_INGRESS_SILENT,
                     message="filtered Qi198 as filter_elevation is set")
 
-        if not self.sender.upstream and key in ['Qs450', 'Qs451']:
+        if not self.sender.upstream and key in TRAFFIC_KEYWORDS:
             # Filter traffic injection from vPilot if filter is enabled
             # We use SILENT filtering since this will happen often
             if self.router.config.psx.filter_traffic:
