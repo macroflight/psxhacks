@@ -141,8 +141,7 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
                     self.peername
                 )
             # Encode and send
-            self.writer.write(line.encode())
-            self.writer.write(PSX_PROTOCOL_SEPARATOR)
+            self.writer.write(line.encode() + PSX_PROTOCOL_SEPARATOR)
             if drain:
                 await self.writer.drain()
         except ConnectionError as exc:
