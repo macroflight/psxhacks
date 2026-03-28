@@ -919,6 +919,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         queue_to_clients = []
 
         compiled_regexp = re.compile(exclude_name_regexp) if exclude_name_regexp is not None else None  # pylint: disable=line-too-long
+
+        in_situ_load = False
+        now = time.perf_counter()
+        if (now - self.last_load1) < (now - self.last_load3):
+            in_situ_load = True
+
         for client in self.clients.values():  # pylint: disable=too-many-nested-blocks
             if client.pause_forwarding:
                 self.logger.debug(
@@ -958,11 +964,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 # clients during the client welcome or when we load a
                 # situ.
                 self.logger.debug("isonlystart for %s", client.peername)
-
-                in_situ_load = False
-                now = time.perf_counter()
-                if (now - self.last_load1) < (now - self.last_load3):
-                    in_situ_load = True
 
                 if client.is_frankenrouter:
                     # Always send to other frankenrouters
