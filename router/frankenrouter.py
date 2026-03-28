@@ -1767,7 +1767,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         elif self.message_counter[0]['second'] != now:
             self.message_counter.appendleft({
                 'second': now,
-                'count': 1
+                'count': 0
             })
         self.message_counter[0]['count'] += 1
 

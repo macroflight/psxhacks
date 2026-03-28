@@ -12,6 +12,8 @@ NOACCESS_ACCESS_LEVEL = 'noaccess'
 
 # The correct separator
 PSX_PROTOCOL_SEPARATOR = b'\r\n'
+PSX_PROTOCOL_SEPARATOR_LENGTH = len(PSX_PROTOCOL_SEPARATOR)
+
 
 # All supported separators
 SUPPORTED_PROTOCOL_SEPARATORS = (b'\r\n', b'\n\r', b'\r', b'\n')
@@ -160,7 +162,7 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
 
         t_send = time.perf_counter() - t_start
         self.messages_sent += 1
-        self.bytes_sent += len(line) + len(PSX_PROTOCOL_SEPARATOR)
+        self.bytes_sent += linelen + PSX_PROTOCOL_SEPARATOR_LENGTH
         if log:
             if self.upstream:
                 self.router.log_traffic(line, inbound=False)
@@ -170,12 +172,10 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         # Add to bucket
         now = int(time.time())
         if now not in self.sent_stats:
-            self.sent_stats[now] = {
-                'sent_messages': 0,
-                'sent_bytes': 0,
-            }
-        self.sent_stats[now]['sent_messages'] += 1
-        self.sent_stats[now]['sent_bytes'] += len(line) + len(PSX_PROTOCOL_SEPARATOR)
+            self.sent_stats[now] = {'sent_messages': 0, 'sent_bytes': 0}
+        bucket = self.sent_stats[now]
+        bucket['sent_messages'] += 1
+        bucket['sent_bytes'] += linelen + PSX_PROTOCOL_SEPARATOR_LENGTH
 
         # Update stats for this connection
         self.message_write_times.append(t_send)
@@ -190,7 +190,7 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         elif self.router.writes_counter[0]['second'] != now:
             self.router.writes_counter.appendleft({
                 'second': now,
-                'count': 1
+                'count': 0
             })
         self.router.writes_counter[0]['count'] += 1
         return True
@@ -256,16 +256,14 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
     def from_stream(self, line):
         """Log data read from stream."""
         self.messages_received += 1
-        self.bytes_received += len(line) + len(PSX_PROTOCOL_SEPARATOR)
+        self.bytes_received += len(line) + PSX_PROTOCOL_SEPARATOR_LENGTH
 
         now = int(time.time())
         if now not in self.received_stats:
-            self.received_stats[now] = {
-                'received_messages': 0,
-                'received_bytes': 0,
-            }
-        self.received_stats[now]['received_messages'] += 1
-        self.received_stats[now]['received_bytes'] += len(line) + len(PSX_PROTOCOL_SEPARATOR)
+            self.received_stats[now] = {'received_messages': 0, 'received_bytes': 0}
+        bucket = self.received_stats[now]
+        bucket['received_messages'] += 1
+        bucket['received_bytes'] += len(line) + PSX_PROTOCOL_SEPARATOR_LENGTH
 
         if self.upstream:
             self.router.log_traffic(line)
