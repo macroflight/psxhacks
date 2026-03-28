@@ -6,6 +6,7 @@ import ipaddress
 import logging
 import time
 import traceback
+import socket
 
 NOACCESS_ACCESS_LEVEL = 'noaccess'
 
@@ -35,6 +36,16 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
 
         self.reader = reader
         self.writer = writer
+
+        # Set TCP_NODELAY. Why: not setting this means Nagle's
+        # algorithm is active on all connections. For a PSX protocol
+        # router forwarding small key=value\r\n messages, Nagle's is
+        # actively harmful: it delays transmission whenever there's
+        # unacknowledged data in flight, which for this workload is
+        # almost always.
+        sock = writer.transport.get_extra_info('socket')
+        if sock is not None:
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
         self.last_line_type = None
 
