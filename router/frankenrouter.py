@@ -1515,6 +1515,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 "is_frankenrouter": con.is_frankenrouter,
                 "display_name": con.display_name,
                 "connected_time": int(time.perf_counter() - con.connected_at),
+                "frdp_ping_rtts": con.frdp_ping_rtts[:10],
             })
 
         payload_json = json.dumps(payload)
