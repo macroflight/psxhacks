@@ -133,7 +133,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self.loadrate = 60.0
 
         # Load rate using HOOK
-        self.loadrate_hook = 5000.0
+        self.loadrate_hook = 1200.0
 
         # If we are currently dropping retardant
         self.dropping = False
