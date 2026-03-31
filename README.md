@@ -74,6 +74,16 @@ VATSIM users when enroute. Personally, I'm not convinced that this is
 needed, my enroute winds (from Simbrief) seems to match MSFS quite
 well.
 
+### frankentanker.py
+
+This allows you to simulate dropping water from the [747
+Supertanker](https://en.wikipedia.org/wiki/747_Supertanker). The
+retardant drops are simulated by reducing the PSX aircraft gross
+weight. The water drop system is controlled from the left or right
+CDU. Some functions (e.g drop retardant, arm the system, etc.) can
+also be controlled using PSX network `addon=` messages that you can
+send using e.g FrankenUSB.
+
 ### show_psx.py
 
 Will display and monitor for changes one PSX variable. Mostly useful
@@ -121,10 +131,6 @@ slightly, and that really screwed up my landings...)
 Not needed anymore (bug in PSX.NET.MSFS.WASM now fixed), but maybe
 useful as a simple example of how to inject PSX data into MSFS using
 SimConnect.
-
-### make_gatefinder_database.py
-Extracts gate positions from a LittleNavMap database, for use with the
-Gatefinder tool.
 
 ## What you need to run my Python scripts:
 
