@@ -1198,6 +1198,9 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                     return
                 self.logger.debug("Sending to PSX: %s => %s", psx_variable, increment)
                 self.psx_send_and_set(psx_variable, increment)
+            elif button_config['button type'] == 'ADDON':
+                # Send a custom addon= message stored in button_config['value']
+                self.psx_send_and_set("addon", button_config['value'])
             else:
                 raise FrankenUsbException(f"Unknown button type {button_config['button type']}")
             # End of helper
