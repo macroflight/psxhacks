@@ -56,6 +56,7 @@ import argparse
 import asyncio
 import inspect
 import logging
+import random
 import re
 import sys
 import time
@@ -80,6 +81,7 @@ __DROPRATES__ = {
 # TAILHOOK operating conditions
 __HOOK_HEIGHT_RANGE__ = (60, 200)  # 60-200 ft AGL
 __HOOK_SPEED_RANGE__ = (120, 180)  # 120-180 kt TAS
+__MAX_HOOK_SPEED_DEVIATION__ = 20  # Speed will vary this much when HOOK is in the water
 
 
 def lb2kg(lb):
@@ -333,6 +335,16 @@ class Script():  # pylint: disable=too-many-instance-attributes
                         self.system_armed = False
                         self.message("Retardant load empty, stopping drop")
                     repaint = True
+
+                # Generate airspeed fluctuations while we are loading
+                # water using the HOOK. Simulates wave action, HOOK
+                # bouncing, ...
+                if self.loading_hook:
+                    psx_wxburst = 300 + random.randint(0, __MAX_HOOK_SPEED_DEVIATION__)
+                    if random.randint(-100, 100) > 0:
+                        psx_wxburst = -psx_wxburst
+                    self.logger.info("HOOK in the water, injecting WxBurst=%d", psx_wxburst)
+                    self.psx_send_and_set("WxBurst", psx_wxburst)
 
                 # If the TAILHOOK is extended and we are at the
                 # correct height and airspeed, load some more redardant
