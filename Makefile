@@ -1,14 +1,17 @@
 # Note: needs e.g apt-get install python3-venv
 
+export PATH := /home/kronberg/pkg/python/3.13.5/bin:$(PATH)
+
+
 LINTVENVDIR = $${HOME}/.venv-lint-psxhacks/$(osname)
 
 # Run pylint on all *_.py files except psx.py (which is not included
 # in the repo but frequenly there anyway for testing.
-LINTFILES = $(shell find . -name '*.py' ! -name psx.py)
+LINTFILES = $(shell find . -name '*.py' | egrep -v '(psx.py|test_latency)')
 
-PYCODESTYLEFILES = $(shell find . -name '*.py' ! -name psx.py)
+PYCODESTYLEFILES = $(shell find . -name '*.py' | egrep -v '(psx.py|test_latency)')
 
-PYDOCSTYLEFILES = $(shell find . -name '*.py' | egrep -v '(psx.py|frankentow)')
+PYDOCSTYLEFILES = $(shell find . -name '*.py' | egrep -v '(psx.py|test_latency|frankentow)')
 
 
 CONFIGFILES = config_examples/*
@@ -26,7 +29,7 @@ venv: $(LINTVENVDIR)/bin/activate
 
 $(LINTVENVDIR)/bin/activate:
 	$(info * LINT: Trying to setup a Python3 venv to install lint tools in)
-	test -d $(LINTVENVDIR) || (python3 -m venv $(LINTVENVDIR); . $(LINTVENVDIR)/bin/activate; pip install pylint pycodestyle pydocstyle pyproj)
+	test -d $(LINTVENVDIR) || (python3 -m venv $(LINTVENVDIR); . $(LINTVENVDIR)/bin/activate; pip install pylint pycodestyle pydocstyle pyproj tomlcheck)
 	touch $(LINTVENVDIR)/bin/activate
 
 pylint: venv
@@ -55,7 +58,7 @@ tomlcheck:
 
 unittests:
 	$(info * LINT: Running unit tests)
-	python -m unittest -v router/frankenrouter/*.py
+	python3 -m unittest -v router/frankenrouter/*.py
 
 clean:
 	$(info * LINT: Removing venv)
