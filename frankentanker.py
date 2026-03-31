@@ -236,7 +236,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self.loading_hook = False
         self.system_armed = False
         self.tailhook_extended = False
-        self.repaint_all_mcdus()
+        asyncio.create_task(self.repaint_all_mcdus())
 
     async def tank_control_coro(self):  # pylint: disable=too-many-branches,too-many-statements
         """Check system state and adjust PSX ZFW and other variables as needed.
