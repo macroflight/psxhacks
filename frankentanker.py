@@ -110,6 +110,8 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self.psx = None
         self.psx_connected = False
 
+        self.last_drop_sound_played = 0
+
         # ZFW from PSX (kg)
         self.psx_zfw = None
 
@@ -319,6 +321,13 @@ class Script():  # pylint: disable=too-many-instance-attributes
                         repaint = True
 
                 if self.dropping:
+                    # Play drop sound via PSXSounds
+                    time_since_last_played = time.perf_counter() - self.last_drop_sound_played
+                    if time_since_last_played > 6.0:
+                        # Sound is ~5.5 seconds long
+                        self.psx.send("addon", "PSNDB;;;;frankentankerdrop.mp3/")
+                        self.last_drop_sound_played = time.perf_counter()
+
                     self.retardant_load -= elapsed * __DROPRATES__[self.droprate]
                     self.logger.info(
                         "Retardant drop in progress, drop rate %.0f kg/s, remaining load %.0f kg",
