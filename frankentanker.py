@@ -78,9 +78,6 @@ __DROPRATES__ = {
     "EMG": 8000,
 }
 
-# TAILHOOK operating conditions
-__MAX_HOOK_SPEED_DEVIATION__ = 20  # Speed will vary this much when HOOK is in the water
-
 
 def lb2kg(lb):
     """Convert pounds to kilos."""
@@ -109,6 +106,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self.logger = None
         self.psx = None
         self.psx_connected = False
+        self.psx_paused = False
 
         self.last_drop_sound_played = 0
 
@@ -224,6 +222,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         """Reset initial state."""
         self.loading = False
         self.loading_hook = False
+        self.dropping = False
         self.system_armed = False
         self.tailhook_extended = False
         asyncio.create_task(self.repaint_all_mcdus())
@@ -241,9 +240,14 @@ class Script():  # pylint: disable=too-many-instance-attributes
             while True:
                 repaint = False
                 await asyncio.sleep(1.0)
-                if not self.psx_connected:
-                    self.logger.debug("PSX not yet connected, %s sleeping",
+                if not self.psx_connected or self.psx_paused:
+                    self.logger.debug("PSX not yet connected or paused, %s sleeping",
                                       myname)
+                    last_ran = time.perf_counter()
+                    continue
+
+                if self.psx_zfw is None:
+                    self.logger.debug("PSX ZFW not yet available, %s sleeping", myname)
                     last_ran = time.perf_counter()
                     continue
 
@@ -540,7 +544,8 @@ class Script():  # pylint: disable=too-many-instance-attributes
             mcdu.paint(0, 0, S, A, "      SUPERTANKER       ")
         # row 1: empty
         mcdu.paint(2, 0, S, C, " ZFW           RETARDANT")
-        mcdu.paint(3, 0, L, C, f" {self.psx_zfw / 1000:6.1f}          {ret_t:6.1f} ")
+        zfw_str = f"{self.psx_zfw / 1000:6.1f}" if self.psx_zfw is not None else "   ---"
+        mcdu.paint(3, 0, L, C, f" {zfw_str}          {ret_t:6.1f} ")
         mcdu.paint(4, 0, L, C, f"<OEW           {arm_label}")
         mcdu.paint(5, 0, S, C, f" {self.oew / 1000:6.1f}                ")
         mcdu.paint(6, 0, L, C, "<DROPRATE     STARTLOAD>")
@@ -585,6 +590,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.logger.info("PSX RESUMED")
             self.psx.send("demand", "LeftPfdAlt")
             self.psx_connected = True
+            self.psx_paused = False
             if self.mcduL is None:
                 self.mcduL = psx.MCDU("L", "L", 5, "<TANK", self.mcduEvent)
                 self.mcduR = psx.MCDU("R", "L", 5, "<TANK", self.mcduEvent)
@@ -598,7 +604,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.logger.debug("Starting %s", inspect.currentframe().f_code.co_name)
             self.psx = psx.Client()
 
-            self.psx.onPause = lambda: None
+            self.psx.onPause = lambda: setattr(self, 'psx_paused', True)
             self.psx.onDisconnect = disconnected
             self.psx.onConnect = lambda: None
             self.psx.onResume = onresume
