@@ -66,7 +66,7 @@ class _RouterConfigPsx:  # pylint: disable=missing-class-docstring,too-few-publi
         self.filter_elevation = data.get('filter_elevation', True)
         self.filter_traffic = data.get('filter_traffic', True)
         self.filter_flight_controls = data.get('filter_flight_controls', True)
-        self.filter_flight_controls_ap_disc = data.get('filter_flight_controls_ap_disc', False)
+        self.filter_flight_controls_ap_disc = data.get('filter_flight_controls_ap_disc', True)
 
 
 class _RouterConfigSharedinfo:  # pylint: disable=missing-class-docstring,too-few-public-methods

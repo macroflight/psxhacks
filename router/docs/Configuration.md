@@ -160,7 +160,7 @@ directory = 'C:\fs\PSX\Routerlogs'
   set to false. This should be set to false for a master sim router or
   when you use a router as the central component of a large sim
   without using shared cockpit.
-- `filter_flight_controls_ap_disc`: defaults to false. If set to true,
+- `filter_flight_controls_ap_disc`: defaults to true. If set to true,
   pressing the A/P disconnect button on the yoke will turn off the
   flight control axis lock in your router and turn it on in all other
   slave sim routers, i.e giving you control. This can be handy if you
