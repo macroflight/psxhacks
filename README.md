@@ -231,7 +231,7 @@ Pros: Easier to install
 
 Cons: You cannot edit the Python script inside if you want to change
 something. You also cannot verify what the binary does, so you have to
-trust the developer... 
+trust the developer...
 
 You can find the binary packages on
 https://drive.google.com/drive/folders/1Eu1uJCNUiLkFg9Qq8YwPCiPd9V7D5FbA

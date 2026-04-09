@@ -1,7 +1,7 @@
 # Note: needs e.g apt-get install python3-venv
 
-export PATH := /home/kronberg/pkg/python/3.13.5/bin:$(PATH)
-
+#export PATH := /home/kronberg/pkg/python/3.13.5/bin:/home/kronberg/pkg/python/3.13.4/bin:$(PATH)
+export PATH := /home/kronberg/pkg/python/latest/bin:$(PATH)
 
 LINTVENVDIR = $${HOME}/.venv-lint-psxhacks/$(osname)
 
@@ -54,11 +54,11 @@ markdownlint:
 
 tomlcheck:
 	$(info * LINT: Running tomlcheck)
-	tomlcheck $(TOMLFILES)
+	. $(LINTVENVDIR)/bin/activate; tomlcheck $(TOMLFILES)
 
 unittests:
 	$(info * LINT: Running unit tests)
-	python3 -m unittest -v router/frankenrouter/*.py
+	. $(LINTVENVDIR)/bin/activate; python3 -m unittest -v router/frankenrouter/*.py
 
 clean:
 	$(info * LINT: Removing venv)
