@@ -2140,6 +2140,44 @@ the primary VATSIM connection (VATPRI).
                 html_page = index_page.format(**data)
                 return web.json_response(text=html_page, content_type='text/html')
 
+            @routes.get('/api/flightinfo')
+            async def handle_clightinfo_get(_):
+                self.logger.info("GOT /flightinfo API call")
+                try:
+                    acft_state = self.cache.get_value('Qs121')
+                    route = self.cache.get_value('Qs376')
+                    fltno = self.cache.get_value('Qs401')
+                except routercache.RouterCacheException:
+                    return web.json_response({
+                        'ok_data': False,
+                    })
+                if acft_state is None:
+                    return web.json_response({
+                        'ok_data': False,
+                    })
+
+                PiBaHeAlTas = acft_state.split(';')
+                pitch = math.degrees(float(PiBaHeAlTas[0]) / 1000000)
+                bank = math.degrees(float(PiBaHeAlTas[1]) / 1000000)
+                heading_true = math.degrees(float(PiBaHeAlTas[2]))
+                alt_true_ft = float(PiBaHeAlTas[3]) / 1000
+                tas = float(PiBaHeAlTas[4]) / 1000
+                lat = math.degrees(float(PiBaHeAlTas[5]))
+                lon = math.degrees(float(PiBaHeAlTas[6]))
+                self.logger.info("Returned OK info for /flightinfo API call")
+                return web.json_response({
+                    'ok_data': True,
+                    'latitude_degrees': lat,
+                    'longitude_degrees': lon,
+                    'altitude_feet': alt_true_ft,
+                    'heading_degrees': heading_true,
+                    'speed_knots': tas,
+                    'pitch_degrees': pitch,
+                    'bank_degrees': bank,
+                    'route': route,
+                    'flight': fltno,
+                })
+
             @routes.get('/api/stats')
             async def handle_stats_get(request):
                 params = request.rel_url.query
@@ -2462,7 +2500,14 @@ the primary VATSIM connection (VATPRI).
                 return web.Response(text="OK")
 
             # Run the API
-            app = web.Application()
+            @web.middleware
+            async def cors_middleware(request, handler):
+                response = await handler(request)
+                response.headers['Access-Control-Allow-Origin'] = '*'
+                return response
+
+            app = web.Application(middlewares=[cors_middleware])
+
             app.add_routes(routes)
             loop = asyncio.get_running_loop()
             handler = app.make_handler()
