@@ -156,9 +156,10 @@ class Script():  # pylint: disable=too-many-instance-attributes
         # If the tail hook is extended
         self.tailhook_extended = False
 
-        # MCDU heads for the Left and Right CDUs
+        # MCDU heads for the Left, Right and Center CDUs
         self.mcduL = None
         self.mcduR = None
+        self.mcduC = None
 
         # Pending repaint tasks, keyed by MCDU, to allow cancellation
         self.pending_paint_tasks = {}
@@ -604,6 +605,8 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 self.mcduL.unplug()
             if self.mcduR:
                 self.mcduR.unplug()
+            if self.mcduC:
+                self.mcduC.unplug()
             for task in self.pending_paint_tasks.values():
                 task.cancel()
             self.pending_paint_tasks.clear()
@@ -617,12 +620,17 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.psx_paused = False
             if self.mcduL is None:
                 self.mcduL = psx.MCDU("L", "L", 5, "<TANK", self.mcduEvent)
+            if self.mcduR is None:
                 self.mcduR = psx.MCDU("R", "L", 5, "<TANK", self.mcduEvent)
+            if self.mcduC is None:
+                self.mcduC = psx.MCDU("C", "L", 5, "<TANK", self.mcduEvent)
             self.mcduL.plugin_to(self.psx)
             self.mcduR.plugin_to(self.psx)
+            self.mcduC.plugin_to(self.psx)
             self.active_mcdus.clear()
             self.active_mcdus.append(self.mcduL)
             self.active_mcdus.append(self.mcduR)
+            self.active_mcdus.append(self.mcduC)
 
         try:
             self.logger.debug("Starting %s", inspect.currentframe().f_code.co_name)
