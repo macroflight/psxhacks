@@ -36,9 +36,9 @@ sc|                        |
 0 |      SUPERTANKER       |
 1 |                        |
 2 | ZFW          RETARDANT |
-3 | $zfw   $retardant_load
-4 |<OEW           DISARMED>|
-5 | $oew                   |
+3 | $zfw   $retardant_load |
+4 |               DISARMED>|
+5 |                        |
 6 |<DROPRATE     STARTLOAD>|
 7 | $droprate              |
 8 |<PLNLOAD      QUICKLOAD>|
@@ -50,6 +50,22 @@ sc|                        |
   +------------------------+
 sc|                        |
   +------------------------+
+
+Some likely numbers:
+
+Global 747-400 Supertanker, N744ST
+Up to 74000 l or water or retardant
+
+MTOW 396t
+MTOW ~300t on firefighting mission
+
+Normal drop height: 400-800 ft
+Normal drop speed: 145-155 kt
+
+Normal BCF OEW is 162-165t
+Add RDS weight: ~12t
+
+We will use an OEW of 175 t
 """
 
 import argparse
@@ -71,10 +87,13 @@ __MY_DESCRIPTION__ = 'Load and drop H2O'
 
 # Drop rates for the 1, 2 and 4 valves open modes (kg/s)
 # EMG rate is used for load jettison (can this be higher than 4 valve rate?)
+__DROPRATE_DEFAULT__ = "CL2"
 __DROPRATES__ = {
-    "1": 950,
-    "2": 2800,
-    "4": 5700,
+    "CL2": 1200,
+    "CL4": 2400,
+    "CL6": 3600,
+    "CL8": 4800,
+    "CL10": 6000,
     "EMG": 8000,
 }
 
@@ -96,10 +115,6 @@ class Script():  # pylint: disable=too-many-instance-attributes
         """Set up the class."""
         self.active_mcdus = []
 
-        # Allowed ZFW range
-        self.psx_zfw_min = 160000.0
-        self.psx_zfw_max = 290000.0
-
         self.args = None
         self.taskgroup = None
         self.tasks = set()
@@ -119,11 +134,8 @@ class Script():  # pylint: disable=too-many-instance-attributes
         # The target retardant load (when loading)
         self.retardant_load_target = None
 
-        # This is the ZFW excluding retardant
-        self.oew = 0.0
-
-        # The drop rate: "1", "2", or "4"
-        self.droprate = "4"
+        # The drop rate (key from __DROPRATES__, excluding "EMG")
+        self.droprate = __DROPRATE_DEFAULT__
 
         # Realistic load rate (kg / second)
         self.loadrate = 60.0
@@ -154,15 +166,19 @@ class Script():  # pylint: disable=too-many-instance-attributes
         # CDU scratchpad buffer
         self.scratchpad_text = ''
 
+        self.repaint_req_by = set()
+
     async def repaint_all_mcdus(self):
         """Trigger a repaint of all MCDUs, cancelling any pending paint tasks first."""
-        self.logger.debug("Refreshing all active MCDUs")
+        self.logger.debug("Refreshing all active MCDUs, requested by: %s",
+                          self.repaint_req_by)
         for mcdu in self.active_mcdus:
             existing = self.pending_paint_tasks.get(mcdu)
             if existing and not existing.done():
                 existing.cancel()
             self.pending_paint_tasks[mcdu] = asyncio.create_task(
                 self.paintTankerPage(mcdu))
+        self.repaint_req_by = set()
 
     def psx_send_and_set(self, psx_variable, new_psx_value):
         """Send variable to PSX and store in local db."""
@@ -181,26 +197,33 @@ class Script():  # pylint: disable=too-many-instance-attributes
         if command == "DROP":
             if self.system_armed:
                 self.dropping = True
+                self.repaint_req_by.add("drop-message")
                 asyncio.create_task(self.repaint_all_mcdus())
             else:
                 self.logger.info("System not armed, cannot drop")
         elif command == "STOP":
             self.dropping = False
+            self.repaint_req_by.add("stop-message")
+            asyncio.create_task(self.repaint_all_mcdus())
         elif command == "ARM":
             self.system_armed = True
+            self.repaint_req_by.add("arm-message")
             asyncio.create_task(self.repaint_all_mcdus())
         elif command == "DISARM":
             self.system_armed = False
             self.dropping = False
+            self.repaint_req_by.add("disarm-message")
             asyncio.create_task(self.repaint_all_mcdus())
         elif command == "JETTISON":
             self.dropping = True
             self.system_armed = True
             self.droprate = "EMG"
+            self.repaint_req_by.add("jettison-message")
             asyncio.create_task(self.repaint_all_mcdus())
         elif command == "EXTEND":
             if self.system_armed:
                 self.tailhook_extended = True
+                self.repaint_req_by.add("extend-message")
                 asyncio.create_task(self.repaint_all_mcdus())
             else:
                 self.logger.info("System not armed")
@@ -208,6 +231,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
             if self.tailhook_extended:
                 self.tailhook_extended = False
                 self.system_armed = False
+                self.repaint_req_by.add("retract-message")
                 asyncio.create_task(self.repaint_all_mcdus())
         else:
             self.logger.warning("Got unsupported addon message: %s", value)
@@ -215,6 +239,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
     def psx_zfw_change(self, _, value):
         """Call when the PSX ZFW changes."""
         self.psx_zfw = lb2kg(float(value))
+        self.repaint_req_by.add("zfw-change")
         asyncio.create_task(self.repaint_all_mcdus())
         self.logger.debug("PSX ZFW changed to %.1f t", self.psx_zfw / 1000)
 
@@ -223,8 +248,10 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self.loading = False
         self.loading_hook = False
         self.dropping = False
+        self.droprate = __DROPRATE_DEFAULT__
         self.system_armed = False
         self.tailhook_extended = False
+        self.repaint_req_by.add("system-reset")
         asyncio.create_task(self.repaint_all_mcdus())
 
     async def tank_control_coro(self):  # pylint: disable=too-many-branches,too-many-statements
@@ -238,94 +265,83 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.logger.debug("Starting %s", myname)
             last_ran = time.perf_counter()
             while True:
-                repaint = False
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(self.args.cdu_update_interval)
+
                 if not self.psx_connected or self.psx_paused:
                     self.logger.debug("PSX not yet connected or paused, %s sleeping",
                                       myname)
                     last_ran = time.perf_counter()
                     continue
 
+                # Wait for PSX connection to be established
                 if self.psx_zfw is None:
                     self.logger.debug("PSX ZFW not yet available, %s sleeping", myname)
                     last_ran = time.perf_counter()
                     continue
 
-                # We need to add a margin of 10kg here since
-                # self.psx_zfw will be converted to lb and then
-                # rounded to int before being read back.
-                if self.oew < self.psx_zfw_min - 10 or self.oew > self.psx_zfw + 10:
-                    self.logger.info(
-                        (
-                            "You must enter a valid OEW: now %.1f, (valid is %.1f...%.1f)" +
-                            ", system disabled"
-                        ),
-                        self.oew / 1000, self.psx_zfw_min / 1000, self.psx_zfw / 1000)
-                    self.reset_tank_system()
-                    continue
+                # Retardant load is always calculated as actual PSX ZFW - OEW
+                self.retardant_load = self.psx_zfw - self.args.oew
 
+                # We start by assuming that the ZFW will remain unchanged
+                new_zfw = self.psx_zfw
+
+                # If retardant load ends up greater than the tank
+                # capacity, adjust ZFW.
                 if self.retardant_load > self.args.retardant_load_max:
+                    new_zfw = self.args.oew + self.args.retardant_load_max
                     self.retardant_load = self.args.retardant_load_max
-                    repaint = True
+                    self.logger.info("Too much load, reducing ZFW to %.0f kg", new_zfw)
+                    self.repaint_req_by.add("load-too-high")
 
-                if self.retardant_load < self.args.retardant_load_min:
-                    self.retardant_load = self.args.retardant_load_min
-                    repaint = True
+                if self.retardant_load < 0:
+                    self.logger.info("Retardant load less than zero: %.1f", self.retardant_load)
+                    self.retardant_load = 0.0
+                    new_zfw = self.args.oew + 100
+                    self.repaint_req_by.add("load-less-than-zero")
 
                 elapsed = time.perf_counter() - last_ran
                 last_ran = time.perf_counter()
-                self.logger.debug("%s waking up after %.1f s, system is %s",
-                                  myname, elapsed,
-                                  "ARMED" if self.system_armed else "not armed"
-                                  )
-
-                # Ensure PSX ZFW updated
-                new_zfw = self.retardant_load + self.oew
-                new_zfw_lb = int(kg2lb(new_zfw))
-
-                if new_zfw_lb != int(kg2lb(self.psx_zfw)):
-                    self.logger.debug(
-                        "%f != %f: Sending new ZFW to PSX: %.1f kg == %d lbs",
-                        new_zfw, self.psx_zfw,
-                        new_zfw, new_zfw_lb)
-                    self.psx_send_and_set("TrueZfw", str(new_zfw_lb))
-                    repaint = True
 
                 if self.loading and self.loading_hook:
                     self.logger.info("Cannot use pump and HOOK at the same time, stopping pump")
                     self.loading = False
-                    repaint = True
+                    self.repaint_req_by.add("pump-and-hook-err")
 
                 if self.loading and self.dropping:
                     self.logger.info("Cannot load and drop at the same time, resetting system")
-                    self.loading = False
-                    self.dropping = False
-                    self.system_armed = False
-                    repaint = True
+                    self.reset_tank_system()
 
                 # Handle retardant loading
                 if self.loading:
-                    self.logger.info("Retardant load in progress, rate %.0f kg/s", self.loadrate)
+                    self.logger.info(
+                        "Retardant load in progress, rate %.0f kg/s, load %.0f kg",
+                        self.loadrate, self.retardant_load)
                     self.retardant_load += elapsed * self.loadrate
                     if self.retardant_load >= self.retardant_load_target:
                         self.retardant_load = self.retardant_load_target
-                        self.loading = False
+                        self.reset_tank_system()
                         self.logger.info("Retardant load target reached, stopping load")
                     elif self.retardant_load >= self.args.retardant_load_max:
                         self.retardant_load = self.args.retardant_load_max
-                        self.loading = False
+                        self.reset_tank_system()
                         self.logger.info("Retardant tanks full, stopping load")
-                    repaint = True
+                    self.repaint_req_by.add("loading")
+                    new_zfw = self.args.oew + self.retardant_load
 
+                #
                 # Handle retardant dropping
+                #
+
+                # Cannot drop if system is not armed
                 if self.dropping:
                     if not self.system_armed:
                         self.logger.info("System not armed, cannot drop")
                         self.dropping = False
-                        repaint = True
+                        self.repaint_req_by.add("drop-not-armed")
 
                 if self.dropping:
-                    # Play drop sound via PSXSounds
+                    self.repaint_req_by.add("dropping")
+                    # Play drop sound via PSXSounds every N seconds
                     time_since_last_played = time.perf_counter() - self.last_drop_sound_played
                     if time_since_last_played > 6.0:
                         # Sound is ~5.5 seconds long
@@ -336,15 +352,16 @@ class Script():  # pylint: disable=too-many-instance-attributes
                     self.logger.info(
                         "Retardant drop in progress, drop rate %.0f kg/s, remaining load %.0f kg",
                         __DROPRATES__[self.droprate], self.retardant_load)
-                    if self.retardant_load <= self.args.retardant_load_min:
-                        self.retardant_load = self.args.retardant_load_min
-                        self.dropping = False
-                        self.system_armed = False
+                    if self.retardant_load < 0:
+                        self.retardant_load = 0
+                        self.reset_tank_system()
                         self.logger.info("Retardant load empty, stopping drop")
-                    repaint = True
 
-                # If the TAILHOOK is extended and we are at the
-                # correct height and airspeed, load some more redardant
+                    new_zfw = self.args.oew + self.retardant_load
+
+                #
+                # TAILHOOK MODE
+                #
                 if self.tailhook_extended:
                     raw_height = self.psx.get("AcftHeight")
                     raw_pibahealtas = self.psx.get("PiBaHeAlTas")
@@ -355,62 +372,64 @@ class Script():  # pylint: disable=too-many-instance-attributes
                         height = float(raw_height)
                         tas = float(raw_pibahealtas.split(";")[4]) / 1000
 
-                        # Inject random speed deviation when HOOK is in the water
-                        # defined as upper limit of loading height plus 10 ft
-                        if height < self.args.hook_max_height + 10:
-                            psx_wxburst = 300 + random.randint(
-                                0, self.args.hook_speed_fluctuations)
-                            if random.randint(-100, 100) > 0:
-                                psx_wxburst = -psx_wxburst
-                            self.logger.info("HOOK in the water, injecting WxBurst=%d", psx_wxburst)
-                            self.psx_send_and_set("WxBurst", psx_wxburst)
-
                         self.logger.info(
                             "HOOK extended - height is %.0f ft TAS is %.0f kt", height, tas)
                         hook_use_possible = True
-                        if tas < self.args.hook_min_speed:
-                            self.logger.info("Too slow for HOOK")
-                            hook_use_possible = False
-                        if tas > self.args.hook_max_speed:
-                            self.logger.info("Too fast for HOOK")
-                            hook_use_possible = False
                         if height < self.args.hook_min_height:
-                            self.logger.info("TOO LOW, HOOK retracting!")
+                            self.logger.info("TOO LOW, HOOK retracting! (%.0f < %.0f)",
+                                             height, self.args.hook_min_height)
                             hook_use_possible = False
-                            self.tailhook_extended = False
-                            self.system_armed = False
-                            self.loading_hook = False
-                            repaint = True
-                        if height > self.args.hook_max_height:
-                            self.logger.info("Too high for HOOK")
-                            hook_use_possible = False
+                            self.reset_tank_system()
+                        else:
+                            if tas < self.args.hook_min_speed:
+                                self.logger.info("Too slow for HOOK: %.0f < %.0f",
+                                                 tas, self.args.hook_min_speed)
+                                hook_use_possible = False
+                            if tas > self.args.hook_max_speed:
+                                self.logger.info("Too fast for HOOK: %.0f > %.0f",
+                                                 tas, self.args.hook_max_speed)
+                                hook_use_possible = False
+                            if height > self.args.hook_max_height:
+                                self.logger.info("Too high for HOOK! (%.0f > %.0f)",
+                                                 height, self.args.hook_max_height)
+                                hook_use_possible = False
                         if hook_use_possible:
-                            self.logger.info("HOOK loading in progress")
+                            # Inject random speed deviation when HOOK is in the water
+                            if height < self.args.hook_max_height + 10:
+                                psx_wxburst = 300 + random.randint(
+                                    0, self.args.hook_speed_fluctuations)
+                                if random.randint(-100, 100) > 0:
+                                    psx_wxburst = -psx_wxburst
+                                self.logger.info("HOOK in the water, injecting WxBurst=%d",
+                                                 psx_wxburst)
+                                self.psx_send_and_set("WxBurst", psx_wxburst)
+                            self.logger.info("HOOK is scooping water!")
                             self.loading_hook = True
-                            self.retardant_load += elapsed * self.loadrate_hook
+                            # loading rate is random due to hydrodynamic mumbo-jumbo
+                            self.retardant_load += (
+                                elapsed * self.loadrate_hook * random.uniform(0.2, 1.8))
                             if self.retardant_load >= self.retardant_load_target:
                                 self.retardant_load = self.retardant_load_target
-                                self.tailhook_extended = False
-                                self.system_armed = False
-                                self.loading_hook = False
+                                self.reset_tank_system()
                                 self.logger.info(
                                     "Retardant target reached, retracting and disarming")
                             elif self.retardant_load >= self.args.retardant_load_max:
                                 self.retardant_load = self.args.retardant_load_max
-                                self.tailhook_extended = False
-                                self.system_armed = False
-                                self.loading_hook = False
+                                self.reset_tank_system()
                                 self.logger.info(
                                     "Retardant tanks filled, retracting and disarming")
-                            repaint = True
+                            new_zfw = self.args.oew + self.retardant_load
+                            self.repaint_req_by.add("scooping")
                         else:
                             self.loading_hook = False
                 else:
                     self.loading_hook = False
+                updated = self.update_psx_zfw(new_zfw)
+                if updated:
+                    self.repaint_req_by.add("zfw-updated")
 
                 # If we changed anything relevant, repaint MCDU page
-                if repaint:
-                    self.logger.debug("Adjusted some data, repainting")
+                if len(self.repaint_req_by) > 0:
                     asyncio.create_task(self.repaint_all_mcdus())
 
         except Exception as exc:  # pylint:disable=broad-exception-caught
@@ -419,46 +438,44 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 exc, myname)
             self.logger.critical(traceback.format_exc())
 
+    def update_psx_zfw(self, new_zfw):
+        """If the ZFW changed, push the new one to PSX."""
+        if self.psx_zfw is None:
+            return False
+        new_zfw_lb = int(kg2lb(new_zfw))
+        if new_zfw_lb != int(kg2lb(self.psx_zfw)):
+            self.logger.info(
+                "Updating PSX ZFW from %.1f kg to approx %.1f kg == %d lbs",
+                self.psx_zfw, new_zfw, new_zfw_lb)
+            self.psx_send_and_set("TrueZfw", str(new_zfw_lb))
+            return True
+        return False
+
     def mcduEvent(self, mcdu, event_type, value=None):  # pylint: disable=too-many-branches,too-many-statements
         """Call made by an MCDU when it has something to report or request."""
         self.logger.debug("MCDU event from %s: %s=%s", mcdu.location, event_type, value)
         if event_type in ["logon", "resume"]:
             asyncio.create_task(self.repaint_all_mcdus())
         elif event_type == "keypress":
-            repaint = False
+            self.repaint_req_by = set()
             if value == "CLR":
                 self.scratchpad_text = ''
                 mcdu.paint(13, 0, "large", "white", " " * 24)
-            elif value == "2L":  # OEW: accept scratchpad value (tonnes)
-                if self.scratchpad_text:
-                    try:
-                        self.oew = 1000 * float(self.scratchpad_text)
-                        # Assume any ZFW weight above OEW is retardant)
-                        self.retardant_load = max(0, self.psx_zfw - self.oew)
-                        self.scratchpad_text = ''
-                        mcdu.paint(13, 0, "large", "white", " " * 24)
-                        repaint = True
-                    except ValueError:
-                        pass
-                else:
-                    # Default to current ZFW
-                    self.oew = min(self.args.default_oew, self.psx_zfw)
-                    self.retardant_load = max(0, self.psx_zfw - self.oew)
-                    repaint = True
             elif value == "2R":  # DISARMED/ARMED toggle
                 if self.loading:
                     self.logger.info("Cannot arm system while loading")
                 else:
                     self.system_armed = not self.system_armed
                     self.logger.info("ARM/DISARM pressed, state is now %s", self.system_armed)
-                repaint = True
-            elif value == "3L":  # DROPRATE: cycle through valve counts
-                keys = list(__DROPRATES__.keys())
-                self.droprate = keys[(keys.index(self.droprate) + 1) % len(keys)]
-                repaint = True
+                self.repaint_req_by.add("arm-disarm-press")
+            elif value == "3L":  # DROPRATE: cycle through valve counts (EMG excluded)
+                keys = [k for k in __DROPRATES__ if k != "EMG"]
+                current = self.droprate if self.droprate in keys else __DROPRATE_DEFAULT__
+                self.droprate = keys[(keys.index(current) + 1) % len(keys)]
+                self.repaint_req_by.add("droprate-press")
             elif value == "3R":  # STARTLOAD
                 self.loading = True
-                repaint = True
+                self.repaint_req_by.add("startload-press")
             elif value == "4L":  # PLNLOAD: set retardant load target from scratchpad (tonnes → kg)
                 if self.scratchpad_text:
                     try:
@@ -466,16 +483,16 @@ class Script():  # pylint: disable=too-many-instance-attributes
                         self.retardant_load_target = min(
                             self.retardant_load_target, self.args.retardant_load_max)
                         self.retardant_load_target = max(
-                            self.retardant_load_target, self.args.retardant_load_min)
+                            self.retardant_load_target, 0)
                         self.scratchpad_text = ''
                         mcdu.paint(13, 0, "large", "white", " " * 24)
-                        repaint = True
+                        self.repaint_req_by.add("plnload-press")
                     except ValueError:
                         pass
                 else:
                     # Default to max load
                     self.retardant_load_target = self.args.retardant_load_max
-                    repaint = True
+                    self.repaint_req_by.add("plnload-press-max")
             elif value == "6R":  # DROP/STOP toggle
                 if self.dropping:
                     self.dropping = False
@@ -484,12 +501,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
                         self.dropping = True
                     else:
                         self.logger.info("System not armed")
-                repaint = True
+                self.repaint_req_by.add("drop-stop-toggle-press")
             elif value == "6L":  # JETTISON: emergency full-rate drop
                 self.dropping = True
                 self.system_armed = True
                 self.droprate = "EMG"
-                repaint = True
+                self.repaint_req_by.add("jettison-press")
             elif value == "5R":  # EXTEND/RETRACT tailhook toggle
                 if self.tailhook_extended:
                     self.tailhook_extended = False
@@ -499,16 +516,19 @@ class Script():  # pylint: disable=too-many-instance-attributes
                         self.tailhook_extended = True
                     else:
                         self.logger.info("System not armed")
-                repaint = True
+                self.repaint_req_by.add("hook-extend-retract-press")
             elif value == "4R":  # QUICKLOAD: instant fill to target
                 self.loading = False
-                self.retardant_load = min(self.retardant_load_target, self.args.retardant_load_max)
-                repaint = True
+                self.retardant_load = min(
+                    self.retardant_load_target,
+                    self.args.retardant_load_max)
+                self.update_psx_zfw(self.args.oew + self.retardant_load)
+                self.repaint_req_by.add("quickload-press")
             elif value in ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.']:
                 if len(self.scratchpad_text) < 10:
                     self.scratchpad_text += value
                     mcdu.paint(13, 0, "large", "magenta", self.scratchpad_text)
-            if repaint:
+            if len(self.repaint_req_by) > 0:
                 asyncio.create_task(self.repaint_all_mcdus())
         else:
             self.logger.debug(
@@ -526,12 +546,17 @@ class Script():  # pylint: disable=too-many-instance-attributes
         L = "large"
         S = "small"
 
-        ret_t = self.retardant_load / 1000.0
+        try:
+            ret_t = self.retardant_load / 1000.0
+        except TypeError:
+            ret_t = 0.0
+
         arm_label = "     ARM>" if not self.system_armed else "  DISARM>"
         mcdu.clear()
         #                          123456789012345678901234
         if self.dropping:
-            mcdu.paint(0, 0, L, R, "       DROPPING         ")
+            dropping_label = "EMERG" if self.droprate == "EMG" else self.droprate
+            mcdu.paint(0, 0, L, R, f"     DROPPING {dropping_label:5s}     ")
         elif self.loading_hook:
             mcdu.paint(0, 0, L, R, " I IDENTIFY AS A CL-415 ")
         elif self.tailhook_extended:
@@ -546,10 +571,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
         mcdu.paint(2, 0, S, C, " ZFW           RETARDANT")
         zfw_str = f"{self.psx_zfw / 1000:6.1f}" if self.psx_zfw is not None else "   ---"
         mcdu.paint(3, 0, L, C, f" {zfw_str}          {ret_t:6.1f} ")
-        mcdu.paint(4, 0, L, C, f"<OEW           {arm_label}")
-        mcdu.paint(5, 0, S, C, f" {self.oew / 1000:6.1f}                ")
+        mcdu.paint(4, 0, L, C, f"               {arm_label}")
         mcdu.paint(6, 0, L, C, "<DROPRATE     STARTLOAD>")
-        droprate_label = "EMERG" if self.droprate == "EMG" else f"{self.droprate} VALVE(S)"
+        droprate_label = "EMERG" if self.droprate == "EMG" else f"{self.droprate}"
         mcdu.paint(7, 0, S, C, f" {droprate_label}")
         mcdu.paint(8, 0, L, C, "<PLNLOAD      QUICKLOAD>")
         mcdu.paint(9, 0, S, C, f" {self.retardant_load_target / 1000:.1f} ")
@@ -700,12 +724,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
         )
         parser.add_argument(
             '--hook-min-height',
-            type=float, action='store', default=60,
+            type=float, action='store', default=30,
             help="The HOOK will not load water if your height is less than this (ft)",
         )
         parser.add_argument(
             '--hook-max-height',
-            type=float, action='store', default=200,
+            type=float, action='store', default=120,
             help="The HOOK will not load water if your height is greater than this (ft)",
         )
         parser.add_argument(
@@ -729,14 +753,14 @@ class Script():  # pylint: disable=too-many-instance-attributes
             help="How much retardant we can carry (kg)",
         )
         parser.add_argument(
-            '--retardant-load-min',
-            type=float, action='store', default=0.0,
-            help="How little retardant we can carry (kg)",
+            '--cdu-update-interval',
+            type=float, action='store', default=1.0,
+            help="How often we update the ZFW and CDU display"
         )
         parser.add_argument(
-            '--default-oew',
-            type=float, action='store', default=180000.0,
-            help="Default OEW (kg)",
+            '--oew',
+            type=float, action='store', default=175000.0,
+            help="OEW (kg)",
         )
         parser.add_argument(
             '--debug',
@@ -745,11 +769,8 @@ class Script():  # pylint: disable=too-many-instance-attributes
         )
         self.args = parser.parse_args()
 
-        # Initialize some default state
-        self.retardant_load = self.args.retardant_load_min
-
         # The target retardant load (when loading)
-        self.retardant_load_target = 0.5 * self.args.retardant_load_max
+        self.retardant_load_target = self.args.retardant_load_max
 
     async def run(self):
         """Start everything."""
