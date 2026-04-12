@@ -1,4 +1,4 @@
-# pylint: disable=invalid-name
+# pylint: disable=invalid-name,too-many-lines
 """A script to manage the water drop system on a 747 SuperTanker.
 
 Usage:
@@ -87,6 +87,8 @@ __MY_DESCRIPTION__ = 'Load and drop H2O'
 
 # Drop rates for the 1, 2 and 4 valves open modes (kg/s)
 # EMG rate is used for load jettison (can this be higher than 4 valve rate?)
+__TURB_INT_STEPS__ = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 99]
+
 __DROPRATE_DEFAULT__ = "CL2"
 __DROPRATES__ = {
     "CL2": 1200,
@@ -169,6 +171,16 @@ class Script():  # pylint: disable=too-many-instance-attributes
 
         self.repaint_req_by = set()
 
+        self.mcdu_page = "tanker"
+        self.turb_enable = False
+        self.turb_int_spd = 0
+        self.turb_int_yaw = 0
+        self.turb_int_bank = 0
+        self.turb_int_sink = 0
+        self.turb_int_gust = 0
+        self.turbulence_events_per_minute = 5
+        self.turbulence_max_alt = 0
+
     async def repaint_all_mcdus(self):
         """Trigger a repaint of all MCDUs, cancelling any pending paint tasks first."""
         self.logger.debug("Refreshing all active MCDUs, requested by: %s",
@@ -177,8 +189,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
             existing = self.pending_paint_tasks.get(mcdu)
             if existing and not existing.done():
                 existing.cancel()
-            self.pending_paint_tasks[mcdu] = asyncio.create_task(
-                self.paintTankerPage(mcdu))
+            if self.mcdu_page == "turbulence":
+                self.pending_paint_tasks[mcdu] = asyncio.create_task(
+                    self.paintTurbulencePage(mcdu))
+            else:
+                self.pending_paint_tasks[mcdu] = asyncio.create_task(
+                    self.paintTankerPage(mcdu))
         self.repaint_req_by = set()
 
     def psx_send_and_set(self, psx_variable, new_psx_value):
@@ -439,6 +455,52 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 exc, myname)
             self.logger.critical(traceback.format_exc())
 
+    async def turbulence_coro(self):
+        """Apply turbulence effects based on self.turb_* settings."""
+        myname = inspect.currentframe().f_code.co_name
+        try:
+            self.logger.debug("Starting %s", myname)
+            while True:
+                await asyncio.sleep(0.2)
+
+                if not self.psx_connected or self.psx_paused:
+                    self.logger.debug("PSX not yet connected or paused, %s sleeping",
+                                      myname)
+                    continue
+
+                if self.turb_enable:
+                    if self.turbulence_max_alt > 0:
+                        raw_height = self.psx.get("AcftHeight")
+                        if raw_height is not None and float(raw_height) > self.turbulence_max_alt:
+                            continue
+
+                    # 300 cycles/minute at 200 ms; convert events/min to probability/cycle
+                    inject_prob = self.turbulence_events_per_minute / 300.0
+                    candidates = [
+                        (intensity, base, label)
+                        for intensity, base, label in (
+                            (self.turb_int_spd, 300, "SPD"),
+                            (self.turb_int_gust, 400, "GUST"),
+                            (self.turb_int_yaw, 200, "YAW"),
+                            (self.turb_int_bank, 100, "BANK"),
+                            (self.turb_int_sink, 0, "SINK"),
+                        )
+                        if intensity > 0
+                    ]
+                    if candidates and random.random() < inject_prob:
+                        intensity, base, label = random.choice(candidates)
+                        changesize = random.randint(0, intensity)
+                        direction = random.choice([-1, 1])
+                        psx_value = direction * (base + changesize)
+                        self.logger.info("TURB %s: injecting WxBurst=%d", label, psx_value)
+                        self.psx_send_and_set("WxBurst", psx_value)
+
+        except Exception as exc:  # pylint:disable=broad-exception-caught
+            self.logger.critical(
+                "Unhandled exception %s in %s, shutting down",
+                exc, myname)
+            self.logger.critical(traceback.format_exc())
+
     def update_psx_zfw(self, new_zfw):
         """If the ZFW changed, push the new one to PSX."""
         if self.psx_zfw is None:
@@ -456,12 +518,138 @@ class Script():  # pylint: disable=too-many-instance-attributes
         """Call made by an MCDU when it has something to report or request."""
         self.logger.debug("MCDU event from %s: %s=%s", mcdu.location, event_type, value)
         if event_type in ["logon", "resume"]:
+            self.mcdu_page = "tanker"
             asyncio.create_task(self.repaint_all_mcdus())
-        elif event_type == "keypress":
+        elif event_type == "keypress":  # pylint: disable=too-many-nested-blocks
             self.repaint_req_by = set()
             if value == "CLR":
                 self.scratchpad_text = ''
                 mcdu.paint(13, 0, "large", "white", " " * 24)
+            elif value in ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']:
+                if len(self.scratchpad_text) < 10:
+                    self.scratchpad_text += value
+                    mcdu.paint(13, 0, "large", "magenta", self.scratchpad_text)
+            elif self.mcdu_page == "turbulence":
+                if value == "1L":  # ENABLE/DISABLE turbulence effects
+                    self.turb_enable = not self.turb_enable
+                    self.repaint_req_by.add("turb-enable-toggle")
+                elif value == "2L":  # SPD intensity
+                    if self.scratchpad_text:
+                        try:
+                            v = int(self.scratchpad_text)
+                            if 0 <= v <= 99:
+                                self.turb_int_spd = v
+                                self.scratchpad_text = ''
+                                mcdu.paint(13, 0, "large", "white", " " * 24)
+                        except ValueError:
+                            pass
+                    else:
+                        self.turb_int_spd = next(
+                            (s for s in __TURB_INT_STEPS__ if s > self.turb_int_spd),
+                            __TURB_INT_STEPS__[0])
+                    self.repaint_req_by.add("turb-spd-press")
+                elif value == "2R":  # YAW intensity
+                    if self.scratchpad_text:
+                        try:
+                            v = int(self.scratchpad_text)
+                            if 0 <= v <= 99:
+                                self.turb_int_yaw = v
+                                self.scratchpad_text = ''
+                                mcdu.paint(13, 0, "large", "white", " " * 24)
+                        except ValueError:
+                            pass
+                    else:
+                        self.turb_int_yaw = next(
+                            (s for s in __TURB_INT_STEPS__ if s > self.turb_int_yaw),
+                            __TURB_INT_STEPS__[0])
+                    self.repaint_req_by.add("turb-yaw-press")
+                elif value == "3L":  # BANK intensity
+                    if self.scratchpad_text:
+                        try:
+                            v = int(self.scratchpad_text)
+                            if 0 <= v <= 99:
+                                self.turb_int_bank = v
+                                self.scratchpad_text = ''
+                                mcdu.paint(13, 0, "large", "white", " " * 24)
+                        except ValueError:
+                            pass
+                    else:
+                        self.turb_int_bank = next(
+                            (s for s in __TURB_INT_STEPS__ if s > self.turb_int_bank),
+                            __TURB_INT_STEPS__[0])
+                    self.repaint_req_by.add("turb-bank-press")
+                elif value == "3R":  # SINK intensity
+                    if self.scratchpad_text:
+                        try:
+                            v = int(self.scratchpad_text)
+                            if 0 <= v <= 99:
+                                self.turb_int_sink = v
+                                self.scratchpad_text = ''
+                                mcdu.paint(13, 0, "large", "white", " " * 24)
+                        except ValueError:
+                            pass
+                    else:
+                        self.turb_int_sink = next(
+                            (s for s in __TURB_INT_STEPS__ if s > self.turb_int_sink),
+                            __TURB_INT_STEPS__[0])
+                    self.repaint_req_by.add("turb-sink-press")
+                elif value == "4L":  # GUST intensity
+                    if self.scratchpad_text:
+                        try:
+                            v = int(self.scratchpad_text)
+                            if 0 <= v <= 99:
+                                self.turb_int_gust = v
+                                self.scratchpad_text = ''
+                                mcdu.paint(13, 0, "large", "white", " " * 24)
+                        except ValueError:
+                            pass
+                    else:
+                        self.turb_int_gust = next(
+                            (s for s in __TURB_INT_STEPS__ if s > self.turb_int_gust),
+                            __TURB_INT_STEPS__[0])
+                    self.repaint_req_by.add("turb-gust-press")
+                elif value == "DEL":
+                    self.turbulence_max_alt = 0
+                    self.scratchpad_text = ''
+                    mcdu.paint(13, 0, "large", "white", " " * 24)
+                    self.repaint_req_by.add("turb-maxalt-del")
+                elif value == "5L":  # MAXALT: set max altitude for turbulence injection
+                    if self.scratchpad_text:
+                        try:
+                            v = int(self.scratchpad_text)
+                            if v >= 0:
+                                self.turbulence_max_alt = v
+                                self.scratchpad_text = ''
+                                mcdu.paint(13, 0, "large", "white", " " * 24)
+                        except ValueError:
+                            pass
+                    else:
+                        self.turbulence_max_alt = 0
+                    self.repaint_req_by.add("turb-maxalt-press")
+                elif value == "5R":  # RATE: set events per minute from scratchpad
+                    if self.scratchpad_text:
+                        try:
+                            v = int(self.scratchpad_text)
+                            if v > 0:
+                                self.turbulence_events_per_minute = min(v, 150)
+                                self.scratchpad_text = ''
+                                mcdu.paint(13, 0, "large", "white", " " * 24)
+                        except ValueError:
+                            pass
+                    self.repaint_req_by.add("turb-rate-press")
+                elif value == "6L":  # BACK to tanker page
+                    self.mcdu_page = "tanker"
+                    self.repaint_req_by.add("turb-back-press")
+                elif value == "6R":  # RESET all turbulence settings
+                    self.turb_enable = False
+                    self.turb_int_spd = 0
+                    self.turb_int_yaw = 0
+                    self.turb_int_bank = 0
+                    self.turb_int_sink = 0
+                    self.turb_int_gust = 0
+                    self.turbulence_events_per_minute = 5
+                    self.turbulence_max_alt = 0
+                    self.repaint_req_by.add("turb-reset-press")
             elif value == "2R":  # DISARMED/ARMED toggle
                 if self.loading:
                     self.logger.info("Cannot arm system while loading")
@@ -508,6 +696,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 self.system_armed = True
                 self.droprate = "EMG"
                 self.repaint_req_by.add("jettison-press")
+            elif value == "5L":  # Navigate to turbulence page
+                self.mcdu_page = "turbulence"
+                self.repaint_req_by.add("turb-nav-press")
             elif value == "5R":  # EXTEND/RETRACT tailhook toggle
                 if self.tailhook_extended:
                     self.tailhook_extended = False
@@ -525,7 +716,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
                     self.args.retardant_load_max)
                 self.update_psx_zfw(self.args.oew + self.retardant_load)
                 self.repaint_req_by.add("quickload-press")
-            elif value in ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.']:
+            elif value == '.':
                 if len(self.scratchpad_text) < 10:
                     self.scratchpad_text += value
                     mcdu.paint(13, 0, "large", "magenta", self.scratchpad_text)
@@ -579,7 +770,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         mcdu.paint(8, 0, L, C, "<PLNLOAD      QUICKLOAD>")
         mcdu.paint(9, 0, S, C, f" {self.retardant_load_target / 1000:.1f} ")
         hook_label = "HOOK RETRACT>" if self.tailhook_extended else " HOOK EXTEND>"
-        mcdu.paint(10, 0, L, C, f"           {hook_label}")
+        mcdu.paint(10, 0, L, C, f"<TURB      {hook_label}")
         if self.system_armed:
             drop_label = "          STOP>" if self.dropping else "          DROP>"
         else:
@@ -589,7 +780,36 @@ class Script():  # pylint: disable=too-many-instance-attributes
         if self.scratchpad_text:
             mcdu.paint(13, 0, "large", "magenta", self.scratchpad_text)
 
-    async def get_psx_connection_coro(self):
+    async def paintTurbulencePage(self, mcdu):
+        """Paint the turbulence intensity settings page on the MCDU."""
+        await asyncio.sleep(0.5)
+
+        A = "amber"
+        C = "cyan"
+        L = "large"
+        S = "small"
+
+        enable_label = "<DISABLE" if self.turb_enable else "<ENABLE"
+        title = "        BOUNCING        " if self.turb_enable else "      TURBULENCE        "
+
+        mcdu.clear()
+        #                          123456789012345678901234
+        mcdu.paint(0, 0, S, A, title)
+        mcdu.paint(2, 0, L, C, f"{enable_label:<24}")
+        mcdu.paint(4, 0, L, C, "<SPD                YAW>")
+        mcdu.paint(5, 0, S, C, f" {self.turb_int_spd:<21}{self.turb_int_yaw:>2}")
+        mcdu.paint(6, 0, L, C, "<BANK              SINK>")
+        mcdu.paint(7, 0, S, C, f" {self.turb_int_bank:<21}{self.turb_int_sink:>2}")
+        mcdu.paint(8, 0, L, C, "<GUST                   ")
+        mcdu.paint(9, 0, S, C, f" {self.turb_int_gust}")
+        mcdu.paint(10, 0, L, C, "<MAXALT            RATE>")
+        maxalt_str = "DISABLED" if self.turbulence_max_alt == 0 else str(self.turbulence_max_alt)
+        mcdu.paint(11, 0, S, C, f" {maxalt_str:<20}{self.turbulence_events_per_minute:>3}")
+        mcdu.paint(12, 0, L, C, "<BACK             RESET>")
+        if self.scratchpad_text:
+            mcdu.paint(13, 0, "large", "magenta", self.scratchpad_text)
+
+    async def get_psx_connection_coro(self):  # pylint: disable=too-many-statements
         """Maintain a PSX connection."""
         def connected(*_):
             """Run when connected to PSX."""
@@ -702,6 +922,14 @@ class Script():  # pylint: disable=too-many-instance-attributes
                     self.logger.info("Starting %s...", name)
                     task = self.taskgroup.create_task(
                         self.tank_control_coro(), name=name)
+                    self.tasks.add(task)
+                    self.logger.info("Started %s.", name)
+
+                name = "Turbulence"
+                if name not in running:
+                    self.logger.info("Starting %s...", name)
+                    task = self.taskgroup.create_task(
+                        self.turbulence_coro(), name=name)
                     self.tasks.add(task)
                     self.logger.info("Started %s.", name)
 
