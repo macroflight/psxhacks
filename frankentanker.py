@@ -767,7 +767,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         )
         parser.add_argument(
             '--oew',
-            type=float, action='store', default=175000.0,
+            type=float, action='store', default=191420.0,
             help="OEW (kg)",
         )
         parser.add_argument(
