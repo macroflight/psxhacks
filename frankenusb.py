@@ -108,7 +108,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             description=__MY_DESCRIPTION__,
             epilog='Good luck!')
         parser.add_argument('--config-file',
-                            action='store', default="frankenusb-frankensim.conf")
+                            action='store', default="frankenusb.conf")
         parser.add_argument('--debug',
                             action='store_true')
         parser.add_argument('--quiet',
@@ -144,6 +144,15 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             self.logger.setLevel(logging.CRITICAL)
         elif self.args.debug:
             self.logger.setLevel(logging.DEBUG)
+
+        # Backwards compatibility for the default config file name
+        # (was: frankenusb-frankensim.conf)
+        if not os.path.exists(self.args.config_file):
+            if os.path.exists("frankenusb-frankensim.conf"):
+                self.logger.info(
+                    "frankenusb.conf not found, but frankenusb-frankensim.conf exists" +
+                    ", so I will use that")
+                self.args.config_file = "frankenusb-frankensim.conf"
 
     def load_module_from_file(self, module_name, path):
         """Load config file."""
