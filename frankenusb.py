@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import importlib.util
 import logging
+import os
 import time
 from collections import defaultdict
 import pygame  # pylint: disable=import-error
@@ -1066,14 +1067,14 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                     self.psx_send_and_set(button_config['psx variable'], new_value)
                 else:
                     self.psx_send_and_set(button_config['psx variable'], button_config['value'])
-            elif button_config['button type'] == "REVERSE_LEVER":
-                if direction == 'down':
-                    # mode, joystick_name, event, config, reverse
-                    await self.handle_throttle_reverse_button(
-                        'button', joystick_name, event, button_config, False)
-                else:
-                    await self.handle_throttle_reverse_button(
-                        'button', joystick_name, event, button_config, True)
+            elif button_config['button type'] == "REVERSE_LEVER_UP":
+                # Enable reversers
+                await self.handle_throttle_reverse_button(
+                    'button', joystick_name, event, button_config, True)
+            elif button_config['button type'] == "REVERSE_LEVER_DOWN":
+                # Disable reversers
+                await self.handle_throttle_reverse_button(
+                    'button', joystick_name, event, button_config, False)
             elif button_config['button type'] == "REVERSE_TOGGLE":
                 if direction == 'down':
                     await self.handle_throttle_reverse_button(
