@@ -2627,13 +2627,13 @@ the primary VATSIM connection (VATPRI).
 Configuration file {self.args.config_file} not found.
 If you want to use a config file, press Control-C now and create one.
 
-To run the router in "basic client mode", answer the questions below.
+The router will now start in Basic Mode without a config file.
 
-HOWTO for temporarily converting your PSX sim to a shared cockpit
-slave sim:
+Quick HOWTO for temporarily converting your PSX sim to a shared
+cockpit slave sim:
 
 1: Open the Instructor window for your PSX main server
-2: On the Network tab, click Stop
+2: Under Network > Main, click Stop
 3: Under Preferences > Basic, make sure "This client connects to:" is 127.0.0.1
 4: Under Preferences > Basic, make sure "On Port:" is 10747
 5: Answer the questions below
@@ -2656,14 +2656,6 @@ shared cockpit master sim.
 Password: leave blank if the master sim does not use a
 password. Otherwise use the password given to you by the owner of the
 shared cockpit master sim.
-
-The "elevation filter" (prevents your MSFS from affecting the shared
-sim's elevation can be toggled by opening
-http://localhost:8747/filter/elevation in a web browser.
-
-The "traffic filter" (prevents your vPilot from sending traffic/TCAS
-data to the shared sim can be toggled by opening
-http://localhost:8747/filter/traffic in a web browser.
 """)
 
             # Default to listen on 10747 for "dumb client mode" and connect to 10748
