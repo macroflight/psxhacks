@@ -1503,15 +1503,6 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         """Log the value of a PSX variable."""
         self.logger.info("PSX variable %s is now %s", key, value)
 
-    async def shutdown(self, key, _):
-        """Shutdown cleanly."""
-        if key != "exit":
-            self.logger.critical("Shutdown called but not due to PSX exit command")
-            return
-        self.psx.send("exit")
-        await asyncio.sleep(1.0)
-        raise SystemExit("Got PSX exit message, shutting down")
-
     async def setup_psx_connection(self):
         """Set up the PSX connection."""
         def setup():
@@ -1529,6 +1520,15 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         def connected(key, value):
             self.logger.info("Connected to PSX %s %s as #%s", key, value, self.psx.get('id'))
             self.psx_connected = True
+
+        def shutdown(self, key, _):
+            """Shutdown cleanly."""
+            if key not in ["exit", "pleaseBeSoKindAndQuit"]:
+                self.logger.critical("Shutdown called with strange key: %s", key)
+                return
+            self.psx.send("exit")
+            time.sleep(1.0)
+            raise SystemExit("Got PSX exit message, shutting down")
 
         self.psx = psx.Client()
         self.psx.logger = self.logger.debug  # .info to see traffic
@@ -1550,7 +1550,8 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.psx.subscribe("Afds", self.print_psx_variable)
 
         # So we can shut down cleanly when asked to
-        self.psx.subscribe("exit", self.shutdown)
+        self.psx.subscribe("pleaseBeSoKindAndQuit", shutdown)
+        self.psx.subscribe("exit", shutdown)
 
         self.psx.onResume = setup
         self.psx.onPause = teardown
