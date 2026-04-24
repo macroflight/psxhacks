@@ -34,7 +34,7 @@ from frankenrouter.rules import RulesAction, RulesCode, Rules
 __MYNAME__ = 'frankenrouter'
 __MY_DESCRIPTION__ = 'A PSX Router'
 
-__VERSION__ = '1.1.6'
+__VERSION__ = '1.1.7'
 
 # If we have no upstream connection and no cached data, assume this
 # version.
@@ -1995,7 +1995,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 await self.send_to_upstream(line, sender.peername)
                 await self.client_broadcast(line, exclude=[sender.peername])
 
-    async def forwarder_task(self, messagequeue, name):  # pylint: disable=too-many-branches
+    async def forwarder_task(self, messagequeue, name):  # pylint: disable=too-many-branches,too-many-statements
         """Read messages from the queue and forward them."""
         try:
             while True:
@@ -2003,26 +2003,64 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     message = await messagequeue.get()
                 except asyncio.QueueShutDown:
                     raise SystemExit("Message queue has been shut down, this shuld not happen")  # pylint: disable=raise-missing-from
-                queuetime = time.perf_counter() - message['received_time']
-                if message['sender'] is None:
-                    if self.is_upstream_connected():
-                        await self.handle_message(self.upstream, message)
+
+                # Drain any further messages already queued (burst batching).
+                # This lets us send one write() per connection per batch rather
+                # than one per message, which is the main source of latency when
+                # a CDU addon sends a full screen refresh.
+                batch = [message]
+                try:
+                    while True:
+                        batch.append(messagequeue.get_nowait())
+                except (asyncio.QueueEmpty, asyncio.QueueShutDown):
+                    pass
+
+                # Enable write buffering on all connections active at batch
+                # start.  Snapshot the list so connections that appear or
+                # disappear mid-batch are handled correctly.
+                connections_to_flush = list(self.clients.values())
+                if self.is_upstream_connected():
+                    connections_to_flush.append(self.upstream)
+                for conn in connections_to_flush:
+                    conn.buffering = True
+
+                batch_dequeue_time = time.perf_counter()
+                max_queuetime = 0.0
+                slowest_sender = batch[0]['sender']
+
+                for message in batch:
+                    queuetime = batch_dequeue_time - message['received_time']
+                    if queuetime > max_queuetime:
+                        max_queuetime = queuetime
+                        slowest_sender = message['sender']
+                    if message['sender'] is None:
+                        if self.is_upstream_connected():
+                            await self.handle_message(self.upstream, message)
+                        else:
+                            self.logger.warning(
+                                "Dropping message from upstream - no longer connected: %s",
+                                message)
                     else:
-                        self.logger.warning(
-                            "Dropping message from upstream - no longer connected: %s",
-                            message)
-                else:
-                    if message['sender'] in self.clients:
-                        await self.handle_message(self.clients[message['sender']], message)
-                    else:
-                        self.logger.warning(
-                            "Dropping message from %s - no longer connected: %s",
-                            message['sender'], message)
-                totaltime = time.perf_counter() - message['received_time']
+                        if message['sender'] in self.clients:
+                            await self.handle_message(self.clients[message['sender']], message)
+                        else:
+                            self.logger.warning(
+                                "Dropping message from %s - no longer connected: %s",
+                                message['sender'], message)
+
+                # Flush all write buffers: one write() per connection for the
+                # entire batch.  Connections closed during processing have
+                # already flushed themselves via close(); this is a no-op for
+                # them.
+                for conn in connections_to_flush:
+                    conn.flush_write_buffer()
+
+                # One warning per batch rather than per message
+                batch_totaltime = time.perf_counter() - batch[0]['received_time']
                 print_delay_warning = False
                 if (
-                        totaltime > self.config.performance.total_delay_warning or
-                        queuetime > self.config.performance.queue_time_warning
+                        batch_totaltime > self.config.performance.total_delay_warning or
+                        max_queuetime > self.config.performance.queue_time_warning
                 ):
                     print_delay_warning = True
                 # Do not warn about delay if we just connected to upstream.
@@ -2040,10 +2078,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     print_delay_warning = False
                 if print_delay_warning:
                     self.logger.warning(
-                        "WARNING: forwarding from %s took %.1f ms" +
-                        " (%.1f ms queue time, qsize=%d)",
-                        "upstream" if message['sender'] is None else message['sender'],
-                        totaltime * 1000, queuetime * 1000, messagequeue.qsize())
+                        "WARNING: forwarding batch of %d from %s took %.1f ms total"
+                        " (%.1f ms max queue time, qsize=%d)",
+                        len(batch),
+                        "upstream" if slowest_sender is None else slowest_sender,
+                        batch_totaltime * 1000,
+                        max_queuetime * 1000,
+                        messagequeue.qsize())
         # Standard Task cleanup
         except asyncio.exceptions.CancelledError:
             self.logger.info("Task %s was cancelled, cleanup and exit", name)

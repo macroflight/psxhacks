@@ -105,6 +105,12 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         # Statistics buffer for write performance
         self.message_write_times = collections.deque(maxlen=100)
 
+        # Batch write buffer: when buffering=True, to_stream() accumulates
+        # encoded lines here instead of calling writer.write() directly.
+        # flush_write_buffer() then does a single writer.write() for the batch.
+        self._write_buffer: list[bytes] = []
+        self.buffering: bool = False
+
         # Generic stats buffer (dict keyed by time, second resolution for 1s buckets)
         # We purge this data in the housekeeping function
         self.received_stats = {}
@@ -131,21 +137,24 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
                 self.closed_warned = True
             return False
         try:
-            # Check if the client buffer is growing too much
-            if (
-                    self.writer.transport.get_write_buffer_size() >
-                    self.router.config.performance.write_buffer_warning
-            ):
-                self.logger.warning(
-                    "Write buffer %d > %d for %s",
-                    self.writer.transport.get_write_buffer_size(),
-                    self.router.config.performance.write_buffer_warning,
-                    self.peername
-                )
-            # Encode and send
-            self.writer.write(line.encode() + PSX_PROTOCOL_SEPARATOR)
-            if drain:
-                await self.writer.drain()
+            encoded = line.encode() + PSX_PROTOCOL_SEPARATOR
+            if self.buffering and not drain:
+                self._write_buffer.append(encoded)
+            else:
+                # Check if the client buffer is growing too much
+                if (
+                        self.writer.transport.get_write_buffer_size() >
+                        self.router.config.performance.write_buffer_warning
+                ):
+                    self.logger.warning(
+                        "Write buffer %d > %d for %s",
+                        self.writer.transport.get_write_buffer_size(),
+                        self.router.config.performance.write_buffer_warning,
+                        self.peername
+                    )
+                self.writer.write(encoded)
+                if drain:
+                    await self.writer.drain()
         except ConnectionError as exc:
             self.logger.info(
                 "Got %s on write to %s/%s, closing connection",
@@ -194,6 +203,13 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
             })
         self.router.writes_counter[0]['count'] += 1
         return True
+
+    def flush_write_buffer(self) -> None:
+        """Flush all buffered data to the transport as a single write call."""
+        if self._write_buffer and not self.closed:
+            self.writer.write(b''.join(self._write_buffer))
+        self._write_buffer.clear()
+        self.buffering = False
 
     async def read_line_from_stream(self):
         r"""Read a single PSX message line from the stream.
@@ -272,9 +288,14 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
 
     async def close(self, clean=True):
         """Close a server connection and remove server data."""
+        if clean:
+            self.flush_write_buffer()  # send any buffered data first
+        else:
+            self._write_buffer.clear()
+            self.buffering = False
         try:
             if clean:
-                await self.to_stream("exit")
+                await self.to_stream("exit")  # buffering=False now, writes directly
                 await asyncio.sleep(0.5)
             self.writer.close()
             await self.writer.wait_closed()
