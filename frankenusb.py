@@ -764,7 +764,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         latch_disengage_limit_time = 0.2
 
         def time_since_we_updated_tla():
-            return time.time() - self.psx_send_state['Tla']['last sent']
+            try:
+                return time.time() - self.psx_send_state['Tla']['last sent']
+            except KeyError:
+                return float('inf')
 
         def get_last_update():
             res = self.thrustaxis_last_update[joystick_name][thrustaxis]
@@ -1521,7 +1524,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             self.logger.info("Connected to PSX %s %s as #%s", key, value, self.psx.get('id'))
             self.psx_connected = True
 
-        def shutdown(self, key, _):
+        def shutdown(key, _):
             """Shutdown cleanly."""
             if key not in ["exit", "pleaseBeSoKindAndQuit"]:
                 self.logger.critical("Shutdown called with strange key: %s", key)
