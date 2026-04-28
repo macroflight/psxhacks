@@ -1,6 +1,7 @@
 . "$PSScriptRoot\common.ps1"
 
 $Host.UI.RawUI.WindowTitle = "FrankenTanker"
+KillPythonScript "frankentanker.py"
 
 cd $FrankenTankerDir
 

@@ -3,9 +3,11 @@
 cd $CpdlcDir
 
 $Host.UI.RawUI.WindowTitle = "Hoppie PSX CPDLC"
+KillPythonScript "psx-acars.py"
 
 $env:PYTHONPATH = $PsxhacksDevel
 
-& $PsxhacksPython psx-acars.py --stealth --psx-port=10748 --min-interval=15 --max-interval=30 $HoppieLogonCode
+Write-Output "Logon code used: $HoppieLogonCode"
+& $PsxhacksPython psx-acars.py @CpdlcOptions $HoppieLogonCode
 
 # Read-Host -Prompt "Press Enter to exit"

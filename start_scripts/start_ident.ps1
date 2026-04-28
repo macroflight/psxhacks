@@ -3,6 +3,7 @@
 cd $FrankenRouterDir
 
 $Host.UI.RawUI.WindowTitle = "FrankenRouterIDENT"
+KillPythonScript "frankenrouter_ident.py"
 
 $env:PYTHONPATH = $PsxhacksDevel
 

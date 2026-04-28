@@ -1,7 +1,7 @@
 . "$PSScriptRoot\common.ps1"
 
 $Host.UI.RawUI.WindowTitle = "Restart PSX.NET"
-taskkill /im PSX.NET.exe /t /f
+KillProcess "PSX.NET"
 
 Start-Process -WorkingDirectory $PsxNetDir "$PsxNetDir\PSX.NET.exe"
 

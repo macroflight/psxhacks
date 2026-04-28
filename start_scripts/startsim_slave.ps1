@@ -3,7 +3,7 @@
 Write-Output "Starting slave sim router..."
 Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_router_slave.ps1"
 
-Read-Host -Prompt "Connect to http://localhost:8747/ and connect to the master sim, then press Enter"
+Read-Host -Prompt "Connect to $FrankenRouterSlaveWeb/upstream and connect to the master sim, then press Enter"
 
 if ($StartIdent) {
     Write-Output "Starting IDENT..."
@@ -30,6 +30,16 @@ if ($StartFrankenusb) {
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankenusb.ps1"
 }
 
+if ($StartFrankentanker) {
+    Write-Output "Starting FrankenTanker..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankentanker.ps1"
+}
+
+if ($StartFrankenwind) {
+    Write-Output "Starting FrankenWind..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankenwind.ps1"
+}
+
 if ($StartAcarsPrint) {
     Write-Output "Starting ACARS Print..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_acarsprint.ps1"
@@ -41,8 +51,18 @@ if ($StartEfb) {
 }
 
 if ($StartVpilot) {
-    Write-Output "Starting vPilot with pushover plugin..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_vpilot_pushover_to_router.ps1"
+    if ($VpilotPlugin -eq "PSX Printer") {
+        Write-Output "Starting vPilot (PSX Printer plugin)..."
+        Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_vpilot_pushover_to_router.ps1"
+    } else {
+        Write-Output "Starting vPilot (Pushover plugin)..."
+        Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_vpilot_pushover.ps1"
+    }
+}
+
+if ($StartCsCdu) {
+    Write-Output "Starting CS CDU..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_cs_cdu.ps1"
 }
 
 Write-Output "Starting non-scripted apps..."
@@ -58,4 +78,4 @@ if ($StartFrankenfreeze) {
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankenfreeze.ps1"
 }
 
-Read-Host -Prompt "Done. Enter to close. If flying alone (or as VATPRI), remember to disable filters: http://localhost:8747/"
+Read-Host -Prompt "Done. Enter to close. If flying alone (or as VATPRI), remember to disable filters: $FrankenRouterSlaveWeb/filter"
