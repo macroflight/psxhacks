@@ -54,6 +54,34 @@ is currently done on VKB Gladiator joystick, VKB STECS throttle, MFG
 pedals and Thrustmaster Boeing yoke. Also tested with Bravo throttle,
 Thrustmaster Airbus joystick, etc.
 
+### start_scripts
+
+A collection of mostly PowerShell scripts to start and stop a PSX
+simulator. It assumes you use a frankenrouter as a permanent part of
+your sim (which then either connect to a PSX main server in your sim
+or a shared cockpit master sim).
+
+Quickstart Guide:
+
+- Have a single copy of the psxhacks repo that you update using e.g
+  GitHub Desktop, installed as e.g C:\fs\psxhacks.
+- Install Python and a virtual environment with all the modules you
+  need (start_scripts will only with with the Python versions of
+  psxhacks, not the EXE files)
+- Create your own override file outside the Git repo, e.g
+  C:\fs\psxhacks-start-override.ps1. If the file is named like that
+  and on the same directory level as the Git repo, it will be found
+  automatically.
+- Check `start_scripts\common.ps1` and put any setting you need to
+  override for your sim in the override file.
+- Start the sim using startsim_slave.ps1. This assumes that you
+  already have a master sim or a PSX main server ready to connect
+  to. The script will prompt you to do certain things, e.g switch to
+  the correct upstream after the router has been started.
+
+Most of the individual scripts can be run independently, e.g
+double-click start_cpdlc.ps1 to restart the CPDLC client.
+
 ### frankenfreeze.py
 
 This will create cloud in PSX's weather model when MSFS is in
