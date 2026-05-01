@@ -104,6 +104,7 @@ $FrankenTankerDir   = "$SimBase\frankentanker"
 $FrankenUsbDir      = "$SimBase\frankenusb"
 $FrankenRouterDir   = "$SimBase\frankenrouter"
 $FrankenWindDir     = "$SimBase\frankenwind"
+$FrankenUtilDir     = "$SimBase\frankenutil"
 
 # If you want to give custom options to frankenusb, e.g a config file name
 $FrankenUsbOptions  = ""

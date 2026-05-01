@@ -16,6 +16,9 @@ Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_bacars.ps
 Write-Output "Starting PSX.NET..."
 Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psxnet.ps1"
 
+Write-Output "Starting frankenutil..."
+Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankenutil.ps1"
+
 if ($StartCpdlc) {
     Write-Output "Starting HAFAP (CPDLC)..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_cpdlc.ps1"
