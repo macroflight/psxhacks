@@ -13,8 +13,10 @@ import os
 import pathlib
 import random
 import re
+import signal
 import statistics
 import string
+import sys
 import textwrap
 import time
 import traceback
@@ -2107,7 +2109,39 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 <ul>
 <li><a href="/filter">Filter control</a>
 <li><a href="/upstream">Upstream control</a>
+<li><a href="/shutdown">Router shutdown</a>
 </ul>
+</body>
+</html>
+'''
+
+        shutdown_page = '''
+<html>
+<head>
+<meta name="color-scheme" content="{rest_api_color_scheme}" />
+</head>
+<body>
+<h1>Frankenrouter shutdown</h1>
+<hr>
+<p><b>Warning: this will stop the router. All connected clients will be disconnected.</b>
+<p>
+<form action="/api/shutdown/yes" method="post">
+<input type="submit" value="Shut down router now">
+</form>
+<hr>
+<p><a href="/">Cancel</a>
+</body>
+</html>
+'''
+
+        shutdown_confirm_page = '''
+<html>
+<head>
+<meta name="color-scheme" content="{rest_api_color_scheme}" />
+</head>
+<body>
+<h1>Router is shutting down</h1>
+<p>The router is shutting down. You can close this window.
 </body>
 </html>
 '''
@@ -2540,6 +2574,26 @@ the primary VATSIM connection (VATPRI).
                 await self.client_broadcast(f"Qs119={text}")
                 return web.Response(text="OK")
 
+            @routes.get('/shutdown')
+            async def handle_shutdown_get(_):
+                data = {'rest_api_color_scheme': self.config.listen.rest_api_color_scheme}
+                html_page = shutdown_page.format(**data)
+                return web.json_response(text=html_page, content_type='text/html')
+
+            @routes.post('/api/shutdown/yes')
+            async def handle_shutdown_yes(_):
+                self.logger.info("API: shutdown requested via web interface")
+                loop = asyncio.get_running_loop()
+
+                def _do_shutdown():
+                    signal.signal(signal.SIGINT, signal.SIG_DFL)
+                    signal.raise_signal(signal.SIGINT)
+
+                loop.call_later(0.5, _do_shutdown)
+                data = {'rest_api_color_scheme': self.config.listen.rest_api_color_scheme}
+                html_page = shutdown_confirm_page.format(**data)
+                return web.json_response(text=html_page, content_type='text/html')
+
             # Run the API
             @web.middleware
             async def cors_middleware(request, handler):
@@ -2847,7 +2901,50 @@ shared cockpit master sim.
         self.logger.info("All tasks ended, shutting down")
 
 
+def _install_ctrl_c_guard():
+    """Replace Ctrl-C with a warning; keep the router running."""
+    def _handler(signum, frame):  # pylint: disable=unused-argument
+        sys.stderr.write(
+            "\n\nUSE WEB INTERFACE OR TASK MANAGER/KILL TO STOP ROUTER\n\n")
+        sys.stderr.flush()
+
+    signal.signal(signal.SIGINT, _handler)
+
+
+# Kept at module level so the GC does not free the ctypes callback while the
+# process is running (Windows would crash when trying to invoke a freed pointer).
+_win32_console_handlers: list = []
+
+
+def _install_close_guard():
+    """Windows only: suppress accidental window close (Alt-F4, X button, taskbar).
+
+    Task Manager uses TerminateProcess() which bypasses console handlers entirely,
+    so kill-via-Task-Manager still works normally.
+    """
+    if sys.platform != 'win32':
+        return
+    import ctypes  # pylint: disable=import-outside-toplevel
+    import ctypes.wintypes  # pylint: disable=import-outside-toplevel
+    _CTRL_CLOSE_EVENT = 2
+    _CTRL_LOGOFF_EVENT = 5
+
+    @ctypes.WINFUNCTYPE(ctypes.wintypes.BOOL, ctypes.wintypes.DWORD)
+    def _handler(ctrl_type):
+        if ctrl_type in (_CTRL_CLOSE_EVENT, _CTRL_LOGOFF_EVENT):
+            sys.stderr.write(
+                "\nWindow close blocked. Use Task Manager to stop the router.\n")
+            sys.stderr.flush()
+            return True  # Suppress: prevents the default ExitProcess() call
+        return False  # Let other handlers run (e.g. Ctrl-C)
+
+    _win32_console_handlers.append(_handler)  # keep alive
+    ctypes.windll.kernel32.SetConsoleCtrlHandler(_handler, True)
+
+
 if __name__ == '__main__':
+    _install_ctrl_c_guard()
+    _install_close_guard()
     try:
         asyncio.run(Frankenrouter().main())
     except KeyboardInterrupt:
