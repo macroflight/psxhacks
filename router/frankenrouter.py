@@ -1067,6 +1067,28 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.logger.debug("Sending demand=%s to upstream", demand_var)
                     await self.send_to_upstream(f"demand={demand_var}")
 
+                # Workaround for problem described in
+                # https://aerowinx.com/board/index.php/topic,7861.0.html
+                # - send "jettison off" when connected to
+                # upstream. This assumes you don't connect to a master
+                # sim while fuel jettison is actually in progress, but
+                # that seems rather unlikely.
+                # Qi25="CfgJettisonMlw"; Mode=ECON; Min=0; Max=1;
+                # Qh274="JettSelSystem"; Mode=ECON; Min=0; Max=4;
+                try:
+                    has_jettison_mlw = self.cache.get_value('Qi25')
+                    jettison_sel = self.cache.get_value('Qh274')
+                    if has_jettison_mlw == '0':
+                        if jettison_sel != '0':
+                            self.logger.warning("Jettison selector mismatch (%s, %s) on connection, applying workaround", has_jettison_mlw, jettison_sel)
+                            await self.send_to_upstream("Qh274=0")
+                    elif has_jettison_mlw == '1':
+                        if jettison_sel != '3':
+                            self.logger.warning("Jettison selector mismatch (%s, %s) on connection, applying workaround",has_jettison_mlw, jettison_sel)
+                            await self.send_to_upstream("Qh274=0")
+                except routercache.RouterCacheException:
+                    self.logger.warning("Not applying jettison workaround since data not in cache yet")
+
                 # Connection complete, refresh status display and send FRDP ROUTERINFO
                 self.connection_state_changed()
 
