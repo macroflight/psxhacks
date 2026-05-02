@@ -1084,32 +1084,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.logger.debug("Sending demand=%s to upstream", demand_var)
                     await self.send_to_upstream(f"demand={demand_var}")
 
-                # Workaround for problem described in
-                # https://aerowinx.com/board/index.php/topic,7861.0.html
-                # - send "jettison off" when connected to
-                # upstream. This assumes you don't connect to a master
-                # sim while fuel jettison is actually in progress, but
-                # that seems rather unlikely.
-                # Qi25="CfgJettisonMlw"; Mode=ECON; Min=0; Max=1;
-                # Qh274="JettSelSystem"; Mode=ECON; Min=0; Max=4;
-                try:
-                    has_jettison_mlw = self.cache.get_value('Qi25')
-                    jettison_sel = self.cache.get_value('Qh274')
-                    if has_jettison_mlw == '0':
-                        if jettison_sel != '0':
-                            self.logger.warning(
-                                "Jettison selector mismatch (%s, %s) on connection,"
-                                " applying workaround", has_jettison_mlw, jettison_sel)
-                            await self.send_to_upstream("Qh274=0")
-                    elif has_jettison_mlw == '1':
-                        if jettison_sel != '3':
-                            self.logger.warning(
-                                "Jettison selector mismatch (%s, %s) on connection,"
-                                " applying workaround", has_jettison_mlw, jettison_sel)
-                            await self.send_to_upstream("Qh274=0")
-                except routercache.RouterCacheException:
-                    self.logger.warning("Not applying jettison workaround since data not in cache")
-
                 # Connection complete, refresh status display and send FRDP ROUTERINFO
                 self.connection_state_changed()
 
@@ -1738,6 +1712,46 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                                 self.cache.update("Qs418", "")
                                 await self.send_to_upstream("Qs418=")
                                 await self.client_broadcast("Qs418=")
+
+                    # Workaround for problem described in
+                    # https://aerowinx.com/board/index.php/topic,7861.0.html
+                    # - send "jettison off" when connected to
+                    # upstream. This assumes you don't connect to a master
+                    # sim while fuel jettison is actually in progress, but
+                    # that seems rather unlikely.
+                    # Qi25="CfgJettisonMlw"; Mode=ECON; Min=0; Max=1;
+                    # Qh274="JettSelSystem"; Mode=ECON; Min=0; Max=4;
+                    if (self.is_upstream_connected() and
+                            (time.perf_counter() - self.upstream.connected_at) <
+                            2 * self.args.housekeeping_interval):
+                        self.logger.info("Checking if we need to apply the jettison switch fix")
+                        try:
+                            has_jettison_mlw = self.cache.get_value('Qi25')
+                            jettison_sel = self.cache.get_value('Qh274')
+                            self.logger.info(
+                                "Jettison check: Qi25=%s, Qh274=%s",
+                                has_jettison_mlw, jettison_sel)
+                            if has_jettison_mlw == 0:
+                                if jettison_sel != 0:
+                                    self.logger.warning(
+                                        "Jettison selector mismatch (%s, %s) after"
+                                        " connection, applying workaround Qh274=0",
+                                        has_jettison_mlw, jettison_sel)
+                                    await self.send_to_upstream("Qh274=0")
+                                    await self.client_broadcast("Qh274=0")
+                            elif has_jettison_mlw == 1:
+                                if jettison_sel != 2:
+                                    self.logger.warning(
+                                        "Jettison selector mismatch (%s, %s) after"
+                                        " connection, applying workaround Qh274=2",
+                                        has_jettison_mlw, jettison_sel)
+                                    await self.send_to_upstream("Qh274=2")
+                                    await self.client_broadcast("Qh274=2")
+                            else:
+                                self.logger.info("No jettison fix needed")
+                        except routercache.RouterCacheException:
+                            self.logger.warning(
+                                "Not applying jettison workaround since data not in cache")
 
                     # Trim variable stats buffer
                     if self.args.enable_variable_stats:
