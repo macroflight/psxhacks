@@ -1080,14 +1080,18 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     jettison_sel = self.cache.get_value('Qh274')
                     if has_jettison_mlw == '0':
                         if jettison_sel != '0':
-                            self.logger.warning("Jettison selector mismatch (%s, %s) on connection, applying workaround", has_jettison_mlw, jettison_sel)
+                            self.logger.warning(
+                                "Jettison selector mismatch (%s, %s) on connection,"
+                                " applying workaround", has_jettison_mlw, jettison_sel)
                             await self.send_to_upstream("Qh274=0")
                     elif has_jettison_mlw == '1':
                         if jettison_sel != '3':
-                            self.logger.warning("Jettison selector mismatch (%s, %s) on connection, applying workaround",has_jettison_mlw, jettison_sel)
+                            self.logger.warning(
+                                "Jettison selector mismatch (%s, %s) on connection,"
+                                " applying workaround", has_jettison_mlw, jettison_sel)
                             await self.send_to_upstream("Qh274=0")
                 except routercache.RouterCacheException:
-                    self.logger.warning("Not applying jettison workaround since data not in cache yet")
+                    self.logger.warning("Not applying jettison workaround since data not in cache")
 
                 # Connection complete, refresh status display and send FRDP ROUTERINFO
                 self.connection_state_changed()
