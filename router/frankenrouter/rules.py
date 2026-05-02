@@ -351,7 +351,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         peername = (clientinfo['laddr'], clientinfo['lport'])
         if peername in self.router.clients:
             client = self.router.clients[peername]
-            if client.display_name_source in ('name message', 'access config'):
+            if client.display_name_source == 'name message':
                 self.logger.debug(
                     "Ignoring CLIENTINFO for %s: already identified via %s",
                     peername, client.display_name_source)
@@ -1261,6 +1261,24 @@ class TestRules(unittest.TestCase):
         self.assertEqual(testpeer.client_provided_id, 'SELFID')
         self.assertEqual(testpeer.display_name, 'Self Identified')
         self.assertEqual(testpeer.display_name_source, 'name message')
+
+        # CLIENTINFO must overwrite an access config label (it is more specific)
+        testpeer.display_name = 'Access Config Label'
+        testpeer.display_name_source = 'access config'
+        testpeer.client_provided_id = None
+        json_payload3 = json.dumps({
+            "laddr": "127.0.0.1",
+            "lport": 12345,
+            "client_provided_id": "GATEFIND",
+            "display_name": "PSX.NET GateFinder"
+        })
+        (action, code, *_) = rules.route(
+            f"addon=FRANKENROUTER:1:CLIENTINFO:{json_payload3}", testpeer)
+        self.assertEqual(action, RulesAction.DROP)
+        self.assertEqual(code, RulesCode.FRDP_CLIENTINFO)
+        self.assertEqual(testpeer.client_provided_id, 'GATEFIND')
+        self.assertEqual(testpeer.display_name, 'PSX.NET GateFinder')
+        self.assertEqual(testpeer.display_name_source, 'FRDP CLIENTINFO')
 
     def test_frdp_client_auth(self):  # pylint: disable=too-many-statements
         """Test FRDP messages from client."""
