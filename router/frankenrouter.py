@@ -314,6 +314,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             action='store_true',
             help="Ask about upstream details before starting",
         )
+        parser.add_argument(
+            '--devel',
+            action='store_true',
+            help="Development mode: exit on Ctrl-C instead of printing a warning",
+        )
         self.args = parser.parse_args()
 
     def get_random_id(self, length=16):
@@ -2969,8 +2974,9 @@ def _install_close_guard():
 
 
 if __name__ == '__main__':
-    _install_ctrl_c_guard()
-    _install_close_guard()
+    if '--devel' not in sys.argv:
+        _install_ctrl_c_guard()
+        _install_close_guard()
     try:
         asyncio.run(Frankenrouter().main())
     except KeyboardInterrupt:
