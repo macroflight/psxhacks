@@ -91,7 +91,7 @@ class Script():
                 remoteport = c.raddr.port
             except Exception:  # pylint: disable=broad-exception-caught
                 continue
-            if remoteport != 10747:
+            if remoteport != self.args.psx_main_server_port:
                 continue
             if (c.laddr.ip, c.laddr.port) in identified:
                 continue
