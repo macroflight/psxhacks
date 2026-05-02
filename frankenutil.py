@@ -42,9 +42,6 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self.repaint_req_by = set()
         self.mcdu_page = "main"
 
-        self.heading_r = None
-        self.latitude_r = None
-        self.longitude_r = None
         self.geod = Geod(ellps="WGS84")
 
         self.slew_enabled = True
@@ -55,13 +52,6 @@ class Script():  # pylint: disable=too-many-instance-attributes
         """Send variable to PSX and store in local db."""
         self.psx.send(psx_variable, new_psx_value)
         self.psx._set(psx_variable, new_psx_value)  # pylint: disable=protected-access
-
-    def position_changed(self, _, value):
-        """Update local position state when PSX reports a position change."""
-        elems = value.split(';', 6)
-        self.heading_r = float(elems[2])
-        self.latitude_r = float(elems[5])
-        self.longitude_r = float(elems[6])
 
     def towing_var_changed(self, _key, _value):
         """Repaint towing page when a towing-related PSX variable changes."""
@@ -105,41 +95,34 @@ class Script():  # pylint: disable=too-many-instance-attributes
         if not self.slew_enabled:
             self.logger.info("Slew blocked: ground speed > 5 kt")
             return
-        if self.heading_r is None:
-            self.logger.warning("Position not yet available, cannot slew")
+        pos = self.psx.get('PiBaHeAlTas')
+        if pos is None:
+            self.logger.warning("PiBaHeAlTas not available, cannot slew")
             return
-        current = self.psx.get('StartPiBaHeAlVsTasYw')
-        if current is None:
-            self.logger.warning("StartPiBaHeAlVsTasYw not available, cannot slew")
-            return
-        elems = current.split(';')
-        elems[0] = '1'
+        pos_elems = pos.split(';', 6)
+        heading_r = float(pos_elems[2])
+        lat = float(pos_elems[5])
+        lon = float(pos_elems[6])
         if direction == 'FORWARD':
-            newpos = self.geod.fwd(lons=self.longitude_r, lats=self.latitude_r,
-                                   az=self.heading_r, dist=amount, radians=True)
-            elems[9] = str(newpos[0])
-            elems[8] = str(newpos[1])
+            lon, lat, _ = self.geod.fwd(lons=lon, lats=lat, az=heading_r, dist=amount,
+                                        radians=True)
         elif direction == 'BACKWARD':
-            newpos = self.geod.fwd(lons=self.longitude_r, lats=self.latitude_r,
-                                   az=self.heading_r, dist=-amount, radians=True)
-            elems[9] = str(newpos[0])
-            elems[8] = str(newpos[1])
+            lon, lat, _ = self.geod.fwd(lons=lon, lats=lat, az=heading_r, dist=-amount,
+                                        radians=True)
         elif direction == 'LEFT':
-            newpos = self.geod.fwd(lons=self.longitude_r, lats=self.latitude_r,
-                                   az=self.heading_r - math.pi / 2, dist=amount, radians=True)
-            elems[9] = str(newpos[0])
-            elems[8] = str(newpos[1])
+            lon, lat, _ = self.geod.fwd(lons=lon, lats=lat, az=heading_r - math.pi / 2,
+                                        dist=amount, radians=True)
         elif direction == 'RIGHT':
-            newpos = self.geod.fwd(lons=self.longitude_r, lats=self.latitude_r,
-                                   az=self.heading_r + math.pi / 2, dist=amount, radians=True)
-            elems[9] = str(newpos[0])
-            elems[8] = str(newpos[1])
+            lon, lat, _ = self.geod.fwd(lons=lon, lats=lat, az=heading_r + math.pi / 2,
+                                        dist=amount, radians=True)
         elif direction == 'NOSELEFT':
-            elems[3] = str(int(1000 * (self.heading_r - math.radians(amount))))
+            heading_r -= math.radians(amount)
         elif direction == 'NOSERIGHT':
-            elems[3] = str(int(1000 * (self.heading_r + math.radians(amount))))
+            heading_r += math.radians(amount)
+        heading_mrad = int(1000 * heading_r)
         self.logger.info("Slew %s %.1f", direction, amount)
-        self.psx_send_and_set('StartPiBaHeAlVsTasYw', ';'.join(elems))
+        self.psx_send_and_set('StartPiBaHeAlVsTasYw',
+                              f'1;0;0;{heading_mrad};0;0;0;0;{lat};{lon};0')
 
     def do_towing_start(self):
         """Start towing (set mode to 20)."""
@@ -414,7 +397,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
 
             self.psx.subscribe("id")
             self.psx.subscribe("version", connected)
-            self.psx.subscribe("PiBaHeAlTas", self.position_changed)
+            self.psx.subscribe("PiBaHeAlTas")
             self.psx.subscribe("StartPiBaHeAlVsTasYw")
             self.psx.subscribe("GroundSpeed")
             self.psx.subscribe("Towing", self.towing_var_changed)
