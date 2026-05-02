@@ -1,18 +1,8 @@
 """A script to map use window names to identify PSX clients.
 
-# Installing Python dependencies:
+A relatively modern Python is needed (for asyncio.TaskGroup), e.g 3.13
 
-- A relatively modern Python is needed (for asyncio.TaskGroup), e.g 3.13
-
-# Make a venv
-
-C:\fs\python\3.13.5\python.exe -m venv C:\fs\python\venv\test-1
-. C:\fs\python\venv\test-1\scripts\Activate.ps1
-
-# Install dependencies:
-
-pip install pywin32
-pip install psutil
+Modules needed: pywin32 and psutil
 """
 import argparse
 import asyncio
