@@ -5,9 +5,19 @@ Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_router_slav
 
 Read-Host -Prompt "Connect to $FrankenRouterSlaveWeb/upstream and connect to the master sim, then press Enter"
 
-if ($StartIdent) {
+if ($StartCpdlc -eq "slave") {
+    Write-Output "Starting HAFAP (CPDLC)..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_cpdlc.ps1"
+}
+
+if ($StartFrankenident -eq "slave") {
     Write-Output "Starting FrankenIDENT..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankenident.ps1"
+}
+
+if ($StartFrankenutil -eq "slave") {
+    Write-Output "Starting FrankenUtil..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankenutil.ps1"
 }
 
 Write-Output "Starting PSX main clients..."
@@ -20,42 +30,42 @@ Delay 5
 Write-Output "Starting PSX.NET.MSFS.Router..."
 Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_msfs_router.ps1"
 
-if ($StartPsxSounds) {
+if ($StartPsxSounds -eq "slave") {
     Write-Output "Starting PSXSounds..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psxsounds.ps1"
 }
 
-if ($StartFrankenusb) {
+if ($StartFrankenusb -eq "slave") {
     Write-Output "Starting FrankenUSB..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankenusb.ps1"
 }
 
-if ($StartFrankentanker) {
+if ($StartFrankentanker -eq "slave") {
     Write-Output "Starting FrankenTanker..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankentanker.ps1"
 }
 
-if ($StartFrankenwind) {
+if ($StartFrankenwind -eq "slave") {
     Write-Output "Starting FrankenWind..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankenwind.ps1"
 }
 
-if ($StartFrankenturb) {
+if ($StartFrankenturb -eq "slave") {
     Write-Output "Starting FrankenTurb..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankenturb.ps1"
 }
 
-if ($StartAcarsPrint) {
+if ($StartAcarsPrint -eq "slave") {
     Write-Output "Starting ACARS Print..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_acarsprint.ps1"
 }
 
-if ($StartEfb) {
+if ($StartEfb -eq "slave") {
     Write-Output "Starting PSX.NET.EFB..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_psxnetefb.ps1"
 }
 
-if ($StartVpilot) {
+if ($StartVpilot -eq "slave") {
     if ($VpilotPlugin -eq "PSX Printer") {
         Write-Output "Starting vPilot (PSX Printer plugin)..."
         Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_vpilot_pushover_to_router.ps1"
@@ -65,7 +75,7 @@ if ($StartVpilot) {
     }
 }
 
-if ($StartCsCdu) {
+if ($StartCsCdu -eq "slave") {
     Write-Output "Starting CS CDU..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_cs_cdu.ps1"
 }
@@ -78,7 +88,7 @@ Read-Host -Prompt "Now start MSFS and enter free flight, then press Enter"
 Write-Output "Starting PSX.NET.MSFS.Client..."
 Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_msfs_client.ps1"
 
-if ($StartFrankenfreeze) {
+if ($StartFrankenfreeze -eq "slave") {
     Write-Output "Starting Frankenfreeze..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankenfreeze.ps1"
 }

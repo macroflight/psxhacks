@@ -98,16 +98,7 @@ $HoppieLogonCode = "DUMMYLOGONCODE"
 # pick by name:
 #   $SimfestEmails = @{ "work" = "work@example.com"; "personal" = "me@gmail.com" }
 
-# Some of the psxhacks addons need a work directory to run in, where
-# logs and other things are placed. In the Frankensim these are placed
-# in the same directory (SimBase) where psxhacks is placed, but you
-# can put them anywhere, just put the variable in your override file.
-$FrankenfreezeDir   = "$SimBase\frankenfreeze"
-$FrankentankerDir   = "$SimBase\frankentanker"
 $FrankenusbDir      = "$SimBase\frankenusb"
-$FrankenwindDir     = "$SimBase\frankenwind"
-$FrankenturbDir     = "$SimBase\frankenturb"
-$FrankenutilDir     = "$SimBase\frankenutil"
 
 # Options for the routers
 $FrankenrouterDir           = "$SimBase\frankenrouter"
@@ -133,22 +124,23 @@ $FrankenutilOptions = @()
 # Which of the addons that we can manage you actually want started in
 # your sim. You can override these in the override file.
 
-$StartFrankenfreeze = $false
-$StartFrankentanker = $false
-$StartFrankenusb    = $false
-$StartFrankenwind   = $false
-$StartFrankenturb   = $false
-$StartFrankenident  = $false
+$StartFrankenfreeze = "off"
+$StartFrankentanker = "off"
+$StartFrankenusb    = "off"
+$StartFrankenwind   = "off"
+$StartFrankenturb   = "off"
+$StartFrankenident  = "off"
+$StartFrankenutil   = "off"
 
 # Other addons
-$StartCpdlc         = $false
-$StartPsxSounds     = $false
-$StartVpilot        = $false
-$StartAcarsPrint    = $false
-$StartEfb           = $false
+$StartCpdlc         = "off"
+$StartPsxSounds     = "off"
+$StartVpilot        = "off"
+$StartAcarsPrint    = "off"
+$StartEfb           = "off"
 
 # CDU
-$StartCsCdu         = $false
+$StartCsCdu         = "off"
 $CsCduExe = "$SimBase\hw\cs_cdu\CockpitSimulator v2025.2.7.exe"
 
 
@@ -203,7 +195,8 @@ $PreFlavorDefaults = @{
     StartFrankentanker = $StartFrankentanker
     StartFrankenwind   = $StartFrankenwind
     StartFrankenturb   = $StartFrankenturb
-    StartIdent         = $StartIdent
+    StartFrankenident  = $StartFrankenident
+    StartFrankenutil   = $StartFrankenutil
     StartPsxSounds     = $StartPsxSounds
     StartVpilot        = $StartVpilot
     StartAcarsPrint    = $StartAcarsPrint

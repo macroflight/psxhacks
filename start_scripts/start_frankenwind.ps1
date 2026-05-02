@@ -3,8 +3,6 @@
 $Host.UI.RawUI.WindowTitle = "FrankenWind"
 KillPythonScript "frankenwind.py"
 
-cd $FrankenwindDir
-
 $env:PYTHONPATH = $PsxhacksDevel
 
 & $PsxhacksPython "$PsxhacksDevel\frankenwind.py" @FrankenwindOptions

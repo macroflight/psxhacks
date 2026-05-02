@@ -3,8 +3,6 @@
 $Host.UI.RawUI.WindowTitle = "FrankenUTIL"
 KillPythonScript "frankenutil.py"
 
-cd $FrankenutilDir
-
 $env:PYTHONPATH = $PsxhacksDevel
 
 & $PsxhacksPython "$PsxhacksDevel\frankenutil.py" @FrankenutilOptions
