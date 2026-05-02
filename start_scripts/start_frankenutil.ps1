@@ -7,6 +7,6 @@ cd $FrankenUtilDir
 
 $env:PYTHONPATH = $PsxhacksDevel
 
-& $PsxhacksPython "$PsxhacksDevel\frankenutil.py" --psx-main-server-port=10748 --cdus=L,R --menu-row=6
+& $PsxhacksPython "$PsxhacksDevel\frankenutil.py" @$FrankenUtilOptions
 
 # Read-Host -Prompt "Press Enter to exit"
