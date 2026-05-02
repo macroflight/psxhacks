@@ -100,6 +100,8 @@ class RulesCode(enum.Enum):
     FRDP_ALL_CONTROL_LOCKS = enum.auto()
     FRDP_NO_CONTROL_LOCKS = enum.auto()
     FRDP_FLIGHTCONTROLS = enum.auto()
+    FRDP_ELEVATION_SOURCE = enum.auto()
+    FRDP_TRAFFIC_SOURCE = enum.auto()
     FRDP_JOIN = enum.auto()
     FRDP_CLIENTINFO = enum.auto()
     FRDP_ROUTERINFO = enum.auto()
@@ -239,6 +241,38 @@ class Rules():  # pylint: disable=too-many-public-methods
         flight control filtering.
         """
         return self.myreturn(RulesAction.DROP, RulesCode.FRDP_NO_CONTROL_LOCKS)
+
+    def handle_addon_frankenrouter_elevation_source(self, payload):
+        """Handle FRDP ELEVATION_SOURCE message.
+
+        Format:
+        addon=FRANKENROUTER:<protocol version>:ELEVATION_SOURCE:<sim name>
+
+        When this router is the SHAREDINFO master, record the source sim and
+        trigger a SHAREDINFO broadcast so all routers update their filters.
+        Otherwise forward upstream toward the master.
+        """
+        if self.router.config.sharedinfo.master:
+            self.router.sharedinfo['elevation_source_simulator'] = payload
+            self.router.frdp_sharedinfo_requested = True
+            return self.myreturn(RulesAction.DROP, RulesCode.FRDP_ELEVATION_SOURCE)
+        return self.myreturn(RulesAction.UPSTREAM_ONLY, RulesCode.FRDP_ELEVATION_SOURCE)
+
+    def handle_addon_frankenrouter_traffic_source(self, payload):
+        """Handle FRDP TRAFFIC_SOURCE message.
+
+        Format:
+        addon=FRANKENROUTER:<protocol version>:TRAFFIC_SOURCE:<sim name>
+
+        When this router is the SHAREDINFO master, record the source sim and
+        trigger a SHAREDINFO broadcast so all routers update their filters.
+        Otherwise forward upstream toward the master.
+        """
+        if self.router.config.sharedinfo.master:
+            self.router.sharedinfo['traffic_source_simulator'] = payload
+            self.router.frdp_sharedinfo_requested = True
+            return self.myreturn(RulesAction.DROP, RulesCode.FRDP_TRAFFIC_SOURCE)
+        return self.myreturn(RulesAction.UPSTREAM_ONLY, RulesCode.FRDP_TRAFFIC_SOURCE)
 
     def handle_addon_frankenrouter_flightcontrols(self, payload):
         """Handle a FRDP FLIGHTCONTROLS message.
@@ -391,9 +425,32 @@ class Rules():  # pylint: disable=too-many-public-methods
 
         # Merge data from sharedinfo package into our own variables
         self.router.sharedinfo['master_uuid'] = sharedinfo['master_uuid']
-        for key in ['pilot_flying_simulator']:
+        for key in [
+            'pilot_flying_simulator',
+            'elevation_source_simulator',
+            'traffic_source_simulator',
+        ]:
             if key in sharedinfo:
                 self.router.sharedinfo[key] = sharedinfo[key]
+
+        # Update local filter state based on source assignments in SHAREDINFO.
+        # Do NOT trigger frdp_sharedinfo_requested to avoid a broadcast loop.
+        own_sim = self.router.config.identity.simulator
+        filter_changed = False
+        if 'elevation_source_simulator' in sharedinfo:
+            new_val = sharedinfo['elevation_source_simulator'] != own_sim
+            if new_val != self.router.config.psx.filter_elevation:
+                self.router.config.psx.filter_elevation = new_val
+                filter_changed = True
+        if 'traffic_source_simulator' in sharedinfo:
+            new_val = sharedinfo['traffic_source_simulator'] != own_sim
+            if new_val != self.router.config.psx.filter_traffic:
+                self.router.config.psx.filter_traffic = new_val
+                filter_changed = True
+        if filter_changed:
+            self.router.status_display_requested = True
+            self.router.frdp_routerinfo_requested = True
+
         # Forward message to network but only to frankenrouters
         return self.myreturn(
             RulesAction.FILTER,
@@ -440,6 +497,10 @@ class Rules():  # pylint: disable=too-many-public-methods
             return self.handle_addon_frankenrouter_no_control_locks()
         if message_type == 'FLIGHTCONTROLS':
             return self.handle_addon_frankenrouter_flightcontrols(payload)
+        if message_type == 'ELEVATION_SOURCE':
+            return self.handle_addon_frankenrouter_elevation_source(payload)
+        if message_type == 'TRAFFIC_SOURCE':
+            return self.handle_addon_frankenrouter_traffic_source(payload)
         if message_type == 'JOIN':
             return self.handle_addon_frankenrouter_join(payload)
         if message_type == 'ROUTERINFO':

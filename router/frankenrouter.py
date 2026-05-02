@@ -212,6 +212,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.sharedinfo = {
             'master_uuid': None,
             'pilot_flying_simulator': "NO_CONTROL_LOCKS",
+            'elevation_source_simulator': "NOSIM",
+            'traffic_source_simulator': "NOSIM",
         }
         # Track when we last send the start keyword upstream
         self.start_sent_at = 0.0
@@ -1587,11 +1589,19 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             return
         payload = {
             "master_uuid": self.uuid,
-            "pilot_flying_simulator": self.sharedinfo["pilot_flying_simulator"]
+            "pilot_flying_simulator": self.sharedinfo["pilot_flying_simulator"],
+            "elevation_source_simulator": self.sharedinfo["elevation_source_simulator"],
+            "traffic_source_simulator": self.sharedinfo["traffic_source_simulator"],
         }
         payload_json = json.dumps(payload)
         # Store our own sharedinfo so we have all the data in the same place
         self.sharedinfo = payload
+        # Apply filter state for this (master) router based on source assignments
+        own_sim = self.config.identity.simulator
+        self.config.psx.filter_elevation = (
+            payload['elevation_source_simulator'] != own_sim)
+        self.config.psx.filter_traffic = (
+            payload['traffic_source_simulator'] != own_sim)
         # Send to network (upstream and any connected frankenrouters)
         self.logger.debug("Sending SHAREDINFO up and downstream")
         await self.send_to_upstream(
@@ -1871,6 +1881,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 sender_hr, line)
             await self.send_to_upstream(extra_data['message'])
             await self.client_broadcast(extra_data['message'])
+        elif code == RulesCode.FRDP_ELEVATION_SOURCE:
+            self.logger.info(
+                "Got FRDP ELEVATION_SOURCE message from %s: %s",
+                sender_hr, line)
+        elif code == RulesCode.FRDP_TRAFFIC_SOURCE:
+            self.logger.info(
+                "Got FRDP TRAFFIC_SOURCE message from %s: %s",
+                sender_hr, line)
         elif code == RulesCode.FRDP_IDENT:
             self.logger.debug(
                 "Got FRDP IDENT message from %s: %s",
@@ -2206,9 +2224,22 @@ the primary VATSIM connection (VATPRI)
 <p>
 <p>This filter should be enabled unless you are flying single-pilot or you are
 the primary VATSIM connection (VATPRI).
+{network_source_section}
 <hr>
 </body>
 </html>
+'''
+
+        filter_page_network_source_section = '''
+<hr>
+<h2>Network filter source control</h2>
+<p>This sim: <b>{this_sim}</b>
+<p>Elevation data source: <b>{elevation_source}</b>
+<p><a href="/api/filter/elevation/start_sending">START SENDING ELEVATION DATA</a>
+<p><a href="/api/filter/elevation/stop_sending">STOP SENDING ELEVATION DATA</a>
+<p>Traffic data source: <b>{traffic_source}</b>
+<p><a href="/api/filter/traffic/start_sending">START SENDING TRAFFIC DATA</a>
+<p><a href="/api/filter/traffic/stop_sending">STOP SENDING TRAFFIC DATA</a>
 '''
 
         upstream_page = '''
@@ -2407,6 +2438,16 @@ the primary VATSIM connection (VATPRI).
                     data["filter_status_description_traffic"] = "your sim IS sending traffic data"  # pylint: disable=line-too-long
                     data["next_state_traffic"] = "enable"
 
+                if self.is_upstream_connected() and self.upstream.is_frankenrouter:
+                    data['network_source_section'] = filter_page_network_source_section.format(
+                        this_sim=self.config.identity.simulator,
+                        elevation_source=self.sharedinfo.get(
+                            'elevation_source_simulator', 'unknown'),
+                        traffic_source=self.sharedinfo.get(
+                            'traffic_source_simulator', 'unknown'),
+                    )
+                else:
+                    data['network_source_section'] = ''
                 html_page = filter_page.format(**data)
                 return web.json_response(text=html_page, content_type='text/html')
 
@@ -2436,6 +2477,36 @@ the primary VATSIM connection (VATPRI).
                 self.config.psx.filter_traffic = False
                 self.logger.info("API: traffic filter disabled")
                 self.connection_state_changed()
+                raise web.HTTPFound('/filter')
+
+            @routes.get('/api/filter/elevation/start_sending')
+            async def handle_filter_elevation_start_sending(_):
+                sim = self.config.identity.simulator
+                self.logger.info("API: sending ELEVATION_SOURCE:%s upstream", sim)
+                await self.send_to_upstream(
+                    f"addon=FRANKENROUTER:{self.frdp_version}:ELEVATION_SOURCE:{sim}")
+                raise web.HTTPFound('/filter')
+
+            @routes.get('/api/filter/elevation/stop_sending')
+            async def handle_filter_elevation_stop_sending(_):
+                self.logger.info("API: sending ELEVATION_SOURCE:NOSIM upstream")
+                await self.send_to_upstream(
+                    f"addon=FRANKENROUTER:{self.frdp_version}:ELEVATION_SOURCE:NOSIM")
+                raise web.HTTPFound('/filter')
+
+            @routes.get('/api/filter/traffic/start_sending')
+            async def handle_filter_traffic_start_sending(_):
+                sim = self.config.identity.simulator
+                self.logger.info("API: sending TRAFFIC_SOURCE:%s upstream", sim)
+                await self.send_to_upstream(
+                    f"addon=FRANKENROUTER:{self.frdp_version}:TRAFFIC_SOURCE:{sim}")
+                raise web.HTTPFound('/filter')
+
+            @routes.get('/api/filter/traffic/stop_sending')
+            async def handle_filter_traffic_stop_sending(_):
+                self.logger.info("API: sending TRAFFIC_SOURCE:NOSIM upstream")
+                await self.send_to_upstream(
+                    f"addon=FRANKENROUTER:{self.frdp_version}:TRAFFIC_SOURCE:NOSIM")
                 raise web.HTTPFound('/filter')
 
             @routes.get('/upstream')
