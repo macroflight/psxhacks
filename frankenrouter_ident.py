@@ -65,14 +65,15 @@ class Script():  # pylint: disable=too-many-instance-attributes
             GetWindowText(hwnd, buff, length + 1)
             return buff.value
 
-        def add_client(laddr, lport, raddr, rport, name):  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        def add_client(laddr, lport, raddr, rport, client_provided_id, display_name):  # pylint: disable=too-many-arguments,too-many-positional-arguments
             key = f"{laddr}:{lport}"
             clients[key] = {
                 "raddr": raddr,
                 "rport": rport,
                 "laddr": laddr,
                 "lport": lport,
-                "name": name,
+                "client_provided_id": client_provided_id,
+                "display_name": display_name,
             }
 
         identified = set()
@@ -86,7 +87,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
             if (c.laddr.ip, c.laddr.port) in identified:
                 continue
 
-            name = False
+            ident = None
 
             try:
                 proc_name = psutil.Process(c.pid).name()
@@ -94,9 +95,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 proc_name = ""
 
             if re.match(r"CockpitSimulator", proc_name):
-                name = "CSCDU"
+                ident = ("CSBRIDGE", "Cockpit Simulator Bridge")
 
-            if not name:
+            if not ident:
                 hwnds = get_hwnds_for_pid(c.pid)
                 self.logger.info("Checking pid %s (%s:%s), hwnds is %s",
                                  c.pid, c.laddr.ip, c.laddr.port, hwnds)
@@ -104,22 +105,25 @@ class Script():  # pylint: disable=too-many-instance-attributes
                     title = get_window_title_by_handle(hwnd)
                     self.logger.debug("Title is %s", title)
                     if re.match(r".*PSX.NET.GateFinder.*", title):
-                        name = "Gatefinder"
+                        ident = ("GATEFIND", "PSX.NET GateFinder")
                     elif re.match(r".*ACARS Printer.*", title):
-                        name = "Printer"
+                        ident = ("PRINTER", "AcarsPrint App for thermal printers")
                     elif re.match(r"^PSX.NET$", title):
-                        name = "PSX.NET"
+                        ident = ("PSXNET", "PSX.NET")
                     else:
                         self.logger.debug(
                             "Non-identified client on %s:%s: %s",
                             c.laddr.ip, c.laddr.port, title)
-                    if name:
+                    if ident:
                         break
 
-            if name:
-                self.logger.debug("%s:%s identified as %s", c.laddr.ip, c.laddr.port, name)
+            if ident:
+                client_provided_id, display_name = ident
+                self.logger.debug("%s:%s identified as %s (%s)",
+                                  c.laddr.ip, c.laddr.port, client_provided_id, display_name)
                 identified.add((c.laddr.ip, c.laddr.port))
-                add_client(c.laddr.ip, c.laddr.port, c.raddr.ip, c.raddr.port, name)
+                add_client(c.laddr.ip, c.laddr.port, c.raddr.ip, c.raddr.port,
+                           client_provided_id, display_name)
         self.logger.debug("Returning %s", clients)
         return clients
 

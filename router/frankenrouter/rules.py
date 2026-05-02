@@ -326,7 +326,8 @@ class Rules():  # pylint: disable=too-many-public-methods
         {
             "laddr": "127.0.0.1",
             "lport": 12345,
-            "name": "PSX Sounds"
+            "client_provided_id": "GATEFIND",
+            "display_name": "PSX.NET GateFinder"
         }
         """
         if self.sender.upstream:
@@ -341,16 +342,25 @@ class Rules():  # pylint: disable=too-many-public-methods
                 RulesAction.DROP, RulesCode.MESSAGE_INVALID,
                 message=f"Invalid JSON data in FRDP CLIENTINFO message: {self.line}"
             )
-        if not all(k in clientinfo for k in ('laddr', 'lport', 'name')):
+        required = ('laddr', 'lport', 'client_provided_id', 'display_name')
+        if not all(k in clientinfo for k in required):
             return self.myreturn(
                 RulesAction.DROP, RulesCode.MESSAGE_INVALID,
                 message=f"Missing required fields in FRDP CLIENTINFO message: {self.line}"
             )
         peername = (clientinfo['laddr'], clientinfo['lport'])
         if peername in self.router.clients:
-            self.router.clients[peername].display_name = clientinfo['name']
-            self.router.clients[peername].display_name_source = "FRDP CLIENTINFO"
-            self.router.connection_state_changed()
+            client = self.router.clients[peername]
+            if client.display_name_source in ('name message', 'access config'):
+                self.logger.debug(
+                    "Ignoring CLIENTINFO for %s: already identified via %s",
+                    peername, client.display_name_source)
+            else:
+                client.client_provided_id = clientinfo['client_provided_id']
+                client.display_name = clientinfo['display_name']
+                client.client_provided_display_name = clientinfo['display_name']
+                client.display_name_source = "FRDP CLIENTINFO"
+                self.router.connection_state_changed()
         else:
             self.logger.warning(
                 "Got CLIENTINFO data for non-connected client %s", peername)
@@ -1222,14 +1232,35 @@ class TestRules(unittest.TestCase):
         json_payload = json.dumps({
             "laddr": "127.0.0.1",
             "lport": 12345,
-            "name": "PSX Sounds"
+            "client_provided_id": "PSXSOUNDS",
+            "display_name": "PSX Sounds"
         })
         (action, code, *_) = rules.route(
             f"addon=FRANKENROUTER:1:CLIENTINFO:{json_payload}", testpeer)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.FRDP_CLIENTINFO)
+        self.assertEqual(testpeer.client_provided_id, 'PSXSOUNDS')
         self.assertEqual(testpeer.display_name, 'PSX Sounds')
+        self.assertEqual(testpeer.client_provided_display_name, 'PSX Sounds')
         self.assertEqual(testpeer.display_name_source, 'FRDP CLIENTINFO')
+
+        # CLIENTINFO must not overwrite a name= self-identification
+        testpeer.display_name = 'Self Identified'
+        testpeer.display_name_source = 'name message'
+        testpeer.client_provided_id = 'SELFID'
+        json_payload2 = json.dumps({
+            "laddr": "127.0.0.1",
+            "lport": 12345,
+            "client_provided_id": "IDENT",
+            "display_name": "Ident Provided Name"
+        })
+        (action, code, *_) = rules.route(
+            f"addon=FRANKENROUTER:1:CLIENTINFO:{json_payload2}", testpeer)
+        self.assertEqual(action, RulesAction.DROP)
+        self.assertEqual(code, RulesCode.FRDP_CLIENTINFO)
+        self.assertEqual(testpeer.client_provided_id, 'SELFID')
+        self.assertEqual(testpeer.display_name, 'Self Identified')
+        self.assertEqual(testpeer.display_name_source, 'name message')
 
     def test_frdp_client_auth(self):  # pylint: disable=too-many-statements
         """Test FRDP messages from client."""
