@@ -12,6 +12,9 @@ PSX instances connected. Can be used for shared cockpit.
 
 [More information is available here](router/README.md)
 
+A small helper `frankenrouter_ident.py` can be run to help identify
+addons that do not identify themselves with a `name=` PSX message.
+
 ### frankenusb.py
 
 Replacement for the PSX USB subsystem (for my needs at least). Things

@@ -1,5 +1,45 @@
 # Changelog
 
+## 2026-05-02: version 1.2.0
+
+- Single-click setting of elevation and traffic filters. Now only one
+  person needs to do this, and the other routers change their filters
+  automatically.
+- Make it more difficult to accidentally stop the router with e.g
+  Control-C or Alt-F4
+- Workaround for jettison selector bug
+- Warn if routers in the network run different versions
+- frankenrouter_ident.py will now send both ID and display name
+
+## 2026-04-24: version 1.1.7
+
+- Major changes to improve latency. We now batch forward messages that
+  are in the queue (so we don't add latency, we just batch the
+  messages to each recipient and then send them in one go)
+
+## 2026-04-24: version 1.1.6
+
+- Minor improvement to "basic mode" on-screen info
+
+## 2026-04-12: version 1.1.5
+
+- Performance improvements, including using TCP_NODELAY
+- Include the last 10 FRDP RTT measurements in routerinfo, allows all
+  routers to see how the other router-to-router connections in the
+  network are doing
+
+## 2026-03-26: version 1.1.4
+
+- A/P disconnect button will now enable the flight controls in your
+  sim (i.e no need to use frankenusb just for this)
+- Performance improvements
+
+## 2026-03-25: version 1.1.3
+
+- add per-client message/s and bytes/s to API
+- minor improvements to /api/stats
+- bug fixes
+
 ## 2025-12-18: version 1.1.2
 
 - Minor bug fixes, e.g fixing situ load and save that was broken when

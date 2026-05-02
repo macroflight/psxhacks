@@ -167,7 +167,7 @@ that we get from the router's variable cache.
 ## REST API
 
 The router has a (currently very small) REST API. See
-[docs/API.md](this page).
+[this page](docs/API.md).
 
 ## The addon that identifies PSX clients by their window name "frankenrouter_ident"
 
@@ -188,7 +188,6 @@ This addon needs the `pywin32` and `psutil` modules installed, e.g
 using a virtual environment:
 
 ``` text
-text
 python3 -m venv router1
 . router1/bin/activate
 pip install pywin32
