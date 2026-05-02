@@ -6,6 +6,6 @@ $Host.UI.RawUI.WindowTitle = "FrankenRouter SLAVE"
 
 $env:PYTHONPATH = $PsxhacksDevel
 
-& $PsxhacksPython "$PsxhacksDevel\router\frankenrouter.py" $FrankenRouterSlaveOptions
+& $PsxhacksPython "$PsxhacksDevel\router\frankenrouter.py" @FrankenrouterslaveOptions
 
 # Read-Host -Prompt "Press Enter to exit"

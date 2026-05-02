@@ -22,7 +22,9 @@ $OverrideFile = "$PSScriptRoot\..\..\psxhacks-start-override.ps1"
 $FlavorFile = "$PSScriptRoot\..\..\psxhacks-current-flavor.ps1"
 
 #
-# DO NOT CHANGE ANYTHING BELOW THIS LINE ... unless you know you need to
+# DO NOT CHANGE ANYTHING BELOW THIS LINE unless you really know what
+# you're doing, in most cases you should put your local settings in
+# the override file instead.
 #
 
 $PsxhacksDevel = Split-Path $PSScriptRoot -Parent
@@ -52,12 +54,10 @@ $PsxSoundsDir        = "$SimBase\psx_sounds\PSXSounds"
 
 # Location of Hoppie's ACARS client For Aerowinx PSX and command line options
 $CpdlcDir           = "$SimBase\hafap"
-# --stealth is manadatory if you also use BACARS
+# --stealth is mandatory if you also use BACARS
 # --min-interval=15 --max-interval=30 seems to be OK on VATSIM
+# --no-no-comm fixes an annoying problem but you need Macroflight's patched version of HAFAP
 $CpdlcOptions = "--stealth","--no-no-comm","--min-interval=15","--max-interval=30"
-
-# Frankenutil options
-$FrankenUtilOptions = "--psx-main-server-port=10748","--cdus=L,R","--menu-row=6"
 
 # Location of PSX itself
 $AerowinxDir        = "$SimBase\psx\Aerowinx"
@@ -102,40 +102,53 @@ $HoppieLogonCode = "DUMMYLOGONCODE"
 # logs and other things are placed. In the Frankensim these are placed
 # in the same directory (SimBase) where psxhacks is placed, but you
 # can put them anywhere, just put the variable in your override file.
-$FrankenFreezeDir   = "$SimBase\frankenfreeze"
-$FrankenTankerDir   = "$SimBase\frankentanker"
-$FrankenUsbDir      = "$SimBase\frankenusb"
-$FrankenRouterDir   = "$SimBase\frankenrouter"
-$FrankenWindDir     = "$SimBase\frankenwind"
-$FrankenTurbDir     = "$SimBase\frankenturb"
-$FrankenUtilDir     = "$SimBase\frankenutil"
+$FrankenfreezeDir   = "$SimBase\frankenfreeze"
+$FrankentankerDir   = "$SimBase\frankentanker"
+$FrankenusbDir      = "$SimBase\frankenusb"
+$FrankenwindDir     = "$SimBase\frankenwind"
+$FrankenturbDir     = "$SimBase\frankenturb"
+$FrankenutilDir     = "$SimBase\frankenutil"
 
-# If you want to give custom options to frankenusb, e.g a config file name
-$FrankenUsbOptions  = ""
-$FrankenTurbOptions = "--psx-main-server-port=10748"
-
-# Options for the master sim router
-$FrankenRouterMasterOptions = "--config-file=frankensim-core.toml"
-$FrankenRouterSlaveOptions = "--config-file=frankensim-client.toml"
+# Options for the routers
+$FrankenrouterDir           = "$SimBase\frankenrouter"
+$FrankenrouterMasterOptions = @("--config-file=frankensim-core.toml")
+$FrankenrouterSlaveOptions  = @("--config-file=frankensim-client.toml")
 # Location of router web interface
-$FrankenRouterSlaveWeb = "http://localhost:8747"
+$FrankenrouterSlaveWeb      = "http://localhost:8747"
+
+# Options for the rest of the frankenaddons, e.g a config file name
+#
+# If port 10748 is used it is because those usually run in the master
+# sim, and my master sim is on port 10748
+#
+# $ExampleOptions = @("--foo", "--bar=123")
+$FrankenfreezeOptions = @()
+$FrankentankerOptions = @()
+$FrankenusbOptions  = @()
+$FrankenwindOptions  = @()
+$FrankenturbOptions = @()
+$FrankenidentOptions = @()
+$FrankenutilOptions = @()
 
 # Which of the addons that we can manage you actually want started in
 # your sim. You can override these in the override file.
 
-$StartCpdlc         = $true
-$StartCsCdu         = $true
 $StartFrankenfreeze = $false
-$StartFrankenusb    = $true
 $StartFrankentanker = $false
+$StartFrankenusb    = $false
 $StartFrankenwind   = $false
 $StartFrankenturb   = $false
-$StartIdent         = $false
-$StartPsxSounds     = $true
-$StartVpilot        = $true
-$StartAcarsPrint    = $false
-$StartEfb           = $true
+$StartFrankenident  = $false
 
+# Other addons
+$StartCpdlc         = $false
+$StartPsxSounds     = $false
+$StartVpilot        = $false
+$StartAcarsPrint    = $false
+$StartEfb           = $false
+
+# CDU
+$StartCsCdu         = $false
 $CsCduExe = "$SimBase\hw\cs_cdu\CockpitSimulator v2025.2.7.exe"
 
 

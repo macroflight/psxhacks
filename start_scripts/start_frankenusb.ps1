@@ -3,10 +3,10 @@
 $Host.UI.RawUI.WindowTitle = "FrankenUSB"
 KillPythonScript "frankenusb.py"
 
-cd $FrankenUsbDir
+cd $FrankenusbDir
 
 $env:PYTHONPATH = $PsxhacksDevel
 
-& $PsxhacksPython "$PsxhacksDevel\frankenusb.py" $FrankenUsbOptions
+& $PsxhacksPython "$PsxhacksDevel\frankenusb.py" @FrankenusbOptions
 
 # Read-Host -Prompt "Press Enter to exit"

@@ -6,8 +6,8 @@ Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_router_slav
 Read-Host -Prompt "Connect to $FrankenRouterSlaveWeb/upstream and connect to the master sim, then press Enter"
 
 if ($StartIdent) {
-    Write-Output "Starting IDENT..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_ident.ps1"
+    Write-Output "Starting FrankenIDENT..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankenident.ps1"
 }
 
 Write-Output "Starting PSX main clients..."
@@ -79,7 +79,7 @@ Write-Output "Starting PSX.NET.MSFS.Client..."
 Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_msfs_client.ps1"
 
 if ($StartFrankenfreeze) {
-    Write-Output "Starting FrankenFreeze..."
+    Write-Output "Starting Frankenfreeze..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankenfreeze.ps1"
 }
 
