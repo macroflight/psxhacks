@@ -28,7 +28,7 @@ PSX_SERVER_RECONNECT_DELAY = 1.0
 PSX_PROTOCOL_SEPARATOR = b'\r\n'
 
 
-class Script():
+class Script():  # pylint: disable=too-many-instance-attributes
     """Generic FrankenTech script."""
 
     def __init__(self):
