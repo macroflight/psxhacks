@@ -514,9 +514,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                             upstream = f"frankenrouter {con['display_name']}"
                             upstream += f" ({trimstring(con['uuid'])})"
                 self.logger.info(
-                    "Remote %s (%s) in sim %s has %d clients, up %d s (data age %.0fs)",
+                    "Remote %s (%s) v%s in sim %s has %d clients, up %d s (data age %.0fs)",
                     info['router_name'],
                     trimstring(info['uuid']),
+                    info.get('version', 'unknown'),
                     info['simulator_name'],
                     clients,
                     info['performance']['uptime'],
@@ -526,6 +527,15 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.logger.info(
                         "--> upstream connection is %s",
                         upstream)
+
+        versions = {info.get('version', 'unknown')
+                    for uuid, info in self.routerinfo.items()
+                    if uuid != self.uuid}
+        versions.add(__VERSION__)
+        if len(versions) > 1:
+            self.logger.warning(
+                "Version mismatch across routers in network: %s",
+                ', '.join(sorted(versions)))
 
         self.logger.info("-" * HEADER_LINE_LENGTH)
 
