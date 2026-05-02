@@ -76,15 +76,6 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         # if e.g the flap lever axis is in sync with PSX.
         self.axis_set_state = {}
 
-        self.flight_control_lock_active = False
-        self.flight_control_lock_variables = [
-            'FltControls',
-            'Brakes',
-            'Tla',
-            'SpdBrkLever',
-            'Tiller',
-        ]
-
         # The interlock state for the PSX_THROTTLE and PSX_REVERSE
         # axis types. The four elements represent the interlocks for
         # engine #1, #2, #3 and #4.
@@ -193,62 +184,6 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             'indexes': [1],
             'value': 0,
         })
-
-    def towing_heading_change(self, increment):
-        """Change the pushback target heading by increment degrees.
-
-        Towing is a string of six digits. Wee care about digits 4, 5 and 6, which are the heading.
-        """
-        towing = str(self.psx.get('Towing'))
-        self.logger.debug("Towing string: %s", towing)
-        self.logger.debug("Current towing heading str: %s", towing[3:6])
-        heading = int(towing[3:6])
-        self.logger.debug("Current towing heading: %s", heading)
-        heading_new = heading + increment
-        if heading_new >= 360:
-            heading_new -= 360
-        if heading_new < 0:
-            heading_new += 360
-        self.logger.debug("New towing heading: %s", heading_new)
-        towing_new = towing[:3] + str(heading_new).zfill(3)
-        self.logger.debug("New towing string: %s", towing_new)
-        self.psx_send_and_set('Towing', towing_new)
-
-    def towing_direction_toggle(self):
-        """Toggle the towing direction.
-
-        Towing is a string of six digits. Wee care about digit 1 (1 = pushback, 2 = push forward)
-        """
-        towing = str(self.psx.get('Towing'))
-        self.logger.debug("Towing string: %s", towing)
-        direction = towing[0]
-        if direction == "1":
-            direction = "2"
-        else:
-            direction = "1"
-        self.logger.debug("New towing direction: %s", direction)
-        towing_new = direction + towing[1:]
-        self.logger.debug("New towing string: %s", towing_new)
-        self.psx_send_and_set('Towing', towing_new)
-
-    def towing_mode_toggle(self):
-        """Toggle the towing mode (start/stop).
-
-        Towing is a string of six digits. Wee care about digit 2 and 3
-        We never use auto.
-        """
-        towing = str(self.psx.get('Towing'))
-        self.logger.debug("Towing string: %s", towing)
-        mode = towing[1:3]
-        self.logger.debug("Towing mode: %s", mode)
-        if mode == "10":
-            mode = "98"
-        else:
-            mode = "20"
-        self.logger.debug("New towing mode: %s", mode)
-        towing_new = towing[:1] + mode + towing[3:]
-        self.logger.debug("New towing string: %s", towing_new)
-        self.psx_send_and_set('Towing', towing_new)
 
     async def handle_axis_motion_normal(self, event, axis_config):
         """Handle motion on a normal axis."""
@@ -1125,14 +1060,6 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 new_value = value | 1
                 if new_value != value:
                     self.psx_send_and_set(button_config['psx variable'], new_value)
-            elif button_config['button type'] == 'TOWING_HEADING':
-                self.towing_heading_change(button_config['increment'])
-            elif button_config['button type'] == 'TOWING_DIRECTION_TOGGLE':
-                self.towing_direction_toggle()
-            elif button_config['button type'] == 'TOWING_MODE_TOGGLE':
-                self.towing_mode_toggle()
-            elif button_config['button type'] == 'FLIGHT_CONTROL_LOCK_TOGGLE':
-                self.toggle_flight_control_lock()
             elif button_config['button type'] == 'FLIGHT_CONTROL_MY_CONTROLS':
                 self.my_controls()
             elif button_config['button type'] == 'FLIGHT_CONTROL_NO_CONTROL_LOCKS':
@@ -1292,53 +1219,6 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         else:
             # Handle this as a up/down event
             await handle_button_helper()
-
-    def toggle_flight_control_lock(self):  # pylint: disable=too-many-branches
-        """Toggle the flight control lock and update status message.
-
-        The local lock is always toggled when this function is called.
-
-        If the new state is enabled, we try to add our
-        EICAS_IDENTIFIER_LETTER to the lock status message (e.g "AXLK: M")
-
-        If the new state is disabled, we try to remove our
-        EICAS_IDENTIFIER_LETTER from the lock status message.
-        """
-        # Toggle the actual lock
-        if self.flight_control_lock_active:
-            self.flight_control_lock_active = False
-        else:
-            self.flight_control_lock_active = True
-
-        eicasletter = self.config_misc.get("EICAS_IDENTIFIER_LETTER", None)
-        if eicasletter is None:
-            self.logger.info("Flight control lock toggled to %s", self.flight_control_lock_active)
-        else:
-            if len(eicasletter) > 1:
-                raise FrankenUsbException(
-                    "EICAS_IDENTIFIER_LETTER cannot be more than one letter")
-
-            # Update EICAS message
-            prefix = "AXLK: "
-            current_message = self.psx.get(MSG_TYPE_FLT_CTL_LOCK)
-            letters = current_message.replace(prefix, "")
-
-            if self.flight_control_lock_active:
-                if eicasletter not in letters:
-                    letters = ''.join(sorted(letters + eicasletter))
-                    letters = "".join(set(letters))
-            else:
-                if eicasletter in letters:
-                    letters = letters.replace(eicasletter, "")
-            if letters == '':
-                new_message = ''
-            else:
-                new_message = prefix + letters
-
-            self.logger.info(
-                "Flight control lock toggled. New value: %s. Message change from %s to %s",
-                self.flight_control_lock_active, current_message, new_message)
-            self.psx_send_and_set(MSG_TYPE_FLT_CTL_LOCK, new_message)
 
     def my_controls(self):
         """Send a message to PSX to release the flight control lock to me."""
@@ -1578,15 +1458,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         await self.psx.connect(host=self.args.psx_server, port=self.args.psx_port)
 
     def psx_send_and_set(self, psx_variable, new_psx_value):
-        """Send variable to PSX and store in local db.
-
-        Filtering: if the flight control lock is active, do not send
-        any of the flight control variables to PSX.
-        """
-        if self.flight_control_lock_active:
-            if psx_variable in self.flight_control_lock_variables:
-                self.logger.debug("FLT CTL LOCK: not updating %s", psx_variable)
-                return
+        """Send variable to PSX and store in local db."""
         self.logger.debug("TO PSX: %s -> %s", psx_variable, new_psx_value)
         self.psx.send(psx_variable, new_psx_value)
         self.psx._set(psx_variable, new_psx_value)  # pylint: disable=protected-access
