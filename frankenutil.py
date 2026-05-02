@@ -48,6 +48,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self.geod = Geod(ellps="WGS84")
 
         self.slew_enabled = True
+        self.tow_enabled = True
         self.scratchpad_text = ''
 
     def psx_send_and_set(self, psx_variable, new_psx_value):
@@ -61,6 +62,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self.heading_r = float(elems[2])
         self.latitude_r = float(elems[5])
         self.longitude_r = float(elems[6])
+
+    def towing_var_changed(self, _key, _value):
+        """Repaint towing page when a towing-related PSX variable changes."""
+        if self.mcdu_page == "towing":
+            self.repaint_req_by.add("towing-var-changed")
+            asyncio.create_task(self.repaint_all_mcdus())
 
     async def slew_monitor_coro(self):
         """Disable slew when ground speed exceeds 5 kt."""
@@ -77,11 +84,15 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 if raw is None:
                     continue
                 gs = float(raw)
-                was_enabled = self.slew_enabled
+                was_slew = self.slew_enabled
+                was_tow = self.tow_enabled
                 self.slew_enabled = gs <= 5.0
-                self.logger.debug("GroundSpeed %.1f kt, slew_enabled=%s", gs, self.slew_enabled)
-                if self.slew_enabled != was_enabled:
-                    self.repaint_req_by.add("slew-speed-change")
+                self.tow_enabled = gs <= 20.0
+                self.logger.debug(
+                    "GroundSpeed %.1f kt, slew_enabled=%s tow_enabled=%s",
+                    gs, self.slew_enabled, self.tow_enabled)
+                if self.slew_enabled != was_slew or self.tow_enabled != was_tow:
+                    self.repaint_req_by.add("speed-change")
                     asyncio.create_task(self.repaint_all_mcdus())
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical(
@@ -132,6 +143,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
 
     def do_towing_start(self):
         """Start towing (set mode to 20)."""
+        if self.psx.get('ParkBrkLev') != "1":
+            self.logger.warning("Towing start blocked: parking brake not set")
+            return
         current = self.psx.get('Towing')
         if current is None or len(current) < 3:
             self.logger.warning("Towing variable not available")
@@ -219,6 +233,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
                     if len(self.scratchpad_text) < 3:
                         self.scratchpad_text += value
                         mcdu.paint(13, 0, "large", "magenta", self.scratchpad_text)
+                elif value == "6L":
+                    self.mcdu_page = "main"
+                    self.scratchpad_text = ''
+                    self.repaint_req_by.add("towing-back-press")
+                elif not self.tow_enabled:
+                    pass
                 elif value == "1L":
                     self.do_towing_start()
                     self.repaint_req_by.add("towing-start")
@@ -239,10 +259,16 @@ class Script():  # pylint: disable=too-many-instance-attributes
                             self.repaint_req_by.add("towing-hdg-set")
                         except ValueError:
                             pass
-                elif value == "6L":
-                    self.mcdu_page = "main"
-                    self.scratchpad_text = ''
-                    self.repaint_req_by.add("towing-back-press")
+                elif value == "3R":
+                    if self.scratchpad_text:
+                        try:
+                            radius = int(self.scratchpad_text)
+                            self.psx_send_and_set('TowTurnRadius', str(radius))
+                            self.scratchpad_text = ''
+                            mcdu.paint(13, 0, "large", "white", " " * 24)
+                            self.repaint_req_by.add("towing-radius-set")
+                        except ValueError:
+                            pass
             if self.repaint_req_by:
                 asyncio.create_task(self.repaint_all_mcdus())
         else:
@@ -281,7 +307,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         mcdu.paint(8, 0, L, C, "<LEFT 1         RIGHT 1>")
         mcdu.paint(12, 0, L, C, "<BACK                   ")
 
-    async def paintTowingPage(self, mcdu):
+    async def paintTowingPage(self, mcdu):  # pylint: disable=too-many-branches
         """Paint the TOWING menu page."""
         await asyncio.sleep(0.5)
         A = "amber"
@@ -312,13 +338,24 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 hdg_str = f"{int(towing[3:6]):03d}"
             except ValueError:
                 hdg_str = "???"
+        radius_raw = self.psx.get('TowTurnRadius')
+        if radius_raw is None:
+            radius_str = "---"
+        else:
+            try:
+                radius_str = f"{int(radius_raw):3d}"
+            except ValueError:
+                radius_str = "???"
         mcdu.clear()
         #                      123456789012345678901234
-        mcdu.paint(0, 0, S, A, title)
+        if self.tow_enabled:
+            mcdu.paint(0, 0, S, A, title)
+        else:
+            mcdu.paint(0, 0, S, "red", "    TOWING LOCKED       ")
         mcdu.paint(2, 0, L, C, "<START            STOP>")
         mcdu.paint(4, 0, L, C, "<TOGGLE MODE            ")
-        mcdu.paint(5, 0, S, C, " TARGET HDG             ")
-        mcdu.paint(6, 0, L, C, f" {hdg_str}                    ")
+        mcdu.paint(5, 0, S, C, " TARGET HDG      RADIUS ")
+        mcdu.paint(6, 0, L, C, f" {hdg_str}                {radius_str:>3}>")
         mcdu.paint(12, 0, L, C, "<BACK                   ")
         if self.scratchpad_text:
             mcdu.paint(13, 0, "large", "magenta", self.scratchpad_text)
@@ -380,7 +417,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.psx.subscribe("PiBaHeAlTas", self.position_changed)
             self.psx.subscribe("StartPiBaHeAlVsTasYw")
             self.psx.subscribe("GroundSpeed")
-            self.psx.subscribe("Towing")
+            self.psx.subscribe("Towing", self.towing_var_changed)
+            self.psx.subscribe("TowTurnRadius", self.towing_var_changed)
+            self.psx.subscribe("ParkBrkLev")
 
             self.psx.logger = self.logger.debug
 
