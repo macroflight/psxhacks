@@ -2712,19 +2712,17 @@ the primary VATSIM connection (VATPRI).
             app = web.Application(middlewares=[cors_middleware])
 
             app.add_routes(routes)
-            loop = asyncio.get_running_loop()
-            handler = app.make_handler()
-            await loop.create_server(
-                handler,
-                '0.0.0.0',
-                self.config.listen.rest_api_port,
-            )
+            runner = web.AppRunner(app)
+            await runner.setup()
+            site = web.TCPSite(runner, '0.0.0.0', self.config.listen.rest_api_port)
+            await site.start()
             while True:  # wait forever
                 await asyncio.sleep(3600.0)
 
         # Standard Task cleanup
         except asyncio.exceptions.CancelledError:
             self.logger.info("Task %s was cancelled, cleanup and exit", name)
+            await runner.cleanup()
             raise
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s, shutting down",
@@ -3019,55 +3017,9 @@ def _install_ctrl_c_guard():
     signal.signal(signal.SIGINT, _handler)
 
 
-# Kept at module level so the GC does not free the ctypes callback while the
-# process is running (Windows would crash when trying to invoke a freed pointer).
-_win32_console_handlers: list = []
-
-
-def _install_close_guard():
-    """Windows only: suppress accidental window close (Alt-F4, X button, taskbar).
-
-    Task Manager uses TerminateProcess() which bypasses all of this,
-    so kill-via-Task-Manager still works normally.
-    """
-    if sys.platform != 'win32':
-        return
-    import ctypes  # pylint: disable=import-outside-toplevel
-    import ctypes.wintypes  # pylint: disable=import-outside-toplevel
-
-    # Remove SC_CLOSE from the console window's system menu. This grays out
-    # the X button and makes Alt-F4 a no-op at the Win32 message level,
-    # before any signal ever reaches Python.
-    _SC_CLOSE = 0xF060
-    _MF_BYCOMMAND = 0x0000
-    hwnd = ctypes.windll.kernel32.GetConsoleWindow()
-    if hwnd:
-        hmenu = ctypes.windll.user32.GetSystemMenu(hwnd, False)
-        if hmenu:
-            ctypes.windll.user32.DeleteMenu(hmenu, _SC_CLOSE, _MF_BYCOMMAND)
-
-    # Belt-and-suspenders: also intercept CTRL_CLOSE_EVENT for cases where
-    # another process triggers a console close signal directly.
-    _CTRL_CLOSE_EVENT = 2
-    _CTRL_LOGOFF_EVENT = 5
-
-    @ctypes.WINFUNCTYPE(ctypes.wintypes.BOOL, ctypes.wintypes.DWORD)
-    def _handler(ctrl_type):
-        if ctrl_type in (_CTRL_CLOSE_EVENT, _CTRL_LOGOFF_EVENT):
-            sys.stderr.write(
-                "\nWindow close blocked. Use Task Manager to stop the router.\n")
-            sys.stderr.flush()
-            return True  # Suppress: prevents the default ExitProcess() call
-        return False  # Let other handlers run (e.g. Ctrl-C)
-
-    _win32_console_handlers.append(_handler)  # keep alive
-    ctypes.windll.kernel32.SetConsoleCtrlHandler(_handler, True)
-
-
 if __name__ == '__main__':
     if '--devel' not in sys.argv:
         _install_ctrl_c_guard()
-        _install_close_guard()
     try:
         asyncio.run(Frankenrouter().main())
     except KeyboardInterrupt:
