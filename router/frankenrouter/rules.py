@@ -397,7 +397,7 @@ class Rules():  # pylint: disable=too-many-public-methods
             RulesCode.KEYVALUE_FILTER_EGRESS,
             extra_data={'exclude_non_frankenrouter': True})
 
-    def handle_addon_frankenrouter_sharedinfo(self, payload):
+    def handle_addon_frankenrouter_sharedinfo(self, payload):  # pylint: disable=too-many-branches
         """Handle a FRDP SHAREDINFO message.
 
         Format:
@@ -445,21 +445,23 @@ class Rules():  # pylint: disable=too-many-public-methods
 
         # Update local filter state based on source assignments in SHAREDINFO.
         # Do NOT trigger frdp_sharedinfo_requested to avoid a broadcast loop.
-        own_sim = self.router.config.identity.simulator
-        filter_changed = False
-        if 'elevation_source_simulator' in sharedinfo:
-            new_val = sharedinfo['elevation_source_simulator'] != own_sim
-            if new_val != self.router.config.psx.filter_elevation:
-                self.router.config.psx.filter_elevation = new_val
-                filter_changed = True
-        if 'traffic_source_simulator' in sharedinfo:
-            new_val = sharedinfo['traffic_source_simulator'] != own_sim
-            if new_val != self.router.config.psx.filter_traffic:
-                self.router.config.psx.filter_traffic = new_val
-                filter_changed = True
-        if filter_changed:
-            self.router.status_display_requested = True
-            self.router.frdp_routerinfo_requested = True
+        # The master router never updates its own filters from SHAREDINFO.
+        if not self.router.config.sharedinfo.master:
+            own_sim = self.router.config.identity.simulator
+            filter_changed = False
+            if 'elevation_source_simulator' in sharedinfo:
+                new_val = sharedinfo['elevation_source_simulator'] != own_sim
+                if new_val != self.router.config.psx.filter_elevation:
+                    self.router.config.psx.filter_elevation = new_val
+                    filter_changed = True
+            if 'traffic_source_simulator' in sharedinfo:
+                new_val = sharedinfo['traffic_source_simulator'] != own_sim
+                if new_val != self.router.config.psx.filter_traffic:
+                    self.router.config.psx.filter_traffic = new_val
+                    filter_changed = True
+            if filter_changed:
+                self.router.status_display_requested = True
+                self.router.frdp_routerinfo_requested = True
 
         # Forward message to network but only to frankenrouters
         return self.myreturn(

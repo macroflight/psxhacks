@@ -1596,12 +1596,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         payload_json = json.dumps(payload)
         # Store our own sharedinfo so we have all the data in the same place
         self.sharedinfo = payload
-        # Apply filter state for this (master) router based on source assignments
-        own_sim = self.config.identity.simulator
-        self.config.psx.filter_elevation = (
-            payload['elevation_source_simulator'] != own_sim)
-        self.config.psx.filter_traffic = (
-            payload['traffic_source_simulator'] != own_sim)
+        # The master router does NOT update its own filters from SHAREDINFO;
+        # its filters are only changed via the elevation/traffic source handlers.
         # Send to network (upstream and any connected frankenrouters)
         self.logger.debug("Sending SHAREDINFO up and downstream")
         await self.send_to_upstream(
