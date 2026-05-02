@@ -54,7 +54,7 @@ $PsxSoundsDir        = "$SimBase\psx_sounds\PSXSounds"
 $CpdlcDir           = "$SimBase\hafap"
 # --stealth is manadatory if you also use BACARS
 # --min-interval=15 --max-interval=30 seems to be OK on VATSIM
-$CpdlcOptions = "--stealth","--min-interval=15","--max-interval=30"
+$CpdlcOptions = "--stealth","--no-no-comm","--min-interval=15","--max-interval=30"
 
 # Frankenutil options
 $FrankenUtilOptions = "--psx-main-server-port=10748","--cdus=L,R","--menu-row=6"
