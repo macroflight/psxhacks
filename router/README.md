@@ -197,7 +197,7 @@ python3 frankenrouter_ident.py
 ```
 
 To start this addon, start a new terminal window and run `python
-frankenrouter_ident.py` in the router directory.
+frankenrouter_ident.py` from the psxhacks directory.
 
 ## Planned changes/new features
 

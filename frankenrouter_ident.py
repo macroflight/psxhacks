@@ -1,4 +1,4 @@
-r"""A script to map use window names to identify PSX clients.
+"""A script to map use window names to identify PSX clients.
 
 # Installing Python dependencies:
 
@@ -29,7 +29,7 @@ import win32gui  # pylint: disable=import-error
 import win32process  # pylint: disable=import-error
 
 __MYNAME__ = 'frankenrouter_ident.py'
-__MY_DESCRIPTION__ = 'Identify PSX clients by their window title'
+__MY_DESCRIPTION__ = 'Identify PSX clients by process name or window title'
 
 VERSION = '0.1'
 
@@ -49,11 +49,12 @@ class Script():
         self.logger = None
         self.psx_clients = {}
         self.psx_connection = None
+        self.psx_connection_is_new = False
         # Keep this in sync with frankenrouter.py
         self.frdp_version = 1
 
     def identify_clients(self):  # pylint: disable=too-many-locals,too-many-branches, too-many-statements
-        """Identify PSX clients on this machine by their window name."""
+        """Identify PSX clients on this machine by process name or window title."""
         GetWindowText = ctypes.windll.user32.GetWindowTextW  # pylint: disable=invalid-name
         GetWindowTextLength = ctypes.windll.user32.GetWindowTextLengthW  # pylint: disable=invalid-name
         clients = {}
@@ -92,54 +93,72 @@ class Script():
                 continue
             if remoteport != 10747:
                 continue
-            hwnds = get_hwnds_for_pid(c.pid)
-            self.logger.info("Checking pid %s (%s:%s), hwnds is %s",
-                             c.pid, c.laddr.ip, c.laddr.port, hwnds)
-            for hwnd in hwnds:
-                name = False
-                if (c.laddr.ip, c.laddr.port) in identified:
-                    # self.logger.debug("Already identified")
-                    continue
-                title = get_window_title_by_handle(hwnd)
-                self.logger.debug("Title is %s", title)
-                if re.match(r".*PSX.NET.GateFinder.*", title):
-                    name = "Gatefinder"
-                elif re.match(r".*ACARS Printer.*", title):
-                    name = "Printer"
-                elif re.match(r"^PSX.NET$", title):
-                    name = "PSX.NET"
-                else:
-                    self.logger.debug(
-                        "Non-identified client on %s:%s: %s",
-                        c.laddr.ip, c.laddr.port, title)
-                if name:
-                    self.logger.debug("%s:%s identified as %s", c.laddr.ip, c.laddr.port, name)
-                    identified.add((c.laddr.ip, c.laddr.port))
-                    add_client(c.laddr.ip, c.laddr.port, c.raddr.ip, c.raddr.port, name)
+            if (c.laddr.ip, c.laddr.port) in identified:
+                continue
+
+            name = False
+
+            try:
+                proc_name = psutil.Process(c.pid).name()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                proc_name = ""
+
+            if re.match(r"CockpitSimulator", proc_name):
+                name = "CSCDU"
+
+            if not name:
+                hwnds = get_hwnds_for_pid(c.pid)
+                self.logger.info("Checking pid %s (%s:%s), hwnds is %s",
+                                 c.pid, c.laddr.ip, c.laddr.port, hwnds)
+                for hwnd in hwnds:
+                    title = get_window_title_by_handle(hwnd)
+                    self.logger.debug("Title is %s", title)
+                    if re.match(r".*PSX.NET.GateFinder.*", title):
+                        name = "Gatefinder"
+                    elif re.match(r".*ACARS Printer.*", title):
+                        name = "Printer"
+                    elif re.match(r"^PSX.NET$", title):
+                        name = "PSX.NET"
+                    else:
+                        self.logger.debug(
+                            "Non-identified client on %s:%s: %s",
+                            c.laddr.ip, c.laddr.port, title)
+                    if name:
+                        break
+
+            if name:
+                self.logger.debug("%s:%s identified as %s", c.laddr.ip, c.laddr.port, name)
+                identified.add((c.laddr.ip, c.laddr.port))
+                add_client(c.laddr.ip, c.laddr.port, c.raddr.ip, c.raddr.port, name)
         self.logger.debug("Returning %s", clients)
         return clients
 
     async def identify_clients_coro(self):
         """Create mapping between local IP, local port and PSX client name."""
-
-        def equal(a, b):
-            return json.dumps(a) == json.dumps(b)
-
         try:
             self.logger.debug("Starting %s", inspect.currentframe().f_code.co_name)
             while True:
                 await asyncio.sleep(self.args.check_interval)
                 psx_clients_new = self.identify_clients()
-                self.logger.debug("Identified %d clients", len(self.psx_clients))
-                if not equal(self.psx_clients, psx_clients_new):
-                    if self.psx_connection is not None:
-                        for peername, data in psx_clients_new.items():
-                            self.logger.debug("Sending data for %s to router: %s", peername, data)
-                            line = f"addon=FRANKENROUTER:{self.frdp_version}:CLIENTINFO:{json.dumps(data)}"  # pylint: disable=line-too-long
-                            self.psx_connection['writer'].write(
-                                line.encode() + PSX_PROTOCOL_SEPARATOR)
-                            await self.psx_connection['writer'].drain()
-                        self.psx_clients = psx_clients_new
+                self.logger.debug("Identified %d clients", len(psx_clients_new))
+
+                if self.psx_connection is not None:
+                    if self.psx_connection_is_new:
+                        # Fresh connection: re-send all currently known clients
+                        to_send = psx_clients_new
+                        self.psx_connection_is_new = False
+                    else:
+                        # Normal: only send new or changed entries
+                        to_send = {k: v for k, v in psx_clients_new.items()
+                                   if k not in self.psx_clients or self.psx_clients[k] != v}
+                    for peername, data in to_send.items():
+                        self.logger.debug("Sending data for %s to router: %s", peername, data)
+                        line = f"addon=FRANKENROUTER:{self.frdp_version}:CLIENTINFO:{json.dumps(data)}"  # pylint: disable=line-too-long
+                        self.psx_connection['writer'].write(
+                            line.encode() + PSX_PROTOCOL_SEPARATOR)
+                        await self.psx_connection['writer'].drain()
+
+                self.psx_clients = psx_clients_new
 
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s, shutting down",
@@ -168,13 +187,21 @@ class Script():
             self.psx_connection = {
                 'writer': writer,
             }
+            self.psx_connection_is_new = True
             self.psx_connection['writer'].write(
                 "name=IDENT:FRANKEN.PY client identifier".encode() +
                 PSX_PROTOCOL_SEPARATOR)
             while True:
                 # Read and discard any arriving traffic
                 try:
-                    await reader.readline()
+                    data = await reader.readline()
+                    if not data:
+                        self.logger.info(
+                            "Router connection closed, sleeping %.1f s before reconnect",
+                            PSX_SERVER_RECONNECT_DELAY,
+                        )
+                        await asyncio.sleep(PSX_SERVER_RECONNECT_DELAY)
+                        break
                 except Exception as exc:  # pylint: disable=broad-exception-caught
                     self.logger.info(
                         "Router connection broke (%s), sleeping %.1f s before reconnect",
@@ -183,6 +210,7 @@ class Script():
                     )
                     await asyncio.sleep(PSX_SERVER_RECONNECT_DELAY)
                     break
+            self.psx_connection = None
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s, shutting down",
                                  exc, inspect.currentframe().f_code.co_name)
@@ -206,10 +234,6 @@ class Script():
                         else:
                             self.logger.info("Task: %s has ended: %s", task.get_name(), exc)
                     else:
-                        try:
-                            task.result()
-                        except asyncio.InvalidStateError:
-                            pass
                         running.append(task.get_name())
                 # Cleanup
                 for task in tasks_ended:
@@ -285,8 +309,6 @@ class Script():
         self.logger = logging.getLogger(__MYNAME__)
         if self.args.debug:
             self.logger.setLevel(logging.DEBUG)
-
-        if self.args.debug:
             asyncio.get_event_loop().set_debug(True)
         async with asyncio.TaskGroup() as self.taskgroup:
             task = self.taskgroup.create_task(self.monitor_coro(), name="Monitor")

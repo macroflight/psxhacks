@@ -7,6 +7,6 @@ KillPythonScript "frankenrouter_ident.py"
 
 $env:PYTHONPATH = $PsxhacksDevel
 
-& $PsxhacksPython "$PsxhacksDevel\router\frankenrouter_ident.py"
+& $PsxhacksPython "$PsxhacksDevel\frankenrouter_ident.py"
 
 # Read-Host -Prompt "Press Enter to exit"
