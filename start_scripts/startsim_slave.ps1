@@ -40,6 +40,11 @@ if ($StartFrankenwind) {
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankenwind.ps1"
 }
 
+if ($StartFrankenturb) {
+    Write-Output "Starting FrankenTurb..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankenturb.ps1"
+}
+
 if ($StartAcarsPrint) {
     Write-Output "Starting ACARS Print..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_acarsprint.ps1"

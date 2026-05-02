@@ -107,10 +107,12 @@ $FrankenTankerDir   = "$SimBase\frankentanker"
 $FrankenUsbDir      = "$SimBase\frankenusb"
 $FrankenRouterDir   = "$SimBase\frankenrouter"
 $FrankenWindDir     = "$SimBase\frankenwind"
+$FrankenTurbDir     = "$SimBase\frankenturb"
 $FrankenUtilDir     = "$SimBase\frankenutil"
 
 # If you want to give custom options to frankenusb, e.g a config file name
 $FrankenUsbOptions  = ""
+$FrankenTurbOptions = "--psx-main-server-port=10748"
 
 # Options for the master sim router
 $FrankenRouterMasterOptions = "--config-file=frankensim-core.toml"
@@ -127,6 +129,7 @@ $StartFrankenfreeze = $false
 $StartFrankenusb    = $true
 $StartFrankentanker = $false
 $StartFrankenwind   = $false
+$StartFrankenturb   = $false
 $StartIdent         = $false
 $StartPsxSounds     = $true
 $StartVpilot        = $true
@@ -186,6 +189,7 @@ $PreFlavorDefaults = @{
     StartFrankenusb    = $StartFrankenusb
     StartFrankentanker = $StartFrankentanker
     StartFrankenwind   = $StartFrankenwind
+    StartFrankenturb   = $StartFrankenturb
     StartIdent         = $StartIdent
     StartPsxSounds     = $StartPsxSounds
     StartVpilot        = $StartVpilot

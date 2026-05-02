@@ -51,6 +51,13 @@ $FlavorDefinitions = @(
         Options     = @("yes", "no")
         Default     = "no"
         Type        = "bool"
+    },
+    [ordered]@{
+        Name        = "StartFrankenturb"
+        Description = "Start Frankenturb addon"
+        Options     = @("yes", "no")
+        Default     = "no"
+        Type        = "bool"
     }
 )
 

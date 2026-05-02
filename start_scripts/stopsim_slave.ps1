@@ -13,6 +13,7 @@ KillProcess "CockpitSimulator"
 
 KillPythonScript "frankenfreeze.py"
 KillPythonScript "frankenrouter_ident.py"
+KillPythonScript "frankenturb.py"
 KillJavaJar "AcarsPrint.jar"
 
 # Ask PSX server to shut down gracefully before killing java.exe
