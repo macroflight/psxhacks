@@ -58,6 +58,8 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.args = {}
         # Keeps track of what and when we have sent to PSX
         self.psx_send_state = defaultdict(dict)
+        self.last_hardware_tiller = 0
+        self.last_hardware_rudder = 0
         # Main PSX connection object
         self.psx = None
         self.psx_connected = False
@@ -128,6 +130,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         parser.add_argument('--long-press-limit',
                             action='store', default=0.5, type=float,
                             help='button presses longer than this are considered long',
+                            )
+        parser.add_argument('--disable-rudder-tiller-interconnect',
+                            action='store_true', default=False,
+                            help='disable the rudder-tiller interconnect',
                             )
 
         self.args = parser.parse_args()
@@ -1523,6 +1529,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                     elapsed = time.time()  # never sent
 
                 # Store the new value(s) in state
+                if thisevent['variable'] == 'Tiller':
+                    self.last_hardware_tiller = thisevent['value']
+                if thisevent['variable'] == 'FltControls' and 2 in thisevent['indexes']:
+                    self.last_hardware_rudder = thisevent['value']
                 for index in thisevent['indexes']:
                     if 'new data' not in self.psx_send_state[thisevent['variable']]:
                         self.psx_send_state[thisevent['variable']]['new data'] = {}
@@ -1550,7 +1560,18 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                     for index, value in new_data.items():
                         elems[index] = str(value)
                     new_psx_value = ";".join(elems)
+                    if (not self.args.disable_rudder_tiller_interconnect and
+                            variable == 'Tiller'):
+                        generated_tiller = int(0.1 * self.last_hardware_rudder)
+                        new_psx_value = str(max(self.last_hardware_tiller,
+                                                generated_tiller, key=abs))
                     self.psx_send_and_set(variable, new_psx_value)
+                    if (not self.args.disable_rudder_tiller_interconnect and
+                            variable == 'FltControls' and 2 in new_data):
+                        rudder_value = new_data[2]
+                        generated_tiller = int(0.1 * rudder_value)
+                        new_tiller = max(self.last_hardware_tiller, generated_tiller, key=abs)
+                        self.psx_send_and_set('Tiller', str(new_tiller))
                     data['last sent'] = time.time()
                     data['new data'] = {}
             await asyncio.sleep(0.01)
