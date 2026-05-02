@@ -139,7 +139,7 @@ function Select-Option([string]$description, [string[]]$options, [string]$curren
     $idx = [Array]::IndexOf($options, $current)
     if ($idx -lt 0) { $idx = 0 }
 
-    Write-Host ""
+    Clear-Host
     Write-Host $description -ForegroundColor White
     $startRow = [Console]::CursorTop
 
