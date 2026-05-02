@@ -3031,13 +3031,27 @@ _win32_console_handlers: list = []
 def _install_close_guard():
     """Windows only: suppress accidental window close (Alt-F4, X button, taskbar).
 
-    Task Manager uses TerminateProcess() which bypasses console handlers entirely,
+    Task Manager uses TerminateProcess() which bypasses all of this,
     so kill-via-Task-Manager still works normally.
     """
     if sys.platform != 'win32':
         return
     import ctypes  # pylint: disable=import-outside-toplevel
     import ctypes.wintypes  # pylint: disable=import-outside-toplevel
+
+    # Remove SC_CLOSE from the console window's system menu. This grays out
+    # the X button and makes Alt-F4 a no-op at the Win32 message level,
+    # before any signal ever reaches Python.
+    _SC_CLOSE = 0xF060
+    _MF_BYCOMMAND = 0x0000
+    hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+    if hwnd:
+        hmenu = ctypes.windll.user32.GetSystemMenu(hwnd, False)
+        if hmenu:
+            ctypes.windll.user32.DeleteMenu(hmenu, _SC_CLOSE, _MF_BYCOMMAND)
+
+    # Belt-and-suspenders: also intercept CTRL_CLOSE_EVENT for cases where
+    # another process triggers a console close signal directly.
     _CTRL_CLOSE_EVENT = 2
     _CTRL_LOGOFF_EVENT = 5
 
