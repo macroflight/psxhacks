@@ -4,9 +4,6 @@
 
 cd $AerowinxDir
 
-# Start the five main PSX client windows (no server)
-java -jar AerowinxStart.jar t9-main-noserver.pref
-java -jar AerowinxStart.jar t9-mcp.pref
-java -jar AerowinxStart.jar t9-pedestal.pref
-java -jar AerowinxStart.jar t9-fo.pref
-java -jar AerowinxStart.jar t9-overhead.pref
+foreach ($pref in $AerowinxPrefFiles) {
+    java -jar AerowinxStart.jar $pref
+}

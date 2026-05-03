@@ -61,6 +61,7 @@ $CpdlcOptions = "--stealth","--no-no-comm","--min-interval=15","--max-interval=3
 
 # Location of PSX itself
 $AerowinxDir        = "$SimBase\psx\Aerowinx"
+$AerowinxPrefFiles  = @("t9-main-noserver.pref", "t9-mcp.pref", "t9-pedestal.pref", "t9-fo.pref", "t9-overhead.pref")
 
 # Location of vPilot
 $VPilotDir          = "$SimBase\vPilot"
