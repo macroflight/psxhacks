@@ -124,6 +124,24 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self.psx_send_and_set('StartPiBaHeAlVsTasYw',
                               f'1;0;0;{heading_mrad};0;0;0;0;{lat};{lon};0')
 
+    def do_ground(self):
+        """Lower aircraft elevation by 1000 units if not already at ground level."""
+        raw = self.psx.get('Elev')
+        if raw is None:
+            self.logger.warning("Elev not available, cannot lower")
+            return
+        try:
+            elev = int(raw)
+        except ValueError:
+            self.logger.warning("Cannot parse Elev: %s", raw)
+            return
+        if elev <= -100000:
+            self.logger.info("Elev already at ground level (%d)", elev)
+            return
+        new_elev = elev - 1000
+        self.logger.info("Ground: Elev %d -> %d", elev, new_elev)
+        self.psx_send_and_set('Elev', str(new_elev))
+
     def do_towing_start(self):
         """Start towing (set mode to 20)."""
         if self.psx.get('ParkBrkLev') != "1":
@@ -205,6 +223,8 @@ class Script():  # pylint: disable=too-many-instance-attributes
                     self.do_slew('BACKWARD', 1)
                 elif value == "4R":
                     self.do_slew('RIGHT', 1)
+                elif value == "5L":
+                    self.do_ground()
                 elif value == "6L":
                     self.mcdu_page = "main"
                     self.repaint_req_by.add("slew-back-press")
@@ -288,6 +308,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         mcdu.paint(4, 0, L, C, "<NOSE L5        NOSE R5>")
         mcdu.paint(6, 0, L, C, "<FORW 1          BACK 1>")
         mcdu.paint(8, 0, L, C, "<LEFT 1         RIGHT 1>")
+        mcdu.paint(10, 0, L, C, "<GROUND                 ")
         mcdu.paint(12, 0, L, C, "<BACK                   ")
 
     async def paintTowingPage(self, mcdu):  # pylint: disable=too-many-branches
@@ -400,6 +421,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.psx.subscribe("PiBaHeAlTas")
             self.psx.subscribe("StartPiBaHeAlVsTasYw")
             self.psx.subscribe("GroundSpeed")
+            self.psx.subscribe("Elev")
             self.psx.subscribe("Towing", self.towing_var_changed)
             self.psx.subscribe("TowTurnRadius", self.towing_var_changed)
             self.psx.subscribe("ParkBrkLev")
