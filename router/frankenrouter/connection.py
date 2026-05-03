@@ -144,12 +144,12 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
                 # Check if the client buffer is growing too much
                 if (
                         self.writer.transport.get_write_buffer_size() >
-                        self.router.config.performance.write_buffer_warning
+                        self.router.config.performance.write_buffer_critical_limit
                 ):
                     self.logger.warning(
                         "Write buffer %d > %d for %s",
                         self.writer.transport.get_write_buffer_size(),
-                        self.router.config.performance.write_buffer_warning,
+                        self.router.config.performance.write_buffer_critical_limit,
                         self.peername
                     )
                 self.writer.write(encoded)

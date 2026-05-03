@@ -86,9 +86,21 @@ class _RouterConfigFiltering:  # pylint: disable=missing-class-docstring,too-few
 
 class _RouterConfigPerformance:  # pylint: disable=missing-class-docstring,too-few-public-methods
     def __init__(self, data):
-        self.write_buffer_warning = data.get('write_buffer_warning', 100000)
-        if not isinstance(self.write_buffer_warning, int):
-            raise RouterConfigError("performance write_buffer_warning must be an integer")
+        self.write_buffer_critical_limit = data.get('write_buffer_critical_limit', 100000)
+        if not isinstance(self.write_buffer_critical_limit, int):
+            raise RouterConfigError("performance write_buffer_critical_limit must be an integer")
+
+        self.received_messages_per_second_critical_limit = data.get(
+            'received_messages_per_second_critical_limit', 60)
+        if not isinstance(self.received_messages_per_second_critical_limit, int):
+            raise RouterConfigError(
+                "performance received_messages_per_second_critical_limit must be an integer")
+
+        self.sent_messages_per_second_critical_limit = data.get(
+            'sent_messages_per_second_critical_limit', 60)
+        if not isinstance(self.sent_messages_per_second_critical_limit, int):
+            raise RouterConfigError(
+                "performance sent_messages_per_second_critical_limit must be an integer")
 
         self.queue_time_warning = data.get('queue_time_warning', 0.016)
         if not isinstance(self.queue_time_warning, float):
@@ -330,7 +342,7 @@ I'm not TOML
         self.assertEqual(conf.listen.port, 10747)
         # self.assertEqual(conf.upstream.host, '127.0.0.1')
         self.assertEqual(conf.psx.variables, r'C:\PSX\Variables.txt')
-        self.assertEqual(conf.performance.write_buffer_warning, 100000)
+        self.assertEqual(conf.performance.write_buffer_critical_limit, 100000)
         self.assertEqual(conf.access[0].level, 'full')
 
     def test_file_input(self):

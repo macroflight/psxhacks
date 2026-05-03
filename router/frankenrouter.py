@@ -321,6 +321,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             action='store_true',
             help="Development mode: exit on Ctrl-C instead of printing a warning",
         )
+        parser.add_argument(
+            '--add-fake-error',
+            type=str, action='store', default=None, metavar='MSG',
+            help="Always include this string in the errors list (for testing).",
+        )
         self.args = parser.parse_args()
 
     def get_random_id(self, length=16):
@@ -529,6 +534,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.logger.info(
                         "--> upstream connection is %s",
                         upstream)
+                for error in info.get('errors', []):
+                    self.logger.warning(
+                        "ERROR from %s/%s: %s",
+                        info['router_name'], info['simulator_name'], error)
 
         versions = {info.get('version', 'unknown')
                     for uuid, info in self.routerinfo.items()
@@ -1229,27 +1238,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                              )
 
     def print_warnings(self):
-        """Print some important warnings."""
-        filterstatus = self.get_filter_status()
-        warnings = False
-        if len(filterstatus['elevation']['disabled']) > 1:
-            self.logger.info(
-                "!!! WARNING: more than one sim is sending MSFS elevation to PSX: %s",
-                filterstatus['elevation']['disabled'])
-            warnings = True
-        if len(filterstatus['elevation']['disabled']) < 1:
-            self.logger.info("!!! WARNING: no sim is sending MSFS elevation to PSX")
-            warnings = True
-        if len(filterstatus['traffic']['disabled']) > 1:
-            self.logger.info(
-                "!!! WARNING: more than one sim is sending vPilot traffic data: %s",
-                filterstatus['traffic']['disabled'])
-            warnings = True
-        if len(filterstatus['traffic']['disabled']) < 1:
-            self.logger.info("!!! WARNING: no sim is sending vPilot traffic data")
-            warnings = True
-        if warnings:
-            self.logger.info("!!! After filter change, warnings may remain for up to 60s")
+        """Print caveat if there are active errors."""
+        if self.get_errors():
+            self.logger.info("!!! After filter change, errors may remain for up to 60s")
 
     def print_aircraft_status(self):
         """Display a basic aircraft status line to verify sane data."""
@@ -1519,6 +1510,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             },
             "filter_elevation": self.config.psx.filter_elevation,
             "filter_traffic": self.config.psx.filter_traffic,
+            "errors": self.get_errors(),
         }
         payload['connections'] = []
 
@@ -1582,11 +1574,60 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.last_frdp_sharedinfo = time.perf_counter()
         # End of send_frdp_sharedinfo()
 
-    def print_client_warnings(self):
-        """Print warnings about unexpected client counts."""
+    def get_errors(self):  # pylint: disable=too-many-branches
+        """Return errors for this router (sent in FRDP ROUTERINFO)."""
+        errors = []
+        if self.args.add_fake_error:
+            errors.append(self.args.add_fake_error)
+        conns = list(self.clients.values())
+        if self.is_upstream_connected():
+            conns.append(self.upstream)
+        buf_limit = self.config.performance.write_buffer_critical_limit
+        rx_limit = self.config.performance.received_messages_per_second_critical_limit
+        tx_limit = self.config.performance.sent_messages_per_second_critical_limit
+        bucket = int(time.time() - 1.0)
+        for con in conns:
+            buf = con.writer.transport.get_write_buffer_size()
+            if buf > buf_limit:
+                errors.append(
+                    f"Write buffer for {con.display_name} is {buf} bytes"
+                    f" (limit {buf_limit})")
+            if bucket in con.received_stats:
+                rx = con.received_stats[bucket]['received_messages']
+                if rx > rx_limit:
+                    errors.append(
+                        f"Received message rate for {con.display_name} is {rx}/s"
+                        f" (limit {rx_limit})")
+            if bucket in con.sent_stats:
+                tx = con.sent_stats[bucket]['sent_messages']
+                if tx > tx_limit:
+                    errors.append(
+                        f"Sent message rate for {con.display_name} is {tx}/s"
+                        f" (limit {tx_limit})")
+        filterstatus = self.get_filter_status()
+        if len(filterstatus['elevation']['disabled']) > 1:
+            errors.append(
+                f"More than one sim is sending MSFS elevation to PSX:"
+                f" {filterstatus['elevation']['disabled']}")
+        if len(filterstatus['traffic']['disabled']) > 1:
+            errors.append(
+                f"More than one sim is sending vPilot traffic data:"
+                f" {filterstatus['traffic']['disabled']}")
+        # "No sim is sending" is a network-wide check: only the master sim router
+        # has a complete view, so only it should report these errors.
+        if self.is_upstream_connected() and not self.upstream.is_frankenrouter:
+            if len(filterstatus['elevation']['disabled']) < 1:
+                errors.append("No sim is sending MSFS elevation to PSX")
+            if len(filterstatus['traffic']['disabled']) < 1:
+                errors.append("No sim is sending vPilot traffic data")
+        return errors
+
+    def get_warnings(self):  # pylint: disable=too-many-branches
+        """Return warnings for this router (printed locally, not sent in ROUTERINFO)."""
+        warnings = []
         checks = self.config.check
         if checks is None:
-            return
+            return warnings
         for check in checks:
             count = 0
             if check.checktype == 'is_frankenrouter':
@@ -1594,20 +1635,26 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     if client.is_frankenrouter:
                         count += 1
                 if check.limit_min and count < check.limit_min:
-                    self.logger.warning("WARNING: Too few (%d) frankenrouter clients!", count)
+                    warnings.append(f"Too few ({count}) frankenrouter clients")
                 if check.limit_max and count > check.limit_max:
-                    self.logger.warning("WARNING: Too many (%d) frankenrouter clients!", count)
+                    warnings.append(f"Too many ({count}) frankenrouter clients")
             elif check.checktype == 'name_regexp':
                 regexp = check.regexp
                 for client in self.clients.values():
                     if re.match(regexp, client.display_name):
                         count += 1
                 if check.limit_min and count < check.limit_min:
-                    self.logger.warning(
-                        "WARNING: Too few (%d) clients matching %s found!", count, regexp)
+                    warnings.append(f"Too few ({count}) clients matching {regexp}")
                 if check.limit_max and count > check.limit_max:
-                    self.logger.warning(
-                        "WARNING: Too many (%d) clients matching %s found!", count, regexp)
+                    warnings.append(f"Too many ({count}) clients matching {regexp}")
+        return warnings
+
+    def print_client_errors(self):
+        """Print current router errors and warnings."""
+        for error in self.get_errors():
+            self.logger.warning("ERROR: %s", error)
+        for warning in self.get_warnings():
+            self.logger.warning("WARNING: %s", warning)
 
     async def status_display_task(self, name):
         """Status display Task."""
@@ -1627,7 +1674,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.print_status()
                     last_display = time.perf_counter()
                     self.status_display_requested = False
-                    self.print_client_warnings()
+                    self.print_client_errors()
                     self.print_aircraft_status()
                     self.print_warnings()
                     self.print_variable_stats()
@@ -1678,6 +1725,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                             pass
 
                     # Send master caution if the filter state is incorrect
+                    # or if any router reports errors
                     if self.is_upstream_connected() and not self.upstream.is_frankenrouter:
                         message = "FRANKENROUTER"
                         filterstatus = self.get_filter_status()
@@ -1690,6 +1738,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                             state_ok = False
                         if len(filterstatus['traffic']['disabled']) < 1:
                             state_ok = False
+                        for ri_uuid, info in self.routerinfo.items():
+                            if info.get('errors'):
+                                self.logger.warning(
+                                    "Router %s (%s) reports errors: %s",
+                                    info.get('router_name', ri_uuid),
+                                    info.get('simulator_name', '?'),
+                                    info['errors'])
+                                state_ok = False
                         try:
                             mcmessage = self.cache.get_value("Qs418")
                         except routercache.RouterCacheException:
@@ -1699,7 +1755,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                             if time_since_warning > FILTER_WARNING_INTERVAL:
                                 # Send master caution
                                 # Qs418="FreeMsgW"; Mode=ECON; Min=0; Max=16;
-                                self.logger.warning("Filter state bad, sending MC")
+                                self.logger.warning(
+                                    "One or more routers has an error, sending FRANKENROUTER MC")
                                 self.filter_warning_sent = time.perf_counter()
                                 self.cache.update("Qs418", message)
                                 await self.send_to_upstream(f"Qs418={message}")
@@ -1708,7 +1765,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                             self.filter_warning_sent = 0
                             if mcmessage == message:
                                 # Clear message (but not any other master caution we might have)
-                                self.logger.warning("Filter state OK, clearing MC")
+                                self.logger.warning("All routers error-free, clearing MC")
                                 self.cache.update("Qs418", "")
                                 await self.send_to_upstream("Qs418=")
                                 await self.client_broadcast("Qs418=")

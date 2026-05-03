@@ -302,8 +302,17 @@ regarding its performance. Note: all of these variables have defaults,
 unless you find that you get lots of false warnings you should not
 need to change any of these settings.
 
-- `write_buffer_warning`: if a connected client's write buffer has
-  more than this much data in it a warning will be shown.
+- `write_buffer_critical_limit`: if a connected client's write buffer has
+  more than this many bytes queued, a critical error is raised and included
+  in ROUTERINFO so the master sim can trigger a master caution.
+
+- `received_messages_per_second_critical_limit`: if a connection receives
+  more than this many messages in a second, a critical error is raised.
+  Default: 60.
+
+- `sent_messages_per_second_critical_limit`: if a connection sends more
+  than this many messages in a second, a critical error is raised.
+  Default: 60.
 
 - `queue_time_warning`: if a message sits for longer than this in the
   router's internal forwarding queue, a warning will be shown.
