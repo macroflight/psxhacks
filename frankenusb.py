@@ -1088,6 +1088,8 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 for button, phase in button_config['button to phase'].items():
                     if self.joystick_get_button_position(joystick_name, button) == 1:
                         await self.flight_phase_setup(phase)
+            elif button_config['button type'] == 'ACTION_FLIGHT_PHASE_BUTTON':
+                await self.flight_phase_setup(button_config['phase'])
             elif button_config['button type'] == 'TMBOEING_ROTARY_MODE':
                 self.tmboeing_mode = button_config['position']
                 self.logger.debug("tmboeing_mode = %s", button_config['position'])
