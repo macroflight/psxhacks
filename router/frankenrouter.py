@@ -923,6 +923,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             islong=False, isonlystart=False,
             key=None, exclude_name_regexp=None,
             exclude_non_frankenrouter=False,
+            exclude_other_sim_frankenrouters=False,
             ignore_access=False,
     ):  # pylint: disable=too-many-branches, too-many-arguments, too-many-positional-arguments, too-many-locals, too-many-statements
         """Send a line to connected clients.
@@ -969,6 +970,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             if not client.is_frankenrouter and exclude_non_frankenrouter:
                 self.logger.debug(
                     "Not sending to non-frankenrouter client %s: %s", client.peername, line)
+                continue
+            if (exclude_other_sim_frankenrouters and client.is_frankenrouter and
+                    client.simulator_name != self.config.identity.simulator):
+                self.logger.debug(
+                    "Not sending to other-sim frankenrouter %s: %s", client.peername, line)
                 continue
             if not client.has_access() and not ignore_access:
                 self.logger.debug(
@@ -1862,7 +1868,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.critical(traceback.format_exc())
         # End of housekeeping_task()
 
-    async def handle_message(self, sender, msg):  # pylint: disable=too-many-branches,too-many-statements
+    async def handle_message(self, sender, msg):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         """Handle a message.
 
         sender is a reference to a ConnectionClient or ConnectionUpstream object
@@ -2115,6 +2121,23 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         self.client_broadcast(line, exclude=[sender.peername],
                                               exclude_non_frankenrouter=True),
                     )
+            elif 'exclude_other_sim_frankenrouters' in extra_data:
+                self.logger.debug("sending with exclude_other_sim_frankenrouters: %s", line)
+                own_sim = self.config.identity.simulator
+                upstream_is_other_sim = (
+                    self.is_upstream_connected() and
+                    self.upstream.is_frankenrouter and
+                    self.upstream.simulator_name != own_sim)
+                if sender.upstream:
+                    await self.client_broadcast(
+                        line, exclude_other_sim_frankenrouters=True)
+                else:
+                    tasks = [self.client_broadcast(
+                        line, exclude=[sender.peername],
+                        exclude_other_sim_frankenrouters=True)]
+                    if not upstream_is_other_sim:
+                        tasks.append(self.send_to_upstream(line, sender.peername))
+                    await asyncio.gather(*tasks)
             else:
                 self.logger.critical(
                     "RulesAction.FILTER but no known filter type in extra_data: %s: %s",

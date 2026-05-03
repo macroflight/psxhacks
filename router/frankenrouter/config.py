@@ -67,6 +67,24 @@ class _RouterConfigPsx:  # pylint: disable=missing-class-docstring,too-few-publi
         self.filter_traffic = data.get('filter_traffic', True)
         self.filter_flight_controls = data.get('filter_flight_controls', True)
         self.filter_flight_controls_ap_disc = data.get('filter_flight_controls_ap_disc', True)
+        # filter_from_other_sim / filter_to_other_sim: PSX keywords that should
+        # be dropped when received from (or not sent to) a frankenrouter
+        # belonging to a different simulator. This prevents one sim from
+        # inadvertently overwriting local state on another sim.
+        # Useful candidates (cockpit lighting):
+        #   Qh6  LtStorm, Qh7  LtOvhd,  Qh8  LtDome,
+        #   Qh9  LtGlrshPanel, Qh10 LtGlrshFlood,
+        #   Qh11 LtAislePanel, Qh12 LtAisleFlood
+        self.filter_from_other_sim = data.get('filter_from_other_sim', [])
+        if not isinstance(self.filter_from_other_sim, list):
+            raise RouterConfigError("psx filter_from_other_sim must be a list")
+        if not all(isinstance(k, str) for k in self.filter_from_other_sim):
+            raise RouterConfigError("psx filter_from_other_sim entries must be strings")
+        self.filter_to_other_sim = data.get('filter_to_other_sim', [])
+        if not isinstance(self.filter_to_other_sim, list):
+            raise RouterConfigError("psx filter_to_other_sim must be a list")
+        if not all(isinstance(k, str) for k in self.filter_to_other_sim):
+            raise RouterConfigError("psx filter_to_other_sim entries must be strings")
 
 
 class _RouterConfigSharedinfo:  # pylint: disable=missing-class-docstring,too-few-public-methods

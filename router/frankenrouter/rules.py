@@ -128,6 +128,8 @@ class RulesCode(enum.Enum):
     EXIT = enum.auto()
     PBSKAQ = enum.auto()
     LAYOUT = enum.auto()
+    KEYVALUE_FILTERED_INGRESS_SIM_LOCAL = enum.auto()
+    KEYVALUE_FILTERED_EGRESS_SIM_LOCAL = enum.auto()
     KEYVALUE_FILTERED_INGRESS = enum.auto()
     KEYVALUE_FILTERED_INGRESS_SILENT = enum.auto()
     KEYVALUE_FILTER_EGRESS = enum.auto()
@@ -815,6 +817,19 @@ class Rules():  # pylint: disable=too-many-public-methods
         if key == 'layout':
             return self.handle_layout()
 
+        if (key in self.router.config.psx.filter_from_other_sim and
+                self.sender.is_frankenrouter and
+                self.router.config.identity.simulator != self.sender.simulator_name):
+            self.logger.info(
+                "Dropping %s from other-sim frankenrouter %s", key, self.sender.simulator_name)
+            return self.myreturn(RulesAction.DROP, RulesCode.KEYVALUE_FILTERED_INGRESS_SIM_LOCAL)
+
+        if key in self.router.config.psx.filter_to_other_sim:
+            return self.myreturn(
+                RulesAction.FILTER,
+                RulesCode.KEYVALUE_FILTERED_EGRESS_SIM_LOCAL,
+                extra_data={'exclude_other_sim_frankenrouters': True})
+
         if key == 'load1':
             return self.handle_load1()
 
@@ -1038,6 +1053,8 @@ class TestRules(unittest.TestCase):
         def __init__(self):
             """Initialize the config."""
             self.filter_flight_controls = False
+            self.filter_from_other_sim = []
+            self.filter_to_other_sim = []
 
     class DummyConfig():  # pylint: disable=too-few-public-methods
         """Implement small parts of the router for unit testing."""
