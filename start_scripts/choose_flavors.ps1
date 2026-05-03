@@ -65,6 +65,13 @@ $FlavorDefinitions = @(
         Options     = @("master", "slave", "off")
         Default     = "off"
         Type        = "tristate"
+    },
+    [ordered]@{
+        Name        = "StartFrankencduproxy"
+        Description = "Start FrankenCDU proxy"
+        Options     = @("master", "slave", "off")
+        Default     = "off"
+        Type        = "tristate"
     }
 )
 

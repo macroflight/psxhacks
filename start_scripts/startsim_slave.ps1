@@ -75,6 +75,11 @@ if ($StartVpilot -eq "slave") {
     }
 }
 
+if ($StartFrankencduproxy -eq "slave") {
+    Write-Output "Starting FrankenCDU proxy..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankencduproxy.ps1"
+}
+
 if ($StartCsCdu -eq "slave") {
     Write-Output "Starting CS CDU..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_cs_cdu.ps1"

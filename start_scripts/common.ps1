@@ -121,6 +121,7 @@ $FrankenwindOptions  = @()
 $FrankenturbOptions = @()
 $FrankenidentOptions = @()
 $FrankenutilOptions = @()
+$FrankencduproxyOptions = @()
 
 # Which of the addons that we can manage you actually want started in
 # your sim. You can override these in the override file.
@@ -141,7 +142,8 @@ $StartAcarsPrint    = "off"
 $StartEfb           = "off"
 
 # CDU
-$StartCsCdu         = "off"
+$StartFrankencduproxy = "off"
+$StartCsCdu           = "off"
 $CsCduExe = "$SimBase\hw\cs_cdu\CockpitSimulator v2025.2.7.exe"
 
 
@@ -197,8 +199,9 @@ $PreFlavorDefaults = @{
     StartFrankenwind   = $StartFrankenwind
     StartFrankenturb   = $StartFrankenturb
     StartFrankenident  = $StartFrankenident
-    StartFrankenutil   = $StartFrankenutil
-    StartPsxSounds     = $StartPsxSounds
+    StartFrankenutil      = $StartFrankenutil
+    StartFrankencduproxy  = $StartFrankencduproxy
+    StartPsxSounds        = $StartPsxSounds
     StartVpilot        = $StartVpilot
     StartAcarsPrint    = $StartAcarsPrint
     StartEfb           = $StartEfb
