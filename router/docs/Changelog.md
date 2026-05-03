@@ -1,5 +1,38 @@
 # Changelog
 
+## 2026-05-03: version 1.3.0
+
+- Router network error reporting: each router now includes an `errors`
+  list in its FRDP ROUTERINFO message. The master sim router collects
+  errors from all routers and triggers the FRANKENROUTER master caution
+  if any router has an active error. Errors are also shown in the
+  status display of every router in the network.
+- The following conditions are now reported as errors:
+  - Write buffer for a connection exceeds `write_buffer_critical_limit`
+    (renamed from `write_buffer_warning`)
+  - Received or sent messages per second for a connection exceeds the
+    new `received_messages_per_second_critical_limit` /
+    `sent_messages_per_second_critical_limit` settings (default: 60/s)
+  - More than one sim sending MSFS elevation data to PSX
+  - No sim sending MSFS elevation data to PSX (master sim router only)
+  - More than one sim sending vPilot traffic data
+  - No sim sending vPilot traffic data (master sim router only)
+- Configurable per-sim keyword filtering: `filter_from_other_sim`
+  drops listed keywords when received from a frankenrouter in a
+  different simulator; `filter_to_other_sim` suppresses listed keywords
+  when forwarding to frankenrouters in other simulators. Useful for
+  cockpit lighting variables (Qh6–Qh12) that should not bleed between
+  simulators in a shared cockpit setup.
+- Removed non-functional Alt-F4 / window-close protection (it was
+  advertised in 1.2.0 but could not be made to work reliably on modern
+  Windows). Ctrl-C protection is still in place.
+- Bug fix: master router no longer incorrectly enables its own
+  elevation/traffic filters when broadcasting SHAREDINFO.
+- Bug fix: jettison selector workaround no longer crashes when the
+  router is not connected to upstream.
+- Maintenance: replaced deprecated aiohttp `make_handler()` API with
+  the `AppRunner`/`TCPSite` API.
+
 ## 2026-05-02: version 1.2.0
 
 - Single-click setting of elevation and traffic filters. Now only one
