@@ -2,18 +2,19 @@
 
 Sits between the CS CDU Bridge and the PSX Main Server. All PSX protocol
 traffic is forwarded transparently, except CDU-tagged keywords, which have
-their CDU position letter (L / C / R) translated so the physical CDU can
-act as any of the three software CDUs.
+their CDU position letter (L / C / R) translated according to a configurable
+mapping so physical CDUs can act as any of the three software CDUs.
 
-The CDU bridge is always configured for one position (--cs-cdu-config, e.g.
-"L"). The proxy maps that position to the desired PSX CDU (--cd-cdu-swap-with,
-e.g. "R"), rewriting keywords in both directions:
+A mapping entry B=P means hardware CDU B controls (and displays) PSX CDU P.
+Multiple hardware CDUs may map to the same PSX CDU. Unmapped hardware CDUs
+pass through unchanged (identity mapping). Example --cdu-map=L=C,R=L:
 
-  PSX→bridge : R* / *R keywords → L* / *L  (bridge sees target CDU data)
-  bridge→PSX : L* / *L keywords → R* / *R  (keypresses reach target CDU)
+  PSX→bridge : CcduXxx → LcduXxx, LcduXxx → RcduXxx  (per mapping)
+  bridge→PSX : LcduXxx → CcduXxx, RcduXxx → LcduXxx  (per mapping)
 
-The original bridge-CDU data from PSX is dropped to prevent display
-conflicts; all other CDU data passes through unchanged.
+PSX data for a hardware CDU whose mapping was overridden is dropped to
+prevent display conflicts. The mapping can be changed at runtime via
+addon=FRANKENCDUPROXY:L=C,R=L messages.
 """
 
 import argparse
@@ -90,6 +91,28 @@ class _Lexicon:
         return self._name_to_q.get(name, fallback)
 
 
+# ── CDU map parsing ──────────────────────────────────────────────────────────
+
+_ALL_CDUS = ('L', 'C', 'R')
+
+
+def _parse_cdu_map(spec: str) -> dict:
+    """Parse 'L=R' or 'L=R,C=L' into a {bridge_cdu: psx_cdu} dict.
+
+    Identity entries (B=B) are silently ignored. Raises ValueError on bad input.
+    """
+    result = {}
+    for part in spec.split(','):
+        part = part.strip()
+        bridge, sep, psx = part.partition('=')
+        bridge, psx = bridge.strip().upper(), psx.strip().upper()
+        if not sep or bridge not in _ALL_CDUS or psx not in _ALL_CDUS:
+            raise ValueError(f"invalid CDU mapping {part!r}")
+        if bridge != psx:
+            result[bridge] = psx
+    return result
+
+
 # ── PSX display cache ─────────────────────────────────────────────────────────
 
 class _PsxCache:
@@ -103,28 +126,25 @@ class _PsxCache:
         """Cache the stripped PSX line for a named CDU variable."""
         self._data[name] = stripped
 
-    def replay_cdu(self, cdu: str) -> List[str]:
-        """Return CRLF-terminated lines for all cached variables of cdu."""
-        return [
-            line + '\r\n'
-            for name, line in self._data.items()
-            if _get_cdu_letter(name) == cdu
-        ]
+    def replay_all(self) -> List[str]:
+        """Return all cached PSX lines (CRLF-terminated)."""
+        return [line + '\r\n' for line in self._data.values()]
 
 
 # ── Line-level translation ────────────────────────────────────────────────────
 
 def _translate_psx_to_bridge(
-    line: str, lex: _Lexicon, bridge_cdu: str, target_cdu: str,
+    line: str, lex: _Lexicon, mapping: dict,
     cache: Optional[_PsxCache] = None,
-) -> Optional[str]:
+) -> List[str]:
     """Translate one PSX line for forwarding to the CDU bridge.
 
-    Returns the (possibly rewritten) line, or None to drop it.
+    Returns a list of lines to send (empty list = drop).
+    Each PSX CDU line is fanned out to all bridge CDUs mapped to that PSX CDU.
     """
     stripped = line.rstrip('\r\n')
     if not stripped:
-        return line
+        return [line]
 
     key, sep, value = stripped.partition('=')
 
@@ -132,49 +152,55 @@ def _translate_psx_to_bridge(
     if _LEXLINE_RE.match(key):
         if sep:
             lex.learn(key, value)
-        return line
+        return [line]
 
     name, was_qcode = lex.to_name(key)
-
     cdu = _get_cdu_letter(name)
-    if cache is not None and cdu is not None and sep:
+
+    if cdu is None:
+        return [line]
+
+    if cache is not None and sep:
         cache.update(name, stripped)
 
-    if cdu == target_cdu:
-        # Translate target-CDU display data → bridge CDU slot.
-        new_name = _swap_cdu_letter(name, target_cdu, bridge_cdu)
-        new_key = lex.to_qcode(new_name, new_name) if was_qcode else new_name
-        return f"{new_key}={value}\r\n" if sep else f"{new_key}\r\n"
-    if cdu == bridge_cdu and bridge_cdu != target_cdu:
-        # Drop raw bridge-CDU data; it would conflict with the translated
-        # target-CDU data we are already sending in that slot.
-        return None
-
-    return line
+    # Fan out to every bridge CDU whose effective mapping points at this PSX CDU.
+    result = []
+    for b in _ALL_CDUS:
+        if mapping.get(b, b) != cdu:
+            continue
+        if b == cdu:
+            result.append(stripped + '\r\n')
+        else:
+            new_name = _swap_cdu_letter(name, cdu, b)
+            new_key = lex.to_qcode(new_name, new_name) if was_qcode else new_name
+            result.append(f"{new_key}={value}\r\n" if sep else f"{new_key}\r\n")
+    return result
 
 
 def _translate_bridge_to_psx(
-    line: str, lex: _Lexicon, bridge_cdu: str, target_cdu: str
-) -> Optional[str]:
+    line: str, lex: _Lexicon, mapping: dict,
+) -> List[str]:
     """Translate one CDU-bridge line for forwarding to PSX.
 
-    Returns the (possibly rewritten) line, or None to drop it.
+    Returns a list of lines to send (empty list = drop).
     """
     stripped = line.rstrip('\r\n')
     if not stripped:
-        return line
+        return [line]
 
     key, sep, value = stripped.partition('=')
     name, was_qcode = lex.to_name(key)
-
     cdu = _get_cdu_letter(name)
-    if cdu == bridge_cdu:
-        # Translate bridge-CDU input → target CDU.
-        new_name = _swap_cdu_letter(name, bridge_cdu, target_cdu)
-        new_key = lex.to_qcode(new_name, new_name) if was_qcode else new_name
-        return f"{new_key}={value}\r\n" if sep else f"{new_key}\r\n"
 
-    return line
+    if cdu is None:
+        return [line]
+
+    psx = mapping.get(cdu, cdu)
+    if psx == cdu:
+        return [line]
+    new_name = _swap_cdu_letter(name, cdu, psx)
+    new_key = lex.to_qcode(new_name, new_name) if was_qcode else new_name
+    return [f"{new_key}={value}\r\n" if sep else f"{new_key}\r\n"]
 
 
 # ── Proxy server ──────────────────────────────────────────────────────────────
@@ -184,13 +210,18 @@ class CduProxy:  # pylint: disable=too-few-public-methods
 
     def __init__(self, args: argparse.Namespace):
         """Initialise from parsed command-line arguments."""
-        self.bridge_cdu: str = args.cs_cdu_config
-        self.target_cdu: str = args.target_cdu if args.target_cdu else args.cs_cdu_config
+        self._mapping: dict = args.cdu_map or {}
         self.psx_host: str = args.psx_host
         self.psx_port: int = args.psx_port
         self.listen_port: int = args.listen_port
         self.logger = logging.getLogger('frankencduproxy')
         self._bridge_writers: Set[asyncio.StreamWriter] = set()
+
+    def _mapping_desc(self) -> str:
+        """Return a human-readable description of the current CDU mapping."""
+        if not self._mapping:
+            return 'no remapping'
+        return ' '.join(f"{b}→{p}" for b, p in sorted(self._mapping.items()))
 
     @staticmethod
     def _set_nodelay(writer: asyncio.StreamWriter) -> None:
@@ -214,15 +245,16 @@ class CduProxy:  # pylint: disable=too-few-public-methods
                     break
                 text = line.decode('latin-1')
                 translated = translate_fn(text)
-                if translated is not None:
-                    self.logger.debug("%s: %s", direction, translated.rstrip())
-                    writer.write(translated.encode('latin-1'))
+                if translated:
+                    for out in translated:
+                        self.logger.debug("%s: %s", direction, out.rstrip())
+                        writer.write(out.encode('latin-1'))
                 else:
                     self.logger.debug("%s [dropped]: %s", direction, text.rstrip())
         except (ConnectionError, asyncio.IncompleteReadError, OSError) as exc:
             self.logger.info("%s: %s", direction, exc)
 
-    def _check_addon(self, line: str, on_swap: Callable[[str], None]) -> None:
+    def _check_addon(self, line: str, on_swap: Callable[[], None]) -> None:
         stripped = line.rstrip('\r\n')
         key, sep, value = stripped.partition('=')
         if key != 'addon' or not sep:
@@ -230,23 +262,28 @@ class CduProxy:  # pylint: disable=too-few-public-methods
         prefix = 'FRANKENCDUPROXY:'
         if not value.upper().startswith(prefix):
             return
-        new_cdu = value[len(prefix):].upper()
-        if new_cdu not in ('L', 'C', 'R'):
-            self.logger.warning("Addon message: unrecognised CDU %r", new_cdu)
+        payload = value[len(prefix):]
+        try:
+            new_entries = _parse_cdu_map(payload)
+            # Also collect explicit identity entries to reset prior overrides.
+            for part in payload.split(','):
+                part = part.strip()
+                b, esep, p = part.partition('=')
+                b, p = b.strip().upper(), p.strip().upper()
+                if esep and b == p and b in _ALL_CDUS:
+                    new_entries[b] = b
+        except ValueError:
+            self.logger.warning("Addon message: invalid CDU map %r", payload)
             return
-        old_target = self.target_cdu
-        self.target_cdu = new_cdu
-        if new_cdu == self.bridge_cdu:
-            self.logger.info(
-                "Swap disabled via addon message (bridge=%s)", self.bridge_cdu,
-            )
-        else:
-            self.logger.info(
-                "Swap changed via addon message: bridge=%s now controls PSX=%s",
-                self.bridge_cdu, new_cdu,
-            )
-        if new_cdu != old_target:
-            on_swap(new_cdu)
+        old_mapping = dict(self._mapping)
+        for b, p in new_entries.items():
+            if b != p:
+                self._mapping[b] = p
+            else:
+                self._mapping.pop(b, None)
+        if self._mapping != old_mapping:
+            self.logger.info("Addon message: CDU mapping now: %s", self._mapping_desc())
+            on_swap()
 
     async def _handle_bridge(
         self,
@@ -276,25 +313,20 @@ class CduProxy:  # pylint: disable=too-few-public-methods
         lex = _Lexicon()
         cache = _PsxCache()
 
-        def _on_psx(ln: str) -> Optional[str]:
-            def _refresh(new_cdu: str) -> None:
-                for cached_line in cache.replay_cdu(new_cdu):
-                    out = _translate_psx_to_bridge(
-                        cached_line, lex, self.bridge_cdu, new_cdu,
-                    )
-                    if out is not None:
+        def _on_psx(ln: str) -> List[str]:
+            def _refresh() -> None:
+                for cached_line in cache.replay_all():
+                    for out in _translate_psx_to_bridge(cached_line, lex, self._mapping):
                         br_writer.write(out.encode('latin-1'))
             self._check_addon(ln, _refresh)
-            return _translate_psx_to_bridge(
-                ln, lex, self.bridge_cdu, self.target_cdu, cache,
-            )
+            return _translate_psx_to_bridge(ln, lex, self._mapping, cache)
 
         t1 = asyncio.create_task(self._relay(
             psx_reader, br_writer, _on_psx, 'PSX→bridge',
         ))
         t2 = asyncio.create_task(self._relay(
             br_reader, psx_writer,
-            lambda ln: _translate_bridge_to_psx(ln, lex, self.bridge_cdu, self.target_cdu),
+            lambda ln: _translate_bridge_to_psx(ln, lex, self._mapping),
             'bridge→PSX',
         ))
 
@@ -318,14 +350,9 @@ class CduProxy:  # pylint: disable=too-few-public-methods
         server = await asyncio.start_server(
             self._handle_bridge, '0.0.0.0', self.listen_port
         )
-        swap_desc = (
-            f"bridge={self.bridge_cdu} → PSX={self.target_cdu}"
-            if self.bridge_cdu != self.target_cdu
-            else f"no swap (bridge={self.bridge_cdu})"
-        )
         self.logger.info(
             "CDU proxy listening on port %d  %s  PSX=%s:%d",
-            self.listen_port, swap_desc, self.psx_host, self.psx_port,
+            self.listen_port, self._mapping_desc(), self.psx_host, self.psx_port,
         )
         try:
             async with server:
@@ -359,14 +386,11 @@ def main() -> None:
         help='Port to listen on for the CDU bridge (default: 10748)',
     )
     parser.add_argument(
-        '--cs-cdu-config', default='L', choices=['L', 'C', 'R'],
-        metavar='CDU',
-        help='CDU position the CS Bridge is configured for: L, C, or R (default: L)',
-    )
-    parser.add_argument(
-        '--cd-cdu-swap-with', default=None, choices=['L', 'C', 'R'],
-        metavar='CDU', dest='target_cdu',
-        help='PSX CDU position to control: L, C, or R (default: same as --cs-cdu-config)',
+        '--cdu-map', default=None, type=_parse_cdu_map, metavar='MAP',
+        help=(
+            'CDU mapping as bridge=psx pairs, e.g. L=R or L=C,R=L '
+            '(default: no remapping)'
+        ),
     )
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
     args = parser.parse_args()
