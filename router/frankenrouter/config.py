@@ -109,13 +109,13 @@ class _RouterConfigPerformance:  # pylint: disable=missing-class-docstring,too-f
             raise RouterConfigError("performance write_buffer_critical_limit must be an integer")
 
         self.received_messages_per_second_critical_limit = data.get(
-            'received_messages_per_second_critical_limit', 60)
+            'received_messages_per_second_critical_limit', 120)
         if not isinstance(self.received_messages_per_second_critical_limit, int):
             raise RouterConfigError(
                 "performance received_messages_per_second_critical_limit must be an integer")
 
         self.sent_messages_per_second_critical_limit = data.get(
-            'sent_messages_per_second_critical_limit', 60)
+            'sent_messages_per_second_critical_limit', 120)
         if not isinstance(self.sent_messages_per_second_critical_limit, int):
             raise RouterConfigError(
                 "performance sent_messages_per_second_critical_limit must be an integer")
