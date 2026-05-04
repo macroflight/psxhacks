@@ -15,6 +15,10 @@ import psx
 
 from frankenturb import TurbulenceEngine, parse_pibahealtas  # pylint: disable=import-self
 from frankenturb.boost import AccelerationComputer, AccelerationState, parse_boost_line
+from frankenturb.cb import (
+    find_nearest_cb, parse_wx_zone_basic, parse_wx_zone_position, parse_wx_clust,
+)
+from frankenturb.cb_turbulence import compute_cb_turbulence
 
 
 __MYNAME__ = 'frankenturb'
@@ -94,6 +98,14 @@ def _pick_burst(state):
             (_BURST_SINK, r([-1, 1]), "SINK", 1.5),
             (_BURST_BANK, r([-1, 1]), "BANK", 1.5),
             (_BURST_SPD, r([-1, 1]), "SPD", 1.0),
+            (_BURST_YAW, r([-1, 1]), "YAW", 0.5),
+        ]
+    elif state.kind == 'cb':
+        # CBs are dominated by violent up/downdrafts and roll; large SPD changes.
+        candidates = [
+            (_BURST_SINK, r([-1, 1]), "SINK", 3.0),
+            (_BURST_BANK, r([-1, 1]), "BANK", 2.0),
+            (_BURST_SPD, r([-1, 1]), "SPD", 1.5),
             (_BURST_YAW, r([-1, 1]), "YAW", 0.5),
         ]
     else:  # shear, shear+*, none
@@ -182,6 +194,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self.engine = TurbulenceEngine()
         self._turb_print_count = 0
 
+        self.type_biases = {'wave': 100, 'rotor': 100, 'mechanical': 100, 'shear': 100, 'cb': 100}
+        self.lateral_size_bias = 50  # % of nearest-neighbour zone radius; tune to match radar
+
         self.latest_accel_state: Optional[AccelerationState] = None
 
     def psx_send_and_set(self, psx_variable, new_psx_value):
@@ -210,6 +225,34 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 self.scratchpad_text = ''
                 mcdu.paint(13, 0, "large", "white", " " * 24)
                 self.repaint_req_by.add("bias-set")
+        except ValueError:
+            pass
+
+    def _enter_lat_size_bias(self, mcdu):
+        """Process scratchpad as a CB lateral size percentage (0–999) and apply it."""
+        if not self.scratchpad_text:
+            return
+        try:
+            v = int(self.scratchpad_text)
+            if 0 <= v <= 999:
+                self.lateral_size_bias = v
+                self.scratchpad_text = ''
+                mcdu.paint(13, 0, "large", "white", " " * 24)
+                self.repaint_req_by.add("lat-size-bias-set")
+        except ValueError:
+            pass
+
+    def _enter_type_bias(self, mcdu, kind):
+        """Process scratchpad as a type-specific bias percentage (0–999) and apply it."""
+        if not self.scratchpad_text:
+            return
+        try:
+            v = int(self.scratchpad_text)
+            if 0 <= v <= 999:
+                self.type_biases[kind] = v
+                self.scratchpad_text = ''
+                mcdu.paint(13, 0, "large", "white", " " * 24)
+                self.repaint_req_by.add(f"type-bias-{kind}")
         except ValueError:
             pass
 
@@ -287,20 +330,36 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
             self.logger.critical(traceback.format_exc())
 
-    def _handle_keypress(self, mcdu, value):
+    def _handle_keypress(self, mcdu, value):  # pylint: disable=too-many-branches
         """Dispatch a single CDU keypress to the appropriate action."""
         if value == "1L":
             self.turb_enabled = not self.turb_enabled
             self.repaint_req_by.add("enable-toggle")
         elif value == "1R":
             self._enter_bias(mcdu)
+        elif value == "2L":
+            self._enter_type_bias(mcdu, 'wave')
         elif value == "2R":
             self._cycle_wind_mode()
+        elif value == "3L":
+            self._enter_type_bias(mcdu, 'rotor')
         elif value == "3R":
             self._apply_manual_wind(mcdu)
+        elif value == "4L":
+            self._enter_type_bias(mcdu, 'mechanical')
+        elif value == "4R":
+            self._enter_type_bias(mcdu, 'shear')
+        elif value == "5L":
+            self._enter_type_bias(mcdu, 'cb')
+        elif value == "5R":
+            self._enter_lat_size_bias(mcdu)
         elif value == "6R":
             self.turb_enabled = False
             self.intensity_bias = 100
+            self.type_biases = {
+                'wave': 100, 'rotor': 100, 'mechanical': 100, 'shear': 100, 'cb': 100,
+            }
+            self.lateral_size_bias = 50
             self.wind_mode = "live"
             self.psx_wind = None
             self.engine.clear_fixed_wind()
@@ -351,24 +410,82 @@ class Script():  # pylint: disable=too-many-instance-attributes
         else:
             src_str = "MANUAL>"
 
+        wave_str = f"<{self.type_biases['wave']}%"
+        rotor_str = f"<{self.type_biases['rotor']}%"
+        mech_str = f"<{self.type_biases['mechanical']}%"
+        shear_str = f"{self.type_biases['shear']}%>"
+
         mcdu.clear()
         #                          123456789012345678901234
         mcdu.paint(0, 0, S, A, title)
         mcdu.paint(1, 15, S, A, "INT BIAS>")
         mcdu.paint(2, 0, L, C, f"{enable_label:<12}{bias_str:>12}")
+        mcdu.paint(3, 0, S, A, "WAVE")
         mcdu.paint(3, 15, S, A, "WIND SRC>")
-        mcdu.paint(4, 0, L, C, f"{src_str:>24}")
-
+        mcdu.paint(4, 0, L, C, f"{wave_str:<12}{src_str:>12}")
+        mcdu.paint(5, 0, S, A, "ROTOR")
         if self.wind_mode == "manual":
             mcdu.paint(5, 19, S, A, "WIND>")
-            wind_str = f"{self.manual_wind_dir:03d}/{self.manual_wind_spd:03d}KT"
-            mcdu.paint(6, 0, L, C, f"{wind_str:>24}")
+            wind_str = f"{self.manual_wind_dir:03d}/{self.manual_wind_spd:03d}KT>"
+            mcdu.paint(6, 0, L, C, f"{rotor_str:<12}{wind_str:>12}")
+        else:
+            mcdu.paint(6, 0, L, C, f"{rotor_str:<12}")
+        mcdu.paint(7, 0, S, A, "MECH")
+        mcdu.paint(7, 18, S, A, "SHEAR>")
+        mcdu.paint(8, 0, L, C, f"{mech_str:<12}{shear_str:>12}")
+        mcdu.paint(9, 0, S, A, "CB")
+        mcdu.paint(9, 15, S, A, "LAT SIZE>")
+        mcdu.paint(10, 0, L, C,
+                   f"{'<' + str(self.type_biases['cb']) + '%':<12}"
+                   f"{str(self.lateral_size_bias) + '%>':>12}")
 
         mcdu.paint(12, 18, L, A, "RESET>")
         if self.scratchpad_text:
             mcdu.paint(13, 0, "large", "magenta", self.scratchpad_text)
 
-    async def turbulence_coro(self):  # pylint: disable=too-many-locals,too-many-statements
+    def _get_nearest_cb(self, lat: float, lon: float):
+        """Collect CB data from PSX and return the nearest active storm cell.
+
+        Reads WxMode1–7 (zone positions), Wx1–7 and WxBasic (CB profiles),
+        WxClust (planet-weather cells), and TimeEarth (simulation clock)
+        from the PSX client cache, then delegates to find_nearest_cb.
+        Returns a CbInfo instance or None when no CBs are active.
+        """
+        raw_time = self.psx.get("TimeEarth")
+        try:
+            time_earth_ms = int(raw_time) if raw_time else int(time.time() * 1000)
+        except ValueError:
+            time_earth_ms = int(time.time() * 1000)
+
+        zone_positions = {}
+        for zone_i in range(1, 8):
+            raw = self.psx.get(f"WxMode{zone_i}")
+            if raw:
+                pos = parse_wx_zone_position(raw)
+                if pos is not None:
+                    zone_positions[zone_i] = pos
+
+        zone_cb_data = {}
+        planet_raw = self.psx.get("WxBasic")
+        if planet_raw:
+            planet_cb = parse_wx_zone_basic(planet_raw)
+            if planet_cb is not None:
+                zone_cb_data[0] = planet_cb
+        for zone_i in range(1, 8):
+            raw = self.psx.get(f"Wx{zone_i}")
+            if raw:
+                cb_data = parse_wx_zone_basic(raw)
+                if cb_data is not None:
+                    zone_cb_data[zone_i] = cb_data
+
+        clust_raw = self.psx.get("WxClust")
+        clust_positions = parse_wx_clust(clust_raw) if clust_raw else []
+
+        return find_nearest_cb(lat, lon, zone_positions, zone_cb_data,
+                               clust_positions, time_earth_ms,
+                               lat_scale=self.lateral_size_bias / 100.0)
+
+    async def turbulence_coro(self):  # pylint: disable=too-many-locals,too-many-statements,too-many-branches
         """Compute turbulence, inject WxBurst events into PSX, and log state."""
         myname = inspect.currentframe().f_code.co_name
         last_print = 0.0
@@ -408,11 +525,23 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 state = await loop.run_in_executor(
                     None, self.engine.compute, lat, lon, alt_ft)
 
+                # CB proximity turbulence (fast — no I/O, just PSX cache + math).
+                cb = self._get_nearest_cb(lat, lon)
+                cb_state = None
+                if cb is not None:
+                    cb_state = compute_cb_turbulence(alt_ft, cb)
+                    if cb_state.intensity > state.intensity:
+                        state = cb_state
+
                 # --- Inject WxBurst into PSX ------------------------------------
-                # intensity_bias (0–999 %) multiplies the computed intensity:
-                # 100 = 1× (default, unchanged), 200 = 2×, 0 = off.
+                # intensity_bias and the per-kind type_bias both scale intensity:
+                # each is 0–999 % (100 = 1×).  Combined: bias×type/10000.
                 # WxBurst magnitude is capped at 99 (PSX maximum).
-                effective_intensity = min(1.0, state.intensity * self.intensity_bias / 100.0)
+                type_bias = self.type_biases.get(state.kind, 100)
+                effective_intensity = min(
+                    1.0,
+                    state.intensity * self.intensity_bias * type_bias / 10000.0,
+                )
                 if self.turb_enabled and effective_intensity >= 0.01:
                     inject_prob = (effective_intensity ** 0.5) * (self.args.rate / 100.0)
                     if random.random() < inject_prob:
@@ -468,6 +597,17 @@ class Script():  # pylint: disable=too-many-instance-attributes
                     self.logger.info(
                         "           [why] %s %s",
                         intensity_label.upper(), state.reason)
+                if cb is not None:
+                    self.logger.info(
+                        "           [CB ] %s brg=%03.0f° rng=%.0fnm "
+                        "edge=%+.0fnm base=%.0fft top=%.0fft cov=%d",
+                        cb.source, cb.bearing_deg, cb.range_center_nm,
+                        cb.range_edge_nm, cb.cloud_base_ft_msl,
+                        cb.cloud_top_ft_msl, cb.coverage)
+                    if cb_state is not None and cb_state.intensity >= 0.01:
+                        self.logger.info(
+                            "           [CB turb] %s %.2f",
+                            cb_state.reason, cb_state.intensity)
                 if self.args.accelerations and accel is not None:
                     self.logger.info(
                         "           [acc] heave=%+.2fG surge=%+.2fG sway=%+.2fG "
@@ -575,6 +715,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.psx.subscribe("WxBasic")
             for _i in range(1, 8):
                 self.psx.subscribe(f"Wx{_i}")
+
+            # Needed for CB proximity detection
+            self.psx.subscribe("TimeEarth")
+            self.psx.subscribe("WxClust")
+            for _i in range(1, 8):
+                self.psx.subscribe(f"WxMode{_i}")
 
             self.psx.subscribe("id")
             self.psx.subscribe("version", connected)
