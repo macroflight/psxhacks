@@ -940,6 +940,20 @@ class Rules():  # pylint: disable=too-many-public-methods
                     RulesAction.DROP,
                     RulesCode.KEYVALUE_FILTERED_INGRESS_SILENT,
                     message="filtered Qi198 as filter_elevation is set")
+            # If the value is unchanged, only send to
+            # upstream. Sending unconditionally to upstream prevents
+            # the master sim router from switching to PSX's elevation
+            # source if it has not seen a Qi198 injection in 60
+            # seconds. Not sending to downstream when the value is
+            # unchanged means we behave more like a PSX main server.
+            try:
+                if self.router.cache.get_value('Qi198') == int(value):
+                    return self.myreturn(
+                        RulesAction.UPSTREAM_ONLY,
+                        RulesCode.KEYVALUE_FILTERED_INGRESS_SILENT,
+                        message="Qi198 unchanged: forwarding upstream only")
+            except (RouterCacheException, ValueError, TypeError):
+                pass
 
         if not self.sender.upstream and key in TRAFFIC_KEYWORDS:
             # Filter traffic injection from vPilot if filter is enabled
