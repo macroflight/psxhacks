@@ -453,13 +453,13 @@ class Rules():  # pylint: disable=too-many-public-methods
             filter_changed = False
             if 'elevation_source_simulator' in sharedinfo:
                 new_val = sharedinfo['elevation_source_simulator'] != own_sim
-                if new_val != self.router.config.psx.filter_elevation:
-                    self.router.config.psx.filter_elevation = new_val
+                if new_val != self.router.filter_elevation:
+                    self.router.filter_elevation = new_val
                     filter_changed = True
             if 'traffic_source_simulator' in sharedinfo:
                 new_val = sharedinfo['traffic_source_simulator'] != own_sim
-                if new_val != self.router.config.psx.filter_traffic:
-                    self.router.config.psx.filter_traffic = new_val
+                if new_val != self.router.filter_traffic:
+                    self.router.filter_traffic = new_val
                     filter_changed = True
             if filter_changed:
                 self.router.status_display_requested = True
@@ -883,8 +883,8 @@ class Rules():  # pylint: disable=too-many-public-methods
                         RulesCode.KEYVALUE_FILTERED_INGRESS,
                         message="filtered Qh426/Tiller")
 
-        # Ingress filter: flight controls
-        if self.router.config.psx.filter_flight_controls:
+        # Ingress filter: flight controls if this is a slave sim router
+        if self.router.is_upstream_connected() and self.router.upstream.is_frankenrouter:
             if not self.sender.upstream and key in FLIGHT_CONTROL_INPUT_KEYWORDS:
                 self.logger.debug("FLIGHT CONTROL INPUT: %s", key)
                 flying = self.router.sharedinfo["pilot_flying_simulator"]
@@ -931,11 +931,9 @@ class Rules():  # pylint: disable=too-many-public-methods
 
         if not self.sender.upstream and key == 'Qi198':
             # Filter elevation updates (usually from MSFS.Router) from
-            # downstream if the config option is set. We use this to
-            # supress elevation updates from simulators that will not
-            # be VATPRI, especially if they don't have the exact same
-            # scenery. We use SILENT filtering since this will happen at 2Hz
-            if self.router.config.psx.filter_elevation:
+            # downstream if the runtime filter flag is set. We use SILENT
+            # filtering since this will happen at 2Hz
+            if self.router.filter_elevation:
                 return self.myreturn(
                     RulesAction.DROP,
                     RulesCode.KEYVALUE_FILTERED_INGRESS_SILENT,
@@ -958,7 +956,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         if not self.sender.upstream and key in TRAFFIC_KEYWORDS:
             # Filter traffic injection from vPilot if filter is enabled
             # We use SILENT filtering since this will happen often
-            if self.router.config.psx.filter_traffic:
+            if self.router.filter_traffic:
                 if "vPilot" in self.sender.display_name:
                     return self.myreturn(
                         RulesAction.DROP,
@@ -1066,7 +1064,6 @@ class TestRules(unittest.TestCase):
 
         def __init__(self):
             """Initialize the config."""
-            self.filter_flight_controls = False
             self.filter_from_other_sim = []
             self.filter_to_other_sim = []
 
@@ -1090,6 +1087,10 @@ class TestRules(unittest.TestCase):
             self.last_load3 = 0.0
             self.frdp_version = 1
             self.config = TestRules.DummyConfig()
+
+        def is_upstream_connected(self):
+            """Return dummy value."""
+            return False
 
         def variable_stats_add(self, *args):
             """Add dummy stats."""

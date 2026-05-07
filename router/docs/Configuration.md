@@ -146,20 +146,6 @@ directory = 'C:\fs\PSX\Routerlogs'
   Forum](https://aerowinx.com/assets/networkers/Variables.txt)). If
   the file is not found, the router will print a warning and try to
   download a copy of the file from Aerowinx.
-- `filter_elevation`: defaults to false. If true, Qi198 elevation
-  injections from clients (usually PSX.MSFS.Router) will be
-  filtered. This filter can be toggled during runtime using the REST
-  API.
-- `filter_traffic`: defaults to false. If true, traffic information
-  (usually from the vPilot plugin) will be filtered. This filter can
-  be toggled during runtime using the REST API.
-- `filter_flight_controls`: defaults to true. If true, the router will
-  filter certain flight control axes (e.g rudder). The filtering can
-  be controlled by e.g an USB button mapped through frankenusb. For a
-  shared cockpit setup, the master sim frankenrouter must have this
-  set to false. This should be set to false for a master sim router or
-  when you use a router as the central component of a large sim
-  without using shared cockpit.
 - `filter_flight_controls_ap_disc`: defaults to true. If set to true,
   pressing the A/P disconnect button on the yoke will turn off the
   flight control axis lock in your router and turn it on in all other

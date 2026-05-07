@@ -55,8 +55,8 @@ FRDP_PING_INTERVAL = 5.0
 # How often to send FRDP ROUTERINFO (also sent after certain events, e.g router connects to network)
 FRDP_ROUTERINFO_INTERVAL = 60.0
 
-# How often to send FRDP ROUTERINFO (also sent after certain events, e.g router connects to network)
-FRDP_SHAREDINFO_INTERVAL = 60.0
+# How often to send FRDP SHAREDINFO (also sent after certain events, e.g router connects to network)
+FRDP_SHAREDINFO_INTERVAL = 10.0
 
 # Keep 300 seconds of RTT data for the statistics in the status display
 FRDP_KEEP_RTT_SAMPLES = 300
@@ -86,7 +86,7 @@ def trimstring(longname, maxlen=11, sep=".."):
     return longname[:length] + sep + longname[-length:]
 
 
-class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-public-methods
+class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-public-methods,too-many-statements
     """Replaces the PSX USB subsystem."""
 
     def __init__(self):
@@ -204,6 +204,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.writes_counter = collections.deque(maxlen=60)
         self.message_counter = collections.deque(maxlen=60)
 
+        # Status of local traffic and elevation ingress filters - safe defaults set
+        self.filter_traffic = True
+        self.filter_elevation = True
+
     def reset_after_upstream_connect(self):
         """Re-initialize certain variables after upstream connection."""
         self.last_load1 = 0.0
@@ -257,7 +261,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         )
         parser.add_argument(
             '--housekeeping-interval',
-            type=int, action='store', default=30,
+            type=int, action='store', default=10,
             help="How often to perform housekeeping tasks (writing cache to file, etc.) (s)",
         )
         parser.add_argument(
@@ -424,8 +428,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         )
         self.logger.info(
             "Filters in this router: elevation filter is %s, traffic filter is %s",
-            "enabled" if self.config.psx.filter_elevation else "disabled",
-            "enabled" if self.config.psx.filter_traffic else "disabled",
+            "enabled" if self.filter_elevation else "disabled",
+            "enabled" if self.filter_traffic else "disabled",
         )
         if self.log_traffic_filename:
             self.logger.info("Logging traffic to %s", self.log_traffic_filename)
@@ -1079,6 +1083,15 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 # Remove some information that might have come from another upstream
                 self.reset_after_upstream_connect()
 
+                # Enable elevation and traffic filter so we don't accidentally
+                # leak data upstream. Especially the elevation injections can be
+                # troublesome (aircraft might jump when a slave sim connections
+                # if that slavesim manages to send a Qi198 to the master sim.
+                self.logger.info("Enabling elevation filter")
+                self.filter_elevation = True
+                self.logger.info("Enabling traffic filter")
+                self.filter_traffic = True
+
                 if self.config.upstream.password:
                     # assume upstream is frankenrouter if we use --password
                     self.logger.info("Assuming upstream is frankenrouter")
@@ -1514,8 +1527,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             "performance": {
                 "uptime": int(time.perf_counter() - self.starttime),
             },
-            "filter_elevation": self.config.psx.filter_elevation,
-            "filter_traffic": self.config.psx.filter_traffic,
+            "filter_elevation": self.filter_elevation,
+            "filter_traffic": self.filter_traffic,
             "errors": self.get_errors(),
         }
         payload['connections'] = []
@@ -1695,6 +1708,149 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             return
         # End of status_display_task()
 
+    def _housekeeping_disable_filters_if_standalone(self):
+        """Disable elevation and traffic filter for standalone router.
+
+        If we have an upstream and it's been connected for long
+        enough, we can check sharedinfo. If there is no filter data in
+        sharedinfo, we know we are not part of a shared cockpit setup,
+        and we can then disable the filters.
+        """
+        if self.is_upstream_connected():
+            upstream_connection_time = time.perf_counter() - self.upstream.connected_at
+            if upstream_connection_time > FRDP_SHAREDINFO_INTERVAL:
+                if self.sharedinfo.get('elevation_source_simulator', "NOSIM") == "NOSIM":  # pylint: disable=line-too-long
+                    self.sharedinfo['elevation_source_simulator'] = self.config.identity.simulator  # pylint: disable=line-too-long
+                    self.logger.info("Standalone sim - elevation filter disabled")
+                    self.filter_elevation = False
+                    self.status_display_requested = True
+                if self.sharedinfo.get('traffic_source_simulator', "NOSIM") == "NOSIM":  # pylint: disable=line-too-long
+                    self.sharedinfo['traffic_source_simulator'] = self.config.identity.simulator  # pylint: disable=line-too-long
+                    self.logger.info("Standalone sim - traffic filter disabled")
+                    self.filter_traffic = False
+                    self.status_display_requested = True
+
+    async def _housekeeping_enable_psx_elevation_database(self):
+        """Switch back to PSX's internal elevation database.
+
+        If no sim is injecting elevation data into the network, we
+        should switch back to PSX's internal elevation database.
+
+        If no one is injecting elevation data into the network. Only
+        do this on the master sim router, i.e a router whose upstream
+        is connected but not a frankenrouter.
+        """
+        if self.is_upstream_connected() and not self.upstream.is_frankenrouter:
+            try:
+                time_since_elevation_injection = self.cache.get_age("Qi198")
+                if time_since_elevation_injection > PSX_RESUME_ELEVATION_AFTER:
+                    if self.args.disable_elevation_reset:
+                        self.logger.info(
+                            "PSX elevation not reset due --disable-elevation-reset")
+                    else:
+                        self.logger.warning(
+                            "Qi198 not seen in %d s, enabling PSX elevation database",
+                            PSX_RESUME_ELEVATION_AFTER
+                        )
+                        self.cache.update("Qi198", PSX_RESUME_ELEVATION)
+                        await self.send_to_upstream(f"Qi198={PSX_RESUME_ELEVATION}")
+            except routercache.RouterCacheException:
+                # No Qi198 in cache yet
+                pass
+
+    async def _housekeeping_enable_master_caution(self):
+        """Send master caution if errors detected.
+
+        Only do this check on the master sim router.
+        """
+        if self.is_upstream_connected() and not self.upstream.is_frankenrouter:
+            message = "FRANKENROUTER"
+            filterstatus = self.get_filter_status()
+            state_ok = True
+            if len(filterstatus['elevation']['disabled']) > 1:
+                state_ok = False
+            if len(filterstatus['elevation']['disabled']) < 1:
+                state_ok = False
+            if len(filterstatus['traffic']['disabled']) > 1:
+                state_ok = False
+            if len(filterstatus['traffic']['disabled']) < 1:
+                state_ok = False
+            for ri_uuid, info in self.routerinfo.items():
+                if info.get('errors'):
+                    self.logger.warning(
+                        "Router %s (%s) reports errors: %s",
+                        info.get('router_name', ri_uuid),
+                        info.get('simulator_name', '?'),
+                        info['errors'])
+                    state_ok = False
+            try:
+                mcmessage = self.cache.get_value("Qs418")
+            except routercache.RouterCacheException:
+                mcmessage = ""
+            if not state_ok:
+                time_since_warning = time.perf_counter() - self.filter_warning_sent
+                if time_since_warning > FILTER_WARNING_INTERVAL:
+                    # Send master caution
+                    # Qs418="FreeMsgW"; Mode=ECON; Min=0; Max=16;
+                    self.logger.warning(
+                        "One or more routers has an error, sending FRANKENROUTER MC")
+                    self.filter_warning_sent = time.perf_counter()
+                    self.cache.update("Qs418", message)
+                    await self.send_to_upstream(f"Qs418={message}")
+                    await self.client_broadcast(f"Qs418={message}")
+            else:
+                self.filter_warning_sent = 0
+                if mcmessage == message:
+                    # Clear message (but not any other master caution we might have)
+                    self.logger.warning("All routers error-free, clearing MC")
+                    self.cache.update("Qs418", "")
+                    await self.send_to_upstream("Qs418=")
+                    await self.client_broadcast("Qs418=")
+
+    async def _housekeeping_jettison_fix(self):
+        """Jettison selector switch bug workaround.
+
+        Workaround for problem described in
+        https://aerowinx.com/board/index.php/topic,7861.0.html
+        - send "jettison off" when connected to
+        upstream. This assumes you don't connect to a master
+        sim while fuel jettison is actually in progress, but
+        that seems rather unlikely.
+        Qi25="CfgJettisonMlw"; Mode=ECON; Min=0; Max=1;
+        Qh274="JettSelSystem"; Mode=ECON; Min=0; Max=4;
+        """
+        if (self.is_upstream_connected() and
+                (time.perf_counter() - self.upstream.connected_at) <
+                2 * self.args.housekeeping_interval):
+            self.logger.info("Checking if we need to apply the jettison switch fix")
+            try:
+                has_jettison_mlw = self.cache.get_value('Qi25')
+                jettison_sel = self.cache.get_value('Qh274')
+                self.logger.info(
+                    "Jettison check: Qi25=%s, Qh274=%s",
+                    has_jettison_mlw, jettison_sel)
+                if has_jettison_mlw == 0:
+                    if jettison_sel != 0:
+                        self.logger.warning(
+                            "Jettison selector mismatch (%s, %s) after"
+                            " connection, applying workaround Qh274=0",
+                            has_jettison_mlw, jettison_sel)
+                        await self.send_to_upstream("Qh274=0")
+                        await self.client_broadcast("Qh274=0")
+                elif has_jettison_mlw == 1:
+                    if jettison_sel != 2:
+                        self.logger.warning(
+                            "Jettison selector mismatch (%s, %s) after"
+                            " connection, applying workaround Qh274=2",
+                            has_jettison_mlw, jettison_sel)
+                        await self.send_to_upstream("Qh274=2")
+                        await self.client_broadcast("Qh274=2")
+                else:
+                    self.logger.info("No jettison fix needed")
+            except routercache.RouterCacheException:
+                self.logger.warning(
+                    "Not applying jettison workaround since data not in cache")
+
     async def housekeeping_task(self, name):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
         """Miscellaneous housekeeping Task."""
         try:  # pylint: disable=too-many-nested-blocks
@@ -1707,114 +1863,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     # Write chache to disk
                     self.cache.write_to_file()
 
-                    # Switch back to PSX's internal elevation database
-                    # if no one is injecting elevation data into the
-                    # network. Only do this on the master sim router,
-                    # i.e a router whose upstream is connected but not
-                    # a frankenrouter.a
-                    if self.is_upstream_connected() and not self.upstream.is_frankenrouter:
-                        try:
-                            time_since_elevation_injection = self.cache.get_age("Qi198")
-                            if time_since_elevation_injection > PSX_RESUME_ELEVATION_AFTER:
-                                if self.args.disable_elevation_reset:
-                                    self.logger.info(
-                                        "PSX elevation not reset due --disable-elevation-reset")
-                                else:
-                                    self.logger.warning(
-                                        "Qi198 not seen in %d s, enabling PSX elevation database",
-                                        PSX_RESUME_ELEVATION_AFTER
-                                    )
-                                    self.cache.update("Qi198", PSX_RESUME_ELEVATION)
-                                    await self.send_to_upstream(f"Qi198={PSX_RESUME_ELEVATION}")
-                        except routercache.RouterCacheException:
-                            # No Qi198 in cache yet
-                            pass
+                    # Call housekeeping functions
+                    self._housekeeping_disable_filters_if_standalone()
+                    await self._housekeeping_enable_psx_elevation_database()
+                    await self._housekeeping_enable_master_caution()
+                    await self._housekeeping_jettison_fix()
 
-                    # Send master caution if the filter state is incorrect
-                    # or if any router reports errors
-                    if self.is_upstream_connected() and not self.upstream.is_frankenrouter:
-                        message = "FRANKENROUTER"
-                        filterstatus = self.get_filter_status()
-                        state_ok = True
-                        if len(filterstatus['elevation']['disabled']) > 1:
-                            state_ok = False
-                        if len(filterstatus['elevation']['disabled']) < 1:
-                            state_ok = False
-                        if len(filterstatus['traffic']['disabled']) > 1:
-                            state_ok = False
-                        if len(filterstatus['traffic']['disabled']) < 1:
-                            state_ok = False
-                        for ri_uuid, info in self.routerinfo.items():
-                            if info.get('errors'):
-                                self.logger.warning(
-                                    "Router %s (%s) reports errors: %s",
-                                    info.get('router_name', ri_uuid),
-                                    info.get('simulator_name', '?'),
-                                    info['errors'])
-                                state_ok = False
-                        try:
-                            mcmessage = self.cache.get_value("Qs418")
-                        except routercache.RouterCacheException:
-                            mcmessage = ""
-                        if not state_ok:
-                            time_since_warning = time.perf_counter() - self.filter_warning_sent
-                            if time_since_warning > FILTER_WARNING_INTERVAL:
-                                # Send master caution
-                                # Qs418="FreeMsgW"; Mode=ECON; Min=0; Max=16;
-                                self.logger.warning(
-                                    "One or more routers has an error, sending FRANKENROUTER MC")
-                                self.filter_warning_sent = time.perf_counter()
-                                self.cache.update("Qs418", message)
-                                await self.send_to_upstream(f"Qs418={message}")
-                                await self.client_broadcast(f"Qs418={message}")
-                        else:
-                            self.filter_warning_sent = 0
-                            if mcmessage == message:
-                                # Clear message (but not any other master caution we might have)
-                                self.logger.warning("All routers error-free, clearing MC")
-                                self.cache.update("Qs418", "")
-                                await self.send_to_upstream("Qs418=")
-                                await self.client_broadcast("Qs418=")
-
-                    # Workaround for problem described in
-                    # https://aerowinx.com/board/index.php/topic,7861.0.html
-                    # - send "jettison off" when connected to
-                    # upstream. This assumes you don't connect to a master
-                    # sim while fuel jettison is actually in progress, but
-                    # that seems rather unlikely.
-                    # Qi25="CfgJettisonMlw"; Mode=ECON; Min=0; Max=1;
-                    # Qh274="JettSelSystem"; Mode=ECON; Min=0; Max=4;
-                    if (self.is_upstream_connected() and
-                            (time.perf_counter() - self.upstream.connected_at) <
-                            2 * self.args.housekeeping_interval):
-                        self.logger.info("Checking if we need to apply the jettison switch fix")
-                        try:
-                            has_jettison_mlw = self.cache.get_value('Qi25')
-                            jettison_sel = self.cache.get_value('Qh274')
-                            self.logger.info(
-                                "Jettison check: Qi25=%s, Qh274=%s",
-                                has_jettison_mlw, jettison_sel)
-                            if has_jettison_mlw == 0:
-                                if jettison_sel != 0:
-                                    self.logger.warning(
-                                        "Jettison selector mismatch (%s, %s) after"
-                                        " connection, applying workaround Qh274=0",
-                                        has_jettison_mlw, jettison_sel)
-                                    await self.send_to_upstream("Qh274=0")
-                                    await self.client_broadcast("Qh274=0")
-                            elif has_jettison_mlw == 1:
-                                if jettison_sel != 2:
-                                    self.logger.warning(
-                                        "Jettison selector mismatch (%s, %s) after"
-                                        " connection, applying workaround Qh274=2",
-                                        has_jettison_mlw, jettison_sel)
-                                    await self.send_to_upstream("Qh274=2")
-                                    await self.client_broadcast("Qh274=2")
-                            else:
-                                self.logger.info("No jettison fix needed")
-                        except routercache.RouterCacheException:
-                            self.logger.warning(
-                                "Not applying jettison workaround since data not in cache")
+                    # Do some minor housekeeping that does not need separate functions
 
                     # Trim variable stats buffer
                     if self.args.enable_variable_stats:
@@ -2303,17 +2358,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 <body>
 <h1>Frankenrouter filter control</h1>
 <hr>
-<p>Elevation filter is <b>{filter_status_elevation}</b> ({filter_status_description_elevation})
-<p><a href="/api/filter/elevation/{next_state_elevation}">{next_state_elevation} elevation filter</a>
-<p>This filter should be enabled unless you are flying single-pilot or you are
-the primary VATSIM connection (VATPRI)
-<hr>
-<p>
-<p>Traffic (TCAS/traffic data from vPilot) filter is <b>{filter_status_traffic}</b> ({filter_status_description_traffic})
-<p><a href="/api/filter/traffic/{next_state_traffic}">{next_state_traffic} traffic filter</a>
-<p>
-<p>This filter should be enabled unless you are flying single-pilot or you are
-the primary VATSIM connection (VATPRI).
+<p>Note: Filter control is now automatic. If you are connected to a master sim you will have options below to start or stop sending elevation or traffic data from your sim. These control the filters in all connected routers.
 {network_source_section}
 <hr>
 </body>
@@ -2323,6 +2368,7 @@ the primary VATSIM connection (VATPRI).
         filter_page_network_source_section = '''
 <hr>
 <h2>Network filter source control</h2>
+<p>Note: you need to reload this page to see the current settings.
 <p>This sim: <b>{this_sim}</b>
 <p>Elevation data source: <b>{elevation_source}</b>
 <p><a href="/api/filter/elevation/start_sending">START SENDING ELEVATION DATA</a>
@@ -2511,7 +2557,7 @@ the primary VATSIM connection (VATPRI).
             async def handle_web_filter_get(_):
                 data = {}
                 data['rest_api_color_scheme'] = self.config.listen.rest_api_color_scheme
-                if self.config.psx.filter_elevation:
+                if self.filter_elevation:
                     data["filter_status_elevation"] = "enabled"
                     data["filter_status_description_elevation"] = "your sim is NOT sending elevation data"  # pylint: disable=line-too-long
                     data["next_state_elevation"] = "disable"
@@ -2519,7 +2565,7 @@ the primary VATSIM connection (VATPRI).
                     data["filter_status_elevation"] = "disabled"
                     data["filter_status_description_elevation"] = "your sim IS sending elevation data"  # pylint: disable=line-too-long
                     data["next_state_elevation"] = "enable"
-                if self.config.psx.filter_traffic:
+                if self.filter_traffic:
                     data["filter_status_traffic"] = "enabled"
                     data["filter_status_description_traffic"] = "your sim is NOT sending traffic data"  # pylint: disable=line-too-long
                     data["next_state_traffic"] = "disable"
@@ -2540,34 +2586,6 @@ the primary VATSIM connection (VATPRI).
                     data['network_source_section'] = ''
                 html_page = filter_page.format(**data)
                 return web.json_response(text=html_page, content_type='text/html')
-
-            @routes.get('/api/filter/elevation/enable')
-            async def handle_filter_elevation_enable(_):
-                self.config.psx.filter_elevation = True
-                self.logger.info("API: elevation filter enabled")
-                self.connection_state_changed()
-                raise web.HTTPFound('/filter')
-
-            @routes.get('/api/filter/elevation/disable')
-            async def handle_filter_elevation_disable(_):
-                self.config.psx.filter_elevation = False
-                self.logger.info("API: elevation filter disabled")
-                self.connection_state_changed()
-                raise web.HTTPFound('/filter')
-
-            @routes.get('/api/filter/traffic/enable')
-            async def handle_filter_traffic_enable(_):
-                self.config.psx.filter_traffic = True
-                self.logger.info("API: traffic filter enabled")
-                self.connection_state_changed()
-                raise web.HTTPFound('/filter')
-
-            @routes.get('/api/filter/traffic/disable')
-            async def handle_filter_traffic_disable(_):
-                self.config.psx.filter_traffic = False
-                self.logger.info("API: traffic filter disabled")
-                self.connection_state_changed()
-                raise web.HTTPFound('/filter')
 
             @routes.get('/api/filter/elevation/start_sending')
             async def handle_filter_elevation_start_sending(_):
@@ -2962,7 +2980,7 @@ shared cockpit master sim.
             self.config.upstream.port = 10748
 
             # Enable filtering of MSFS elevation data by default
-            self.config.psx.filter_elevation = True
+            self.filter_elevation = True
 
             while True:
                 self.config.identity.simulator = input(

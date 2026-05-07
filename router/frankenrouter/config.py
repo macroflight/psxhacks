@@ -63,9 +63,12 @@ class _RouterConfigPsx:  # pylint: disable=missing-class-docstring,too-few-publi
         self.variables = data.get('variables', 'Variables.txt')
         if not isinstance(self.variables, str):
             raise RouterConfigError("PSX Variables path must be a string")
-        self.filter_elevation = data.get('filter_elevation', True)
-        self.filter_traffic = data.get('filter_traffic', True)
-        self.filter_flight_controls = data.get('filter_flight_controls', True)
+        if 'filter_elevation' in data:
+            raise RouterConfigError("The filter_elevation setting is deprecated")
+        if 'filter_traffic' in data:
+            raise RouterConfigError("The filter_traffic setting is deprecated")
+        if 'filter_flight_controls' in data:
+            raise RouterConfigError("The filter_flight_controls setting is deprecated")
         self.filter_flight_controls_ap_disc = data.get('filter_flight_controls_ap_disc', True)
         # filter_from_other_sim / filter_to_other_sim: PSX keywords that should
         # be dropped when received from (or not sent to) a frankenrouter
