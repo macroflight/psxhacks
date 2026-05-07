@@ -53,7 +53,7 @@ HEADER_LINE_LENGTH = 126
 FRDP_PING_INTERVAL = 5.0
 
 # How often to send FRDP ROUTERINFO (also sent after certain events, e.g router connects to network)
-FRDP_ROUTERINFO_INTERVAL = 60.0
+FRDP_ROUTERINFO_INTERVAL = 10.0
 
 # How often to send FRDP SHAREDINFO (also sent after certain events, e.g router connects to network)
 FRDP_SHAREDINFO_INTERVAL = 10.0
