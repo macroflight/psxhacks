@@ -3146,6 +3146,15 @@ if __name__ == '__main__':
     if '--devel' not in sys.argv:
         _install_ctrl_c_guard()
     try:
-        asyncio.run(Frankenrouter().main())
-    except KeyboardInterrupt:
-        print("Shut down due to ^C")
+        try:
+            asyncio.run(Frankenrouter().main())
+        except KeyboardInterrupt:
+            print("Shut down due to ^C")
+        except SystemExit as exc:
+            if exc.code is not None:
+                print(exc.code)
+        except Exception:  # pylint: disable=broad-exception-caught
+            traceback.print_exc()
+    finally:
+        if '--devel' not in sys.argv:
+            input("Exited, press Enter to continue")
