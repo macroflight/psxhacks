@@ -409,4 +409,12 @@ def main() -> None:
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except Exception:  # pylint: disable=broad-exception-caught
+        import traceback
+        traceback.print_exc()
+        input("An error occurred, press Enter to continue...")
+    except SystemExit as exc:
+        if exc.code not in (None, 0):
+            input("An error occurred, press Enter to continue...")

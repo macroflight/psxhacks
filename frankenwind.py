@@ -332,5 +332,13 @@ class FrankenWind():  # pylint: disable=too-many-instance-attributes
 
 
 if __name__ == '__main__':
-    me = FrankenWind()
-    me.run()
+    try:
+        me = FrankenWind()
+        me.run()
+    except Exception:  # pylint: disable=broad-exception-caught
+        import traceback
+        traceback.print_exc()
+        input("An error occurred, press Enter to continue...")
+    except SystemExit as exc:
+        if exc.code not in (None, 0):
+            input("An error occurred, press Enter to continue...")

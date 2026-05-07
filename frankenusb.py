@@ -6,6 +6,7 @@ import importlib.util
 import logging
 import os
 import time
+import traceback
 from collections import defaultdict
 import pygame  # pylint: disable=import-error
 import psx  # pylint: disable=unused-import
@@ -1647,5 +1648,12 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
 
 
 if __name__ == '__main__':
-    me = FrankenUsb()
-    me.run()
+    try:
+        me = FrankenUsb()
+        me.run()
+    except Exception:  # pylint: disable=broad-exception-caught
+        traceback.print_exc()
+        input("An error occurred, press Enter to continue...")
+    except SystemExit as exc:
+        if exc.code not in (None, 0):
+            input("An error occurred, press Enter to continue...")
