@@ -1606,6 +1606,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         tx_limit = self.config.performance.sent_messages_per_second_critical_limit
         bucket = int(time.time() - 1.0)
         for con in conns:
+            # Skip test until connection has been established for more
+            # than 60 seconds. We always have a high message rate
+            # during the initial welcome message.
+            if (time.perf_counter() - con.connected_at) < 60:
+                continue
             buf = con.writer.transport.get_write_buffer_size()
             if buf > buf_limit:
                 errors.append(
