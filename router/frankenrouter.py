@@ -343,6 +343,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             return True
         return False
 
+    def get_router_type(self):
+        """Return True if we are a slave sim router."""
+        if not self.is_upstream_connected():
+            return "unknown"
+        if self.upstream.is_frankenrouter:
+            return "slave"
+        return "master"
+
     def is_client_connected(self, client_addr):
         """Return True if this client is connected."""
         if client_addr in self.clients:
@@ -1433,7 +1441,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     #
                     # Send FRDP ping to upstream if it is a frankenrouter
                     #
-                    if self.is_upstream_connected() and self.upstream.is_frankenrouter:
+                    if self.get_router_type() == 'slave':
                         frdp_request_id = self.get_random_id()
                         self.logger.debug(
                             "Sending FRDP ping to upstream, request_id is %s",
@@ -1467,7 +1475,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 #
                 # We only want to send this upstream if connected to
                 # another frankenrouter.
-                if self.is_upstream_connected() and self.upstream.is_frankenrouter:
+                if self.get_router_type() == 'slave':
                     if not self.upstream.frdp_ident_sent:
                         self.logger.info("Sending FRDP IDENT to upstream")
                         await self.send_to_upstream(f"addon=FRANKENROUTER:{self.frdp_version}:IDENT:{self.config.identity.simulator}:{self.config.identity.router}:{self.uuid}")  # pylint: disable=line-too-long
@@ -1483,7 +1491,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 #
                 # We only want to send this upstream if connected to
                 # another frankenrouter.
-                if self.is_upstream_connected() and self.upstream.is_frankenrouter:
+                if self.get_router_type() == 'slave':
                     if self.config.upstream.password and not self.upstream.frdp_auth_sent:
                         await self.send_to_upstream(f"addon=FRANKENROUTER:{self.frdp_version}:AUTH:{self.config.upstream.password}")  # pylint: disable=line-too-long
                         self.upstream.frdp_auth_sent = True
@@ -1639,7 +1647,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 f" {filterstatus['traffic']['disabled']}")
         # "No sim is sending" is a network-wide check: only the master sim router
         # has a complete view, so only it should report these errors.
-        if self.is_upstream_connected() and not self.upstream.is_frankenrouter:
+        if self.get_router_type() == 'master':
             if len(filterstatus['elevation']['disabled']) < 1:
                 errors.append("No sim is sending MSFS elevation to PSX")
             if len(filterstatus['traffic']['disabled']) < 1:
@@ -1745,7 +1753,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         do this on the master sim router, i.e a router whose upstream
         is connected but not a frankenrouter.
         """
-        if self.is_upstream_connected() and not self.upstream.is_frankenrouter:
+        if self.get_router_type() == 'master':
             try:
                 time_since_elevation_injection = self.cache.get_age("Qi198")
                 if time_since_elevation_injection > PSX_RESUME_ELEVATION_AFTER:
@@ -1768,7 +1776,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
         Only do this check on the master sim router.
         """
-        if self.is_upstream_connected() and not self.upstream.is_frankenrouter:
+        if self.get_router_type() == 'master':
             message = "FRANKENROUTER"
             filterstatus = self.get_filter_status()
             state_ok = True
@@ -2579,7 +2587,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     data["filter_status_description_traffic"] = "your sim IS sending traffic data"  # pylint: disable=line-too-long
                     data["next_state_traffic"] = "enable"
 
-                if self.is_upstream_connected() and self.upstream.is_frankenrouter:
+                if self.get_router_type() == 'slave':
                     data['network_source_section'] = filter_page_network_source_section.format(
                         this_sim=self.config.identity.simulator,
                         elevation_source=self.sharedinfo.get(

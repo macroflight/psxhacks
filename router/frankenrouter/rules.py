@@ -884,7 +884,7 @@ class Rules():  # pylint: disable=too-many-public-methods
                         message="filtered Qh426/Tiller")
 
         # Ingress filter: flight controls if this is a slave sim router
-        if self.router.is_upstream_connected() and self.router.upstream.is_frankenrouter:
+        if self.router.get_router_type() == 'slave':
             if not self.sender.upstream and key in FLIGHT_CONTROL_INPUT_KEYWORDS:
                 self.logger.debug("FLIGHT CONTROL INPUT: %s", key)
                 flying = self.router.sharedinfo["pilot_flying_simulator"]
@@ -1091,6 +1091,10 @@ class TestRules(unittest.TestCase):
         def is_upstream_connected(self):
             """Return dummy value."""
             return False
+
+        def get_router_type(self):
+            """Return dummy value."""
+            return "unknown"
 
         def variable_stats_add(self, *args):
             """Add dummy stats."""
