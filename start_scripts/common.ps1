@@ -73,8 +73,9 @@ $PsxNetEfbDir       = "$SimBase\psx_net_efb\PSX.NET.EFB-2.0.0.2-2025-11-12-2"
 #  expect the file to be in this location, so don't override this)
 $PsxNetEfbConfigDir = "$env:USERPROFILE\Documents\PSX.NET.EFB"
 
-# Location of PSX.NET.WeatherRadar and SimObjectRouter
+# Location of PSX.NET.WeatherRadar, PSX.NET.GroundCrew and SimObjectRouter
 $PsxNetWeatherRadarDir = "$SimBase\psx_net_weather_radar"
+$PsxNetGroundCrewDir   = "$SimBase\psx_net_ground_crew"
 $SimObjectRouterDir    = "$SimBase\sim_object_router"
 
 # Where the ACARS Print app is installed
@@ -150,6 +151,7 @@ $StartSimObjectRouter    = $false
 
 $StartPsxNetMsfsRouter   = $true
 $StartPsxNetWeatherRadar = $false
+$StartPsxNetGroundCrew   = $false
 
 $StartFrankencduproxy = $false
 $StartCsCdu           = $false
@@ -193,6 +195,7 @@ $SimAddonNames = [ordered]@{
     "frankenrouter slave"    = "FrankenRouter (slave)"
     "frankenrouter master"   = "FrankenRouter (master)"
     "PSX.NET.WeatherRadar"   = "PSX.NET WeatherRadar"
+    "PSX.NET.GroundCrew"     = "PSX.NET GroundCrew"
     "SimObjectRouter"        = "SimObjectRouter"
 }
 

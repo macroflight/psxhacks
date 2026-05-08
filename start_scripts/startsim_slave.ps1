@@ -95,6 +95,12 @@ if ($StartPsxNetWeatherRadar ) {
     Invoke-WindowPosition "PSX.NET.WeatherRadar"
 }
 
+if ($StartPsxNetGroundCrew ) {
+    Write-Output "Starting PSX.NET.GroundCrew..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_ground_crew.ps1"
+    Invoke-WindowPosition "PSX.NET.GroundCrew"
+}
+
 if ($StartSimObjectRouter ) {
     Write-Output "Starting SimObjectRouter..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_sim_object_router.ps1"
