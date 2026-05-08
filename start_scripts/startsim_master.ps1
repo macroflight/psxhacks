@@ -33,25 +33,25 @@ if ($StartPsxNet ) {
 
 if ($StartFrankenutil ) {
     Write-Output "Starting FrankenUtil..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankenutil.ps1"
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenutil.ps1"
     Apply-WindowPosition "frankenutil"
 }
 
 if ($StartCpdlc ) {
     Delay 5
     Write-Output "Starting HAFAP (CPDLC)..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_cpdlc.ps1"
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_cpdlc.ps1"
     Apply-WindowPosition "HAFAP/CPDLC"
 }
 
 if ($StartFrankentanker ) {
     Write-Output "Starting FrankenTanker..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankentanker.ps1"
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankentanker.ps1"
     Apply-WindowPosition "frankentanker"
 }
 
 if ($StartFrankenturb ) {
     Write-Output "Starting FrankenTurb..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankenturb.ps1"
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenturb.ps1"
     Apply-WindowPosition "frankenturb"
 }

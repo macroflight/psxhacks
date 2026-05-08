@@ -17,7 +17,7 @@
 # differs.
 $OverrideFile = "$PSScriptRoot\..\..\psxhacks-start-override.ps1"
 
-# Location of the current flavor file — updated by choose_flavors.ps1.
+# Location of the current flavor file — updated by configure_flavor.ps1.
 # Defaults to the same directory as the override file.
 $FlavorFile = "$PSScriptRoot\..\..\psxhacks-current-flavor.ps1"
 
@@ -81,7 +81,7 @@ $SimObjectRouterDir    = "$SimBase\sim_object_router"
 $AcarsPrintDir      = "$SimBase\acars_print\AcarsPrintV1_1"
 
 # Flavor-derived variables — overridden at runtime by psxhacks-current-flavor.ps1.
-# These defaults apply when choose_flavors.ps1 has not yet been run.
+# These defaults apply when configure_flavor.ps1 has not yet been run.
 $AirlineIcao    = "BAW"
 $AirlineIata    = "BA"
 $SimfestEmail   = ""
@@ -91,7 +91,7 @@ $VpilotPlugin   = "Pushover"
 # Your Hoppie logon code. Set this in the override file:
 #   $HoppieLogonCode = "yourcode"
 # If you have multiple codes and want to choose between them at startup,
-# define a named hashtable instead and choose_flavors.ps1 will let you
+# define a named hashtable instead and configure_flavor.ps1 will let you
 # pick by name:
 #   $HoppieLogonCodes = @{ "normal" = "yourcode1"; "testing" = "yourcode2" }
 $HoppieLogonCode = "DUMMYLOGONCODE"
@@ -99,7 +99,7 @@ $HoppieLogonCode = "DUMMYLOGONCODE"
 # Your Simfest Portal email address. Set this in the override file:
 #   $SimfestEmail = "you@example.com"
 # If you have multiple addresses and want to choose between them at startup,
-# define a named hashtable instead and choose_flavors.ps1 will let you
+# define a named hashtable instead and configure_flavor.ps1 will let you
 # pick by name:
 #   $SimfestEmails = @{ "work" = "work@example.com"; "personal" = "me@gmail.com" }
 

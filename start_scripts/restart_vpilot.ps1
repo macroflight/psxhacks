@@ -1,0 +1,15 @@
+. "$PSScriptRoot\common.ps1"
+
+$Host.UI.RawUI.WindowTitle = "vPilot"
+KillProcess "vPilot"
+
+cd $VPilotDir
+
+$iniSource = if ($VpilotPlugin -eq "PSX Printer") {
+    ".\Plugins\vPilot-Pushover-TOROUTER.ini"
+} else {
+    ".\Plugins\vPilot-Pushover-TOPUSHOVER.ini"
+}
+Copy-Item $iniSource .\Plugins\vPilot-Pushover.ini -Force
+
+Start-Process .\vPilot.exe
