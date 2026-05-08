@@ -73,6 +73,10 @@ $PsxNetEfbDir       = "$SimBase\psx_net_efb\PSX.NET.EFB-2.0.0.2-2025-11-12-2"
 #  expect the file to be in this location, so don't override this)
 $PsxNetEfbConfigDir = "$env:USERPROFILE\Documents\PSX.NET.EFB"
 
+# Location of PSX.NET.WeatherRadar and SimObjectRouter
+$PsxNetWeatherRadarDir = "$SimBase\psx_net_weather_radar"
+$SimObjectRouterDir    = "$SimBase\sim_object_router"
+
 # Where the ACARS Print app is installed
 $AcarsPrintDir      = "$SimBase\acars_print\AcarsPrintV1_1"
 
@@ -144,6 +148,10 @@ $StartEfb           = "off"
 # CDU
 $StartFrankencduproxy = "off"
 $StartCsCdu           = "off"
+
+# Slave-only addons
+$StartPsxNetWeatherRadar = "off"
+$StartSimObjectRouter    = "off"
 $CsCduExe = "$SimBase\hw\cs_cdu\CockpitSimulator v2025.2.7.exe"
 
 # Set to $true in the override file to enable apply_window_positions.ps1
@@ -173,8 +181,10 @@ $SimAddonNames = [ordered]@{
     "frankenident"         = "FrankenIDENT"
     "frankenutil"          = "FrankenUtil"
     "frankencduproxy"      = "FrankenCDU Proxy"
-    "frankenrouter slave"  = "FrankenRouter (slave)"
-    "frankenrouter master" = "FrankenRouter (master)"
+    "frankenrouter slave"    = "FrankenRouter (slave)"
+    "frankenrouter master"   = "FrankenRouter (master)"
+    "PSX.NET.WeatherRadar"   = "PSX.NET WeatherRadar"
+    "SimObjectRouter"        = "SimObjectRouter"
 }
 
 

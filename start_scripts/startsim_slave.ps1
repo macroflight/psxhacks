@@ -117,6 +117,18 @@ Write-Output "Starting PSX.NET.MSFS.Client..."
 Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_msfs_client.ps1"
 Apply-WindowPosition "PSX.NET.MSFS"
 
+if ($StartPsxNetWeatherRadar -eq "slave") {
+    Write-Output "Starting PSX.NET.WeatherRadar..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_psx_net_weather_radar.ps1"
+    Apply-WindowPosition "PSX.NET.WeatherRadar"
+}
+
+if ($StartSimObjectRouter -eq "slave") {
+    Write-Output "Starting SimObjectRouter..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_sim_object_router.ps1"
+    Apply-WindowPosition "SimObjectRouter"
+}
+
 if ($StartFrankenfreeze -eq "slave") {
     Write-Output "Starting Frankenfreeze..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankenfreeze.ps1"

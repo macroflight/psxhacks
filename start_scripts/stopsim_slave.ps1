@@ -5,6 +5,8 @@
 KillProcess "PSX.NET.MSFS.Client"
 KillProcess "PSX.NET.MSFS2024.Client"
 KillProcess "PSX.NET.MSFS.Router"
+KillProcess "PSX.NET.WeatherRadar"
+KillProcess "SimObjectRouter"
 KillProcess "PSXSounds"
 KillProcess "PSXVibrate"
 KillProcess "PSX.NET.EFB.Windows"
