@@ -1,5 +1,6 @@
 """Shut down PSX cleanly."""
 # pylint: disable=missing-function-docstring,global-statement,invalid-name
+import argparse
 import asyncio
 import logging
 import sys
@@ -40,7 +41,7 @@ def psx_thread(name, x, y):  # pylint: disable=unused-argument
         PSX.onPause = teardown
         PSX.onDisconnect = teardown
         try:
-            asyncio.run(PSX.connect())
+            asyncio.run(PSX.connect(host=ARGS.psx_host, port=ARGS.psx_port))
         except KeyboardInterrupt:
             print("\nStopped by keyboard interrupt (Ctrl-C)")
 
@@ -49,6 +50,10 @@ if __name__ == "__main__":
     LOGFORMAT = "%(asctime)s: %(message)s"
     logging.basicConfig(format=LOGFORMAT, level=logging.INFO,
                         datefmt="%H:%M:%S")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--psx-host", default="127.0.0.1", help="PSX host (default: 127.0.0.1)")
+    parser.add_argument("--psx-port", type=int, default=10747, help="PSX port (default: 10747)")
+    ARGS = parser.parse_args()
     psx_thread = threading.Thread(target=psx_thread, args=("PSX"), daemon=True)
     psx_thread.start()
 
