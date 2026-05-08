@@ -16,7 +16,6 @@ KillProcess "CockpitSimulator"
 
 KillPythonScript "frankenfreeze.py"
 KillPythonScript "frankenrouter_ident.py"
-KillPythonScript "frankenturb.py"
 KillPythonScript "frankencduproxy.py"
 KillJavaJar "AcarsPrint.jar"
 

@@ -7,6 +7,7 @@ async def main(host, port):
     """Connect to PSX and send the quit command."""
     _, writer = await asyncio.open_connection(host, port)
     writer.write("pleaseBeSoKindAndQuit\n".encode())
+    await asyncio.sleep(2.0)
     await writer.drain()
     writer.close()
     await writer.wait_closed()
