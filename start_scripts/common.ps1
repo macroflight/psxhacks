@@ -130,6 +130,10 @@ $FrankencduproxyOptions = @()
 # Which of the addons that we can manage you actually want started in
 # your sim. You can override these in the override file.
 
+#
+# Addons that run in the master sim (if enabled)
+#
+
 $StartFrankenfreeze = $false
 $StartFrankentanker = $false
 $StartFrankenusb    = $false
@@ -138,26 +142,26 @@ $StartFrankenturb   = $false
 $StartFrankenident  = $false
 $StartFrankenutil   = $false
 
-# Master-only addons
-$StartBacars        = $true
-$StartPsxNet        = $true
-
-# Other addons
-$StartCpdlc         = $false
 $StartPsxSounds     = $false
 $StartVpilot        = $false
 $StartAcarsPrint    = $false
 $StartEfb           = $false
+$StartSimObjectRouter    = $false
 
-# CDU
-$StartFrankencduproxy = $false
-$StartCsCdu           = $false
-
-# Slave-only addons
 $StartPsxNetMsfsRouter   = $true
 $StartPsxNetWeatherRadar = $false
-$StartSimObjectRouter    = $false
+
+$StartFrankencduproxy = $false
+$StartCsCdu           = $false
 $CsCduExe = "$SimBase\hw\cs_cdu\CockpitSimulator v2025.2.7.exe"
+
+#
+# Addons that run in the master sim (if enabled)
+#
+$StartBacars        = $true
+$StartPsxNet        = $true
+$StartCpdlc         = $false
+
 
 # Set to $true in the override file to enable apply_window_positions.ps1
 $ChangeWindowPositions = $false
