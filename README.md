@@ -81,12 +81,15 @@ Quickstart Guide:
   already have a master sim or a PSX main server ready to connect
   to. The script will prompt you to do certain things, e.g switch to
   the correct upstream after the router has been started.
-- Run configure_window_positions.ps1, choose an addon, find its window
-  ID, move the addon window, press Enter in
-  configure_window_positions, save, repeat. Then run
-  apply_window_positions.ps1 (e.g from start_slavesim.ps1) and it will
-  restore the correct window positions and sizes.
-
+- If you want addon windows to be placed and minimized automatically
+    - Run configure_window_positions.ps1, choose an addon, find its
+      window ID, move the addon window, resize it, press Enter in
+      configure_window_positions, save, repeat.
+    - Set `$ChangeWindowPositionsThen = $true` in your override file.
+    - Start the sim
+	- If you need to reapply all configured window positions, run
+      apply_window_positions.ps1
+	
 Most of the individual scripts can be run independently, e.g
 double-click start_cpdlc.ps1 to restart the CPDLC client.
 
