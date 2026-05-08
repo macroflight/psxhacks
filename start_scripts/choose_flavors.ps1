@@ -38,41 +38,6 @@ $FlavorDefinitions = @(
         Default     = "off"
         Type        = "tristate"
     },
-    [ordered]@{
-        Name        = "StartFrankenfreeze"
-        Description = "Start Frankenfreeze addon"
-        Options     = @("master", "slave", "off")
-        Default     = "off"
-        Type        = "tristate"
-    },
-    [ordered]@{
-        Name        = "StartFrankenwind"
-        Description = "Start Frankenwind addon"
-        Options     = @("master", "slave", "off")
-        Default     = "off"
-        Type        = "tristate"
-    },
-    [ordered]@{
-        Name        = "StartFrankenturb"
-        Description = "Start Frankenturb addon"
-        Options     = @("master", "slave", "off")
-        Default     = "off"
-        Type        = "tristate"
-    },
-    [ordered]@{
-        Name        = "StartFrankenutil"
-        Description = "Start Frankenutil addon"
-        Options     = @("master", "slave", "off")
-        Default     = "off"
-        Type        = "tristate"
-    },
-    [ordered]@{
-        Name        = "StartFrankencduproxy"
-        Description = "Start FrankenCDU proxy"
-        Options     = @("master", "slave", "off")
-        Default     = "off"
-        Type        = "tristate"
-    }
 )
 
 # Inject codemap pickers after AirlineIata for any multi-option named sets.
