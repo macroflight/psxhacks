@@ -35,10 +35,6 @@ $SimBase       = Split-Path $PsxhacksDevel -Parent
 # environment.
 $PsxhacksPython      = "$SimBase\python\psxhacks-1\Scripts\python.exe"
 
-# Location of SyncTrayzor (used in the Frankensim but disabled while
-# the sim is running)
-$SyncTrayzor         = "C:\Program Files\SyncTrayzor\synctrayzor.exe"
-
 # Where the active version of BACARS is installed. Note: to change
 # BACARS config you can use the "flavor" system to change e.g airline
 # when you start the sim.
