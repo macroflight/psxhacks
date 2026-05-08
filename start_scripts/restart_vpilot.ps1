@@ -3,7 +3,7 @@
 $Host.UI.RawUI.WindowTitle = "vPilot"
 KillProcess "vPilot"
 
-cd $VPilotDir
+Set-Location $VPilotDir
 
 $iniSource = if ($VpilotPlugin -eq "PSX Printer") {
     ".\Plugins\vPilot-Pushover-TOROUTER.ini"

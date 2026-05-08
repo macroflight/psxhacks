@@ -2,7 +2,7 @@
 
 $Host.UI.RawUI.WindowTitle = "FrankenRouter SLAVE"
 
-cd $FrankenRouterDir
+Set-Location $FrankenRouterDir
 
 $env:PYTHONPATH = $PsxhacksDevel
 

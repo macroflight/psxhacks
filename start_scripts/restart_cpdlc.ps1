@@ -1,6 +1,6 @@
 . "$PSScriptRoot\common.ps1"
 
-cd $CpdlcDir
+Set-Location $CpdlcDir
 
 $Host.UI.RawUI.WindowTitle = "Hoppie PSX CPDLC"
 KillPythonScript "psx-acars.py"

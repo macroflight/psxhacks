@@ -3,7 +3,7 @@
 $Host.UI.RawUI.WindowTitle = "FrankenUSB"
 KillPythonScript "frankenusb.py"
 
-cd $FrankenusbDir
+Set-Location $FrankenusbDir
 
 $env:PYTHONPATH = $PsxhacksDevel
 

@@ -2,7 +2,7 @@
 
 & "$PSScriptRoot\stop_things_that_should_not_run_while_simming.ps1"
 
-cd $AerowinxDir
+Set-Location $AerowinxDir
 
 foreach ($pref in $AerowinxPrefFiles) {
     java -jar AerowinxStart.jar $pref

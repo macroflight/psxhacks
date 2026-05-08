@@ -1,6 +1,6 @@
 . "$PSScriptRoot\common.ps1"
 
-cd $FrankenRouterDir
+Set-Location $FrankenRouterDir
 
 $Host.UI.RawUI.WindowTitle = "FrankenRouterIDENT"
 KillPythonScript "frankenrouter_ident.py"
