@@ -25,7 +25,8 @@ $env:PYTHONPATH = $PsxhacksDevel
 Delay 10
 
 # Stop slave sim router
-KillPythonScript "frankensim-client.toml"
+$slaveRouterConfig = ($FrankenrouterSlaveOptions | Where-Object { $_ -like "--config-file=*" }) -replace "^--config-file=", ""
+KillPythonScript $slaveRouterConfig
 
 & "$PSScriptRoot\start_things_that_should_not_run_while_simming.ps1"
 
