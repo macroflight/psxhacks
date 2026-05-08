@@ -22,7 +22,7 @@ KillJavaJar "AcarsPrint.jar"
 
 # Ask PSX server to shut down gracefully before killing java.exe
 $env:PYTHONPATH = $PsxhacksDevel
-& $PsxhacksPython "$PsxhacksDevel\psx_shutdown.py"
+& $PsxhacksPython "$PsxhacksDevel\psx_shutdown.py" "--psx-port=$FrankenrouterSlavePort"
 
 # Stopping PSX clients nicely can take a while
 Delay 10

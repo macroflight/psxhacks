@@ -110,6 +110,8 @@ $FrankenusbDir      = "$SimBase\frankenusb"
 $FrankenrouterDir           = "$SimBase\frankenrouter"
 $FrankenrouterMasterOptions = @("--config-file=frankensim-core.toml")
 $FrankenrouterSlaveOptions  = @("--config-file=frankensim-client.toml")
+$FrankenrouterSlavePort     = 10747
+$FrankenrouterMasterPort    = 10748
 # Location of router web interface
 $FrankenrouterSlaveWeb      = "http://localhost:8747"
 
