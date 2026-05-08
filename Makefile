@@ -60,6 +60,11 @@ unittests:
 	$(info * LINT: Running unit tests)
 	. $(LINTVENVDIR)/bin/activate; python3 -m unittest -v router/frankenrouter/*.py
 
+pslint:
+	$(info * LINT: Running PSScriptAnalyzer on PowerShell scripts)
+	@command -v pwsh >/dev/null 2>&1 || { echo "pwsh not found - install PowerShell Core and run: pwsh -Command \"Install-Module PSScriptAnalyzer -Scope CurrentUser -Force\""; exit 1; }
+	pwsh -NoProfile -Command "$$r = Invoke-ScriptAnalyzer -Path ./start_scripts/ -Recurse -Severity Error,Warning; $$r | Select-Object ScriptName,Line,Severity,Message | Format-Table -AutoSize; exit $$r.Count"
+
 clean:
 	$(info * LINT: Removing venv)
 	rm -rf $(LINTVENVDIR)
