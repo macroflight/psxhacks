@@ -1,8 +1,8 @@
 . "$PSScriptRoot\common.ps1"
 
-cd $FrankenRouterDir
-
 $Host.UI.RawUI.WindowTitle = "FrankenRouter MASTER"
+
+cd $FrankenRouterDir
 
 $env:PYTHONPATH = $PsxhacksDevel
 

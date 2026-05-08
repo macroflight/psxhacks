@@ -146,6 +146,37 @@ $StartFrankencduproxy = "off"
 $StartCsCdu           = "off"
 $CsCduExe = "$SimBase\hw\cs_cdu\CockpitSimulator v2025.2.7.exe"
 
+# Set to $true in the override file to enable apply_window_positions.ps1
+$ChangeWindowPositions = $false
+
+# Retry interval and timeout (seconds) used by apply_window_positions.ps1 when
+# waiting for an addon window to appear after the addon is started.
+$WindowPositionSleepSeconds    = 0.5
+$WindowPositionSleepSecondsMax = 30
+
+# Human-readable display names for each sim addon key used in window-positioning scripts
+$SimAddonNames = [ordered]@{
+    "BACARS"               = "BACARS"
+    "PSX.NET.MSFS"         = "PSX.NET MSFS Client"
+    "PSX.NET.MSFS.Router"  = "PSX.NET MSFS Router"
+    "PSX.NET"              = "PSX.NET"
+    "PSXSounds"            = "PSX Sounds"
+    "HAFAP/CPDLC"          = "HAFAP/CPDLC"
+    "vPilot"               = "vPilot"
+    "PSX.NET.EFB"          = "PSX.NET EFB"
+    "ACARS Print App"      = "ACARS Print App"
+    "frankenusb"           = "FrankenUSB"
+    "frankenfreeze"        = "FrankenFreeze"
+    "frankentanker"        = "FrankenTanker"
+    "frankenwind"          = "FrankenWind"
+    "frankenturb"          = "FrankenTurb"
+    "frankenident"         = "FrankenIDENT"
+    "frankenutil"          = "FrankenUtil"
+    "frankencduproxy"      = "FrankenCDU Proxy"
+    "frankenrouter slave"  = "FrankenRouter (slave)"
+    "frankenrouter master" = "FrankenRouter (master)"
+}
+
 
 #
 # Shared functions below
