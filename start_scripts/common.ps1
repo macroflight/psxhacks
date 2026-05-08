@@ -130,28 +130,33 @@ $FrankencduproxyOptions = @()
 # Which of the addons that we can manage you actually want started in
 # your sim. You can override these in the override file.
 
-$StartFrankenfreeze = "off"
-$StartFrankentanker = "off"
-$StartFrankenusb    = "off"
-$StartFrankenwind   = "off"
-$StartFrankenturb   = "off"
-$StartFrankenident  = "off"
-$StartFrankenutil   = "off"
+$StartFrankenfreeze = $false
+$StartFrankentanker = $false
+$StartFrankenusb    = $false
+$StartFrankenwind   = $false
+$StartFrankenturb   = $false
+$StartFrankenident  = $false
+$StartFrankenutil   = $false
+
+# Master-only addons
+$StartBacars        = $true
+$StartPsxNet        = $true
 
 # Other addons
-$StartCpdlc         = "off"
-$StartPsxSounds     = "off"
-$StartVpilot        = "off"
-$StartAcarsPrint    = "off"
-$StartEfb           = "off"
+$StartCpdlc         = $false
+$StartPsxSounds     = $false
+$StartVpilot        = $false
+$StartAcarsPrint    = $false
+$StartEfb           = $false
 
 # CDU
-$StartFrankencduproxy = "off"
-$StartCsCdu           = "off"
+$StartFrankencduproxy = $false
+$StartCsCdu           = $false
 
 # Slave-only addons
-$StartPsxNetWeatherRadar = "off"
-$StartSimObjectRouter    = "off"
+$StartPsxNetMsfsRouter   = $true
+$StartPsxNetWeatherRadar = $false
+$StartSimObjectRouter    = $false
 $CsCduExe = "$SimBase\hw\cs_cdu\CockpitSimulator v2025.2.7.exe"
 
 # Set to $true in the override file to enable apply_window_positions.ps1
@@ -228,25 +233,6 @@ function start_nonscripted_apps {
 }
 
 if (Test-Path $OverrideFile) { . $OverrideFile }
-
-# Snapshot pre-flavor bool values so choose_flavors.ps1 can display
-# "use default (yes/no)" labels showing what common.ps1 would apply.
-$PreFlavorDefaults = @{
-    StartCpdlc         = $StartCpdlc
-    StartCsCdu         = $StartCsCdu
-    StartFrankenfreeze = $StartFrankenfreeze
-    StartFrankenusb    = $StartFrankenusb
-    StartFrankentanker = $StartFrankentanker
-    StartFrankenwind   = $StartFrankenwind
-    StartFrankenturb   = $StartFrankenturb
-    StartFrankenident  = $StartFrankenident
-    StartFrankenutil      = $StartFrankenutil
-    StartFrankencduproxy  = $StartFrankencduproxy
-    StartPsxSounds        = $StartPsxSounds
-    StartVpilot        = $StartVpilot
-    StartAcarsPrint    = $StartAcarsPrint
-    StartEfb           = $StartEfb
-}
 
 # Flavor settings override both defaults and machine-specific overrides.
 if (Test-Path $FlavorFile) { . $FlavorFile }

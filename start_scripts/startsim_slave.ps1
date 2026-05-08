@@ -14,23 +14,10 @@ Apply-WindowPosition "frankenrouter slave"
 
 Read-Host -Prompt "Connect to $FrankenRouterSlaveWeb/upstream and connect to the master sim, then press Enter"
 
-if ($StartCpdlc -eq "slave") {
-    Delay 5
-    Write-Output "Starting HAFAP (CPDLC)..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_cpdlc.ps1"
-    Apply-WindowPosition "HAFAP/CPDLC"
-}
-
-if ($StartFrankenident -eq "slave") {
+if ($StartFrankenident ) {
     Write-Output "Starting FrankenIDENT..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankenident.ps1"
     Apply-WindowPosition "frankenident"
-}
-
-if ($StartFrankenutil -eq "slave") {
-    Write-Output "Starting FrankenUtil..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankenutil.ps1"
-    Apply-WindowPosition "frankenutil"
 }
 
 Write-Output "Starting PSX main clients..."
@@ -40,53 +27,43 @@ Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_psx_clients
 # server which PSX.NET.MSFS.Router needs.
 Delay 5
 
-Write-Output "Starting PSX.NET.MSFS.Router..."
-Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_msfs_router.ps1"
-Apply-WindowPosition "PSX.NET.MSFS.Router"
+if ($StartPsxNetMsfsRouter ) {
+    Write-Output "Starting PSX.NET.MSFS.Router..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_msfs_router.ps1"
+    Apply-WindowPosition "PSX.NET.MSFS.Router"
+}
 
-if ($StartPsxSounds -eq "slave") {
+if ($StartPsxSounds ) {
     Write-Output "Starting PSXSounds..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psxsounds.ps1"
     Apply-WindowPosition "PSXSounds"
 }
 
-if ($StartFrankenusb -eq "slave") {
+if ($StartFrankenusb ) {
     Write-Output "Starting FrankenUSB..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankenusb.ps1"
     Apply-WindowPosition "frankenusb"
 }
 
-if ($StartFrankentanker -eq "slave") {
-    Write-Output "Starting FrankenTanker..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankentanker.ps1"
-    Apply-WindowPosition "frankentanker"
-}
-
-if ($StartFrankenwind -eq "slave") {
+if ($StartFrankenwind ) {
     Write-Output "Starting FrankenWind..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankenwind.ps1"
     Apply-WindowPosition "frankenwind"
 }
 
-if ($StartFrankenturb -eq "slave") {
-    Write-Output "Starting FrankenTurb..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankenturb.ps1"
-    Apply-WindowPosition "frankenturb"
-}
-
-if ($StartAcarsPrint -eq "slave") {
+if ($StartAcarsPrint ) {
     Write-Output "Starting ACARS Print..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_acarsprint.ps1"
     Apply-WindowPosition "ACARS Print App"
 }
 
-if ($StartEfb -eq "slave") {
+if ($StartEfb ) {
     Write-Output "Starting PSX.NET.EFB..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_psxnetefb.ps1"
     Apply-WindowPosition "PSX.NET.EFB"
 }
 
-if ($StartVpilot -eq "slave") {
+if ($StartVpilot ) {
     if ($VpilotPlugin -eq "PSX Printer") {
         Write-Output "Starting vPilot (PSX Printer plugin)..."
         Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_vpilot_pushover_to_router.ps1"
@@ -97,13 +74,13 @@ if ($StartVpilot -eq "slave") {
     Apply-WindowPosition "vPilot"
 }
 
-if ($StartFrankencduproxy -eq "slave") {
+if ($StartFrankencduproxy ) {
     Write-Output "Starting FrankenCDU proxy..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankencduproxy.ps1"
     Apply-WindowPosition "frankencduproxy"
 }
 
-if ($StartCsCdu -eq "slave") {
+if ($StartCsCdu ) {
     Write-Output "Starting CS CDU..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_cs_cdu.ps1"
 }
@@ -117,19 +94,19 @@ Write-Output "Starting PSX.NET.MSFS.Client..."
 Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_msfs_client.ps1"
 Apply-WindowPosition "PSX.NET.MSFS"
 
-if ($StartPsxNetWeatherRadar -eq "slave") {
+if ($StartPsxNetWeatherRadar ) {
     Write-Output "Starting PSX.NET.WeatherRadar..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_psx_net_weather_radar.ps1"
     Apply-WindowPosition "PSX.NET.WeatherRadar"
 }
 
-if ($StartSimObjectRouter -eq "slave") {
+if ($StartSimObjectRouter ) {
     Write-Output "Starting SimObjectRouter..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_sim_object_router.ps1"
     Apply-WindowPosition "SimObjectRouter"
 }
 
-if ($StartFrankenfreeze -eq "slave") {
+if ($StartFrankenfreeze ) {
     Write-Output "Starting Frankenfreeze..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_frankenfreeze.ps1"
     Apply-WindowPosition "frankenfreeze"
