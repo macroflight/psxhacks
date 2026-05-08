@@ -61,7 +61,7 @@ def _sign(v):
     return 1 if v >= 0.0 else -1
 
 
-def _pick_burst(state):
+def _pick_burst(state, intensity):
     """Choose a (base_offset, direction, label) for one WxBurst event.
 
     For wave turbulence the directional components are deterministic, so we
@@ -70,6 +70,12 @@ def _pick_burst(state):
     effect: rotors are roll-heavy, mechanical is a broad mix, waves are mostly
     vertical.
 
+    Wave candidates are intensity-tiered: real-world experience shows that
+    airspeed (SPD) changes dominate at light intensities, with sink and bank
+    becoming significant only at medium and severe levels.  SPD (300-series) is
+    preferred over GUST (400-series) for the speed effect because it has a more
+    visible impact on the PSX airspeed display.
+
     Returns (base_offset: int, direction: +1/-1, label: str).
     """
     r = random.choice
@@ -77,13 +83,30 @@ def _pick_burst(state):
     if state.kind == 'wave':
         vert_dir = _sign(state.vertical) if not _isnan(state.vertical) else r([-1, 1])
         roll_dir = _sign(state.roll) if not _isnan(state.roll) else r([-1, 1])
-        gust_dir = _sign(state.gust) if not _isnan(state.gust) else r([-1, 1])
-        candidates = [
-            # (offset, direction, label, weight)
-            (_BURST_SINK, vert_dir, "SINK", 3.0),
-            (_BURST_BANK, roll_dir, "BANK", 1.0),
-            (_BURST_GUST, gust_dir, "GUST", 0.5),
-        ]
+        spd_dir = _sign(state.gust) if not _isnan(state.gust) else r([-1, 1])
+        if intensity < 0.25:
+            # Light: airspeed fluctuations dominate; sink and bank barely perceptible.
+            candidates = [
+                (_BURST_SPD, spd_dir, "SPD", 4.0),
+                (_BURST_SINK, vert_dir, "SINK", 0.3),
+                (_BURST_BANK, roll_dir, "BANK", 0.2),
+            ]
+        elif intensity < 0.5:
+            # Medium: larger SPD changes; sink growing but still secondary.
+            candidates = [
+                (_BURST_SPD, spd_dir, "SPD", 3.0),
+                (_BURST_SINK, vert_dir, "SINK", 1.0),
+                (_BURST_BANK, roll_dir, "BANK", 0.5),
+                (_BURST_GUST, spd_dir, "GUST", 0.3),
+            ]
+        else:
+            # Severe: strong sink/updraft and SPD roughly equal; some roll.
+            candidates = [
+                (_BURST_SINK, vert_dir, "SINK", 2.5),
+                (_BURST_SPD, spd_dir, "SPD", 2.0),
+                (_BURST_BANK, roll_dir, "BANK", 1.0),
+                (_BURST_GUST, spd_dir, "GUST", 0.5),
+            ]
     elif state.kind == 'rotor':
         # Rotors are roll-dominant and highly chaotic.
         candidates = [
@@ -545,7 +568,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 if self.turb_enabled and effective_intensity >= 0.01:
                     inject_prob = (effective_intensity ** 0.5) * (self.args.rate / 100.0)
                     if random.random() < inject_prob:
-                        base, direction, label = _pick_burst(state)
+                        base, direction, label = _pick_burst(state, effective_intensity)
                         raw_mag = random.randint(1, max(1, int(effective_intensity * 99)))
                         magnitude = min(99, raw_mag)
                         psx_value = direction * (base + magnitude)
