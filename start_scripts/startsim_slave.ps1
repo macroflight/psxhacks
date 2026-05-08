@@ -15,6 +15,7 @@ Apply-WindowPosition "frankenrouter slave"
 Read-Host -Prompt "Connect to $FrankenRouterSlaveWeb/upstream and connect to the master sim, then press Enter"
 
 if ($StartCpdlc -eq "slave") {
+    Delay 5
     Write-Output "Starting HAFAP (CPDLC)..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_cpdlc.ps1"
     Apply-WindowPosition "HAFAP/CPDLC"

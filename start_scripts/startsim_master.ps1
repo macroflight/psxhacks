@@ -34,6 +34,7 @@ if ($StartFrankenutil -eq "master") {
 }
 
 if ($StartCpdlc -eq "master") {
+    Delay 5
     Write-Output "Starting HAFAP (CPDLC)..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_cpdlc.ps1"
     Apply-WindowPosition "HAFAP/CPDLC"
