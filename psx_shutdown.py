@@ -1,81 +1,20 @@
 """Shut down PSX cleanly."""
-# pylint: disable=missing-function-docstring,global-statement,invalid-name
 import argparse
 import asyncio
-import logging
-import sys
-import threading
-import time
-from psx import Client
-
-__MY_CLIENT_ID__ = 'SHUTDOWN'
-__MY_DISPLAY_NAME__ = 'Shutdown PSX clients'
-
-PSX = None
-CONNECTED = False
 
 
-def setup():
-    """Set up PSX connection."""
-    global CONNECTED
-    print("Simulation started")
-    CONNECTED = True
-    PSX.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
-
-
-def teardown():
-    """Shut down PSX connection."""
-    print("Simulation stopped")
-
-
-def psx_thread(name, x, y):  # pylint: disable=unused-argument
-    """Start PSX communication thread."""
-    global PSX
-    logging.info("Thread %s starting", name)
-    with Client() as PSX:
-        PSX.logger = lambda msg: print(f"   {msg}")
-        PSX.subscribe("id")
-        PSX.subscribe("version", lambda key, value:
-                      print(f"Connected to PSX {value} as client #{PSX.get('id')}"))
-        PSX.onResume = setup
-        PSX.onPause = teardown
-        PSX.onDisconnect = teardown
-        try:
-            asyncio.run(PSX.connect(host=ARGS.psx_host, port=ARGS.psx_port))
-        except KeyboardInterrupt:
-            print("\nStopped by keyboard interrupt (Ctrl-C)")
+async def main(host, port):
+    """Connect to PSX and send the quit command."""
+    reader, writer = await asyncio.open_connection(host, port)
+    writer.write("pleaseBeSoKindAndQuit\n".encode())
+    await writer.drain()
+    writer.close()
+    await writer.wait_closed()
 
 
 if __name__ == "__main__":
-    LOGFORMAT = "%(asctime)s: %(message)s"
-    logging.basicConfig(format=LOGFORMAT, level=logging.INFO,
-                        datefmt="%H:%M:%S")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--psx-host", default="127.0.0.1", help="PSX host (default: 127.0.0.1)")
     parser.add_argument("--psx-port", type=int, default=10747, help="PSX port (default: 10747)")
-    ARGS = parser.parse_args()
-    psx_thread = threading.Thread(target=psx_thread, args=("PSX"), daemon=True)
-    psx_thread.start()
-
-    while True:
-        print("Waiting for PSX connection...")
-        if PSX is not None:
-            break
-        time.sleep(1.0)
-    print("Connected to PSX!")
-    retry = 0
-    while True:
-        retry += 1
-        if retry > 10:
-            raise SystemExit("Giving up")
-        if not CONNECTED:
-            print(f"Not yet, CONNECTED is {CONNECTED}...")
-            time.sleep(1.0)
-            continue
-        try:
-            print("Sending pleaseBeSoKindAndQuit to PSX")
-            PSX.writer.write("pleaseBeSoKindAndQuit\n".encode())
-            raise SystemExit("Exiting")
-        except KeyboardInterrupt:
-            print("\nStopped by keyboard interrupt (Ctrl-C)")
-            sys.exit()
+    args = parser.parse_args()
+    asyncio.run(main(args.psx_host, args.psx_port))
