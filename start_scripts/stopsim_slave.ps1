@@ -30,8 +30,4 @@ Delay 10
 $slaveRouterConfig = ($FrankenrouterSlaveOptions | Where-Object { $_ -like "--config-file=*" }) -replace "^--config-file=", ""
 KillPythonScript $slaveRouterConfig
 
-& "$PSScriptRoot\start_things_that_should_not_run_while_simming.ps1"
-
-Delay 5
-
 Read-Host -Prompt "Done. Enter to close. Note: MSFS and master sim components not stoppped"
