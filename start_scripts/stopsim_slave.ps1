@@ -12,6 +12,7 @@ KillProcess "PSXSounds"
 KillProcess "PSXVibrate"
 KillProcess "PSX.NET.EFB.Windows"
 KillProcess "vPilot"
+KillProcess "GeoVR.PSX.Client.Wpf"
 KillProcess "CockpitSimulator"
 
 KillPythonScript "frankenfreeze.py"

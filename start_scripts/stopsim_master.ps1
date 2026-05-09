@@ -19,21 +19,11 @@ Write-Host ""
 
 KillPythonScript "frankenutil.py"
 KillPythonScript "psx-acars.py"
-KillPythonScript "frankenrouter_ident.py"
 KillPythonScript "frankentanker.py"
-KillPythonScript "frankenwind.py"
 KillPythonScript "frankenturb.py"
-KillPythonScript "frankenfreeze.py"
-KillPythonScript "frankencduproxy.py"
-KillPythonScript "frankenusb.py"
 
 KillProcess "PSX.Bacars.UI"
 KillProcess "PSX.NET"
-KillProcess "PSXSounds"
-KillProcess "PSX.NET.EFB.Windows"
-KillProcess "vPilot"
-KillProcess "CockpitSimulator"
-KillJavaJar "AcarsPrint.jar"
 
 # Ask PSX server to shut down gracefully before killing java.exe
 Write-Output "Shutting down PSX server..."
