@@ -256,6 +256,8 @@ class Rules():  # pylint: disable=too-many-public-methods
         """
         if self.router.config.sharedinfo.master:
             self.router.sharedinfo['elevation_source_simulator'] = payload
+            self.logger.info("SET elevation_source_simulator to %s",
+                             self.router.sharedinfo['elevation_source_simulator'])
             self.router.frdp_sharedinfo_requested = True
             return self.myreturn(RulesAction.DROP, RulesCode.FRDP_ELEVATION_SOURCE)
         return self.myreturn(RulesAction.UPSTREAM_ONLY, RulesCode.FRDP_ELEVATION_SOURCE)

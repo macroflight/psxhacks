@@ -56,6 +56,7 @@ hr {{ margin: 1em 0; border: none; border-top: 1px solid #2a2f45; }}
 .btn-amber {{ background: #d97706; color: #fff; }}
 .btn-blue  {{ background: #1d4ed8; color: #fff; }}
 .btn-gray  {{ background: #374151; color: #e5e7eb; }}
+.btn-green {{ background: #16a34a; color: #fff; }}
 .btn-red   {{ background: #dc2626; color: #fff; }}
 .note {{ font-size: 0.88em; color: #64748b; margin: 0.5em 0; }}
 .page-title {{ display: flex; align-items: center; gap: 0.6em; margin-bottom: 1em; }}
@@ -81,9 +82,9 @@ _INDEX_PAGE = (
     '<tr><td>Connection</td>'
     '<td class="{upstream_class}">{upstream_status}</td></tr>\n'
     '<tr><td>Elevation master</td>'
-    '<td class="val">{elevation_source}</td></tr>\n'
+    '<td class="{elevation_source_class}">{elevation_source}</td></tr>\n'
     '<tr><td>Traffic master</td>'
-    '<td class="val">{traffic_source}</td></tr>\n'
+    '<td class="{traffic_source_class}">{traffic_source}</td></tr>\n'
     '<tr><td>Connected simulators</td>'
     '<td class="val">{connected_sims}</td></tr>\n'
     '</table>\n'
@@ -241,13 +242,41 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 upstream_label = (
                     f"{preset_name} ({host}:{port})" if preset_name else f"{host}:{port}"
                 )
+                own_sim = router.config.identity.simulator
+                elevation_source = router.sharedinfo.get('elevation_source_simulator', 'unknown')
+                traffic_source = router.sharedinfo.get('traffic_source_simulator', 'unknown')
                 if router.get_router_type() == 'slave':
-                    master_buttons = (
-                        '<a href="/api/filter/elevation/start_sending" class="btn btn-amber">'
-                        'Make me elevation master</a>\n'
-                        '<a href="/api/filter/traffic/start_sending" class="btn btn-amber">'
-                        'Make me traffic master</a>\n'
-                    )
+                    if elevation_source == own_sim:
+                        elev_btn = (
+                            '<a href="/api/filter/elevation/stop_sending" class="btn btn-red">'
+                            'Stop being the elevation master</a>\n'
+                        )
+                    elif elevation_source == 'NOSIM':
+                        elev_btn = (
+                            '<a href="/api/filter/elevation/start_sending" class="btn btn-green">'
+                            'Make me elevation master</a>\n'
+                        )
+                    else:
+                        elev_btn = (
+                            '<a href="/api/filter/elevation/start_sending" class="btn btn-red">'
+                            'Make me elevation master</a>\n'
+                        )
+                    if traffic_source == own_sim:
+                        traffic_btn = (
+                            '<a href="/api/filter/traffic/stop_sending" class="btn btn-red">'
+                            'Stop being the traffic master</a>\n'
+                        )
+                    elif traffic_source == 'NOSIM':
+                        traffic_btn = (
+                            '<a href="/api/filter/traffic/start_sending" class="btn btn-green">'
+                            'Make me traffic master</a>\n'
+                        )
+                    else:
+                        traffic_btn = (
+                            '<a href="/api/filter/traffic/start_sending" class="btn btn-red">'
+                            'Make me traffic master</a>\n'
+                        )
+                    master_buttons = elev_btn + traffic_btn
                 else:
                     master_buttons = ''
                 sim_names = sorted({
@@ -261,10 +290,16 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     'upstream_label': upstream_label,
                     'upstream_status': 'Connected' if connected else 'Not connected',
                     'upstream_class': 'ok' if connected else 'warn',
-                    'elevation_source': router.sharedinfo.get(
-                        'elevation_source_simulator', 'unknown'),
-                    'traffic_source': router.sharedinfo.get(
-                        'traffic_source_simulator', 'unknown'),
+                    'elevation_source': (
+                        elevation_source + ' (this sim)'
+                        if elevation_source == own_sim else elevation_source),
+                    'elevation_source_class': (
+                        'warn' if elevation_source == 'NOSIM' else 'ok'),
+                    'traffic_source': (
+                        traffic_source + ' (this sim)'
+                        if traffic_source == own_sim else traffic_source),
+                    'traffic_source_class': (
+                        'warn' if traffic_source == 'NOSIM' else 'ok'),
                     'connected_sims': ', '.join(sim_names) if sim_names else 'unknown',
                     'master_buttons': master_buttons,
                 }
@@ -415,7 +450,7 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 router.logger.info("API: sending ELEVATION_SOURCE:%s upstream", sim)
                 await router.send_to_upstream(
                     f"addon=FRANKENROUTER:{router.frdp_version}:ELEVATION_SOURCE:{sim}")
-                await asyncio.sleep(3)
+                await asyncio.sleep(1)
                 raise web.HTTPFound('/')
 
             @routes.get('/api/filter/elevation/stop_sending')
@@ -423,8 +458,8 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 router.logger.info("API: sending ELEVATION_SOURCE:NOSIM upstream")
                 await router.send_to_upstream(
                     f"addon=FRANKENROUTER:{router.frdp_version}:ELEVATION_SOURCE:NOSIM")
-                await asyncio.sleep(3)
-                raise web.HTTPFound('/filter')
+                await asyncio.sleep(1)
+                raise web.HTTPFound('/')
 
             @routes.get('/api/filter/traffic/start_sending')
             async def handle_filter_traffic_start_sending(_):
@@ -432,7 +467,7 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 router.logger.info("API: sending TRAFFIC_SOURCE:%s upstream", sim)
                 await router.send_to_upstream(
                     f"addon=FRANKENROUTER:{router.frdp_version}:TRAFFIC_SOURCE:{sim}")
-                await asyncio.sleep(3)
+                await asyncio.sleep(1)
                 raise web.HTTPFound('/')
 
             @routes.get('/api/filter/traffic/stop_sending')
@@ -440,8 +475,8 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 router.logger.info("API: sending TRAFFIC_SOURCE:NOSIM upstream")
                 await router.send_to_upstream(
                     f"addon=FRANKENROUTER:{router.frdp_version}:TRAFFIC_SOURCE:NOSIM")
-                await asyncio.sleep(3)
-                raise web.HTTPFound('/filter')
+                await asyncio.sleep(1)
+                raise web.HTTPFound('/')
 
             @routes.get('/upstream')
             async def handle_web_upstream_get(_):

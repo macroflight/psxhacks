@@ -1728,16 +1728,34 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         and we can then disable the filters.
         """
         if self.is_upstream_connected():
-            upstream_connection_time = time.perf_counter() - self.upstream.connected_at
-            if upstream_connection_time > FRDP_SHAREDINFO_INTERVAL:
-                if self.sharedinfo.get('elevation_source_simulator', "NOSIM") == "NOSIM":  # pylint: disable=line-too-long
-                    self.sharedinfo['elevation_source_simulator'] = self.config.identity.simulator  # pylint: disable=line-too-long
-                    self.logger.info("Standalone sim - elevation filter disabled")
+            if self.upstream.is_frankenrouter:
+                # We are not standalone, do nothing
+                return
+            if self.config.sharedinfo.master:
+                # We are a designated sharedinfo master, ensure filters off
+                if self.filter_elevation:
+                    self.logger.info("Standalone or master sim - elevation filter disabled")
                     self.filter_elevation = False
                     self.status_display_requested = True
-                if self.sharedinfo.get('traffic_source_simulator', "NOSIM") == "NOSIM":  # pylint: disable=line-too-long
-                    self.sharedinfo['traffic_source_simulator'] = self.config.identity.simulator  # pylint: disable=line-too-long
-                    self.logger.info("Standalone sim - traffic filter disabled")
+                if self.filter_traffic:
+                    self.logger.info("Standalone or master sim - traffic filter disabled")
+                    self.filter_traffic = False
+                    self.status_display_requested = True
+            # Try to autodetect a standalone router (but not
+            # configured as a master sim router):
+            #
+            # If we have an upstream connection that is not identified
+            # a frankenrouter and we have been connected for long
+            # enough, assume we are connected to a PSX main server,
+            # i.e standalone router.
+            upstream_connection_time = time.perf_counter() - self.upstream.connected_at
+            if upstream_connection_time > FRDP_SHAREDINFO_INTERVAL:
+                if self.filter_elevation:
+                    self.logger.info("Standalone or master sim - elevation filter disabled")
+                    self.filter_elevation = False
+                    self.status_display_requested = True
+                if self.filter_traffic:
+                    self.logger.info("Standalone or master sim - traffic filter disabled")
                     self.filter_traffic = False
                     self.status_display_requested = True
 
@@ -1817,6 +1835,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.cache.update("Qs418", "")
                     await self.send_to_upstream("Qs418=")
                     await self.client_broadcast("Qs418=")
+                    self.connection_state_changed()
 
     async def _housekeeping_jettison_fix(self):
         """Jettison selector switch bug workaround.
@@ -1862,6 +1881,36 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.logger.warning(
                     "Not applying jettison workaround since data not in cache")
 
+    def _housekeeping_remove_stale_masters(self):
+        """Remove stale elevation or traffic master.
+
+        If the elevation or traffic master is no longer connected,
+        remove from sharedinfo.
+        """
+        elevation_master = self.sharedinfo['elevation_source_simulator']
+        if elevation_master != "NOSIM":
+            elevation_master_seen = False
+            for router in self.routerinfo.values():
+                if router['simulator_name'] == elevation_master:
+                    elevation_master_seen = True
+            if not elevation_master_seen:
+                self.logger.info("Removing stale elevation master %s",
+                                 self.sharedinfo['elevation_source_simulator'])
+                self.sharedinfo['elevation_source_simulator'] = "NOSIM"
+                self.frdp_sharedinfo_requested = True
+
+        traffic_master = self.sharedinfo['traffic_source_simulator']
+        if traffic_master != "NOSIM":
+            traffic_master_seen = False
+            for router in self.routerinfo.values():
+                if router['simulator_name'] == traffic_master:
+                    traffic_master_seen = True
+            if not traffic_master_seen:
+                self.logger.info("Removing stale traffic master %s",
+                                 self.sharedinfo['traffic_source_simulator'])
+                self.sharedinfo['traffic_source_simulator'] = "NOSIM"
+                self.frdp_sharedinfo_requested = True
+
     async def housekeeping_task(self, name):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
         """Miscellaneous housekeeping Task."""
         try:  # pylint: disable=too-many-nested-blocks
@@ -1879,6 +1928,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     await self._housekeeping_enable_psx_elevation_database()
                     await self._housekeeping_enable_master_caution()
                     await self._housekeeping_jettison_fix()
+                    self._housekeeping_remove_stale_masters()
 
                     # Do some minor housekeeping that does not need separate functions
 
@@ -1898,7 +1948,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     for key, value in self.routerinfo.items():
                         age = time.time() - value['received']
                         if age > 2 * FRDP_ROUTERINFO_INTERVAL:
-                            self.logger.info("Removing old routerinfo entry with age %d", age)
+                            self.logger.info("Removing old routerinfo entry with age %d: %s/%s",
+                                             age, value['simulator_name'], value['router_name'])
                             remove.add(key)
                     for key in remove:
                         del self.routerinfo[key]
