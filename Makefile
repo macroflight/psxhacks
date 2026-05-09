@@ -29,7 +29,7 @@ venv: $(LINTVENVDIR)/bin/activate
 
 $(LINTVENVDIR)/bin/activate:
 	$(info * LINT: Trying to setup a Python3 venv to install lint tools in)
-	test -d $(LINTVENVDIR) || (python3 -m venv $(LINTVENVDIR); . $(LINTVENVDIR)/bin/activate; pip install pylint pycodestyle pydocstyle pyproj tomlcheck)
+	test -d $(LINTVENVDIR) || (python3 -m venv $(LINTVENVDIR); . $(LINTVENVDIR)/bin/activate; pip install pylint pycodestyle pydocstyle pyproj tomlcheck aiohttp)
 	touch $(LINTVENVDIR)/bin/activate
 
 pylint: venv
