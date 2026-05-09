@@ -12,5 +12,8 @@ $iniSource = if ($VpilotPlugin -eq "PSX Printer") {
 }
 Copy-Item $iniSource .\Plugins\vPilot-Pushover.ini -Force
 
-$vPilotArgs = if ($RadioApp -ne "vPilot") { @("/novoice") } else { @() }
-Start-Process .\vPilot.exe -ArgumentList $vPilotArgs
+if ($RadioApp -ne "vPilot") {
+    Start-Process .\vPilot.exe -ArgumentList "/novoice"
+} else {
+    Start-Process .\vPilot.exe
+}
