@@ -178,7 +178,7 @@ $StopBeforeMsfsStart       = $true
 # Retry interval and timeout (seconds) used by apply_window_positions.ps1 when
 # waiting for an addon window to appear after the addon is started.
 $WindowPositionSleepSeconds    = 0.5
-$WindowPositionSleepSecondsMax = 30
+$WindowPositionSleepSecondsMax = 5
 
 # Human-readable display names for each sim addon key used in window-positioning scripts
 $SimAddonNames = [ordered]@{
