@@ -38,6 +38,13 @@ $FlavorDefinitions = @(
         Default     = $false
         Type        = "bool"
     },
+    [ordered]@{
+        Name        = "StartFrankenfreeze"
+        Description = "Start Frankenfreeze addon"
+        Options     = @($true, $false)
+        Default     = $false
+        Type        = "bool"
+    },
 )
 
 # Inject codemap pickers after AirlineIata for any multi-option named sets.

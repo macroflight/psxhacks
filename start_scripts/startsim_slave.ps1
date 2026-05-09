@@ -69,6 +69,12 @@ if ($StartVpilot ) {
     Invoke-WindowPosition "vPilot"
 }
 
+if ($StartPsxNetVatsim ) {
+    Write-Output "Starting PSX.NET.VATSIM..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_vatsim.ps1"
+    Invoke-WindowPosition "vPilot"
+}
+
 if ($StartFrankencduproxy ) {
     Write-Output "Starting FrankenCDU proxy..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankencduproxy.ps1"

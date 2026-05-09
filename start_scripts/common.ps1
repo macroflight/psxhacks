@@ -46,6 +46,7 @@ $PsxNetMsfsRouterDir = "$SimBase\psx_net_msfs\PSX.NET.MSFS.Router.20.0.0.5"
 
 # Location of the EFB and PSX.NET
 $PsxNetDir           = "$SimBase\psx_net\2026-04-11"
+$PsxNetVatsimDir     = "$SimBase\psx_net_vatsim\2026-05-08"
 $PsxSoundsDir        = "$SimBase\psx_sounds\PSXSounds"
 
 # Location of Hoppie's ACARS client For Aerowinx PSX and command line options
@@ -61,6 +62,9 @@ $AerowinxPrefFiles  = @("t9-main-noserver.pref", "t9-mcp.pref", "t9-pedestal.pre
 
 # Location of vPilot
 $VPilotDir          = "$SimBase\vPilot"
+
+# Which radio/voice app to start. Override in the override file if needed.
+$RadioApp           = "vPilot"
 
 # Location of the PSX.NET.EFB install
 $PsxNetEfbDir       = "$SimBase\psx_net_efb\PSX.NET.EFB-2.0.0.2-2025-11-12-2"
@@ -143,6 +147,7 @@ $StartFrankenutil   = $false
 
 $StartPsxSounds     = $false
 $StartVpilot        = $false
+$StartPsxNetVatsim  = $false
 $StartAcarsPrint    = $false
 $StartEfb           = $false
 $StartSimObjectRouter    = $false
@@ -180,6 +185,7 @@ $SimAddonNames = [ordered]@{
     "PSXSounds"            = "PSX Sounds"
     "HAFAP/CPDLC"          = "HAFAP/CPDLC"
     "vPilot"               = "vPilot"
+    "PSX.NET.VATSIM"       = "PSX.NET.VATSIM"
     "PSX.NET.EFB"          = "PSX.NET EFB"
     "ACARS Print App"      = "ACARS Print App"
     "frankenusb"           = "FrankenUSB"
@@ -241,3 +247,5 @@ if (Test-Path $OverrideFile) { . $OverrideFile }
 
 # Flavor settings override both defaults and machine-specific overrides.
 if (Test-Path $FlavorFile) { . $FlavorFile }
+
+if ($StartPsxNetVatsim) { $RadioApp = "PSX.NET.VATSIM" }
