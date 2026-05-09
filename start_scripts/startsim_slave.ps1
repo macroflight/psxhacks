@@ -12,7 +12,9 @@ Write-Output "Starting slave sim router..."
 Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_router_slave.ps1"
 Invoke-WindowPosition "frankenrouter slave"
 
-Read-Host -Prompt "Connect to $FrankenRouterSlaveWeb/upstream and connect to the master sim, then press Enter"
+if ($StopAfterSlaveRouterStart) {
+    Read-Host -Prompt "Connect to $FrankenRouterSlaveWeb and connect to the master sim, then press Enter"
+}
 
 if ($StartFrankenident ) {
     Write-Output "Starting FrankenIDENT..."
@@ -22,10 +24,6 @@ if ($StartFrankenident ) {
 
 Write-Output "Starting PSX main clients..."
 Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_psx_clients.ps1"
-
-# Wait for PSX main clients to start (one of which runs the boost
-# server which PSX.NET.MSFS.Router needs.
-Delay 5
 
 if ($StartPsxNetMsfsRouter ) {
     Write-Output "Starting PSX.NET.MSFS.Router..."
@@ -86,10 +84,9 @@ if ($StartCsCdu ) {
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_cs_cdu.ps1"
 }
 
-Write-Output "Starting non-scripted apps..."
-start_nonscripted_apps
-
-Read-Host -Prompt "Now start MSFS and enter free flight, then press Enter"
+if ($StopBeforeMsfsStart) {
+    Read-Host -Prompt "Now start MSFS and enter free flight, then press Enter"
+}
 
 Write-Output "Starting PSX.NET.MSFS.Client..."
 Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_msfs_client.ps1"
@@ -119,4 +116,7 @@ if ($StartFrankenfreeze ) {
     Invoke-WindowPosition "frankenfreeze"
 }
 
-Read-Host -Prompt "Done. Enter to close. If flying alone (or as VATPRI), remember to disable filters: $FrankenRouterSlaveWeb/filter"
+Write-Output "Starting non-scripted apps..."
+start_nonscripted_apps
+
+Read-Host -Prompt "Done. Enter to close. If flying alone (or as VATPRI), remember to disable filters: $FrankenRouterSlaveWeb"

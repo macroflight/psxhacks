@@ -171,6 +171,10 @@ $StartCpdlc         = $false
 # Set to $true in the override file to enable apply_window_positions.ps1
 $ChangeWindowPositions = $false
 
+# Set to $false in the override file to skip the interactive pauses in startsim_slave.ps1
+$StopAfterSlaveRouterStart = $true
+$StopBeforeMsfsStart       = $true
+
 # Retry interval and timeout (seconds) used by apply_window_positions.ps1 when
 # waiting for an addon window to appear after the addon is started.
 $WindowPositionSleepSeconds    = 0.5
