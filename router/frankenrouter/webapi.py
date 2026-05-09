@@ -2,6 +2,7 @@
 # pylint: disable=fixme,invalid-name
 import asyncio
 import math
+import pathlib
 import re
 import signal
 import statistics
@@ -10,116 +11,206 @@ import time
 
 from aiohttp import web  # pylint: disable=import-error
 
+_STATIC_DIR = pathlib.Path(__file__).parent / 'static'
 
-_INDEX_PAGE = '''
-<html>
-<head>
-<meta name="color-scheme" content="{rest_api_color_scheme}" />
-</head>
-<body>
-<h1>Frankenrouter control</h1>
-<ul>
-<li><a href="/filter">Filter control</a>
-<li><a href="/upstream">Upstream control</a>
-<li><a href="/shutdown">Router shutdown</a>
-</ul>
-</body>
-</html>
-'''
+# Dark EFB-style theme shared by all HTML pages.
+# CSS braces are doubled ({{ / }}) because these strings are used as format templates.
+_COMMON_CSS = '''\
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+* {{ box-sizing: border-box; }}
+body {{
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    max-width: 34em; margin: 0 auto; padding: 1em;
+    background: #0f1117; color: #e2e8f0; min-height: 100vh;
+}}
+h1 {{ margin-top: 0; font-size: 1.3em; font-weight: 600; }}
+h2 {{ font-size: 1em; color: #94a3b8; margin: 1em 0 0.4em; font-weight: 500; }}
+.card {{
+    border-radius: 0.5em; padding: 0.9em 1em; margin-bottom: 1em;
+    background: #1c2033; border: 1px solid #2a2f45;
+}}
+.ok   {{ border-left: 4px solid #22c55e; }}
+.warn {{ border-left: 4px solid #ef4444; }}
+table {{ width: 100%; border-collapse: collapse; }}
+td {{ padding: 0.25em 0; vertical-align: top; }}
+td:first-child {{ width: 45%; color: #94a3b8; font-size: 0.88em; padding-right: 0.5em; }}
+td.val {{ font-weight: 500; color: #f1f5f9; }}
+td.ok  {{ color: #4ade80; font-weight: 600; }}
+td.warn {{ color: #f87171; font-weight: 600; }}
+a.btn {{ display: block; text-decoration: none; }}
+a.btn, input[type=submit] {{
+    width: 100%; padding: 0.85em 1em; margin: 0.45em 0;
+    font-size: 1.05em; border-radius: 0.5em; border: none; cursor: pointer;
+    text-align: center; font-family: inherit; font-weight: 600;
+}}
+input[type=text] {{
+    width: 100%; padding: 0.65em; margin: 0.25em 0 0.75em;
+    font-size: 1em; border-radius: 0.45em;
+    border: 1px solid #374151; background: #111827; color: #f9fafb;
+    font-family: inherit;
+}}
+label {{ display: block; color: #94a3b8; font-size: 0.9em; margin-top: 0.5em; }}
+form {{ margin: 0; }}
+hr {{ margin: 1em 0; border: none; border-top: 1px solid #2a2f45; }}
+.btn-amber {{ background: #d97706; color: #fff; }}
+.btn-blue  {{ background: #1d4ed8; color: #fff; }}
+.btn-gray  {{ background: #374151; color: #e5e7eb; }}
+.btn-red   {{ background: #dc2626; color: #fff; }}
+.note {{ font-size: 0.88em; color: #64748b; margin: 0.5em 0; }}
+.page-title {{ display: flex; align-items: center; gap: 0.6em; margin-bottom: 1em; }}
+.page-title h1 {{ margin: 0; }}
+.page-title img {{ width: 48px; height: 48px; border-radius: 50%; flex-shrink: 0; }}
+.status-area {{ display: flex; gap: 1em; align-items: center; margin-bottom: 1em; }}
+.status-area .card {{ flex: 1; margin-bottom: 0; }}
+.status-logo {{ flex-shrink: 0; }}
+.status-logo img {{ display: block; width: 7em; height: 7em; object-fit: contain; }}
+</style>'''
 
-_SHUTDOWN_PAGE = '''
-<html>
-<head>
-<meta name="color-scheme" content="{rest_api_color_scheme}" />
-</head>
-<body>
-<h1>Frankenrouter shutdown</h1>
-<hr>
-<p><b>Warning: this will stop the router. All connected clients will be disconnected.</b>
-<p>
-<form action="/api/shutdown/yes" method="post">
-<input type="submit" value="Shut down router now">
-</form>
-<hr>
-<p><a href="/">Cancel</a>
-</body>
-</html>
-'''
+_INDEX_PAGE = (
+    '<!DOCTYPE html>\n<html>\n<head>\n'
+    '<meta name="color-scheme" content="{rest_api_color_scheme}" />\n' +
+    _COMMON_CSS +
+    '\n</head>\n<body>\n'
+    '<h1>Frankenrouter &mdash; {this_sim}</h1>\n'
+    '<div class="status-area">\n'
+    '<div class="card {upstream_class}">\n'
+    '<table>\n'
+    '<tr><td>Upstream</td>'
+    '<td class="val">{upstream_label}</td></tr>\n'
+    '<tr><td>Connection</td>'
+    '<td class="{upstream_class}">{upstream_status}</td></tr>\n'
+    '<tr><td>Elevation master</td>'
+    '<td class="val">{elevation_source}</td></tr>\n'
+    '<tr><td>Traffic master</td>'
+    '<td class="val">{traffic_source}</td></tr>\n'
+    '<tr><td>Connected simulators</td>'
+    '<td class="val">{connected_sims}</td></tr>\n'
+    '</table>\n'
+    '</div>\n'
+    '<div class="status-logo">'
+    '<img src="/static/frankentech.png" alt="Frankentech">'
+    '</div>\n'
+    '</div>\n'
+    '{master_buttons}'
+    '<hr>\n'
+    '<a href="/upstream" class="btn btn-blue">Change upstream</a>\n'
+    '<a href="/shutdown" class="btn btn-red">Shutdown router</a>\n'
+    '<hr>\n'
+    '<a href="/" class="btn btn-gray">Refresh</a>\n'
+    '</body>\n</html>\n'
+)
 
-_SHUTDOWN_CONFIRM_PAGE = '''
-<html>
-<head>
-<meta name="color-scheme" content="{rest_api_color_scheme}" />
-</head>
-<body>
-<h1>Router is shutting down</h1>
-<p>The router is shutting down. You can close this window.
-</body>
-</html>
-'''
+_SHUTDOWN_PAGE = (
+    '<!DOCTYPE html>\n<html>\n<head>\n'
+    '<meta name="color-scheme" content="{rest_api_color_scheme}" />\n' +
+    _COMMON_CSS +
+    '\n</head>\n<body>\n'
+    '<div class="page-title">'
+    '<img src="/static/frankentech.png" alt="">'
+    '<h1>Shutdown router</h1>'
+    '</div>\n'
+    '<div class="card warn">\n'
+    '<p style="margin:0">All connected clients will be disconnected.</p>\n'
+    '</div>\n'
+    '<form action="/api/shutdown/yes" method="post">\n'
+    '<input type="submit" value="Confirm shutdown" class="btn-red">\n'
+    '</form>\n'
+    '<hr>\n'
+    '<a href="/" class="btn btn-gray">Cancel</a>\n'
+    '</body>\n</html>\n'
+)
 
-_FILTER_PAGE = '''
-<html>
-<head>
-<meta name="color-scheme" content="{rest_api_color_scheme}" />
-</head>
-<body>
-<h1>Frankenrouter filter control</h1>
-<hr>
-<p>Note: Filter control is now automatic. If you are connected to a master sim you will have options below to start or stop sending elevation or traffic data from your sim. These control the filters in all connected routers.
-{network_source_section}
-<hr>
-</body>
-</html>
-'''
+_SHUTDOWN_CONFIRM_PAGE = (
+    '<!DOCTYPE html>\n<html>\n<head>\n'
+    '<meta name="color-scheme" content="{rest_api_color_scheme}" />\n' +
+    _COMMON_CSS +
+    '\n</head>\n<body>\n'
+    '<div class="page-title">'
+    '<img src="/static/frankentech.png" alt="">'
+    '<h1>Router shutting down</h1>'
+    '</div>\n'
+    '<p class="note">The router is shutting down. You can close this window.</p>\n'
+    '</body>\n</html>\n'
+)
 
-_FILTER_PAGE_NETWORK_SOURCE_SECTION = '''
-<hr>
-<h2>Network filter source control</h2>
-<p>Note: you need to reload this page to see the current settings.
-<p>This sim: <b>{this_sim}</b>
-<p>Elevation data source: <b>{elevation_source}</b>
-<p><a href="/api/filter/elevation/start_sending">START SENDING ELEVATION DATA</a>
-<p><a href="/api/filter/elevation/stop_sending">STOP SENDING ELEVATION DATA</a>
-<p>Traffic data source: <b>{traffic_source}</b>
-<p><a href="/api/filter/traffic/start_sending">START SENDING TRAFFIC DATA</a>
-<p><a href="/api/filter/traffic/stop_sending">STOP SENDING TRAFFIC DATA</a>
-'''
+_FILTER_PAGE = (
+    '<!DOCTYPE html>\n<html>\n<head>\n'
+    '<meta name="color-scheme" content="{rest_api_color_scheme}" />\n' +
+    _COMMON_CSS +
+    '\n</head>\n<body>\n'
+    '<div class="page-title">'
+    '<img src="/static/frankentech.png" alt="">'
+    '<h1>Filter source control</h1>'
+    '</div>\n'
+    '{network_source_section}'
+    '<hr>\n'
+    '<a href="/filter" class="btn btn-gray">Refresh</a>\n'
+    '<a href="/" class="btn btn-gray">Back</a>\n'
+    '</body>\n</html>\n'
+)
 
-_UPSTREAM_PAGE = '''
-<html>
-<head>
-<meta name="color-scheme" content="{rest_api_color_scheme}" />
-</head>
-<body>
-<h1>Frankenrouter connection control</h1>
-<hr>
-<p>Current upstream status: {status}
+_FILTER_PAGE_NETWORK_SOURCE_SECTION = (
+    '<div class="card ok">\n'
+    '<table>\n'
+    '<tr><td>This sim</td><td class="val">{this_sim}</td></tr>\n'
+    '<tr><td>Elevation master</td><td class="val">{elevation_source}</td></tr>\n'
+    '<tr><td>Traffic master</td><td class="val">{traffic_source}</td></tr>\n'
+    '</table>\n'
+    '</div>\n'
+    '<h2>Elevation</h2>\n'
+    '<a href="/api/filter/elevation/start_sending" class="btn btn-amber">'
+    'Make me elevation master</a>\n'
+    '<a href="/api/filter/elevation/stop_sending" class="btn btn-gray">'
+    'Stop sending elevation data</a>\n'
+    '<h2>Traffic</h2>\n'
+    '<a href="/api/filter/traffic/start_sending" class="btn btn-amber">'
+    'Make me traffic master</a>\n'
+    '<a href="/api/filter/traffic/stop_sending" class="btn btn-gray">'
+    'Stop sending traffic data</a>\n'
+)
 
-<hr>
-<form action="/api/upstream" method="post">
-<label for="host">IP address or hostname of master sim:</label><br>
-<input type="text" id="host" value="{host}" name="host"><br>
-<label for="port">Port number of master sim:</label><br>
-<input type="text" id="port" value="{port}" name="port"><br>
-<label for="password">Your password for the master sim:</label><br>
-<input type="text" id="password" value="{password}" name="password"><br>
-<p><input type="submit" value="Reconnect using data entered above">
-</form>
-{presets}
-</body>
-</html>
-'''
+_FILTER_PAGE_NO_CONTROLS = (
+    '<p class="note">Filter source control is only available when connected to a master sim.</p>\n'
+)
 
-_UPSTREAM_PAGE_PRESET_SECTION = '''
-<hr>
-<form action="/api/upstream" method="post">
-<input type="hidden" id="host" value="{host}" name="host">
-<input type="hidden" id="port" value="{port}" name="port">
-<input type="hidden" id="password" value="{password}" name="password">
-<input type="submit" value="Switch to upstream {preset_name}: {host} port {port}">
-</form>
-'''
+_UPSTREAM_PAGE = (
+    '<!DOCTYPE html>\n<html>\n<head>\n'
+    '<meta name="color-scheme" content="{rest_api_color_scheme}" />\n' +
+    _COMMON_CSS +
+    '\n</head>\n<body>\n'
+    '<div class="page-title">'
+    '<img src="/static/frankentech.png" alt="">'
+    '<h1>Upstream connection</h1>'
+    '</div>\n'
+    '<div class="card {status_class}">\n'
+    '<p style="margin:0">{status}</p>\n'
+    '</div>\n'
+    '<form action="/api/upstream" method="post">\n'
+    '<label for="host">Host</label>\n'
+    '<input type="text" id="host" name="host" value="{host}">\n'
+    '<label for="port">Port</label>\n'
+    '<input type="text" id="port" name="port" value="{port}">\n'
+    '<label for="password">Password</label>\n'
+    '<input type="text" id="password" name="password" value="{password}">\n'
+    '<input type="submit" value="Connect" class="btn-blue">\n'
+    '</form>\n'
+    '{presets}'
+    '<hr>\n'
+    '<a href="/upstream" class="btn btn-gray">Refresh</a>\n'
+    '<a href="/" class="btn btn-gray">Back</a>\n'
+    '</body>\n</html>\n'
+)
+
+_UPSTREAM_PAGE_PRESET_SECTION = (
+    '<form action="/api/upstream" method="post">\n'
+    '<input type="hidden" name="host" value="{host}">\n'
+    '<input type="hidden" name="port" value="{port}">\n'
+    '<input type="hidden" name="password" value="{password}">\n'
+    '<input type="submit" '
+    'value="Switch to {preset_name}: {host}:{port}" class="btn-gray">\n'
+    '</form>\n'
+)
 
 
 class RouterWebAPI:  # pylint: disable=too-few-public-methods
@@ -139,7 +230,44 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
 
             @routes.get('/')
             async def handle_web(_):
-                data = {'rest_api_color_scheme': router.config.listen.rest_api_color_scheme}
+                connected = router.upstream is not None
+                host = router.config.upstream.host
+                port = router.config.upstream.port
+                preset_name = next(
+                    (u.name for u in router.config.upstreams
+                     if u.host == host and u.port == port),
+                    None,
+                )
+                upstream_label = (
+                    f"{preset_name} ({host}:{port})" if preset_name else f"{host}:{port}"
+                )
+                if router.get_router_type() == 'slave':
+                    master_buttons = (
+                        '<a href="/api/filter/elevation/start_sending" class="btn btn-amber">'
+                        'Make me elevation master</a>\n'
+                        '<a href="/api/filter/traffic/start_sending" class="btn btn-amber">'
+                        'Make me traffic master</a>\n'
+                    )
+                else:
+                    master_buttons = ''
+                sim_names = sorted({
+                    info['simulator_name']
+                    for info in router.routerinfo.values()
+                    if 'simulator_name' in info
+                })
+                data = {
+                    'rest_api_color_scheme': router.config.listen.rest_api_color_scheme,
+                    'this_sim': router.config.identity.simulator,
+                    'upstream_label': upstream_label,
+                    'upstream_status': 'Connected' if connected else 'Not connected',
+                    'upstream_class': 'ok' if connected else 'warn',
+                    'elevation_source': router.sharedinfo.get(
+                        'elevation_source_simulator', 'unknown'),
+                    'traffic_source': router.sharedinfo.get(
+                        'traffic_source_simulator', 'unknown'),
+                    'connected_sims': ', '.join(sim_names) if sim_names else 'unknown',
+                    'master_buttons': master_buttons,
+                }
                 return web.json_response(
                     text=_INDEX_PAGE.format(**data), content_type='text/html')
 
@@ -268,23 +396,6 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
             @routes.get('/filter')
             async def handle_web_filter_get(_):
                 data = {'rest_api_color_scheme': router.config.listen.rest_api_color_scheme}
-                if router.filter_elevation:
-                    data["filter_status_elevation"] = "enabled"
-                    data["filter_status_description_elevation"] = "your sim is NOT sending elevation data"  # pylint: disable=line-too-long
-                    data["next_state_elevation"] = "disable"
-                else:
-                    data["filter_status_elevation"] = "disabled"
-                    data["filter_status_description_elevation"] = "your sim IS sending elevation data"  # pylint: disable=line-too-long
-                    data["next_state_elevation"] = "enable"
-                if router.filter_traffic:
-                    data["filter_status_traffic"] = "enabled"
-                    data["filter_status_description_traffic"] = "your sim is NOT sending traffic data"  # pylint: disable=line-too-long
-                    data["next_state_traffic"] = "disable"
-                else:
-                    data["filter_status_traffic"] = "disabled"
-                    data["filter_status_description_traffic"] = "your sim IS sending traffic data"  # pylint: disable=line-too-long
-                    data["next_state_traffic"] = "enable"
-
                 if router.get_router_type() == 'slave':
                     data['network_source_section'] = _FILTER_PAGE_NETWORK_SOURCE_SECTION.format(
                         this_sim=router.config.identity.simulator,
@@ -294,7 +405,7 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                             'traffic_source_simulator', 'unknown'),
                     )
                 else:
-                    data['network_source_section'] = ''
+                    data['network_source_section'] = _FILTER_PAGE_NO_CONTROLS
                 return web.json_response(
                     text=_FILTER_PAGE.format(**data), content_type='text/html')
 
@@ -304,13 +415,15 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 router.logger.info("API: sending ELEVATION_SOURCE:%s upstream", sim)
                 await router.send_to_upstream(
                     f"addon=FRANKENROUTER:{router.frdp_version}:ELEVATION_SOURCE:{sim}")
-                raise web.HTTPFound('/filter')
+                await asyncio.sleep(3)
+                raise web.HTTPFound('/')
 
             @routes.get('/api/filter/elevation/stop_sending')
             async def handle_filter_elevation_stop_sending(_):
                 router.logger.info("API: sending ELEVATION_SOURCE:NOSIM upstream")
                 await router.send_to_upstream(
                     f"addon=FRANKENROUTER:{router.frdp_version}:ELEVATION_SOURCE:NOSIM")
+                await asyncio.sleep(3)
                 raise web.HTTPFound('/filter')
 
             @routes.get('/api/filter/traffic/start_sending')
@@ -319,39 +432,40 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 router.logger.info("API: sending TRAFFIC_SOURCE:%s upstream", sim)
                 await router.send_to_upstream(
                     f"addon=FRANKENROUTER:{router.frdp_version}:TRAFFIC_SOURCE:{sim}")
-                raise web.HTTPFound('/filter')
+                await asyncio.sleep(3)
+                raise web.HTTPFound('/')
 
             @routes.get('/api/filter/traffic/stop_sending')
             async def handle_filter_traffic_stop_sending(_):
                 router.logger.info("API: sending TRAFFIC_SOURCE:NOSIM upstream")
                 await router.send_to_upstream(
                     f"addon=FRANKENROUTER:{router.frdp_version}:TRAFFIC_SOURCE:NOSIM")
+                await asyncio.sleep(3)
                 raise web.HTTPFound('/filter')
 
             @routes.get('/upstream')
             async def handle_web_upstream_get(_):
+                connected = router.upstream is not None
                 data = {
                     'rest_api_color_scheme': router.config.listen.rest_api_color_scheme,
                     'host': router.config.upstream.host,
                     'port': router.config.upstream.port,
-                }
-                if router.upstream:
-                    data["status"] = (
-                        f"connected to {router.config.upstream.host}"
+                    'status': (
+                        f"Connected to {router.config.upstream.host}"
                         f":{router.config.upstream.port}"
-                    )
-                else:
-                    data["status"] = "NOT CONNECTED"
-                data["password"] = router.config.upstream.password or ""
-                data["presets"] = ""
+                        if connected else "Not connected"
+                    ),
+                    'status_class': 'ok' if connected else 'warn',
+                    'password': router.config.upstream.password or "",
+                    'presets': "",
+                }
                 for upstream in router.config.upstreams:
-                    formatdata = {
-                        "preset_name": upstream.name,
-                        "host": upstream.host,
-                        "port": upstream.port,
-                        "password": upstream.password if upstream.password is not None else "",
-                    }
-                    data['presets'] += _UPSTREAM_PAGE_PRESET_SECTION.format(**formatdata)
+                    data['presets'] += _UPSTREAM_PAGE_PRESET_SECTION.format(
+                        preset_name=upstream.name,
+                        host=upstream.host,
+                        port=upstream.port,
+                        password=upstream.password if upstream.password is not None else "",
+                    )
                 return web.json_response(
                     text=_UPSTREAM_PAGE.format(**data), content_type='text/html')
 
@@ -519,6 +633,7 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
 
             app = web.Application(middlewares=[cors_middleware])
             app.add_routes(routes)
+            app.router.add_static('/static', _STATIC_DIR)
             runner = web.AppRunner(app)
             await runner.setup()
             site = web.TCPSite(runner, '0.0.0.0', router.config.listen.rest_api_port)
