@@ -195,7 +195,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self.psx_connected = False
         self.psx_paused = False
 
-        self.turb_enabled = False
+        self.turb_enabled = True
         self.intensity_bias = 100
         self.wind_mode = "live"    # "live", "psx", or "manual"
         self.manual_wind_dir = 0   # degrees — stored even when mode is not "manual"
