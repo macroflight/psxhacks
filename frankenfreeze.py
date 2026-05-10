@@ -146,6 +146,12 @@ class FrankenFreeze():  # pylint: disable=too-many-instance-attributes
             self.logger.debug("Weather change NOT by us, caching: %s to %s", key, value)
             self.psx_wx[key] = value
             self.logger.debug("Weather cache: %s", self.psx_wx)
+            if int(self.focused_zone) == 0:
+                focused_zone_name = "WxBasic"
+            else:
+                focused_zone_name = f"Wx{self.focused_zone}"
+            if self.msfs_in_cloud != 1 and key == focused_zone_name:
+                self.merge_msfs_weather_into_focused_zone()
 
     def handle_wx_focus_change(self, key, value):  # pylint: disable=unused-argument
         """Update as needed when when weather changes in PSX or MSFS."""
@@ -267,22 +273,20 @@ class FrankenFreeze():  # pylint: disable=too-many-instance-attributes
                     data[3] = "8"  # lo coverage
                 psx_weather_new = ";".join(data)
         else:
-            if psx_in_dense_cloud:
-                self.logger.info("MSFS not in cloud, PSX in cloud, remove PSX cloud coverage")
-                if psx_in_cloud == 'hi':
-                    data[0] = "0"  # hi coverage
-                else:
-                    data[3] = "0"  # lo coverage
+            psx_weather_new = psx_weather
+            if psx_in_cloud == 'hi' and hiCloudCov > 0:
+                self.logger.info(
+                    "MSFS not in cloud, PSX in hi cloud layer, disabling hi cloud coverage")
+                data[0] = "0"
+                psx_weather_new = ";".join(data)
+            elif psx_in_cloud == 'lo' and loCloudCov > 0:
+                self.logger.info(
+                    "MSFS not in cloud, PSX in lo cloud layer, disabling lo cloud coverage")
+                data[3] = "0"
                 psx_weather_new = ";".join(data)
             else:
                 self.logger.info(
-                    "MSFS not in cloud, PSX not in cloud, restore original PSX weather")
-                self.logger.debug("Weather cache: %s", self.psx_wx)
-                if zonename in self.psx_wx:
-                    psx_weather_new = self.psx_wx[zonename]
-                else:
-                    self.logger.warning("No cached Wx for %s", zonename)
-                    return
+                    "MSFS not in cloud, PSX not in cloud at this altitude, no change needed")
         if psx_weather == psx_weather_new:
             self.logger.info("No change: PSX wx in %s: %s", zonename, psx_weather)
         else:
@@ -293,20 +297,27 @@ class FrankenFreeze():  # pylint: disable=too-many-instance-attributes
         self.psx_altitude_last_update = self.psx_altitude
 
     async def setup_msfs_connection(self):
-        """Connect to MSFS and setup connection details."""
+        """Connect to MSFS and reconnect as needed."""
         while True:
+            self.msfs_connected = False
             try:
                 self.msfs_sc = SimConnect.SimConnect()  # pylint: disable=undefined-variable
                 self.msfs_aq = SimConnect.AircraftRequests(self.msfs_sc)
                 self.msfs_ae = SimConnect.AircraftEvents(self.msfs_sc)
             except ConnectionError:
-                self.logger.warning("MSFS not started, sleeping")
-                await asyncio.sleep(1.0)
+                self.logger.warning("MSFS not available, retrying in 10s")
+                await asyncio.sleep(10.0)
                 continue
-            else:
-                break
-        self.msfs_connected = True
-        self.logger.info("SimConnect established connection to MSFS")
+            for varname in ["AMBIENT_IN_CLOUD", "AMBIENT_TEMPERATURE"]:
+                var = self.msfs_aq.find(varname)
+                var.time = 1000  # Max 1Hz
+            self.msfs_connected = True
+            self.logger.info("SimConnect established connection to MSFS")
+            # Wait here until get_sim_data flags the connection as lost
+            while self.msfs_connected:
+                await asyncio.sleep(10.0)
+            self.logger.warning("MSFS disconnected, reconnecting in 10s")
+            await asyncio.sleep(10.0)
 
     async def setup_psx_connection(self):
         """Set up the PSX connection."""
@@ -329,7 +340,7 @@ class FrankenFreeze():  # pylint: disable=too-many-instance-attributes
         self.psx.subscribe("id")
         self.psx.subscribe("version", connected)
 
-        self.psx.subscribe("WxBasic")
+        self.psx.subscribe("WxBasic", self.handle_wx_change)
         self.psx.subscribe("Wx1", self.handle_wx_change)
         self.psx.subscribe("Wx2", self.handle_wx_change)
         self.psx.subscribe("Wx3", self.handle_wx_change)
@@ -373,7 +384,11 @@ class FrankenFreeze():  # pylint: disable=too-many-instance-attributes
                 msfs_var = int(self.msfs_aq.get('AMBIENT_IN_CLOUD'))
             except TypeError as exc:
                 self.logger.info("Got bad data from MSFS, continuing: %s", exc)
-            # self.logger.debug("Fetched data from MSFS: AMBIENT_IN_CLOUD is %s", msfs_var)
+                continue
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                self.logger.warning("MSFS connection lost: %s", exc)
+                self.msfs_connected = False
+                continue
             msfs_in_cloud_new = bool(msfs_var == 1)
             if msfs_in_cloud_new != self.msfs_in_cloud:
                 self.logger.info(
