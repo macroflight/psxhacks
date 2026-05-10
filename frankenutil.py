@@ -209,6 +209,8 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 elif value == "3L":
                     self.logger.info("Resetting printer (Qi115=1)")
                     self.psx.send("Qi115", "1")
+                elif value == "4L":
+                    self.do_ground()
             elif self.mcdu_page == "slew":
                 if value == "1L":
                     self.do_slew('NOSELEFT', 1)
@@ -226,8 +228,6 @@ class Script():  # pylint: disable=too-many-instance-attributes
                     self.do_slew('BACKWARD', 1)
                 elif value == "4R":
                     self.do_slew('RIGHT', 1)
-                elif value == "5L":
-                    self.do_ground()
                 elif value == "6L":
                     self.mcdu_page = "main"
                     self.repaint_req_by.add("slew-back-press")
@@ -294,6 +294,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         mcdu.paint(2, 0, L, C, "<SLEW                   ")
         mcdu.paint(4, 0, L, C, "<TOWING                 ")
         mcdu.paint(6, 0, L, C, "<RST PRINT              ")
+        mcdu.paint(8, 0, L, C, "<GROUND                 ")
 
     async def paintSlewPage(self, mcdu):
         """Paint the SLEW menu page."""
@@ -312,7 +313,6 @@ class Script():  # pylint: disable=too-many-instance-attributes
         mcdu.paint(4, 0, L, C, "<NOSE L5        NOSE R5>")
         mcdu.paint(6, 0, L, C, "<FORW 1          BACK 1>")
         mcdu.paint(8, 0, L, C, "<LEFT 1         RIGHT 1>")
-        mcdu.paint(10, 0, L, C, "<GROUND                 ")
         mcdu.paint(12, 0, L, C, "<BACK                   ")
 
     async def paintTowingPage(self, mcdu):  # pylint: disable=too-many-branches
