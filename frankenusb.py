@@ -1427,9 +1427,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             if key not in ["exit", "pleaseBeSoKindAndQuit"]:
                 self.logger.critical("Shutdown called with strange key: %s", key)
                 return
+            self.logger.info("Received PSX %s, shutting down", key)
             self.psx.send("exit")
             time.sleep(1.0)
-            raise SystemExit("Got PSX exit message, shutting down")
+            raise SystemExit(0)
 
         self.psx = psx.Client()
         self.psx.logger = self.logger.debug  # .info to see traffic
