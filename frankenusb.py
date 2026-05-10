@@ -33,8 +33,66 @@ MSG_TYPE_FLT_CTL_LOCK = "FreeMsgM"
 # When right-seat mode is active, any button_config 'psx variable' that
 # appears here is automatically redirected to the right-seat version.
 LEFT_RIGHT_CONTROLS = {
+    # LCP
     'LcpPttCp': 'LcpPttFo',
+    'LcpClockCp': 'LcpClockFo',
+    'LcpPvdOnCp': 'LcpPvdOnFo',
+    'LcpPvdCp': 'LcpPvdFo',
+    'LcpPanelCp': 'LcpPanelFo',
+    'LcpFloodCp': 'LcpFloodFo',
+    'LcpOutbdCp': 'LcpOutbdFo',
+    'LcpWxrCp': 'LcpWxrFo',
+    'LcpNdCp': 'LcpNdFo',
+    'LcpMapCp': 'LcpMapFo',
+    'LcpMapOnCp': 'LcpMapOnFo',
+    # ECP overlays
+    'EcpAdfLCp': 'EcpAdfLFo',
+    'EcpAdfRCp': 'EcpAdfRFo',
+    'EcpWxrCp': 'EcpWxrFo',
+    'EcpStaCp': 'EcpStaFo',
+    'EcpWptCp': 'EcpWptFo',
+    'EcpArptCp': 'EcpArptFo',
+    'EcpDataCp': 'EcpDataFo',
+    'EcpPosCp': 'EcpPosFo',
+    'EcpTerrCp': 'EcpTerrFo',
+    'EcpFpvCp': 'EcpFpvFo',
+    'EcpMtrsCp': 'EcpMtrsFo',
+    'EcpRstCp': 'EcpRstFo',
+    'EcpStdCp': 'EcpStdFo',
+    'EcpCtrCp': 'EcpCtrFo',
+    'EcpTfcCp': 'EcpTfcFo',
+    # ECP knobs
+    'EcpMinsCp': 'EcpMinsFo',
+    'EcpMinsModeCp': 'EcpMinsModeFo',
+    'EcpBaroCp': 'EcpBaroFo',
+    'EcpBaroModeCp': 'EcpBaroModeFo',
+    'EcpNdModeCp': 'EcpNdModeFo',
     'EcpNdRangeCp': 'EcpNdRangeFo',
+    # MCP
+    'McpFdCp': 'McpFdFo',
+    # Stab trim
+    'StabTrimCp': 'StabTrimFo',
+    # Master warning
+    'MastWarnCp': 'MastWarnFo',
+    # RMI
+    'RmiRedCp': 'RmiRedFo',
+    'RmiGreenCp': 'RmiGreenFo',
+    # Source selectors
+    'SrceFltDirCp': 'SrceFltDirFo',
+    'SrceNavCp': 'SrceNavFo',
+    'SrceEiuCp': 'SrceEiuFo',
+    'SrceIrsCp': 'SrceIrsFo',
+    'SrceAdcCp': 'SrceAdcFo',
+    # Clock
+    'ChronoPushCp': 'ChronoPushFo',
+    'DatePushCp': 'DatePushFo',
+    'ClkEtCp': 'ClkEtFo',
+    'ClkSetCp': 'ClkSetFo',
+    'CfgBelowClkCp': 'CfgBelowClkFo',
+    # Display brightness
+    'MfIduInbdCp': 'MfIduInbdFo',
+    'MfIduOutbdCp': 'MfIduOutbdFo',
+    'LwrCrtCp': 'LwrCrtFo',
 }
 
 
