@@ -2156,6 +2156,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 await self.close_client_connection(sender)
         elif code == RulesCode.KEYVALUE_NORMAL:
             self.logger.debug("Got normal key-value from %s: %s", sender_hr, line)
+        elif code == RulesCode.SPEEDBRAKE_OVERRIDE:
+            self.logger.info("%s (from %s: %s)", message, sender_hr, line)
+            await asyncio.gather(
+                self.send_to_upstream(extra_data['override_line']),
+                self.client_broadcast(extra_data['override_line']),
+            )
         elif code == RulesCode.KEYVALUE_FILTERED_INGRESS:
             self.logger.info(
                 "Keyword update from %s dropped due to ingress filter (%s): %s",

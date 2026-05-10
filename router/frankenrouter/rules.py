@@ -135,6 +135,7 @@ class RulesCode(enum.Enum):
     KEYVALUE_FILTERED_INGRESS_SILENT = enum.auto()
     KEYVALUE_FILTER_EGRESS = enum.auto()
     KEYVALUE_NORMAL = enum.auto()
+    SPEEDBRAKE_OVERRIDE = enum.auto()
 
 
 class Rules():  # pylint: disable=too-many-public-methods
@@ -473,6 +474,22 @@ class Rules():  # pylint: disable=too-many-public-methods
             RulesAction.FILTER,
             RulesCode.KEYVALUE_FILTER_EGRESS,
             extra_data={'exclude_non_frankenrouter': True})
+
+    def _speedbrake_override(self, value):
+        """Return a SPEEDBRAKE_OVERRIDE result for a filtered Qh388 input."""
+        try:
+            lever = int(value)
+        except ValueError:
+            lever = 0
+        override = 41 if lever > 40 else 0
+        action_word = "arming" if override == 41 else "disarming"
+        msg = f"speedbrake input {value} from filtered sim, {action_word} speedbrake"
+        return self.myreturn(
+            RulesAction.DROP,
+            RulesCode.SPEEDBRAKE_OVERRIDE,
+            message=msg,
+            extra_data={'override_line': f'Qh388={override}'},
+        )
 
     def handle_addon_frankenrouter_flightinfo(self, payload):
         """Handle a FRDP FLIGHTINFO message.
@@ -935,7 +952,10 @@ class Rules():  # pylint: disable=too-many-public-methods
                     )
                 else:
                     if flying != self.router.config.identity.simulator:
-                        # Someone else is pilot flying - filter flight controls
+                        # Someone else is pilot flying - filter flight controls,
+                        # with special handling for speedbrake lever.
+                        if key == 'Qh388':
+                            return self._speedbrake_override(value)
                         self.logger.debug(
                             "%s update dropped - %s is pilot flying",
                             key, flying
