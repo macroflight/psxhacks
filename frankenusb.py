@@ -95,6 +95,8 @@ LEFT_RIGHT_CONTROLS = {
     'LwrCrtCp': 'LwrCrtFo',
 }
 
+_RIGHT_LEFT_CONTROLS = {v: k for k, v in LEFT_RIGHT_CONTROLS.items()}
+
 
 class FrankenUsbException(Exception):
     """FrankenUSB exception.
@@ -1555,9 +1557,15 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         await self.psx.connect(host=self.args.psx_host, port=self.args.psx_port)
 
     def translate_var(self, name):
-        """Return the right-seat equivalent of name if in right-seat mode."""
-        if self.right_seat and name in LEFT_RIGHT_CONTROLS:
-            return LEFT_RIGHT_CONTROLS[name]
+        """Return the seat-translated equivalent of name.
+
+        In right-seat mode, Cp variables translate to Fo and vice versa.
+        """
+        if self.right_seat:
+            if name in LEFT_RIGHT_CONTROLS:
+                return LEFT_RIGHT_CONTROLS[name]
+            if name in _RIGHT_LEFT_CONTROLS:
+                return _RIGHT_LEFT_CONTROLS[name]
         return name
 
     def psx_send_and_set(self, psx_variable, new_psx_value):
