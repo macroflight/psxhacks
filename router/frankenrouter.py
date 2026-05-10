@@ -158,6 +158,27 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.status_display_requested = False
         self.frdp_routerinfo_requested = False
         self.frdp_sharedinfo_requested = False
+        self.frdp_flightinfo_requested = False
+        self.flightinfo = {
+            'last_updated_by': '',
+            'last_updated_at': '',
+            'portal_account': '',
+            'airline_icao': '',
+            'airframe': '',
+            'captain_code': '',
+            'fo_code': '',
+            'seat_swap': False,
+            'observers': '',
+            'flight_number': '',
+            'vatsim_callsign': '',
+            'dep_airport': '',
+            'arr_airport': '',
+            'route': '',
+            'preflight_starts': '',
+            'eobt': '',
+            'comments': '',
+            'scratchpad': '',
+        }
         self.upstream_reconnect_requested = False
         self.longest_destination_string = 0
         self.rules = Rules(self)
@@ -231,6 +252,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.status_display_requested = asyncio.current_task().get_name()
         self.frdp_routerinfo_requested = asyncio.current_task().get_name()
         self.frdp_sharedinfo_requested = asyncio.current_task().get_name()
+        self.frdp_flightinfo_requested = asyncio.current_task().get_name()
 
     def handle_args(self):  # pylint: disable=too-many-statements
         """Handle command line arguments."""
@@ -1509,6 +1531,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         time.perf_counter() - self.last_frdp_sharedinfo > FRDP_SHAREDINFO_INTERVAL
                 ):
                     await self.send_frdp_sharedinfo()
+                #
+                # FRDP FLIGHTINFO
+                #
+                if self.frdp_flightinfo_requested:
+                    await self.send_frdp_flightinfo()
 
         # Standard Task cleanup
         except asyncio.exceptions.CancelledError:
@@ -1598,6 +1625,22 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             exclude_non_frankenrouter=True)
         self.last_frdp_sharedinfo = time.perf_counter()
         # End of send_frdp_sharedinfo()
+
+    async def send_frdp_flightinfo(self):
+        """Send FRDP FLIGHTINFO message."""
+        self.frdp_flightinfo_requested = False
+        payload_json = json.dumps(self.flightinfo)
+        if self.flightinfo.get('last_updated_by'):
+            # Only propagate upstream if this router has real data; an empty
+            # flightinfo on reconnect must not overwrite the master's state.
+            self.logger.debug("Sending FLIGHTINFO upstream")
+            await self.send_to_upstream(
+                f"addon=FRANKENROUTER:{self.frdp_version}:FLIGHTINFO:{payload_json}")
+        self.logger.debug("Sending FLIGHTINFO downstream")
+        await self.client_broadcast(
+            f"addon=FRANKENROUTER:{self.frdp_version}:FLIGHTINFO:{payload_json}",
+            exclude_non_frankenrouter=True)
+        # End of send_frdp_flightinfo()
 
     def get_errors(self):  # pylint: disable=too-many-branches
         """Return errors for this router (sent in FRDP ROUTERINFO)."""
@@ -2133,6 +2176,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.debug("Got FRDP CLIENTINFO: %s", line)
         elif code == RulesCode.FRDP_ROUTERINFO:
             self.logger.debug("Got FRDP ROUTERINFO: %s", line)
+        elif code == RulesCode.FRDP_FLIGHTINFO:
+            self.logger.debug("Got FRDP FLIGHTINFO")
         elif code == RulesCode.FRDP_AUTH_FAIL:
             self.logger.warning("Client failed FRDP authentication: %s: %s", sender_hr, line)
             # Disconnect clients that fail authentication

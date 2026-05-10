@@ -106,6 +106,7 @@ class RulesCode(enum.Enum):
     FRDP_CLIENTINFO = enum.auto()
     FRDP_ROUTERINFO = enum.auto()
     FRDP_SHAREDINFO = enum.auto()
+    FRDP_FLIGHTINFO = enum.auto()
     FRDP_AUTH_FAIL = enum.auto()
     FRDP_AUTH_OK = enum.auto()
     FRDP_AUTH_ALREADY_HAS_ACCESS = enum.auto()
@@ -473,6 +474,25 @@ class Rules():  # pylint: disable=too-many-public-methods
             RulesCode.KEYVALUE_FILTER_EGRESS,
             extra_data={'exclude_non_frankenrouter': True})
 
+    def handle_addon_frankenrouter_flightinfo(self, payload):
+        """Handle a FRDP FLIGHTINFO message.
+
+        Format:
+        addon=FRANKENROUTER:<protocol version>:FLIGHTINFO:<JSON data>
+        """
+        try:
+            flightinfo = json.loads(payload)
+        except json.decoder.JSONDecodeError:
+            return self.myreturn(
+                RulesAction.DROP, RulesCode.MESSAGE_INVALID,
+                message=f"Invalid JSON data in FRDP FLIGHTINFO message: {self.line}"
+            )
+        self.router.flightinfo = flightinfo
+        return self.myreturn(
+            RulesAction.FILTER,
+            RulesCode.FRDP_FLIGHTINFO,
+            extra_data={'exclude_non_frankenrouter': True})
+
     def handle_addon_frankenrouter_auth(self, payload):
         """Handle FRDP AUTH message.
 
@@ -523,6 +543,8 @@ class Rules():  # pylint: disable=too-many-public-methods
             return self.handle_addon_frankenrouter_routerinfo(payload)
         if message_type == 'SHAREDINFO':
             return self.handle_addon_frankenrouter_sharedinfo(payload)
+        if message_type == 'FLIGHTINFO':
+            return self.handle_addon_frankenrouter_flightinfo(payload)
         if message_type == 'CLIENTINFO':
             return self.handle_addon_frankenrouter_clientinfo(payload)
         if message_type == 'AUTH':
@@ -584,9 +606,16 @@ class Rules():  # pylint: disable=too-many-public-methods
         """
         if re.match(r".*:FRANKEN.PY frankenrouter", rest):
             display_name = rest.split(":")[0]
+            newly_identified = not self.sender.is_frankenrouter
             self.sender.is_frankenrouter = True
             self.sender.display_name = display_name
             self.sender.display_name_source = "name message"
+            if newly_identified:
+                # Re-trigger broadcasts now that this client is known to be a
+                # frankenrouter; the initial connection_state_changed() at
+                # connect time fires before identification, so exclude_non_frankenrouter
+                # broadcasts would have skipped this client.
+                self.router.connection_state_changed()
             return self.myreturn(RulesAction.DROP, RulesCode.NAME_FROM_FRANKENROUTER)
 
         if rest == "":

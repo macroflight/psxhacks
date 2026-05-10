@@ -1,6 +1,7 @@
 """Web API (REST + HTML UI) for frankenrouter."""
 # pylint: disable=fixme,invalid-name
 import asyncio
+import datetime
 import math
 import pathlib
 import re
@@ -39,7 +40,7 @@ td.val {{ font-weight: 500; color: #f1f5f9; }}
 td.ok  {{ color: #4ade80; font-weight: 600; }}
 td.warn {{ color: #f87171; font-weight: 600; }}
 a.btn {{ display: block; text-decoration: none; }}
-a.btn, input[type=submit] {{
+a.btn, button.btn, input[type=submit] {{
     width: 100%; padding: 0.85em 1em; margin: 0.45em 0;
     font-size: 1.05em; border-radius: 0.5em; border: none; cursor: pointer;
     text-align: center; font-family: inherit; font-weight: 600;
@@ -51,6 +52,19 @@ input[type=text] {{
     font-family: inherit;
 }}
 label {{ display: block; color: #94a3b8; font-size: 0.9em; margin-top: 0.5em; }}
+textarea {{
+    width: 100%; padding: 0.65em; margin: 0.25em 0 0.75em;
+    font-size: 1em; border-radius: 0.45em;
+    border: 1px solid #374151; background: #111827; color: #f9fafb;
+    font-family: inherit; resize: vertical; min-height: 4em;
+}}
+.grid2 {{ display: grid; grid-template-columns: 1fr 1fr; gap: 0 1em; }}
+.grid3 {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 1em; }}
+.grid4 {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 0 1em; }}
+.check {{ display: flex; align-items: center; gap: 0.5em;
+    margin: 0.5em 0 0.75em; color: #e2e8f0; cursor: pointer; }}
+.btn-sm {{ font-size: 0.78em; padding: 0.45em 0.5em; width: 7em;
+    margin-top: 0.4em; text-align: center; }}
 form {{ margin: 0; }}
 hr {{ margin: 1em 0; border: none; border-top: 1px solid #2a2f45; }}
 .btn-amber {{ background: #d97706; color: #fff; }}
@@ -91,6 +105,7 @@ _INDEX_PAGE = (
     '</div>\n'
     '<div class="status-logo">'
     '<img src="/static/frankentech.png" alt="Frankentech">'
+    '<a href="/flightinfo" class="btn btn-gray btn-sm">Flight Info</a>'
     '</div>\n'
     '</div>\n'
     '{master_buttons}'
@@ -211,6 +226,179 @@ _UPSTREAM_PAGE_PRESET_SECTION = (
     '<input type="submit" '
     'value="Switch to {preset_name}: {host}:{port}" class="btn-gray">\n'
     '</form>\n'
+)
+
+_FLIGHTINFO_PAGE = (
+    '<!DOCTYPE html>\n<html>\n<head>\n'
+    '<meta name="color-scheme" content="{rest_api_color_scheme}" />\n' +
+    _COMMON_CSS +
+    '\n<style>body {{ max-width: 72em; }}</style>\n'
+    '<script>\n'
+    'var autosaveEnabled = localStorage.getItem("flightinfo_autosave") === "1";\n'
+    'var autosaveTimer = null;\n'
+    'var isDirty = false;\n'
+    'var lastKnownVersion = "{last_updated_by}|{last_updated_at}";\n'
+    'var BRIEFING_FIELDS = ["portal_account","airline_icao","airframe","captain_code",'
+    '"fo_code","dep_airport","arr_airport","flight_number","vatsim_callsign",'
+    '"preflight_starts","eobt","observers","route","comments","scratchpad"];\n'
+    'function updateAutosaveBtn() {{\n'
+    '  var btn = document.getElementById("autosave_btn");\n'
+    '  btn.textContent = "Autosave: " + (autosaveEnabled ? "ON" : "OFF");\n'
+    '  btn.className = "btn btn-sm " + (autosaveEnabled ? "btn-green" : "btn-gray");\n'
+    '}}\n'
+    'function toggleAutosave() {{\n'
+    '  autosaveEnabled = !autosaveEnabled;\n'
+    '  localStorage.setItem("flightinfo_autosave", autosaveEnabled ? "1" : "0");\n'
+    '  updateAutosaveBtn();\n'
+    '}}\n'
+    'function scheduleAutosave() {{\n'
+    '  isDirty = true;\n'
+    '  if (!autosaveEnabled) return;\n'
+    '  clearTimeout(autosaveTimer);\n'
+    '  autosaveTimer = setTimeout(doAutosave, 5000);\n'
+    '}}\n'
+    'function doAutosave() {{\n'
+    '  autosaveTimer = null;\n'
+    '  var form = document.getElementById("flightinfo_form");\n'
+    '  var data = new FormData(form);\n'
+    '  fetch("/api/flightinfo", {{method: "POST", body: data, redirect: "manual"}})\n'
+    '    .then(function() {{\n'
+    '      if (autosaveTimer === null) isDirty = false;\n'
+    '      var el = document.getElementById("autosave_status");\n'
+    '      el.textContent = "Autosaved";\n'
+    '      setTimeout(function() {{ el.textContent = ""; }}, 2000);\n'
+    '    }})\n'
+    '    .catch(function() {{}});\n'
+    '}}\n'
+    'function applyBriefing(data) {{\n'
+    '  BRIEFING_FIELDS.forEach(function(id) {{\n'
+    '    var el = document.getElementById(id);\n'
+    '    if (el) el.value = data[id] || "";\n'
+    '  }});\n'
+    '  var cb = document.querySelector("input[name=\\"seat_swap\\"]");\n'
+    '  if (cb) cb.checked = !!data.seat_swap;\n'
+    '  var note = document.getElementById("last_updated_note");\n'
+    '  if (note) note.textContent ='
+    ' "Last updated by: " + (data.last_updated_by || "") + " " + (data.last_updated_at || "");\n'
+    '}}\n'
+    'function playNotification() {{\n'
+    '  try {{\n'
+    '    var ctx = new (window.AudioContext || window.webkitAudioContext)();\n'
+    '    var osc = ctx.createOscillator();\n'
+    '    var gain = ctx.createGain();\n'
+    '    osc.connect(gain);\n'
+    '    gain.connect(ctx.destination);\n'
+    '    osc.type = "sine";\n'
+    '    osc.frequency.setValueAtTime(880, ctx.currentTime);\n'
+    '    osc.frequency.setValueAtTime(1100, ctx.currentTime + 0.08);\n'
+    '    gain.gain.setValueAtTime(0.25, ctx.currentTime);\n'
+    '    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);\n'
+    '    osc.start(ctx.currentTime);\n'
+    '    osc.stop(ctx.currentTime + 0.35);\n'
+    '  }} catch(e) {{}}\n'
+    '}}\n'
+    'function pollBriefing() {{\n'
+    '  fetch("/api/briefing")\n'
+    '    .then(function(r) {{ return r.json(); }})\n'
+    '    .then(function(data) {{\n'
+    '      var v = (data.last_updated_by || "") + "|" + (data.last_updated_at || "");\n'
+    '      if (v !== lastKnownVersion && !isDirty) {{\n'
+    '        applyBriefing(data);\n'
+    '        lastKnownVersion = v;\n'
+    '        playNotification();\n'
+    '        var el = document.getElementById("autosave_status");\n'
+    '        el.textContent = "Updated from network";\n'
+    '        setTimeout(function() {{ el.textContent = ""; }}, 3000);\n'
+    '      }}\n'
+    '    }})\n'
+    '    .catch(function() {{}});\n'
+    '}}\n'
+    'document.addEventListener("DOMContentLoaded", function() {{\n'
+    '  updateAutosaveBtn();\n'
+    '  var form = document.getElementById("flightinfo_form");\n'
+    '  form.addEventListener("input", scheduleAutosave);\n'
+    '  form.addEventListener("change", scheduleAutosave);\n'
+    '  form.addEventListener("submit", function() {{ isDirty = false; }});\n'
+    '  setInterval(pollBriefing, 5000);\n'
+    '}});\n'
+    '</script>\n'
+    '</head>\n<body>\n'
+    '<div class="page-title">'
+    '<img src="/static/frankentech.png" alt="">'
+    '<h1>Flight information</h1>'
+    '</div>\n'
+    '<div style="display:flex;align-items:center;gap:1em;margin-bottom:0.75em;">'
+    '<p id="last_updated_note" class="note" style="margin:0">'
+    'Last updated by: {last_updated_by} {last_updated_at}</p>'
+    '<button type="button" id="autosave_btn" onclick="toggleAutosave()">Autosave: OFF</button>'
+    '<span id="autosave_status" class="note"></span>'
+    '</div>\n'
+    '<form id="flightinfo_form" action="/api/flightinfo" method="post">\n'
+    '<div class="grid3">\n'
+    '<div><label for="portal_account">Portal account</label>'
+    '<input type="text" id="portal_account" name="portal_account"'
+    ' list="dl_portal" value="{portal_account}">'
+    '<datalist id="dl_portal"><option value="pscc@mkro.se"></datalist></div>\n'
+    '<div><label for="airline_icao">Airline ICAO</label>'
+    '<input type="text" id="airline_icao" name="airline_icao"'
+    ' list="dl_icao" value="{airline_icao}">'
+    '<datalist id="dl_icao"><option value="BAW"><option value="DLH">'
+    '<option value="GST"></datalist></div>\n'
+    '<div><label for="airframe">Airframe</label>'
+    '<input type="text" id="airframe" name="airframe"'
+    ' list="dl_airframe" value="{airframe}">'
+    '<datalist id="dl_airframe"><option value="BAW B744 G-CCIVB">'
+    '<option value="DLH B744 D-ABVW"><option value="SuperTanker N744ST">'
+    '</datalist></div>\n'
+    '</div>\n'
+    '<div class="grid4">\n'
+    '<div><label for="captain_code">Captain (P1)</label>'
+    '<input type="text" id="captain_code" name="captain_code"'
+    ' value="{captain_code}"></div>\n'
+    '<div><label for="fo_code">First Officer (P2)</label>'
+    '<input type="text" id="fo_code" name="fo_code" value="{fo_code}"></div>\n'
+    '<div><label for="dep_airport">Departure (ICAO)</label>'
+    '<input type="text" id="dep_airport" name="dep_airport"'
+    ' value="{dep_airport}"></div>\n'
+    '<div><label for="arr_airport">Arrival (ICAO)</label>'
+    '<input type="text" id="arr_airport" name="arr_airport"'
+    ' value="{arr_airport}"></div>\n'
+    '</div>\n'
+    '<div class="grid4">\n'
+    '<div><label for="flight_number">Portal flight number</label>'
+    '<input type="text" id="flight_number" name="flight_number"'
+    ' value="{flight_number}"></div>\n'
+    '<div><label for="vatsim_callsign">VATSIM callsign</label>'
+    '<input type="text" id="vatsim_callsign" name="vatsim_callsign"'
+    ' value="{vatsim_callsign}"></div>\n'
+    '<div><label for="preflight_starts">Preflight starts (HHMMz)</label>'
+    '<input type="text" id="preflight_starts" name="preflight_starts"'
+    ' value="{preflight_starts}"></div>\n'
+    '<div><label for="eobt">EOBT (HHMMz)</label>'
+    '<input type="text" id="eobt" name="eobt" value="{eobt}"></div>\n'
+    '</div>\n'
+    '<label class="check"><input type="checkbox" name="seat_swap"'
+    ' value="1" {seat_swap_checked}>Seat swap (Captain in left seat)</label>\n'
+    '<div class="grid2">\n'
+    '<div><label for="observers">Observers</label>'
+    '<textarea id="observers" name="observers">{observers}</textarea></div>\n'
+    '<div><label for="route">Planned route</label>'
+    '<textarea id="route" name="route">{route}</textarea></div>\n'
+    '</div>\n'
+    '<label for="comments">Comments (SOP to use, etc.)</label>\n'
+    '<textarea id="comments" name="comments">{comments}</textarea>\n'
+    '<label for="scratchpad">Inflight scratchpad</label>\n'
+    '<textarea id="scratchpad" name="scratchpad">{scratchpad}</textarea>\n'
+    '<input type="submit" value="Save and broadcast" class="btn-blue">\n'
+    '</form>\n'
+    '<hr>\n'
+    '<form action="/api/flightinfo/clear" method="post">\n'
+    '<input type="submit" value="Clear all fields" class="btn-gray">\n'
+    '</form>\n'
+    '<hr>\n'
+    '<a href="/flightinfo" class="btn btn-gray">Refresh</a>\n'
+    '<a href="/" class="btn btn-gray">Back</a>\n'
+    '</body>\n</html>\n'
 )
 
 
@@ -639,6 +827,63 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 await router.send_to_upstream(f"Qs119={text}")
                 await router.client_broadcast(f"Qs119={text}")
                 return web.Response(text="OK")
+
+            @routes.get('/flightinfo')
+            async def handle_flightinfo_get(_):
+                data = {
+                    'rest_api_color_scheme': router.config.listen.rest_api_color_scheme,
+                    **router.flightinfo,
+                    'seat_swap_checked': 'checked' if router.flightinfo.get('seat_swap') else '',
+                }
+                return web.json_response(
+                    text=_FLIGHTINFO_PAGE.format(**data), content_type='text/html')
+
+            @routes.post('/api/flightinfo')
+            async def handle_flightinfo_post(request):
+                post = await request.post()
+                now_z = datetime.datetime.now(
+                    datetime.timezone.utc).strftime('%H:%Mz')
+                router.flightinfo = {
+                    'last_updated_by': router.config.identity.simulator,
+                    'last_updated_at': now_z,
+                    'portal_account': str(post.get('portal_account', '')),
+                    'airline_icao': str(post.get('airline_icao', '')),
+                    'airframe': str(post.get('airframe', '')),
+                    'captain_code': str(post.get('captain_code', '')),
+                    'fo_code': str(post.get('fo_code', '')),
+                    'seat_swap': post.get('seat_swap', '') == '1',
+                    'observers': str(post.get('observers', '')),
+                    'flight_number': str(post.get('flight_number', '')),
+                    'vatsim_callsign': str(post.get('vatsim_callsign', '')),
+                    'dep_airport': str(post.get('dep_airport', '')),
+                    'arr_airport': str(post.get('arr_airport', '')),
+                    'route': str(post.get('route', '')),
+                    'preflight_starts': str(post.get('preflight_starts', '')),
+                    'eobt': str(post.get('eobt', '')),
+                    'comments': str(post.get('comments', '')),
+                    'scratchpad': str(post.get('scratchpad', '')),
+                }
+                router.logger.info("API: flight information updated and broadcast")
+                await router.send_frdp_flightinfo()
+                raise web.HTTPFound('/flightinfo')
+
+            @routes.post('/api/flightinfo/clear')
+            async def handle_flightinfo_clear(_):
+                now_z = datetime.datetime.now(
+                    datetime.timezone.utc).strftime('%H:%Mz')
+                router.flightinfo = {
+                    k: (False if k == 'seat_swap' else '')
+                    for k in router.flightinfo
+                }
+                router.flightinfo['last_updated_by'] = router.config.identity.simulator
+                router.flightinfo['last_updated_at'] = now_z
+                router.logger.info("API: flight information cleared and broadcast")
+                await router.send_frdp_flightinfo()
+                raise web.HTTPFound('/flightinfo')
+
+            @routes.get('/api/briefing')
+            async def handle_briefing_get(_):
+                return web.json_response(router.flightinfo)
 
             @routes.get('/shutdown')
             async def handle_shutdown_get(_):
