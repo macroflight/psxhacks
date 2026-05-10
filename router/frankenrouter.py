@@ -449,10 +449,16 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.config.listen.rest_api_port, self.cache.get_size(),
         )
 
+        if self.config.listen.rest_api_port is not None:
+            shutdown_hint = (f"http://localhost:{self.config.listen.rest_api_port}/shutdown"
+                             " or Ctrl-C to shut down cleanly")
+        else:
+            shutdown_hint = "Ctrl-C to shut down cleanly"
         self.logger.info(
-            "Router version %s with UUID: %s - Press Ctrl-C to shut down cleanly",
+            "Router version %s with UUID: %s - %s",
             __VERSION__,
-            trimstring(self.uuid)
+            trimstring(self.uuid),
+            shutdown_hint,
         )
         pilot_flying = self.sharedinfo.get('pilot_flying_simulator', 'unknown')
         own_sim = self.config.identity.simulator
