@@ -5,6 +5,7 @@ import asyncio
 import importlib.util
 import logging
 import os
+import sys
 import time
 import traceback
 from collections import defaultdict
@@ -120,9 +121,13 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                             action='store', default=1.5, type=float,
                             help='axis movements larger than this are filtered out',
                             )
-        parser.add_argument('--psx-server',
+        parser.add_argument('--psx-host',
                             action='store', default="127.0.0.1", type=str,
                             help='Hostname or IP address of the main PSX server',
+                            )
+        parser.add_argument('--psx-server',
+                            action='store', default=None, type=str,
+                            help=argparse.SUPPRESS,
                             )
         parser.add_argument('--psx-port',
                             action='store', default="10747", type=str,
@@ -138,6 +143,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                             )
 
         self.args = parser.parse_args()
+        if self.args.psx_server is not None:
+            print("WARNING: --psx-server is deprecated, use --psx-host", file=sys.stderr)
+            if self.args.psx_host == "127.0.0.1":
+                self.args.psx_host = self.args.psx_server
         self.logger.info("PSX max rate is set to %.1f Hz", self.args.max_rate)
         if self.args.quiet:
             self.logger.setLevel(logging.CRITICAL)
@@ -1464,7 +1473,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             self.psx.subscribe(psx_variable)
         self.logger.info("PSX subscribed variables: %s", ', '.join(self.psx.variables.keys()))
         # Nothing happens until we connect()
-        await self.psx.connect(host=self.args.psx_server, port=self.args.psx_port)
+        await self.psx.connect(host=self.args.psx_host, port=self.args.psx_port)
 
     def psx_send_and_set(self, psx_variable, new_psx_value):
         """Send variable to PSX and store in local db."""
