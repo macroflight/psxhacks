@@ -206,6 +206,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 elif value == "2L":
                     self.mcdu_page = "towing"
                     self.repaint_req_by.add("towing-nav-press")
+                elif value == "3L":
+                    self.logger.info("Resetting printer (Qi115=1)")
+                    self.psx.send("Qi115", "1")
             elif self.mcdu_page == "slew":
                 if value == "1L":
                     self.do_slew('NOSELEFT', 1)
@@ -290,6 +293,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         mcdu.paint(0, 0, S, A, "      FTECH UTILS       ")
         mcdu.paint(2, 0, L, C, "<SLEW                   ")
         mcdu.paint(4, 0, L, C, "<TOWING                 ")
+        mcdu.paint(6, 0, L, C, "<RST PRINT              ")
 
     async def paintSlewPage(self, mcdu):
         """Paint the SLEW menu page."""
