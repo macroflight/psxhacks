@@ -580,6 +580,14 @@ class Rules():  # pylint: disable=too-many-public-methods
             self.logger.debug("Got unsupported addon message: %s", rest)
             addon = rest
             payload = ""
+        if addon == 'FRANKENCDUPROXY':
+            if (self.sender.is_frankenrouter and
+                    self.router.config.identity.simulator != self.sender.simulator_name):
+                self.logger.info(
+                    "Dropping FRANKENCDUPROXY addon from other-sim frankenrouter %s",
+                    self.sender.simulator_name)
+                return self.myreturn(RulesAction.DROP, RulesCode.ADDON_FORWARDED)
+
         if addon == 'FRANKENROUTER':
             if ':' not in payload:
                 return self.myreturn(
