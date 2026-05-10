@@ -69,8 +69,8 @@ Quickstart Guide:
 - Have a single copy of the psxhacks repo that you update using e.g
   GitHub Desktop, installed as e.g C:\fs\psxhacks.
 - Install Python and a virtual environment with all the modules you
-  need (start_scripts will only with with the Python versions of
-  psxhacks, not the EXE files)
+  need (start_scripts will only work with the Python versions of
+  psxhacks, not the EXE files).
 - Create your own override file outside the Git repo, e.g
   C:\fs\psxhacks-start-override.ps1. If the file is named like that
   and on the same directory level as the Git repo, it will be found
