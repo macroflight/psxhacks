@@ -1,5 +1,5 @@
 """Web API (REST + HTML UI) for frankenrouter."""
-# pylint: disable=fixme,invalid-name
+# pylint: disable=fixme,invalid-name,too-many-lines
 import asyncio
 import datetime
 import math
@@ -59,6 +59,8 @@ textarea {{
     font-family: inherit; resize: vertical; min-height: 4em;
 }}
 .grid2 {{ display: grid; grid-template-columns: 1fr 1fr; gap: 0 1em; }}
+.btn-row {{ display: flex; gap: 0.5em; margin: 0.45em 0; }}
+.btn-row a.btn {{ flex: 1; width: auto; margin: 0; }}
 .grid3 {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 1em; }}
 .grid4 {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 0 1em; }}
 .check {{ display: flex; align-items: center; gap: 0.5em;
@@ -99,6 +101,8 @@ _INDEX_PAGE = (
     '<td class="{elevation_source_class}">{elevation_source}</td></tr>\n'
     '<tr><td>Traffic master</td>'
     '<td class="{traffic_source_class}">{traffic_source}</td></tr>\n'
+    '<tr><td>Pilot flying</td>'
+    '<td class="{pilot_flying_class}">{pilot_flying}</td></tr>\n'
     '<tr><td>Connected simulators</td>'
     '<td class="val">{connected_sims}</td></tr>\n'
     '</table>\n'
@@ -189,6 +193,7 @@ _FILTER_PAGE_NETWORK_SOURCE_SECTION = (
 _FILTER_PAGE_NO_CONTROLS = (
     '<p class="note">Filter source control is only available when connected to a master sim.</p>\n'
 )
+
 
 _UPSTREAM_PAGE = (
     '<!DOCTYPE html>\n<html>\n<head>\n'
@@ -402,6 +407,32 @@ _FLIGHTINFO_PAGE = (
 )
 
 
+def _fc_buttons_html(pilot_flying, own_sim):
+    """Return flight control filter button HTML for the index page."""
+    if pilot_flying == own_sim:
+        inner = (
+            '<a href="/api/flightcontrols/no_control_locks" class="btn btn-green">'
+            'No flight control filters</a>\n'
+            '<a href="/api/flightcontrols/all_control_locks" class="btn btn-red">'
+            'Filter all flight controls</a>\n'
+        )
+    elif pilot_flying == 'NO_CONTROL_LOCKS':
+        inner = (
+            '<a href="/api/flightcontrols/all_control_locks" class="btn btn-red">'
+            'Filter all flight controls</a>\n'
+            '<a href="/api/flightcontrols/my_controls" class="btn btn-amber">'
+            'My controls!</a>\n'
+        )
+    else:
+        inner = (
+            '<a href="/api/flightcontrols/no_control_locks" class="btn btn-green">'
+            'No flight control filters</a>\n'
+            '<a href="/api/flightcontrols/my_controls" class="btn btn-amber">'
+            'My controls!</a>\n'
+        )
+    return f'<div class="btn-row">{inner}</div>\n'
+
+
 class RouterWebAPI:  # pylint: disable=too-few-public-methods
     """Owns the aiohttp application and all REST/HTML route handlers."""
 
@@ -433,6 +464,7 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 own_sim = router.config.identity.simulator
                 elevation_source = router.sharedinfo.get('elevation_source_simulator', 'unknown')
                 traffic_source = router.sharedinfo.get('traffic_source_simulator', 'unknown')
+                pilot_flying = router.sharedinfo.get('pilot_flying_simulator', 'unknown')
                 if router.get_router_type() == 'slave':
                     if elevation_source == own_sim:
                         elev_btn = (
@@ -464,7 +496,8 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                             '<a href="/api/filter/traffic/start_sending" class="btn btn-red">'
                             'Make me traffic master</a>\n'
                         )
-                    master_buttons = elev_btn + traffic_btn
+                    master_buttons = elev_btn + traffic_btn + _fc_buttons_html(
+                        pilot_flying, own_sim)
                 else:
                     master_buttons = ''
                 sim_names = sorted({
@@ -488,6 +521,13 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                         if traffic_source == own_sim else traffic_source),
                     'traffic_source_class': (
                         'warn' if traffic_source == 'NOSIM' else 'ok'),
+                    'pilot_flying': (
+                        pilot_flying + ' (this sim)' if pilot_flying == own_sim
+                        else pilot_flying),
+                    'pilot_flying_class': (
+                        'ok' if pilot_flying == own_sim
+                        else 'warn' if pilot_flying == 'ALL_CONTROL_LOCKS'
+                        else 'val'),
                     'connected_sims': ', '.join(sim_names) if sim_names else 'unknown',
                     'master_buttons': master_buttons,
                 }
@@ -663,6 +703,31 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 router.logger.info("API: sending TRAFFIC_SOURCE:NOSIM upstream")
                 await router.send_to_upstream(
                     f"addon=FRANKENROUTER:{router.frdp_version}:TRAFFIC_SOURCE:NOSIM")
+                await asyncio.sleep(1)
+                raise web.HTTPFound('/')
+
+            @routes.get('/api/flightcontrols/my_controls')
+            async def handle_flightcontrols_my_controls(_):
+                sim = router.config.identity.simulator
+                router.logger.info("API: sending FLIGHTCONTROLS:%s upstream", sim)
+                await router.send_to_upstream(
+                    f"addon=FRANKENROUTER:{router.frdp_version}:FLIGHTCONTROLS:{sim}")
+                await asyncio.sleep(1)
+                raise web.HTTPFound('/')
+
+            @routes.get('/api/flightcontrols/no_control_locks')
+            async def handle_flightcontrols_no_control_locks(_):
+                router.logger.info("API: sending FLIGHTCONTROLS:NO_CONTROL_LOCKS upstream")
+                await router.send_to_upstream(
+                    f"addon=FRANKENROUTER:{router.frdp_version}:FLIGHTCONTROLS:NO_CONTROL_LOCKS")
+                await asyncio.sleep(1)
+                raise web.HTTPFound('/')
+
+            @routes.get('/api/flightcontrols/all_control_locks')
+            async def handle_flightcontrols_all_control_locks(_):
+                router.logger.info("API: sending FLIGHTCONTROLS:ALL_CONTROL_LOCKS upstream")
+                await router.send_to_upstream(
+                    f"addon=FRANKENROUTER:{router.frdp_version}:FLIGHTCONTROLS:ALL_CONTROL_LOCKS")
                 await asyncio.sleep(1)
                 raise web.HTTPFound('/')
 

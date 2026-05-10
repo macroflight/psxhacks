@@ -454,10 +454,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             __VERSION__,
             trimstring(self.uuid)
         )
+        pilot_flying = self.sharedinfo.get('pilot_flying_simulator', 'unknown')
+        own_sim = self.config.identity.simulator
+        fc_filter_on = pilot_flying not in ('NO_CONTROL_LOCKS', own_sim)
         self.logger.info(
-            "Filters in this router: elevation filter is %s, traffic filter is %s",
-            "enabled" if self.filter_elevation else "disabled",
-            "enabled" if self.filter_traffic else "disabled",
+            "Filters in this router: elevation=%s, traffic=%s, flight controls=%s",
+            "on" if self.filter_elevation else "off",
+            "on" if self.filter_traffic else "off",
+            "on" if fc_filter_on else "off",
         )
         if self.log_traffic_filename:
             self.logger.info("Logging traffic to %s", self.log_traffic_filename)
