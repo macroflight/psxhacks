@@ -29,6 +29,14 @@ MSG_TYPE_TILLER = "FreeMsgA"
 # The type of message we use to display when the flight control lock is enabled
 MSG_TYPE_FLT_CTL_LOCK = "FreeMsgM"
 
+# Map left-seat PSX variable names to their right-seat equivalents.
+# When right-seat mode is active, any button_config 'psx variable' that
+# appears here is automatically redirected to the right-seat version.
+LEFT_RIGHT_CONTROLS = {
+    'LcpPttCp': 'LcpPttFo',
+    'EcpNdRangeCp': 'EcpNdRangeFo',
+}
+
 
 class FrankenUsbException(Exception):
     """FrankenUSB exception.
@@ -96,6 +104,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         # The position the 3-position selector is in (IAS/MACH,
         # HDG/TRK or ALTITUDE)
         self.tmboeing_mode = None
+
+        # True when operating from the right (FO) seat; remaps variables
+        # listed in LEFT_RIGHT_CONTROLS to their right-seat equivalents.
+        self.right_seat = False
 
     def _handle_args(self):
         """Handle command line arguments."""
@@ -1003,13 +1015,15 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         async def handle_button_helper():  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
             if button_config['button type'] == "SET":
                 # Set a PSX variable to the value in config
-                self.psx_send_and_set(button_config['psx variable'], button_config['value'])
+                self.psx_send_and_set(
+                    self.translate_var(button_config['psx variable']), button_config['value'])
             elif button_config['button type'] == "SET_MULTI":
                 for (key, value) in button_config['psx variables']:
-                    self.psx_send_and_set(key, value)
+                    self.psx_send_and_set(self.translate_var(key), value)
             elif button_config['button type'] == "SET_ACCELERATED":
                 minimum_interval = button_config['minimum interval']
                 acceleration = button_config['acceleration']
+                psx_var = self.translate_var(button_config['psx variable'])
                 # Assumes this is a delta variable (where we send e.g 1 or -1 normally).
                 # If the time since the last event for this button is low
                 # enough, we multiply the value by 5.
@@ -1018,9 +1032,9 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                     self.logger.debug("Button %s/%s last pressed %.2f s ago, ACCELERATED",
                                       event.instance_id, event.button,
                                       time_since_last_event)
-                    self.psx_send_and_set(button_config['psx variable'], new_value)
+                    self.psx_send_and_set(psx_var, new_value)
                 else:
-                    self.psx_send_and_set(button_config['psx variable'], button_config['value'])
+                    self.psx_send_and_set(psx_var, button_config['value'])
             elif button_config['button type'] == "REVERSE_LEVER_UP":
                 # Enable reversers
                 await self.handle_throttle_reverse_button(
@@ -1034,7 +1048,8 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                     await self.handle_throttle_reverse_button(
                         'button', joystick_name, event, button_config, None)
             elif button_config['button type'] == 'INCREMENT':
-                value = int(self.psx.get(button_config['psx variable']))
+                psx_var = self.translate_var(button_config['psx variable'])
+                value = int(self.psx.get(psx_var))
                 increment = int(button_config['increment'])
                 new_value = value + increment
                 wrap = False
@@ -1051,10 +1066,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                     else:
                         new_value = button_config['max']
                 if new_value != value:
-                    self.psx_send_and_set(button_config['psx variable'], new_value)
+                    self.psx_send_and_set(psx_var, new_value)
             elif button_config['button type'] == 'INCREMENT_MULTI':
                 for (key, increment, minval, maxval, wrap) in button_config['psx variables']:
-                    cur = self.psx.get(key)
+                    cur = self.psx.get(self.translate_var(key))
                     self.logger.info("INCREMENT_MULTI got %s for %s", cur, key)
                     value = int(cur)
                     new_value = value + increment
@@ -1071,11 +1086,12 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                     if new_value != value:
                         self.psx_send_and_set(key, new_value)
             elif button_config['button type'] == 'BIGMOMPSH':
-                self.logger.debug("BIGMOMPSH event for %s", button_config['psx variable'])
-                value = int(self.psx.get(button_config['psx variable']))
+                psx_var = self.translate_var(button_config['psx variable'])
+                self.logger.debug("BIGMOMPSH event for %s", psx_var)
+                value = int(self.psx.get(psx_var))
                 new_value = value | 1
                 if new_value != value:
-                    self.psx_send_and_set(button_config['psx variable'], new_value)
+                    self.psx_send_and_set(psx_var, new_value)
             elif button_config['button type'] == 'FLIGHT_CONTROL_MY_CONTROLS':
                 self.my_controls()
             elif button_config['button type'] == 'FLIGHT_CONTROL_NO_CONTROL_LOCKS':
@@ -1156,6 +1172,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                     return
                 self.logger.debug("Sending to PSX: %s => %s", psx_variable, increment)
                 self.psx_send_and_set(psx_variable, increment)
+            elif button_config['button type'] == 'SEAT_TOGGLE':
+                self.right_seat = not self.right_seat
+                seat = "RIGHT" if self.right_seat else "LEFT"
+                self.logger.info("Seat mode: %s", seat)
             elif button_config['button type'] == 'ADDON':
                 # Send a custom addon= message stored in button_config['value']
                 self.psx_send_and_set("addon", button_config['value'])
@@ -1280,7 +1300,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             self.psx_send_and_set("LtTaxi", "0")
         elif phase == 'NORMAL_FLIGHT':
             # Toggle STD/QNH
-            self.psx_send_and_set("EcpStdCp", "1")
+            self.psx_send_and_set(self.translate_var("EcpStdCp"), "1")
         elif phase == 'EXITED_RUNWAY':
             # Turn off strobe
             self.psx_send_and_set("LtStrobe", "0")
@@ -1310,7 +1330,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             # Autobrake off
             self.psx_send_and_set("Autobr", "1")
             # Both FD + A/T off
-            self.psx_send_and_set("McpFdCp", "0")
+            self.psx_send_and_set(self.translate_var("McpFdCp"), "0")
             self.psx_send_and_set("McpFdFo", "0")
             self.psx_send_and_set("McpAtArm", "0")
             # Start APU
@@ -1475,6 +1495,12 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.logger.info("PSX subscribed variables: %s", ', '.join(self.psx.variables.keys()))
         # Nothing happens until we connect()
         await self.psx.connect(host=self.args.psx_host, port=self.args.psx_port)
+
+    def translate_var(self, name):
+        """Return the right-seat equivalent of name if in right-seat mode."""
+        if self.right_seat and name in LEFT_RIGHT_CONTROLS:
+            return LEFT_RIGHT_CONTROLS[name]
+        return name
 
     def psx_send_and_set(self, psx_variable, new_psx_value):
         """Send variable to PSX and store in local db."""
