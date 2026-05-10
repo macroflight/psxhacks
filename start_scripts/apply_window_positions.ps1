@@ -4,7 +4,6 @@ param(
 
 . "$PSScriptRoot\common.ps1"
 
-$Host.UI.RawUI.WindowTitle = "Apply Window Positions"
 $PositionsFile = "$PSScriptRoot\..\..\psxhacks-current-positions.ps1"
 
 if (-not (Test-Path $PositionsFile)) {
