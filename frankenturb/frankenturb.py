@@ -220,6 +220,10 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self.type_biases = {'wave': 100, 'rotor': 100, 'mechanical': 100, 'shear': 100, 'cb': 100}
         self.lateral_size_bias = 50  # % of nearest-neighbour zone radius; tune to match radar
 
+        self._cdu_status_kind = "none"
+        self._cdu_status_intensity = 0.0
+        self._cdu_last_status_update = 0.0
+
         self.latest_accel_state: Optional[AccelerationState] = None
 
     def psx_send_and_set(self, psx_variable, new_psx_value):
@@ -413,6 +417,19 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.logger.debug(
                 "Unhandled MCDU event from %s: %s=%s", mcdu.location, event_type, value)
 
+    def _paint_cdu_status_row(self):
+        """Paint the compact turbulence status on row 11 of all active MCDUs."""
+        _abbr = {"none": "---", "light": "LGT", "moderate": "MOD",
+                 "severe": "SEV", "extreme": "EXT"}
+        label = _intensity_label(self._cdu_status_intensity)
+        abbr = _abbr[label]
+        kind = self._cdu_status_kind.upper()
+        pct = int(self._cdu_status_intensity * 100)
+        color = "cyan" if self._cdu_status_intensity >= 0.10 else "amber"
+        text = f"{kind:<6}{abbr}  {pct:3d}%"
+        for mcdu in self.active_mcdus:
+            mcdu.paint(11, 0, "small", color, text)
+
     async def paintMainPage(self, mcdu):
         """Paint the PSX Turb main page on the MCDU."""
         await asyncio.sleep(0.5)
@@ -462,6 +479,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
                    f"{'<' + str(self.type_biases['cb']) + '%':<12}"
                    f"{str(self.lateral_size_bias) + '%>':>12}")
 
+        self._paint_cdu_status_row()
         mcdu.paint(12, 18, L, A, "RESET>")
         if self.scratchpad_text:
             mcdu.paint(13, 0, "large", "magenta", self.scratchpad_text)
@@ -575,6 +593,14 @@ class Script():  # pylint: disable=too-many-instance-attributes
                         self.psx_send_and_set("WxBurst", str(psx_value))
                         last_burst_str = f"{label}{'+' if direction > 0 else '-'}{magnitude:02d}"
                         self.logger.debug("Injected WxBurst=%d (%s)", psx_value, last_burst_str)
+
+                # --- Update CDU status row on configured interval ---------------
+                now_mono = time.monotonic()
+                if now_mono - self._cdu_last_status_update >= self.args.cdu_status_interval:
+                    self._cdu_last_status_update = now_mono
+                    self._cdu_status_kind = state.kind
+                    self._cdu_status_intensity = effective_intensity
+                    self._paint_cdu_status_row()
 
                 # --- Throttle console output to once per second -----------------
                 now = time.monotonic()
@@ -846,6 +872,11 @@ class Script():  # pylint: disable=too-many-instance-attributes
             '--boost-server-port',
             type=int, default=10749,
             help="Port of the PSX boost server.",
+        )
+        parser.add_argument(
+            '--cdu-status-interval',
+            type=float, default=30.0, metavar='SECONDS',
+            help="How often (seconds) to refresh the CDU turbulence status row.",
         )
         parser.add_argument(
             '--debug',
