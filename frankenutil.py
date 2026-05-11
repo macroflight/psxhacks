@@ -139,8 +139,10 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.logger.info("Elev already at ground level (%d)", elev)
             return
         new_elev = elev - 1000
-        self.logger.info("Ground: Elev %d -> %d", elev, new_elev)
+        self.logger.info("Ground: Elev %d -> %d, Qi198=%d",
+                         elev, new_elev, self.args.ground_force_value)
         self.psx_send_and_set('Elev', str(new_elev))
+        self.psx_send_and_set('Qi198', str(self.args.ground_force_value))
 
     def do_towing_start(self):
         """Start towing (set mode to 20)."""
@@ -520,6 +522,11 @@ class Script():  # pylint: disable=too-many-instance-attributes
             '--menu-row',
             type=int, action='store', default=5,
             help="Row (1-6) of the CDU menu to place the FTECH entry on.",
+        )
+        parser.add_argument(
+            '--ground-force-value',
+            type=int, action='store', default=-999000,
+            help="Value sent to Qi198 when GROUND is pressed.",
         )
         parser.add_argument(
             '--debug',
