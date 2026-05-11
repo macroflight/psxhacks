@@ -179,8 +179,6 @@ $StopBeforeMsfsStart       = $true
 # waiting for an addon window to appear after the addon is started.
 $WindowPositionSleepSeconds    = 0.5
 $WindowPositionSleepSecondsMax = 5
-# Initial delay before the first poll attempt, to give the app time to start.
-$WindowPositionInitialDelay    = 2
 
 # Human-readable display names for each sim addon key used in window-positioning scripts
 $SimAddonNames = [ordered]@{
@@ -247,23 +245,6 @@ function start_nonscripted_apps {
         Write-Output "Starting $app..."
         Start-Process $app
     }
-}
-
-function Invoke-WindowPosition([string]$addon) {
-    if ($ChangeWindowPositions) {
-        $name = if ($SimAddonNames.Contains($addon)) { $SimAddonNames[$addon] } else { $addon }
-        Write-Output ("Positioning " + $name + "...")
-        Start-Process powershell -WindowStyle Hidden -ArgumentList "-File", "$PSScriptRoot\apply_window_positions.ps1", "-Addon", $addon
-    }
-}
-
-$ErrorActionPreference = "Stop"
-trap {
-    Write-Host "ERROR: $_" -ForegroundColor Red
-    if ($Host.Name -eq "ConsoleHost") {
-        Read-Host -Prompt "An error occurred, press Enter to close the window"
-    }
-    exit 1
 }
 
 if (Test-Path $OverrideFile) { . $OverrideFile }

@@ -17,4 +17,3 @@ if ($RadioApp -ne "vPilot") {
 } else {
     Start-Process .\vPilot.exe
 }
-Invoke-WindowPosition "vPilot"

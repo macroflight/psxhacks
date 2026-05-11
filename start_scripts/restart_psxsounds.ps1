@@ -12,4 +12,3 @@ $xml.Save($configPath)
 Start-Process -WorkingDirectory $PsxSoundsDir "$PsxSoundsDir\PSXSounds.exe"
 
 #Read-Host -Prompt "Press Enter to exit"
-Invoke-WindowPosition "PSXSounds"

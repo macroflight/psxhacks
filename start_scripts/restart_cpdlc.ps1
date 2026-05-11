@@ -8,7 +8,6 @@ KillPythonScript "psx-acars.py"
 $env:PYTHONPATH = $PsxhacksDevel
 
 Write-Output "Logon code used: $HoppieLogonCode"
-Invoke-WindowPosition "HAFAP/CPDLC"
 & $PsxhacksPython psx-acars.py @CpdlcOptions $HoppieLogonCode
 
 # Read-Host -Prompt "Press Enter to exit"

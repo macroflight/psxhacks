@@ -4,4 +4,3 @@ $Host.UI.RawUI.WindowTitle = "PSX.NET.WeatherRadar"
 KillProcess "PSX.NET.WeatherRadar"
 
 Start-Process -WorkingDirectory $PsxNetWeatherRadarDir "$PsxNetWeatherRadarDir\PSX.NET.WeatherRadar.exe"
-Invoke-WindowPosition "PSX.NET.WeatherRadar"

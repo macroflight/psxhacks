@@ -7,7 +7,6 @@ Set-Location $FrankenusbDir
 
 $env:PYTHONPATH = $PsxhacksDevel
 
-Invoke-WindowPosition "frankenusb"
 & $PsxhacksPython "$PsxhacksDevel\frankenusb.py" @FrankenusbOptions
 
 # Read-Host -Prompt "Press Enter to exit"

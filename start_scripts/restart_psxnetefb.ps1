@@ -14,4 +14,3 @@ KillProcess "PSX.NET.EFB.Windows"
 Start-Process -WorkingDirectory $PsxNetEfbDir "$PsxNetEfbDir\PSX.NET.EFB.Windows.exe"
 
 #Read-Host -Prompt "Press Enter to exit"
-Invoke-WindowPosition "PSX.NET.EFB"

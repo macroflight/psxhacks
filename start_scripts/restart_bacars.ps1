@@ -18,4 +18,3 @@ $xml.Save($configPath)
 
 Start-Process -WorkingDirectory $BacarsDir "$BacarsDir\PSX.Bacars.UI.exe"
 #Read-Host -Prompt "Press Enter to exit"
-Invoke-WindowPosition "BACARS"
