@@ -82,7 +82,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 remoteport = c.raddr.port
             except Exception:  # pylint: disable=broad-exception-caught
                 continue
-            if remoteport != self.args.psx_main_server_port:
+            if remoteport != self.args.psx_port:
                 continue
             if (c.laddr.ip, c.laddr.port) in identified:
                 continue
@@ -165,8 +165,8 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.logger.debug("Starting %s", inspect.currentframe().f_code.co_name)
             try:
                 reader, writer = await asyncio.open_connection(
-                    self.args.psx_main_server_host,
-                    self.args.psx_main_server_port,
+                    self.args.psx_host,
+                    self.args.psx_port,
                 )
             # At least on Windows we get OSError after ~30s if the PSX
             # server is down or unreachable
@@ -266,15 +266,18 @@ class Script():  # pylint: disable=too-many-instance-attributes
             description=__MY_DESCRIPTION__,
             formatter_class=argparse.ArgumentDefaultsHelpFormatter)
         parser.add_argument(
-            '--psx-main-server-host',
+            '--psx-host',
             type=str, action='store', default='127.0.0.1',
             help="Hostname or IP of the PSX main server or router to connect to.",
         )
         parser.add_argument(
-            '--psx-main-server-port',
+            '--psx-port',
             type=int, action='store', default=10747,
             help="The port of the PSX main server or router to connect to.",
         )
+        parser.add_argument('--psx-main-server-host', default=None, help=argparse.SUPPRESS)
+        parser.add_argument('--psx-main-server-port', default=None, help=argparse.SUPPRESS,
+                            type=int)
         parser.add_argument(
             '--check-interval',
             type=float, action='store', default=10.0,
@@ -286,6 +289,16 @@ class Script():  # pylint: disable=too-many-instance-attributes
             help="Print more debug info. Probably only useful for development.",
         )
         self.args = parser.parse_args()
+        if self.args.psx_main_server_host is not None:
+            print("WARNING: --psx-main-server-host is deprecated, use --psx-host",
+                  file=sys.stderr)
+            if self.args.psx_host == '127.0.0.1':
+                self.args.psx_host = self.args.psx_main_server_host
+        if self.args.psx_main_server_port is not None:
+            print("WARNING: --psx-main-server-port is deprecated, use --psx-port",
+                  file=sys.stderr)
+            if self.args.psx_port == 10747:
+                self.args.psx_port = self.args.psx_main_server_port
 
     async def run(self):
         """Start everything."""
