@@ -38,6 +38,7 @@ class _RouterConfigUpstream:  # pylint: disable=missing-class-docstring,too-few-
         if not isinstance(self.port, int):
             raise RouterConfigError("The upstream port must be an integer")
         self.password = data.get('password', None)
+        self.use_session_password = data.get('use_session_password', False)
         self.default = data.get('default', False)
 
 

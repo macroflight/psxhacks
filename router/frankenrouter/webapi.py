@@ -238,9 +238,8 @@ _UPSTREAM_PAGE = (
     '</body>\n</html>\n'
 )
 
-_UPSTREAM_PAGE_PRESET_SECTION = (
-    '<div class="btn-row">\n'
-    '<form action="/api/upstream" method="post" style="flex:1;margin:0">\n'
+_UPSTREAM_PAGE_PRESET_CONNECT = (
+    '<form action="/api/upstream" method="post">\n'
     '<input type="hidden" name="host" value="{host}">\n'
     '<input type="hidden" name="port" value="{port}">\n'
     '<input type="hidden" name="password" value="{password}">\n'
@@ -249,8 +248,10 @@ _UPSTREAM_PAGE_PRESET_SECTION = (
     '<span style="font-size:0.8em;font-weight:400">{host}:{port}</span>'
     '</button>\n'
     '</form>\n'
-    '<form action="/api/upstream" method="post" style="flex:1;margin:0"'
-    ' onsubmit="return fillSessionPwd(this)">\n'
+)
+
+_UPSTREAM_PAGE_PRESET_SESSION_PWD = (
+    '<form action="/api/upstream" method="post" onsubmit="return fillSessionPwd(this)">\n'
     '<input type="hidden" name="host" value="{host}">\n'
     '<input type="hidden" name="port" value="{port}">\n'
     '<input type="hidden" name="password" value="">\n'
@@ -259,7 +260,6 @@ _UPSTREAM_PAGE_PRESET_SECTION = (
     '<span style="font-size:0.8em;font-weight:400">with session password</span>'
     '</button>\n'
     '</form>\n'
-    '</div>\n'
 )
 
 _SESSION_PASSWORD_PAGE = (
@@ -863,12 +863,19 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 if router.config.upstreams:
                     presets_html = '<h2>Predefined upstreams</h2>\n'
                     for upstream in router.config.upstreams:
-                        presets_html += _UPSTREAM_PAGE_PRESET_SECTION.format(
-                            preset_name=upstream.name,
-                            host=upstream.host,
-                            port=upstream.port,
-                            password=upstream.password if upstream.password is not None else "",
-                        )
+                        if upstream.use_session_password:
+                            presets_html += _UPSTREAM_PAGE_PRESET_SESSION_PWD.format(
+                                preset_name=upstream.name,
+                                host=upstream.host,
+                                port=upstream.port,
+                            )
+                        else:
+                            presets_html += _UPSTREAM_PAGE_PRESET_CONNECT.format(
+                                preset_name=upstream.name,
+                                host=upstream.host,
+                                port=upstream.port,
+                                password=upstream.password or "",
+                            )
                 data = {
                     'rest_api_color_scheme': router.config.listen.rest_api_color_scheme,
                     'host': host,
