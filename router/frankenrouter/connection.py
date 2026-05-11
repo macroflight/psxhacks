@@ -10,6 +10,10 @@ import socket
 
 NOACCESS_ACCESS_LEVEL = 'noaccess'
 
+# Name sources that take priority over fallback names set during access checks.
+# A name announced by the client itself always wins over config/session-password defaults.
+_AUTHORITATIVE_NAME_SOURCES = ('name message', 'FRDP IDENT', 'FRDP CLIENTINFO')
+
 # The correct separator
 PSX_PROTOCOL_SEPARATOR = b'\r\n'
 PSX_PROTOCOL_SEPARATOR_LENGTH = len(PSX_PROTOCOL_SEPARATOR)
@@ -357,20 +361,23 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
             return True
         return False
 
-    def update_access_level(self, client_password=None):  # pylint: disable=too-many-branches
+    def update_access_level(self, client_password=None):  # pylint: disable=too-many-branches,too-many-statements
         """Get the access level for connecting client."""
 
         def set_level(access):
+            name_announced = self.display_name_source in _AUTHORITATIVE_NAME_SOURCES
             if access is None:
                 self.logger.info("Setting %s for %s", NOACCESS_ACCESS_LEVEL, self.peername)
                 self.access_level = NOACCESS_ACCESS_LEVEL
-                self.display_name = 'auth pending'
-                self.display_name_source = 'new connection'
+                if not name_announced:
+                    self.display_name = 'auth pending'
+                    self.display_name_source = 'new connection'
             else:
                 self.logger.info("Setting %s for %s", access.level, self.peername)
                 self.access_level = access.level
-                self.display_name = access.display_name
-                self.display_name_source = 'access config'
+                if not name_announced:
+                    self.display_name = access.display_name
+                    self.display_name_source = 'access config'
 
         client_ip = ipaddress.ip_address(self.ip)
         self.logger.info(
@@ -426,6 +433,18 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
                 set_level(access)
                 return
 
+        # No match for config rules; check runtime session password
+        if (
+            client_password is not None and
+            self.router.session_password is not None and
+            self.router.session_password == client_password
+        ):
+            self.logger.info("Access level full granted based on session password")
+            self.access_level = 'full'
+            if self.display_name_source not in _AUTHORITATIVE_NAME_SOURCES:
+                self.display_name = 'SESSIONPWD'
+                self.display_name_source = 'session password'
+            return
         # No match for any rule, deny access
         set_level(None)
 

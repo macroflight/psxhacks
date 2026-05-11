@@ -183,6 +183,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.longest_destination_string = 0
         self.rules = Rules(self)
         self.blocklist = set()
+        self.session_password = None
 
         # Keep track of when we last sent a filter state warning to EICAS
         self.filter_warning_sent = 0

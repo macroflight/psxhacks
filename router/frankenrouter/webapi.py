@@ -5,8 +5,10 @@ import datetime
 import math
 import pathlib
 import re
+import secrets
 import signal
 import statistics
+import string
 import textwrap
 import time
 
@@ -115,6 +117,7 @@ _INDEX_PAGE = (
     '{master_buttons}'
     '<hr>\n'
     '<a href="/upstream" class="btn btn-blue">Change upstream</a>\n'
+    '{sessionpwd_button}'
     '<a href="/shutdown" class="btn btn-red">Shutdown router</a>\n'
     '<hr>\n'
     '<a href="/" class="btn btn-gray">Refresh</a>\n'
@@ -199,14 +202,26 @@ _UPSTREAM_PAGE = (
     '<!DOCTYPE html>\n<html>\n<head>\n'
     '<meta name="color-scheme" content="{rest_api_color_scheme}" />\n' +
     _COMMON_CSS +
-    '\n</head>\n<body>\n'
+    '\n<script>\n'
+    'function fillSessionPwd(form) {{\n'
+    '  var pwd = prompt("Session password for " + form.host.value + ":" + form.port.value);\n'
+    '  if (!pwd) return false;\n'
+    '  form.password.value = pwd;\n'
+    '  return true;\n'
+    '}}\n'
+    '</script>\n'
+    '</head>\n<body>\n'
     '<div class="page-title">'
     '<img src="/static/frankentech.png" alt="">'
     '<h1>Upstream connection</h1>'
     '</div>\n'
+    '<h2>Current connection</h2>\n'
     '<div class="card {status_class}">\n'
-    '<p style="margin:0">{status}</p>\n'
+    '<table>\n'
+    '{current_rows}'
+    '</table>\n'
     '</div>\n'
+    '<h2>Connect manually</h2>\n'
     '<form action="/api/upstream" method="post">\n'
     '<label for="host">Host</label>\n'
     '<input type="text" id="host" name="host" value="{host}">\n'
@@ -224,13 +239,74 @@ _UPSTREAM_PAGE = (
 )
 
 _UPSTREAM_PAGE_PRESET_SECTION = (
-    '<form action="/api/upstream" method="post">\n'
+    '<div class="btn-row">\n'
+    '<form action="/api/upstream" method="post" style="flex:1;margin:0">\n'
     '<input type="hidden" name="host" value="{host}">\n'
     '<input type="hidden" name="port" value="{port}">\n'
     '<input type="hidden" name="password" value="{password}">\n'
-    '<input type="submit" '
-    'value="Switch to {preset_name}: {host}:{port}" class="btn-gray">\n'
+    '<button type="submit" class="btn btn-gray">'
+    'Connect to {preset_name}<br>'
+    '<span style="font-size:0.8em;font-weight:400">{host}:{port}</span>'
+    '</button>\n'
     '</form>\n'
+    '<form action="/api/upstream" method="post" style="flex:1;margin:0"'
+    ' onsubmit="return fillSessionPwd(this)">\n'
+    '<input type="hidden" name="host" value="{host}">\n'
+    '<input type="hidden" name="port" value="{port}">\n'
+    '<input type="hidden" name="password" value="">\n'
+    '<button type="submit" class="btn btn-blue">'
+    'Connect to {preset_name}<br>'
+    '<span style="font-size:0.8em;font-weight:400">with session password</span>'
+    '</button>\n'
+    '</form>\n'
+    '</div>\n'
+)
+
+_SESSION_PASSWORD_PAGE = (
+    '<!DOCTYPE html>\n<html>\n<head>\n'
+    '<meta name="color-scheme" content="{rest_api_color_scheme}" />\n' +
+    _COMMON_CSS +
+    '\n<script>\n'
+    'function copyPassword() {{\n'
+    '  var pwd = document.getElementById("session_pwd").textContent;\n'
+    '  navigator.clipboard.writeText(pwd).then(function() {{\n'
+    '    var btn = document.getElementById("copy_btn");\n'
+    '    btn.textContent = "Copied!";\n'
+    '    setTimeout(function() {{ btn.textContent = "Copy to clipboard"; }}, 2000);\n'
+    '  }});\n'
+    '}}\n'
+    '</script>\n'
+    '</head>\n<body>\n'
+    '<div class="page-title">'
+    '<img src="/static/frankentech.png" alt="">'
+    '<h1>Session password</h1>'
+    '</div>\n'
+    '<div class="card ok">\n'
+    '<p style="margin:0">If you set a session password, anyone can access'
+    ' the master sim using it.</p>\n'
+    '</div>\n'
+    '{password_section}'
+    '<hr>\n'
+    '<a href="/" class="btn btn-gray">Back</a>\n'
+    '</body>\n</html>\n'
+)
+
+_SESSION_PASSWORD_SET_SECTION = (
+    '<div class="card ok">\n'
+    '<p class="note" style="margin:0 0 0.4em">Current session password</p>\n'
+    '<p id="session_pwd" style="font-size:1.3em;font-weight:600;font-family:monospace;'
+    'letter-spacing:0.1em;margin:0">{password}</p>\n'
+    '</div>\n'
+    '<button type="button" id="copy_btn" onclick="copyPassword()" class="btn btn-gray">'
+    'Copy to clipboard</button>\n'
+    '<form action="/api/sessionpwd/remove" method="post">\n'
+    '<input type="submit" value="Remove session password" class="btn-red">\n'
+    '</form>\n'
+)
+
+_SESSION_PASSWORD_UNSET_SECTION = (
+    '<a href="/api/sessionpwd/generate" class="btn btn-green">'
+    'Generate session password</a>\n'
 )
 
 _FLIGHTINFO_PAGE = (
@@ -530,6 +606,10 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                         else 'val'),
                     'connected_sims': ', '.join(sim_names) if sim_names else 'unknown',
                     'master_buttons': master_buttons,
+                    'sessionpwd_button': (
+                        '<a href="/sessionpwd" class="btn btn-blue">Session password</a>\n'
+                        if router.get_router_type() == 'master' else ''
+                    ),
                 }
                 return web.json_response(
                     text=_INDEX_PAGE.format(**data), content_type='text/html')
@@ -731,29 +811,73 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 await asyncio.sleep(1)
                 raise web.HTTPFound('/')
 
+            @routes.get('/sessionpwd')
+            async def handle_sessionpwd_get(_):
+                if router.session_password:
+                    pwd_section = _SESSION_PASSWORD_SET_SECTION.format(
+                        password=router.session_password)
+                else:
+                    pwd_section = _SESSION_PASSWORD_UNSET_SECTION
+                data = {
+                    'rest_api_color_scheme': router.config.listen.rest_api_color_scheme,
+                    'password_section': pwd_section,
+                }
+                return web.json_response(
+                    text=_SESSION_PASSWORD_PAGE.format(**data), content_type='text/html')
+
+            @routes.get('/api/sessionpwd/generate')
+            async def handle_sessionpwd_generate(_):
+                alphabet = string.ascii_letters + string.digits
+                router.session_password = ''.join(
+                    secrets.choice(alphabet) for _ in range(20))
+                router.logger.info("Session password generated")
+                raise web.HTTPFound('/sessionpwd')
+
+            @routes.post('/api/sessionpwd/remove')
+            async def handle_sessionpwd_remove(_):
+                router.session_password = None
+                router.logger.info("Session password removed")
+                raise web.HTTPFound('/sessionpwd')
+
             @routes.get('/upstream')
             async def handle_web_upstream_get(_):
                 connected = router.upstream is not None
+                host = router.config.upstream.host
+                port = router.config.upstream.port
+                status_class = 'ok' if connected else 'warn'
+                status_text = 'Connected' if connected else 'Not connected'
+                preset_name = next(
+                    (u.name for u in router.config.upstreams
+                     if u.host == host and u.port == port),
+                    None,
+                )
+                current_rows = (
+                    f'<tr><td>Status</td><td class="{status_class}">{status_text}</td></tr>\n'
+                    f'<tr><td>Host</td><td class="val">{host}:{port}</td></tr>\n'
+                )
+                if preset_name:
+                    current_rows += (
+                        f'<tr><td>Name</td><td class="val">{preset_name}</td></tr>\n'
+                    )
+                presets_html = ""
+                if router.config.upstreams:
+                    presets_html = '<h2>Predefined upstreams</h2>\n'
+                    for upstream in router.config.upstreams:
+                        presets_html += _UPSTREAM_PAGE_PRESET_SECTION.format(
+                            preset_name=upstream.name,
+                            host=upstream.host,
+                            port=upstream.port,
+                            password=upstream.password if upstream.password is not None else "",
+                        )
                 data = {
                     'rest_api_color_scheme': router.config.listen.rest_api_color_scheme,
-                    'host': router.config.upstream.host,
-                    'port': router.config.upstream.port,
-                    'status': (
-                        f"Connected to {router.config.upstream.host}"
-                        f":{router.config.upstream.port}"
-                        if connected else "Not connected"
-                    ),
-                    'status_class': 'ok' if connected else 'warn',
+                    'host': host,
+                    'port': port,
+                    'status_class': status_class,
+                    'current_rows': current_rows,
                     'password': router.config.upstream.password or "",
-                    'presets': "",
+                    'presets': presets_html,
                 }
-                for upstream in router.config.upstreams:
-                    data['presets'] += _UPSTREAM_PAGE_PRESET_SECTION.format(
-                        preset_name=upstream.name,
-                        host=upstream.host,
-                        port=upstream.port,
-                        password=upstream.password if upstream.password is not None else "",
-                    )
                 return web.json_response(
                     text=_UPSTREAM_PAGE.format(**data), content_type='text/html')
 
