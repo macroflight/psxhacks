@@ -6,7 +6,7 @@ $FlavorDefinitions = @(
     [ordered]@{
         Name        = "AirlineIcao"
         Description = "Airline ICAO code"
-        Options     = @("BAW", "GTI", "BAN", "DLH", "CLX", "HGO", "MPH", "SIA", "UPS")
+        Options     = @("BAW", "GTI", "BAN", "DLH", "CLX", "HGO", "MPH", "SIA", "UPS", "GST")
         Default     = "BAW"
         Type        = "string"
     },
@@ -44,7 +44,7 @@ $FlavorDefinitions = @(
         Options     = @($true, $false)
         Default     = $false
         Type        = "bool"
-    },
+    }
 )
 
 # Inject codemap pickers after AirlineIata for any multi-option named sets.
