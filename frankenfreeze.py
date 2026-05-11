@@ -279,7 +279,7 @@ class FrankenFreeze():  # pylint: disable=too-many-instance-attributes
                     "MSFS not in cloud, PSX in hi cloud layer, disabling hi cloud coverage")
                 data[0] = "0"
                 psx_weather_new = ";".join(data)
-            elif psx_in_cloud == 'lo' and loCloudCov > 0:
+            elif psx_in_cloud == 'low' and loCloudCov > 0:
                 self.logger.info(
                     "MSFS not in cloud, PSX in lo cloud layer, disabling lo cloud coverage")
                 data[3] = "0"
