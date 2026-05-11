@@ -89,6 +89,8 @@ if ($Addon -ne "" -and -not $WindowPositions.ContainsKey($Addon)) {
 
 $keys = if ($Addon -ne "") { @($Addon) } else { $WindowPositions.Keys | Sort-Object }
 
+if ($WindowPositionInitialDelay -gt 0) { Start-Sleep -Seconds $WindowPositionInitialDelay }
+
 foreach ($addon in $keys) {
     $entry       = $WindowPositions[$addon]
     $title       = $entry.Title

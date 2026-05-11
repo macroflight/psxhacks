@@ -6,3 +6,4 @@ KillProcess "PSX.NET"
 Start-Process -WorkingDirectory $PsxNetDir "$PsxNetDir\PSX.NET.exe"
 
 #Read-Host -Prompt "Press Enter to exit"
+Invoke-WindowPosition "PSX.NET"

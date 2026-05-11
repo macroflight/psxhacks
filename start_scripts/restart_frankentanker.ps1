@@ -5,6 +5,7 @@ KillPythonScript "frankentanker.py"
 
 $env:PYTHONPATH = $PsxhacksDevel
 
+Invoke-WindowPosition "frankentanker"
 & $PsxhacksPython "$PsxhacksDevel\frankentanker.py" @FrankentankerOptions
 
 # Read-Host -Prompt "Press Enter to exit"

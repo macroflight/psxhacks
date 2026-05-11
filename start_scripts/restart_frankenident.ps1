@@ -7,6 +7,7 @@ KillPythonScript "frankenrouter_ident.py"
 
 $env:PYTHONPATH = $PsxhacksDevel
 
+Invoke-WindowPosition "frankenident"
 & $PsxhacksPython "$PsxhacksDevel\frankenrouter_ident.py" @FrankenidentOptions
 
 # Read-Host -Prompt "Press Enter to exit"
