@@ -1236,6 +1236,18 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 self.right_seat = not self.right_seat
                 seat = "RIGHT" if self.right_seat else "LEFT"
                 self.logger.info("Seat mode: %s", seat)
+            elif button_config['button type'] == 'SEAT_TOGGLE_WITH_LAYOUT':
+                self.right_seat = not self.right_seat
+                seat = "RIGHT" if self.right_seat else "LEFT"
+                if seat == 'RIGHT':
+                    # right seat layout
+                    self.psx_send_and_set("layout", "2")
+                    # keyboard control RCP R
+                    self.psx_send_and_set("Qi217", "7")
+                else:
+                    self.psx_send_and_set("layout", "1")
+                    self.psx_send_and_set("Qi217", "6")
+                self.logger.info("Seat mode: %s", seat)
             elif button_config['button type'] == 'ADDON':
                 # Send a custom addon= message stored in button_config['value']
                 self.psx_send_and_set("addon", button_config['value'])
