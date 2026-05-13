@@ -1254,7 +1254,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 # First, figure out what seat we want to be in
                 seat = button_config.get('seat', 'TOGGLE')
                 if seat == 'TOGGLE':
-                    seat = "RIGHT" if self.right_seat else "LEFT"
+                    seat = "LEFT" if self.right_seat else "RIGHT"
                 elif seat not in ['RIGHT', 'LEFT']:
                     # Any invalid config becomes the left seat
                     seat = "LEFT"
