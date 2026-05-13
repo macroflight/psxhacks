@@ -1232,22 +1232,51 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                     return
                 self.logger.debug("Sending to PSX: %s => %s", psx_variable, increment)
                 self.psx_send_and_set(psx_variable, increment)
-            elif button_config['button type'] == 'SEAT_TOGGLE':
-                self.right_seat = not self.right_seat
-                seat = "RIGHT" if self.right_seat else "LEFT"
-                self.logger.info("Seat mode: %s", seat)
-            elif button_config['button type'] == 'SEAT_TOGGLE_WITH_LAYOUT':
-                self.right_seat = not self.right_seat
-                seat = "RIGHT" if self.right_seat else "LEFT"
-                if seat == 'RIGHT':
-                    # right seat layout
-                    self.psx_send_and_set("layout", "2")
-                    # keyboard control RCP R
-                    self.psx_send_and_set("Qi217", "7")
-                else:
-                    self.psx_send_and_set("layout", "1")
-                    self.psx_send_and_set("Qi217", "6")
-                self.logger.info("Seat mode: %s", seat)
+            elif button_config['button type'] == 'SEAT_SELECT':
+                current_seat = "RIGHT" if self.right_seat else "LEFT"
+
+                # Should frankenusb swap L/R buttons
+                select_usb_lr_swap = button_config.get(
+                    'select_frankenusb_left_right_swap', True)
+                select_layout = button_config.get(
+                    'select_layout', True)
+                select_human_pilot = button_config.get(
+                    'select_psx_human_pilot_seat', True)
+                layouts = button_config.get(
+                    'layout_left_right', (1, 2))
+
+                # First, figure out what seat we want to be in
+                seat = button_config.get('seat', 'TOGGLE')
+                if seat == 'TOGGLE':
+                    seat = "RIGHT" if self.right_seat else "LEFT"
+                elif seat not in ['RIGHT', 'LEFT']:
+                    # Any invalid config becomes the left seat
+                    seat = "LEFT"
+
+                # Should frankenusb swap all L/R controls in the cabin?
+                if select_usb_lr_swap:
+                    if seat == 'RIGHT':
+                        self.right_seat = True
+                    else:
+                        self.right_seat = False
+
+                # Should we select a layout?
+                if select_layout:
+                    if seat == 'RIGHT':
+                        self.psx_send_and_set("layout", layouts[1])
+                    else:
+                        self.psx_send_and_set("layout", layouts[0])
+
+                # Should we select the human pilot seat?
+                if select_human_pilot:
+                    if seat == 'RIGHT':
+                        # keyboard control RCP R
+                        self.psx_send_and_set("Qi217", "7")
+                    else:
+                        self.psx_send_and_set("Qi217", "6")
+
+                if seat != current_seat:
+                    self.logger.info("SEAT_SELECT %s - new seat is %s", button_config, seat)
             elif button_config['button type'] == 'ADDON':
                 # Send a custom addon= message stored in button_config['value']
                 self.psx_send_and_set("addon", button_config['value'])
