@@ -107,6 +107,7 @@ if ($StartPsxNetGroundCrew ) {
 if ($StartSimObjectRouter ) {
     Write-Output "Starting SimObjectRouter..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_sim_object_router.ps1"
+    Delay 5
     Invoke-WindowPosition "SimObjectRouter"
 }
 
