@@ -38,7 +38,3 @@ KillJavaJar "AerowinxStart.jar"
 # Stop master sim router last, after PSX has had time to shut down
 $masterRouterConfig = ($FrankenrouterMasterOptions | Where-Object { $_ -like "--config-file=*" }) -replace "^--config-file=", ""
 KillPythonScript $masterRouterConfig
-
-Delay 5
-
-Read-Host -Prompt "Done. Enter to close"
