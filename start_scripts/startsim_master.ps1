@@ -11,7 +11,7 @@ function Invoke-WindowPosition([string]$addon) {
 Write-Output "Starting PSX main server..."
 Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_main_server.ps1"
 
-Delay 5
+Delay 1
 
 Write-Output "Starting master sim router..."
 Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_router_master.ps1"
