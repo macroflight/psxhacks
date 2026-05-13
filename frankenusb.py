@@ -1234,6 +1234,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 self.psx_send_and_set(psx_variable, increment)
             elif button_config['button type'] == 'SEAT_SELECT':
                 current_seat = "RIGHT" if self.right_seat else "LEFT"
+                self.logger.info("SEAT_SELECT starting - current seat is %s", current_seat)
 
                 # Should frankenusb swap L/R buttons
                 select_usb_lr_swap = button_config.get(
@@ -1245,6 +1246,11 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 layouts = button_config.get(
                     'layout_left_right', (1, 2))
 
+                self.logger.info("SEAT_SELECT: USB L/R swap: %s", select_usb_lr_swap)
+                self.logger.info("SEAT_SELECT: change layout: %s (layouts=%s)",
+                                 select_layout, layouts)
+                self.logger.info("SEAT_SELECT: change human pilot: %s", select_human_pilot)
+
                 # First, figure out what seat we want to be in
                 seat = button_config.get('seat', 'TOGGLE')
                 if seat == 'TOGGLE':
@@ -1252,6 +1258,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 elif seat not in ['RIGHT', 'LEFT']:
                     # Any invalid config becomes the left seat
                     seat = "LEFT"
+                self.logger.info("SEAT_SELECT: new seat will be %s", seat)
 
                 # Should frankenusb swap all L/R controls in the cabin?
                 if select_usb_lr_swap:
@@ -1276,7 +1283,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                         self.psx_send_and_set("Qi217", "6")
 
                 if seat != current_seat:
-                    self.logger.info("SEAT_SELECT %s - new seat is %s", button_config, seat)
+                    self.logger.info("SEAT_SELECT seat changed %s -> %s", current_seat, seat)
             elif button_config['button type'] == 'ADDON':
                 # Send a custom addon= message stored in button_config['value']
                 self.psx_send_and_set("addon", button_config['value'])
