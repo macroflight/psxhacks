@@ -459,7 +459,7 @@ _FLIGHTINFO_PAGE = (
     '<input type="text" id="eobt" name="eobt" value="{eobt}"></div>\n'
     '</div>\n'
     '<label class="check"><input type="checkbox" name="seat_swap"'
-    ' value="1" {seat_swap_checked}>Seat swap (Captain in left seat)</label>\n'
+    ' value="1" {seat_swap_checked}>Seat swap (Captain in right seat)</label>\n'
     '<div class="grid2">\n'
     '<div><label for="observers">Observers</label>'
     '<textarea id="observers" name="observers">{observers}</textarea></div>\n'
