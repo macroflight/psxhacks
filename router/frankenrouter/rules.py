@@ -969,13 +969,14 @@ class Rules():  # pylint: disable=too-many-public-methods
             # Drop Qs357 from PSX.NET, it should never touch the brake
             if 'PSX.NET' in self.sender.display_name:
                 return self.myreturn(
-                            RulesAction.DROP,
-                            RulesCode.KEYVALUE_FILTERED_INGRESS,
-                            message=f"dropped Qs357={value} from PSX.NET"
-                        )
+                    RulesAction.DROP,
+                    RulesCode.KEYVALUE_FILTERED_INGRESS,
+                    message=f"dropped Qs357={value} from PSX.NET"
+                )
             # Parking brake release fix
             if not self.sender.upstream and self.router.get_router_type() == 'slave':
-                if self.router.cache.get_value('Qh397') == 1 and self.router.cache.get_age('Qh397') > 5.0:
+                if (self.router.cache.get_value('Qh397') == 1 and
+                        self.router.cache.get_age('Qh397') > 5.0):
                     (left, right) = value.split(';', 1)
                     if int(left) > 990 and int(right) > 990:
                         # Brakes pressed to almost 100%, ensure release.
