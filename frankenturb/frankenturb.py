@@ -201,6 +201,8 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self.manual_wind_dir = 0   # degrees — stored even when mode is not "manual"
         self.manual_wind_spd = 0   # knots
         self.psx_wind = None       # (dir_deg, speed_kt) from last PSX fetch, or None
+        self.mcduL = None
+        self.mcduR = None
         self.mcduC = None
         self.active_mcdus = []
         self.pending_paint_tasks = {}
@@ -727,8 +729,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
             """Run when we are disconnected from PSX."""
             self.logger.info("PSX DISCONNECTED")
             self.psx_connected = False
-            if self.mcduC:
-                self.mcduC.unplug()
+            for mcdu in [self.mcduL, self.mcduR, self.mcduC]:
+                if mcdu:
+                    mcdu.unplug()
             for task in self.pending_paint_tasks.values():
                 task.cancel()
             self.pending_paint_tasks.clear()
@@ -740,11 +743,26 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.psx.send("demand", "LeftPfdAlt")
             self.psx_connected = True
             self.psx_paused = False
-            if self.mcduC is None:
-                self.mcduC = psx.MCDU("C", "L", 5, "<TURB", self.mcduEvent)
-            self.mcduC.plugin_to(self.psx)
             self.active_mcdus.clear()
-            self.active_mcdus.append(self.mcduC)
+            cdus = self.args.cdus.upper()
+            side = self.args.menu_side.upper()
+            row = self.args.menu_row
+            text = "<TURB" if side == "L" else "TURB>"
+            if "L" in cdus:
+                if self.mcduL is None:
+                    self.mcduL = psx.MCDU("L", side, row, text, self.mcduEvent)
+                self.mcduL.plugin_to(self.psx)
+                self.active_mcdus.append(self.mcduL)
+            if "R" in cdus:
+                if self.mcduR is None:
+                    self.mcduR = psx.MCDU("R", side, row, text, self.mcduEvent)
+                self.mcduR.plugin_to(self.psx)
+                self.active_mcdus.append(self.mcduR)
+            if "C" in cdus:
+                if self.mcduC is None:
+                    self.mcduC = psx.MCDU("C", side, row, text, self.mcduEvent)
+                self.mcduC.plugin_to(self.psx)
+                self.active_mcdus.append(self.mcduC)
 
         try:
             self.logger.debug("Starting %s", inspect.currentframe().f_code.co_name)
@@ -850,6 +868,21 @@ class Script():  # pylint: disable=too-many-instance-attributes
             '--psx-main-server-port',
             type=int, action='store', default=10747,
             help="The port of the PSX main server or router to connect to.",
+        )
+        parser.add_argument(
+            '--cdus',
+            type=str, action='store', default='C',
+            help="Which CDUs to set up (any combination of L, R, C).",
+        )
+        parser.add_argument(
+            '--menu-side',
+            type=str, action='store', default='L', choices=['L', 'R'],
+            help="Which side of the CDU menu to place the TURB entry on.",
+        )
+        parser.add_argument(
+            '--menu-row',
+            type=int, action='store', default=6,
+            help="Row (1-6) of the CDU menu to place the TURB entry on.",
         )
         parser.add_argument(
             '--rate',
