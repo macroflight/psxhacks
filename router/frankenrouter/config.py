@@ -98,12 +98,7 @@ class _RouterConfigSharedinfo:  # pylint: disable=missing-class-docstring,too-fe
 
 class _RouterConfigFiltering:  # pylint: disable=missing-class-docstring,too-few-public-methods
     def __init__(self, data):
-        self.tiller = data.get('tiller', False)
-        self.tiller_smallest_movement = data.get('tiller_smallest_movement', 10)
-        self.tiller_center = data.get('tiller_center', 25)
-        if self.tiller_center < 2 * self.tiller_smallest_movement:
-            raise RouterConfigError(
-                "tiller_center too small in relation to tiller_smallest_movemeent")
+        pass
 
 
 class _RouterConfigPerformance:  # pylint: disable=missing-class-docstring,too-few-public-methods
