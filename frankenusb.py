@@ -891,6 +891,12 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 })
             return
 
+        # Block axis control in stepped reverse modes
+        stepped_mode = self.axis_reverse_mode.get(joystick_name, {}).get(event.axis)
+        if stepped_mode in ('reverse_idle', 'reverse_full', 'reverse_idle_back'):
+            self.logger.debug("Stepped reverse mode %s active, axis has no control", stepped_mode)
+            return
+
         # Normal (non-button) mode
         reverse = bool(get_axis_mode(event.axis) == 'reverse')
         axis_position = event.value
@@ -1017,6 +1023,73 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             self.logger.debug("Axis not latched, NOT moving PSX throttle(s)")
         self.logger.debug("EXITING!")
 
+    async def handle_stepped_reverse_toggle(self, joystick_name, button_config):
+        """Handle STEPPED_REVERSE_TOGGLE button press.
+
+        Cycles through four states on each button press:
+          normal → reverse_idle → reverse_full → reverse_idle_back → normal
+
+        Transitions to/from normal require the axis to be near idle.
+        In reverse_idle, reverse_full and reverse_idle_back modes the axis
+        has no control over the throttle.
+        """
+        axis = button_config['axis']
+        axis_config = self.config[joystick_name]['axis motion'][axis]
+        axis_position = self.joystick_get_axis_position(joystick_name, axis)
+
+        if joystick_name not in self.axis_reverse_mode:
+            self.axis_reverse_mode[joystick_name] = {}
+        if axis not in self.axis_reverse_mode[joystick_name]:
+            self.axis_reverse_mode[joystick_name][axis] = 'normal'
+        current_mode = self.axis_reverse_mode[joystick_name][axis]
+
+        unlocked_min = axis_config['reverse lever unlocked range'][0]
+        unlocked_max = axis_config['reverse lever unlocked range'][1]
+        axis_near_idle = unlocked_min <= axis_position <= unlocked_max
+
+        if current_mode == 'normal':
+            if not axis_near_idle:
+                self.logger.info(
+                    "STEPPED_REVERSE_TOGGLE: cannot enter reverse, axis not near idle (%s)",
+                    axis_position)
+                return
+            self.logger.info("STEPPED_REVERSE_TOGGLE: normal -> reverse_idle")
+            self.axis_reverse_mode[joystick_name][axis] = 'reverse_idle'
+            await self.psx_axis_queue.put({
+                'variable': axis_config['psx variable'],
+                'indexes': axis_config['engine indexes'],
+                'value': axis_config['psx reverse idle'],
+            })
+        elif current_mode == 'reverse_idle':
+            self.logger.info("STEPPED_REVERSE_TOGGLE: reverse_idle -> reverse_full")
+            self.axis_reverse_mode[joystick_name][axis] = 'reverse_full'
+            await self.psx_axis_queue.put({
+                'variable': axis_config['psx variable'],
+                'indexes': axis_config['engine indexes'],
+                'value': axis_config['psx reverse full'],
+            })
+        elif current_mode == 'reverse_full':
+            self.logger.info("STEPPED_REVERSE_TOGGLE: reverse_full -> reverse_idle_back")
+            self.axis_reverse_mode[joystick_name][axis] = 'reverse_idle_back'
+            await self.psx_axis_queue.put({
+                'variable': axis_config['psx variable'],
+                'indexes': axis_config['engine indexes'],
+                'value': axis_config['psx reverse idle'],
+            })
+        elif current_mode == 'reverse_idle_back':
+            if not axis_near_idle:
+                self.logger.info(
+                    "STEPPED_REVERSE_TOGGLE: cannot return to normal, axis not near idle (%s)",
+                    axis_position)
+                return
+            self.logger.info("STEPPED_REVERSE_TOGGLE: reverse_idle_back -> normal")
+            self.axis_reverse_mode[joystick_name][axis] = 'normal'
+            await self.psx_axis_queue.put({
+                'variable': axis_config['psx variable'],
+                'indexes': axis_config['engine indexes'],
+                'value': axis_config['psx idle'],
+            })
+
     async def handle_axis_motion(self, event):  # pylint: disable=too-many-branches
         """Handle any axis motion."""
         try:
@@ -1107,6 +1180,9 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 if direction == 'down':
                     await self.handle_throttle_reverse_button(
                         'button', joystick_name, event, button_config, None)
+            elif button_config['button type'] == 'STEPPED_REVERSE_TOGGLE':
+                if direction == 'down':
+                    await self.handle_stepped_reverse_toggle(joystick_name, button_config)
             elif button_config['button type'] == 'INCREMENT':
                 psx_var = self.translate_var(button_config['psx variable'])
                 value = int(self.psx.get(psx_var))
