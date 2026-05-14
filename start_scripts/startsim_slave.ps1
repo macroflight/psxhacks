@@ -25,6 +25,18 @@ if ($StartFrankenident ) {
 Write-Output "Starting PSX main clients..."
 Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_psx_clients.ps1"
 
+if ($StartPsxNetVatsim ) {
+    Write-Output "Starting PSX.NET.VATSIM..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_vatsim.ps1"
+    # Note: we position this window at the end since the app takes long to start sometimes
+}
+
+if ($StartVpilot ) {
+    Write-Output "Starting vPilot..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_vpilot.ps1"
+    Invoke-WindowPosition "vPilot"
+}
+
 if ($StartPsxNetMsfsRouter ) {
     Write-Output "Starting PSX.NET.MSFS.Router..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_msfs_router.ps1"
@@ -61,19 +73,6 @@ if ($StartEfb ) {
     Invoke-WindowPosition "PSX.NET.EFB"
 }
 
-if ($StartVpilot ) {
-    Write-Output "Starting vPilot..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_vpilot.ps1"
-    Invoke-WindowPosition "vPilot"
-}
-
-if ($StartPsxNetVatsim ) {
-    Write-Output "Starting PSX.NET.VATSIM..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_vatsim.ps1"
-    Delay 10
-    Invoke-WindowPosition "PSX.NET.VATSIM"
-}
-
 if ($StartFrankencduproxy ) {
     Write-Output "Starting FrankenCDU proxy..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankencduproxy.ps1"
@@ -84,6 +83,9 @@ if ($StartCsCdu ) {
     Write-Output "Starting CS CDU..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_cs_cdu.ps1"
 }
+
+Delay 10
+Invoke-WindowPosition "PSX.NET.VATSIM"
 
 if ($StopBeforeMsfsStart) {
     Read-Host -Prompt "Now start MSFS and enter free flight, then press Enter"
