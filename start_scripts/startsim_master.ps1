@@ -19,6 +19,13 @@ Invoke-WindowPosition "frankenrouter master"
 
 Delay 5
 
+if ($StartFrankenidentMaster ) {
+    Write-Output "Starting FrankenIDENT..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenident_master.ps1"
+    Invoke-WindowPosition "frankenident_master"
+}
+
+
 if ($StartBacars ) {
     Write-Output "Starting BACARS..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_bacars.ps1"

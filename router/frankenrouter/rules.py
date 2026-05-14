@@ -136,6 +136,7 @@ class RulesCode(enum.Enum):
     KEYVALUE_FILTER_EGRESS = enum.auto()
     KEYVALUE_NORMAL = enum.auto()
     SPEEDBRAKE_OVERRIDE = enum.auto()
+    PARKING_BRAKE_FORCE_RELEASE = enum.auto()
 
 
 class Rules():  # pylint: disable=too-many-public-methods
@@ -873,9 +874,11 @@ class Rules():  # pylint: disable=too-many-public-methods
         if key == 'layout':
             return self.handle_layout()
 
-        if (key in self.router.config.psx.filter_from_other_sim and
+        if (
+                key in self.router.config.psx.filter_from_other_sim and
                 self.sender.is_frankenrouter and
-                self.router.config.identity.simulator != self.sender.simulator_name):
+                self.router.config.identity.simulator != self.sender.simulator_name
+        ):
             self.logger.info(
                 "Dropping %s from other-sim frankenrouter %s", key, self.sender.simulator_name)
             return self.myreturn(RulesAction.DROP, RulesCode.KEYVALUE_FILTERED_INGRESS_SIM_LOCAL)
@@ -955,6 +958,34 @@ class Rules():  # pylint: disable=too-many-public-methods
                             message=(
                                 f"filtered flight control {key} as we are not the " +
                                 f"flying sim {flying}"
+                            )
+                        )
+
+        # Testing a parking brake fix to make it less likely they get
+        # stuck on.
+        # Qs357="Brakes"; Mode=ECON; Min=3; Max=9;
+        # Qh397="ParkBrkLev"; Mode=ECON; Min=0; Max=1;
+        if key == 'Qs357':
+            # Drop Qs357 from PSX.NET, it should never touch the brake
+            if 'PSX.NET' in self.sender.display_name:
+                return self.myreturn(
+                            RulesAction.DROP,
+                            RulesCode.KEYVALUE_FILTERED_INGRESS,
+                            message=f"dropped Qs357={value} from PSX.NET"
+                        )
+            # Parking brake release fix
+            if not self.sender.upstream and self.router.get_router_type() == 'slave':
+                if self.router.cache.get_value('Qh397') == 1 and self.router.cache.get_age('Qh397') > 5.0:
+                    (left, right) = value.split(';', 1)
+                    if int(left) > 990 and int(right) > 990:
+                        # Brakes pressed to almost 100%, ensure release.
+                        # Drop this message but RulesCode ensures we send
+                        # Qs357=1000;1000 + Qh397=0
+                        return self.myreturn(
+                            RulesAction.DROP,
+                            RulesCode.PARKING_BRAKE_FORCE_RELEASE,
+                            message=(
+                                f"Qs357 near max ({value}), forcing parking brake release"
                             )
                         )
 

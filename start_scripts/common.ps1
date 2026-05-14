@@ -127,6 +127,7 @@ $FrankenusbOptions  = @()
 $FrankenwindOptions  = @()
 $FrankenturbOptions = @()
 $FrankenidentOptions = @()
+$FrankenidentMasterOptions = @("--psx-port=10748")
 $FrankenutilOptions = @()
 $FrankencduproxyOptions = @()
 
@@ -143,6 +144,7 @@ $StartFrankenusb    = $false
 $StartFrankenwind   = $false
 $StartFrankenturb   = $false
 $StartFrankenident  = $false
+$StartFrankenidentMaster = $false
 $StartFrankenutil   = $false
 
 $StartPsxSounds     = $false
@@ -198,6 +200,7 @@ $SimAddonNames = [ordered]@{
     "frankenwind"          = "FrankenWind"
     "frankenturb"          = "FrankenTurb"
     "frankenident"         = "FrankenIDENT"
+    "frankenident_master"  = "FrankenIDENT Master"
     "frankenutil"          = "FrankenUtil"
     "frankencduproxy"      = "FrankenCDU Proxy"
     "frankenrouter slave"    = "FrankenRouter (slave)"
