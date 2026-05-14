@@ -87,7 +87,10 @@ if ($Addon -ne "" -and -not $WindowPositions.ContainsKey($Addon)) {
     exit 1
 }
 
+$noRetry = ($Addon -eq "")
 $keys = if ($Addon -ne "") { @($Addon) } else { $WindowPositions.Keys | Sort-Object }
+
+if (-not $noRetry -and $WindowPositionInitialDelay -gt 0) { Start-Sleep -Seconds $WindowPositionInitialDelay }
 
 foreach ($addon in $keys) {
     $entry       = $WindowPositions[$addon]
@@ -106,6 +109,7 @@ foreach ($addon in $keys) {
             $match = $windows | Where-Object { $_.Title -like "*$title*" } | Select-Object -First 1
         }
         if ($null -eq $match) {
+            if ($noRetry) { break }
             Start-Sleep -Milliseconds ([int]($WindowPositionSleepSeconds * 1000))
             $elapsed += $WindowPositionSleepSeconds
         }
