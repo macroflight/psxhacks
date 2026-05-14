@@ -34,7 +34,7 @@ from frankenrouter.webapi import RouterWebAPI
 __MYNAME__ = 'frankenrouter'
 __MY_DESCRIPTION__ = 'A PSX Router'
 
-__VERSION__ = '1.3.1'
+__VERSION__ = '1.3.2'
 
 # If we have no upstream connection and no cached data, assume this
 # version.

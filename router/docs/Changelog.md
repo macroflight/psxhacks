@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-05-14: version 1.3.2
+
+- Added flight information page in the router web UI. This can be used
+  as a scratchpad for shared cockpit data, e.g who sits in which seat,
+  which route we are flying, airframe, etc.
+- Added a "session password" feature - the master sim owner can now
+  generate a random session password and shared that with the crew,
+  who can use that instead of a normal static password to connect to
+  the master sim router. This is intended both to make it easier to
+  handle multiple master sims, but also to make it less likely that
+  people accidentally connect to an active master sim that is in use
+  without realizing it.
+- Router web UI revamped
+- Elevation and traffic filters easier to use
+
 ## 2026-05-03: version 1.3.0
 
 - Router network error reporting: each router now includes an `errors`
