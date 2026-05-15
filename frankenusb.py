@@ -1329,6 +1329,8 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                     'select layout', True)
                 select_human_pilot = button_config.get(
                     'select psx human pilot seat', True)
+                select_psxnetvatsim_acp = button_config.get(
+                    'select psxnetvatsim acp', True)
                 layouts = button_config.get(
                     'layout left right', (1, 2))
 
@@ -1336,6 +1338,8 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 self.logger.info("SEAT_SELECT: change layout: %s (layouts=%s)",
                                  select_layout, layouts)
                 self.logger.info("SEAT_SELECT: change human pilot: %s", select_human_pilot)
+                self.logger.info("SEAT_SELECT: change PSX.NET.VATSIM ACP: %s",
+                                 select_psxnetvatsim_acp)
 
                 # First, figure out what seat we want to be in
                 seat = button_config.get('seat', 'TOGGLE')
@@ -1367,6 +1371,13 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                         self.psx_send_and_set("Qi217", "7")
                     else:
                         self.psx_send_and_set("Qi217", "6")
+
+                # Should we select PSX.NET.VATSIM ACP?
+                if select_psxnetvatsim_acp:
+                    if seat == 'RIGHT':
+                        self.psx_send_and_set("addon", "PSXNETVATSIM:SELECT_ACP:RIGHT")
+                    else:
+                        self.psx_send_and_set("addon", "PSXNETVATSIM:SELECT_ACP:LEFT")
 
                 if seat != current_seat:
                     self.logger.info("SEAT_SELECT seat changed %s -> %s", current_seat, seat)
