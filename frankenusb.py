@@ -1321,13 +1321,13 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
 
                 # Should frankenusb swap L/R buttons
                 select_usb_lr_swap = button_config.get(
-                    'select_frankenusb_left_right_swap', True)
+                    'select frankenusb left right swap', True)
                 select_layout = button_config.get(
-                    'select_layout', True)
+                    'select layout', True)
                 select_human_pilot = button_config.get(
-                    'select_psx_human_pilot_seat', True)
+                    'select psx human pilot seat', True)
                 layouts = button_config.get(
-                    'layout_left_right', (1, 2))
+                    'layout left right', (1, 2))
 
                 self.logger.info("SEAT_SELECT: USB L/R swap: %s", select_usb_lr_swap)
                 self.logger.info("SEAT_SELECT: change layout: %s (layouts=%s)",
