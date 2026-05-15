@@ -129,6 +129,7 @@ class RulesCode(enum.Enum):
     EXIT = enum.auto()
     PBSKAQ = enum.auto()
     LAYOUT = enum.auto()
+    PSXNETVATSIM = enum.auto()
     KEYVALUE_FILTERED_INGRESS_SIM_LOCAL = enum.auto()
     KEYVALUE_FILTERED_EGRESS_SIM_LOCAL = enum.auto()
     KEYVALUE_FILTERED_INGRESS = enum.auto()
@@ -565,7 +566,7 @@ class Rules():  # pylint: disable=too-many-public-methods
             message=f"Unsupported FRDP message type {message_type}: {self.line}"
         )
 
-    def handle_addon(self, rest):
+    def handle_addon(self, rest):  # pylint: disable=too-many-return-statements
         """Handle an addon= message."""
         try:
             (addon, payload) = rest.split(":", 1)
@@ -598,6 +599,15 @@ class Rules():  # pylint: disable=too-many-public-methods
                     message=f"FRDP version mismatch in message: {self.line}"
                 )
             return self.handle_addon_frankenrouter(payload)
+
+        # Drop addon=PSXNETVATSIM:SELECT_ACP:* from other sims
+        if addon == 'PSXNETVATSIM':
+            if self.sender.is_frankenrouter:
+                if self.router.config.identity.simulator != self.sender.simulator_name:
+                    self.logger.info(
+                        "Dropping addon=PSXNETVATSIM from other sim %s: %s",
+                        self.sender.simulator_name, self.line)
+                    return self.myreturn(RulesAction.DROP, RulesCode.PSXNETVATSIM)
 
         # Unhandled addon messages should be forwarded, but only from
         # clients that are allowed to write.
