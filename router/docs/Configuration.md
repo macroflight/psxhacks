@@ -33,12 +33,19 @@ All sections are optional. If you omit a section, the router will use
 some safe default (e.g allow connections from 127.0.0.1, not log
 traffic, etc.)
 
+Note that some sections have two brackets around the name. This means
+that that section can be listed more than once in the file. E.g
+`[[access]]`, NOT `[access]`.
+
 ### `[identity]`
 
 - `simulator`: a string desribing the name of the simulator the router
   is located in.
 - `router`: a name describing the router. If you only have one router
   in your sim, you can use the same name as for the simulator.
+- `type`: set this to "master" (master router in a shared cockpit
+  setup), "slave" (router in a slave sim in a shared cockpit setup) or
+  "standalone" (single router not part of a shared cockpit setup).
 - `stop_minded`: if you want the router to stop if encountering
   unhandled but not necessarily fatal problems, set this to
   true. Useful for e.g router development.
@@ -50,21 +57,20 @@ Example:
 [identity]
 simulator = "FrankenSim"
 router = "router1"
-stop_minded = false
+type = "slave"
 ```
 
 ### `[listen]`
 
 - `port`: the port number the router should listen on
-- `rest_api_port`: if this is set, the REST API is started and listens on this port
+- `rest_api_port`: the port the router web interface and REST API
+  should listen to. Defaults to 8747. If you do not want to use the
+  web interface, set to false.
 
 Note: the normal port for a PSX router is 10748. If you want to use
 the router as a drop-in replacement for your PSX main server for a
 shared cockpit setup, you probably want to use port 10747, as your
 addons will already be configured to connect to that port.
-
-### `[upstream]`
-DEPRECATED, use [[upstream]] instead
 
 ### `[[upstream]]`
 
@@ -158,19 +164,12 @@ Example:
 ```text
 [psx]
 variables = 'C:\fs\PSX\Variables.txt
-filter_elevation = true
 ```
 
 ### `[[access]]`
-
-This section can be listed (and usually will be) listed several times
-in the file.
-
-**Important: this section should have two brackets before and after
-its name, i.e `[[access]]`, NOT `[access]`.**
-
-Each access section describes one rule that control who can connect to
-the router and what access level (e.g full, read-only) they get.
+This section can be listed several times in the file. Each access
+section describes one rule that control who can connect to the router
+and what access level (e.g full, read-only) they get.
 
 Each client will be given access based on its IP address, whether it
 provided a password, etc.
@@ -208,18 +207,18 @@ Example:
 
 ```text
 [[access]]
-display_name = "Any client"
-match_ipv4 = [ "ANY" ]
+display_name = "Main sim PC"
+match_ipv4 = [ "127.0.0.1/32", "192.168.86.9/32" ]
 level = "full"
 
 [[access]]
-display_name = "Any local client"
-match_ipv4 = [ "127.0.0.1/32", "192.168.86.34/32" ]
+display_name = "Remote CDU on iPad"
+match_ipv4 = [ "192.168.86.8/32" ]
 level = "full"
 
 [[access]]
-display_name = "Ventus"
-match_ipv4 = [ "192.168.86.2/32" ]
+display_name = "A board in my sim I/O network"
+match_ipv4 = [ "192.168.52.0/24" ]
 level = "full"
 
 # RemoteSim can only connect from this IP address and must provide a password
@@ -227,13 +226,30 @@ level = "full"
 display_name = "RemoteSim"
 match_ipv4 = [ "123.123.123.123/32" ]
 match_password = "some secret"
-level = "full"
+level = "full"`
 
+# RemoteSim2 can connect if a password is provided
 [[access]]
-display_name = "CDUPAD"
-match_ipv4 = [ "192.168.86.8/32" ]
+display_name = "RemoteSim2"
+match_password = "some other secret"
 level = "full"
 
+# Anyone can connect if they know the session password
+# (set in the master sim router web interface)
+[[access]]
+display_name = "Sim using session password"
+use_session_password = true
+```
+
+If you want any addon or router to be able to connect to your router
+without a password (only use if there's a firewall between you and the
+Internet):
+
+```text
+[[access]]
+display_name = "Any client"
+match_ipv4 = [ "ANY" ]
+level = "full"
 ```
 
 ### `[[check]]`
@@ -243,9 +259,6 @@ expected number of various addons connected to the sim.
 
 This section can be listed (and usually will be) listed several times
 in the file.
-
-**Important: this section should have two brackets before and after
-its name, i.e `[[check]]`, NOT `[check]`.**
 
 - `checktype`:
     - If set to `is_frankenrouter`, the number of connected
