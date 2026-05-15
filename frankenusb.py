@@ -1372,14 +1372,14 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 self.psx_send_and_set("addon", button_config['value'])
             elif button_config['button type'] == 'RADIO_TUNE_TOGGLE_KNOB':
                 self.rotselrcp_knob = 'big' if self.rotselrcp_knob == 'small' else 'small'
-                rcp = "R" if self.right_seat else 'L'
             elif button_config['button type'] == 'RADIO_TUNE':
                 turn = int(button_config['value'])
                 elems = ["0", "0", "0"]
                 index = 1 if self.rotselrcp_knob == 'big' else 2
                 elems[index] = str(turn)
                 new_psx_value = ";".join(elems)
-                self.psx_send_and_set(self.translate_var(button_config['psx variable']), new_psx_value)
+                psx_var = self.translate_var(button_config['psx variable'])
+                self.psx_send_and_set(psx_var, new_psx_value)
             else:
                 raise FrankenUsbException(f"Unknown button type {button_config['button type']}")
             # End of helper
