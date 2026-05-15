@@ -968,13 +968,6 @@ class Rules():  # pylint: disable=too-many-public-methods
         # Qs357="Brakes"; Mode=ECON; Min=3; Max=9;
         # Qh397="ParkBrkLev"; Mode=ECON; Min=0; Max=1;
         if key == 'Qs357':
-            # Drop Qs357 from PSX.NET, it should never touch the brake
-            if 'PSX.NET' in self.sender.display_name:
-                return self.myreturn(
-                    RulesAction.DROP,
-                    RulesCode.KEYVALUE_FILTERED_INGRESS,
-                    message=f"dropped Qs357={value} from PSX.NET"
-                )
             # Parking brake release fix
             if not self.sender.upstream and self.router.get_router_type() == 'slave':
                 if (self.router.cache.get_value('Qh397') == 1 and
