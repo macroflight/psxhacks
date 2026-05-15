@@ -441,9 +441,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.logger.info("")
         self.logger.info("-" * HEADER_LINE_LENGTH)
         self.logger.info(
-            ("This router \"%s\" port %d, %d/%d queue upstream/clients, uptime %d s" +
+            ("This %s router \"%s\" port %d, %d/%d queue upstream/clients, uptime %d s" +
              ", API port %s, cache=%s"),
-            self.config.identity.simulator, self.config.listen.port,
+            self.config.identity.type, self.config.identity.simulator, self.config.listen.port,
             self.messagequeue_from_upstream.qsize(),
             self.messagequeue_from_clients.qsize(),
             int(time.perf_counter() - self.starttime),
@@ -1613,7 +1613,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         if self.uuid is None:
             self.logger.info("No own UUID, cannot send sharedinfo")
             return
-        if not self.config.sharedinfo.master:
+        if self.config.identity.type != 'master':
             self.logger.debug("Not the SHAREDINFO master, not sending")
             return
         payload = {
@@ -1785,7 +1785,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             if self.upstream.is_frankenrouter:
                 # We are not standalone, do nothing
                 return
-            if self.config.sharedinfo.master:
+            if self.config.identity.type == 'master':
                 # We are a designated sharedinfo master, ensure filters off
                 if self.filter_elevation:
                     self.logger.info("Standalone or master sim - elevation filter disabled")

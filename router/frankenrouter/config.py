@@ -14,6 +14,11 @@ class _RouterConfigIdentity:  # pylint: disable=missing-class-docstring,too-few-
         self.simulator = data.get('simulator', "Unknown Sim")
         self.router = data.get('router', "Unknown Router")
         self.stop_minded = data.get('stop_minded', False)
+        self.type = data.get('type', 'unknown')
+        if self.type not in ('master', 'slave', 'standalone', 'unknown'):
+            raise RouterConfigError(
+                f"identity.type must be 'master', 'slave', 'standalone', or 'unknown'; "
+                f"got '{self.type}'")
 
 
 class _RouterConfigListen:  # pylint: disable=missing-class-docstring,too-few-public-methods
@@ -225,6 +230,15 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
         self.psx = _RouterConfigPsx(config.get('psx', {}))
         self.performance = _RouterConfigPerformance(config.get('performance', {}))
         self.sharedinfo = _RouterConfigSharedinfo(config.get('sharedinfo', {}))
+        if self.sharedinfo.master:
+            if self.identity.type == 'master':
+                raise RouterConfigError(
+                    "Both [sharedinfo] master and [identity] type='master' are set; "
+                    "remove the deprecated [sharedinfo] master setting")
+            self.logger.warning(
+                "Config: [sharedinfo] master is deprecated; use type = 'master' "
+                "in [identity] instead")
+            self.identity.type = 'master'
         self.filtering = _RouterConfigFiltering(config.get('filtering', {}))
 
         # To handle the old upstream format, we check if we get a list
@@ -247,6 +261,8 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
         else:
             # Store all defined upstreams in self.upstreams, but also
             # store the default one in self.upstream.
+            if len(config['upstream']) == 1:
+                config['upstream'][0]['default'] = True
             default_upstream = None
             self.upstreams = []
             for elem in config['upstream']:
@@ -258,6 +274,12 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
                     default_upstream = copy.deepcopy(this_upstream)
                 self.upstreams.append(this_upstream)
             self.upstream = default_upstream
+
+        if self.identity.type == 'master':
+            if len(self.upstreams) != 1 or self.upstreams[0].password is not None:
+                raise RouterConfigError(
+                    "Your router is configured to be a master router and then only a single "
+                    "non-password upstream is permitted")
 
         self.access = []
         if 'access' in config:

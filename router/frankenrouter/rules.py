@@ -257,7 +257,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         trigger a SHAREDINFO broadcast so all routers update their filters.
         Otherwise forward upstream toward the master.
         """
-        if self.router.config.sharedinfo.master:
+        if self.router.config.identity.type == 'master':
             self.router.sharedinfo['elevation_source_simulator'] = payload
             self.logger.info("SET elevation_source_simulator to %s",
                              self.router.sharedinfo['elevation_source_simulator'])
@@ -275,7 +275,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         trigger a SHAREDINFO broadcast so all routers update their filters.
         Otherwise forward upstream toward the master.
         """
-        if self.router.config.sharedinfo.master:
+        if self.router.config.identity.type == 'master':
             self.router.sharedinfo['traffic_source_simulator'] = payload
             self.router.frdp_sharedinfo_requested = True
             return self.myreturn(RulesAction.DROP, RulesCode.FRDP_TRAFFIC_SOURCE)
@@ -427,18 +427,10 @@ class Rules():  # pylint: disable=too-many-public-methods
             # Drop message
             return self.myreturn(RulesAction.DROP, RulesCode.FRDP_SHAREDINFO)
 
-        if self.router.config.sharedinfo.master:
-            # If we are supposed to be the master sim but we receive a
-            # SHAREDINFO message, complain, then decide who gets to be
-            # master (use highest UUID) and continue.
-            self.logger.warning(
-                "SHAREDINFO message received from %s, but we are supposed to be the master",
-                sharedinfo['master_uuid'])
-            if self.router.uuid < sharedinfo['master_uuid']:
-                self.logger.warning("ur UUID is lower, relinquish master role for this session")
-                self.router.config.sharedinfo.master = False
-            else:
-                self.logger.warning("Our UUID is higher, keeping master role")
+        if self.router.config.identity.type == 'master':
+            raise SystemExit(
+                f"SHAREDINFO message received from {sharedinfo['master_uuid']}, "
+                f"but this router is configured as master. This should never happen.")
 
         # Merge data from sharedinfo package into our own variables
         self.router.sharedinfo['master_uuid'] = sharedinfo['master_uuid']
@@ -453,7 +445,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         # Update local filter state based on source assignments in SHAREDINFO.
         # Do NOT trigger frdp_sharedinfo_requested to avoid a broadcast loop.
         # The master router never updates its own filters from SHAREDINFO.
-        if not self.router.config.sharedinfo.master:
+        if self.router.config.identity.type != 'master':
             own_sim = self.router.config.identity.simulator
             filter_changed = False
             if 'elevation_source_simulator' in sharedinfo:
