@@ -172,6 +172,9 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         # HDG/TRK or ALTITUDE)
         self.tmboeing_mode = None
 
+        # Active mode for each MODAL_ROTARY, keyed by 'rotary id'
+        self.modal_rotary_mode = {}
+
         # True when operating from the right (FO) seat; remaps variables
         # listed in LEFT_RIGHT_CONTROLS to their right-seat equivalents.
         self.right_seat = False
@@ -1367,6 +1370,52 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
 
                 if seat != current_seat:
                     self.logger.info("SEAT_SELECT seat changed %s -> %s", current_seat, seat)
+            elif button_config['button type'] == 'MODAL_ROTARY':
+                if direction == 'down':
+                    rotary_id = button_config['rotary id']
+                    current_mode = self.modal_rotary_mode.get(rotary_id)
+                    if current_mode is None:
+                        self.logger.warning("MODAL_ROTARY '%s' has no mode set", rotary_id)
+                        return
+                    mode_config = button_config['modes'].get(current_mode)
+                    if mode_config is None:
+                        self.logger.warning("MODAL_ROTARY '%s' mode '%s' not in modes config",
+                                            rotary_id, current_mode)
+                        return
+                    psx_var = self.translate_var(mode_config['psx variable'])
+                    if 'value cw' in mode_config:
+                        dir_key = 'value ' + button_config['direction']
+                        value = mode_config[dir_key]
+                    else:
+                        value = mode_config['increment']
+                        if button_config['direction'] == 'ccw':
+                            value = -value
+                        if ('minimum interval' in button_config and
+                                time.time() - last_event < button_config['minimum interval']):
+                            value *= button_config['acceleration']
+                        if 'increment index' in mode_config:
+                            fields = ['0'] * mode_config['fields']
+                            fields[mode_config['increment index']] = str(value)
+                            value = ';'.join(fields)
+                    self.psx_send_and_set(psx_var, value)
+            elif button_config['button type'] == 'MODAL_ROTARY_MODE_SET':
+                if direction == 'down':
+                    rotary_id = button_config['rotary id']
+                    self.modal_rotary_mode[rotary_id] = button_config['mode']
+                    self.logger.info("MODAL_ROTARY '%s' mode set to '%s'",
+                                     rotary_id, button_config['mode'])
+            elif button_config['button type'] == 'MODAL_ROTARY_MODE_CYCLE':
+                if direction == 'down':
+                    rotary_id = button_config['rotary id']
+                    mode_order = button_config['mode order']
+                    current_mode = self.modal_rotary_mode.get(rotary_id)
+                    if current_mode not in mode_order:
+                        next_mode = mode_order[0]
+                    else:
+                        idx = (mode_order.index(current_mode) + 1) % len(mode_order)
+                        next_mode = mode_order[idx]
+                    self.modal_rotary_mode[rotary_id] = next_mode
+                    self.logger.info("MODAL_ROTARY '%s' mode cycled to '%s'", rotary_id, next_mode)
             elif button_config['button type'] == 'ADDON':
                 # Send a custom addon= message stored in button_config['value']
                 self.psx_send_and_set("addon", button_config['value'])
