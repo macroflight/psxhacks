@@ -93,6 +93,9 @@ LEFT_RIGHT_CONTROLS = {
     'MfIduInbdCp': 'MfIduInbdFo',
     'MfIduOutbdCp': 'MfIduOutbdFo',
     'LwrCrtCp': 'LwrCrtFo',
+    # Radio control panels
+    'RotSelRcpL': 'RotSelRcpR',
+    'SwitchesRcpL': 'SwitchesRcpR',
 }
 
 _RIGHT_LEFT_CONTROLS = {v: k for k, v in LEFT_RIGHT_CONTROLS.items()}
@@ -143,6 +146,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         # the USB axis
         self.thrustaxis_latch_state = {}
         self.thrustaxis_last_update = {}
+
+        # Which of the RCP knobs are we turning using RADIO_TUNE button events?
+        # Set to "big" on startup but toggled by RADIO_TUNE_TOGGLE_KNOB
+        self.rotselrcp_knob = 'big'
 
         # Temporary cache for the AXIS SET type. We need to keep track
         # if e.g the flap lever axis is in sync with PSX.
@@ -1363,6 +1370,16 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             elif button_config['button type'] == 'ADDON':
                 # Send a custom addon= message stored in button_config['value']
                 self.psx_send_and_set("addon", button_config['value'])
+            elif button_config['button type'] == 'RADIO_TUNE_TOGGLE_KNOB':
+                self.rotselrcp_knob = 'big' if self.rotselrcp_knob == 'small' else 'small'
+                rcp = "R" if self.right_seat else 'L'
+            elif button_config['button type'] == 'RADIO_TUNE':
+                turn = int(button_config['value'])
+                elems = ["0", "0", "0"]
+                index = 1 if self.rotselrcp_knob == 'big' else 2
+                elems[index] = str(turn)
+                new_psx_value = ";".join(elems)
+                self.psx_send_and_set(self.translate_var(button_config['psx variable']), new_psx_value)
             else:
                 raise FrankenUsbException(f"Unknown button type {button_config['button type']}")
             # End of helper
