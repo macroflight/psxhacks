@@ -13,6 +13,8 @@ The scripts can be used to greatly simplify startup of your sim and provide a lo
 To better understand the setup of the scripts, it helps to consider the topologies outlined below.
 
 ## Topologies
+This section describes the different topologies when using Frankenrouters. The first one applies to single pilot operations, the next two apply to shared cockpit operations. They differ based on where the master PSX instance is located, and who connects to it remotely.
+
 ### The 'solo' setup
 This setup splits the PSX instances between two routers. The use of a core Frankenrouter is not mandatory, but it allows for access control if you want to host a master sim for shared cockpit operations.
 
@@ -98,7 +100,7 @@ The core Frankenrouter should also contain an `[[access]]` configuration for eac
 This file holds most of the settings used by the other scripts and their defaults values. They're used if you don't override them. Don't edit this file directly! Instead, see `psxhacks-start-override.ps1`.
 
 ### psxhacks-start-override.ps1
-Any overrides of settings in `common.ps1` go in this file. It doesn't exist by default, you have to create it yourself outside of the **psxhacks** Git repo, in the parent directory. This way, new setting and functions can be pulled from Github and your overrides are preserved.
+Any overrides of settings in `common.ps1` go in this file. It doesn't exist by default, you have to create it yourself outside of the **psxhacks** Git repo, in the parent directory. This way, new settings and functions can be pulled from Github and your overrides are preserved.
 
 The next two scripts are `startsim_master.ps1` and `startsim_slave.ps1`.  As their names suggest, these scripts have different scopes and start different programs and scripts.
 
