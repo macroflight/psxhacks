@@ -153,3 +153,15 @@ To change the ExecutionPolicy, use the following command:
 ```
 Set-ExecutionPolicy -ExecutionPolicy Unrestricted
 ```
+
+When you check current setting again, it should now look like this:
+
+```
+        Scope ExecutionPolicy
+        ----- ---------------
+MachinePolicy       Undefined
+   UserPolicy       Undefined
+      Process       Undefined
+  CurrentUser       Undefined
+ LocalMachine    Unrestricted
+```
