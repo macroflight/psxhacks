@@ -130,7 +130,7 @@ Both these scripts use the variables in `common.ps1`, but you should not edit th
 
 ## Help
 ### Unable to execute ps1/powershell scripts
-The Default Execution Policy is set to restricted on Windows 11 and you might need to change it. The current setting on your system can be displayed with the following command in a Powershell window:
+The Default Execution Policy is set to restricted on Windows 11 and you might need to change it. The current settings on your system can be displayed with the following command in a Powershell window:
 
 ```
 Get-ExecutionPolicy -List
@@ -154,7 +154,7 @@ To change the ExecutionPolicy, use the following command:
 Set-ExecutionPolicy -ExecutionPolicy Unrestricted
 ```
 
-When you check current setting again, it should now look like this:
+When you check the settings again, they should now look like this:
 
 ```
         Scope ExecutionPolicy
