@@ -52,9 +52,9 @@ All of these components can run on the same PC, but they don't need to. If you *
 Because of the distributed setup, it's rather easy to connect to another master sim, using the webinterface of the client Frankenrouter. The topology would then look like this:
 
 ```
-+----------------------+    +----------+    +-----------------------------+
-| Client Frankenrouter |  > | internet |  > | Other core Frankenrouter(s) |
-+----------------------+    +----------+    +-----------------------------+
++----------------------+    +----------+    +--------------------------+
+| Client Frankenrouter |  > | internet |  > | Other core Frankenrouter |
++----------------------+    +----------+    +--------------------------+
            ^
 +----------------------+
 | Slave PSX instance   |
