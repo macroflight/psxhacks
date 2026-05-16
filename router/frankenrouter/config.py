@@ -84,6 +84,9 @@ class _RouterConfigPsx:  # pylint: disable=missing-class-docstring,too-few-publi
         #   Qh6  LtStorm, Qh7  LtOvhd,  Qh8  LtDome,
         #   Qh9  LtGlrshPanel, Qh10 LtGlrshFlood,
         #   Qh11 LtAislePanel, Qh12 LtAisleFlood
+        self.qs121_keepalive = data.get('qs121_keepalive', True)
+        if not isinstance(self.qs121_keepalive, bool):
+            raise RouterConfigError("psx qs121_keepalive must be true or false")
         self.filter_from_other_sim = data.get('filter_from_other_sim', [])
         if not isinstance(self.filter_from_other_sim, list):
             raise RouterConfigError("psx filter_from_other_sim must be a list")

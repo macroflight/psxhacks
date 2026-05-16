@@ -228,6 +228,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.filter_traffic = True
         self.filter_elevation = True
 
+        # Keep track of our Qs121 keepalive
+        self.qs121_keepalive_last_warning = 0.0
+
     def reset_after_upstream_connect(self):
         """Re-initialize certain variables after upstream connection."""
         self.last_load1 = 0.0
@@ -1965,12 +1968,37 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.sharedinfo['traffic_source_simulator'] = "NOSIM"
                 self.frdp_sharedinfo_requested = True
 
+    async def _housekeeping_refresh_qs121(self):
+        """Re-broadcast Qs121 when PSX stops sending it (aircraft stationary).
+
+        PSX sends Qs121 at 5 Hz while moving but stops when stationary. Slave
+        routers still need it at a steady rate, so we re-send the cached value
+        when it has not been updated for more than 1 s.
+        """
+        if self.config.identity.type not in ['master', 'standalone']:
+            return
+        if not self.config.psx.qs121_keepalive:
+            return
+        if not self.cache.has_keyword('Qs121'):
+            return
+        age = self.cache.get_age('Qs121')
+        value = self.cache.get_value('Qs121')
+        time_since_warning = time.perf_counter() - self.qs121_keepalive_last_warning
+        if age > 1.0:
+            if time_since_warning > 60.0:
+                self.logger.info(
+                    "No Qs121 seen in %.1fs, re-sending cached value (normal when stationary)",
+                    age)
+                self.qs121_keepalive_last_warning = time.perf_counter()
+            await self.client_broadcast(f"Qs121={value}")
+
     async def housekeeping_task(self, name):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
         """Miscellaneous housekeeping Task."""
         try:  # pylint: disable=too-many-nested-blocks
             last_run = 0.0
             while True:
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(0.5)
+                await self._housekeeping_refresh_qs121()
                 if time.perf_counter() - last_run > self.args.housekeeping_interval:
                     last_run = time.perf_counter()
                     self.logger.debug("Performing housekeeping")
