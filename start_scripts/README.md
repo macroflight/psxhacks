@@ -49,7 +49,7 @@ All of these components can run on the same PC, but they don't need to. If you *
 | Client Frankenrouter | 10747 | Frankenrouter config file (.toml) |
 
 ### Connecting to another master sim
-Because of the distributed setup, it's rather easy to connect to another master sim using the webinterface of your client Frankenrouter. If you always want to be able to chose a known other master sim, this requires configuration of the `[[upstream]]` section in the router configuration file. Alternatively, you can add another master sim ad hoc in the webinterface of your client Frankenrouter.
+Because of the distributed setup, it's rather easy to connect to another master sim using the webinterface of your client Frankenrouter. If you always want to be able to chose a known other master sim, this requires configuration of the `[[upstream]]` section in your client router configuration file. Alternatively, you can add another master sim ad hoc in the webinterface of your client Frankenrouter.
 
 The topology would then look like this:
 
