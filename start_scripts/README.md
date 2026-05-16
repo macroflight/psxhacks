@@ -1,5 +1,5 @@
 # The scripts in start_scripts
-A collection of mostly PowerShell scripts to start and stop a PSX simulator. It assumes you use a frankenrouter as a permanent part of your sim (which then either connect to a PSX main server in your sim or a shared cockpit master sim).
+A collection of mostly PowerShell scripts to start and stop a PSX simulator. It assumes you use a frankenrouter as a permanent part of your sim (which then either connects to a PSX main server in your sim or a shared cockpit master sim).
 
 The scripts can be used to greatly simplify startup of your sim and provide a lot of granularity and modularity. The general idea of this directory is that any customizations are done outside of the **psxhacks** Git repository, so you can keep updating your local installation as updates are published in the Github repo while preserving your local overrides. This will be described further down below. 
 
@@ -44,15 +44,15 @@ All of these components can run on the same PC, but they don't need to. If you *
 |---|---|---|
 | Master PSX instance | 20747 | PSX preference file with `Port10747=20747` |
 | Core Frankenrouter | 10748 | Frankenrouter config file (.toml) |
-| Client Frankenrouter | 10747 | Frankenrouter config file |
+| Client Frankenrouter | 10747 | Frankenrouter config file (.toml) |
 
 ### Connecting to another master sim
 Because of the distributed setup, it's rather easy to connect to another master sim, using the webinterface of the client Frankenrouter. The topology would then look like this:
 
 ```
-+----------------------+    +----------+    +--------------------------+
-| Client Frankenrouter |  > | internet |  > | Other core Frankenrouter |
-+----------------------+    +----------+    +--------------------------+
++----------------------+    +----------+    +-----------------------------+
+| Client Frankenrouter |  > | internet |  > | Other core Frankenrouter(s) |
++----------------------+    +----------+    +-----------------------------+
            ^
 +----------------------+
 | Slave PSX instance   |
@@ -73,9 +73,9 @@ As mentioned, when you're using a core Frankenrouter others can connect to it ov
 | Master PSX instance  |
 +----------------------+
            ^
-+----------------------+    +----------+    +--------------------------------+
-| Core Frankenrouter   |  < | internet |  < | Other client Frankenrouter (s) |
-+----------------------+    +----------+    +--------------------------------+
++----------------------+    +----------+    +-------------------------------+
+| Core Frankenrouter   |  < | internet |  < | Other client Frankenrouter(s) |
++----------------------+    +----------+    +-------------------------------+
            ^
 +----------------------+
 | Client Frankenrouter | 
