@@ -804,6 +804,18 @@ class Rules():  # pylint: disable=too-many-public-methods
             return True
         return False
 
+    def is_readonly_client(self):
+        """Return True if this client matches the SRSL readonly criteria.
+
+        A client is read-only when its display_name contains 'SRSL' and its
+        IP address is listed in psx.readonly_srsl_ips.
+        """
+        if self.sender.upstream:
+            return False
+        if 'SRSL' not in (self.sender.display_name or ''):
+            return False
+        return self.sender.ip in self.router.config.psx.readonly_srsl_ips
+
     def route(self, line, sender):  # pylint: disable=too-many-return-statements,too-many-branches, too-many-statements
         """Decide on routing, log, etc.
 
@@ -863,6 +875,9 @@ class Rules():  # pylint: disable=too-many-public-methods
         # line.
         if not self.allow_write():
             return self.myreturn(RulesAction.DROP, RulesCode.NOWRITE)
+
+        if self.is_readonly_client():
+            return self.myreturn(RulesAction.DROP, RulesCode.KEYVALUE_FILTERED_INGRESS)
 
         if key == 'again':
             return self.handle_again()
@@ -1133,6 +1148,7 @@ class TestRules(unittest.TestCase):
             """Initialize the config."""
             self.filter_from_other_sim = []
             self.filter_to_other_sim = []
+            self.readonly_srsl_ips = []
 
     class DummyConfig():  # pylint: disable=too-few-public-methods
         """Implement small parts of the router for unit testing."""
