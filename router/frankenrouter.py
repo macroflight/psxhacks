@@ -1341,6 +1341,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
             console_formatter = logging.Formatter("%(asctime)s: %(message)s", datefmt="%H:%M:%S")
             file_formatter = logging.Formatter("%(asctime)s: %(message)s")
+            file_formatter.converter = time.gmtime
 
             console_handler = logging.StreamHandler()
             console_handler.setFormatter(console_formatter)
@@ -1425,6 +1426,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.traffic_logger.addHandler(queue_handler)
 
             file_formatter = logging.Formatter("%(asctime)s: %(message)s")
+            file_formatter.converter = time.gmtime
 
             file_handler = logging.handlers.RotatingFileHandler(
                 self.log_traffic_filename,
