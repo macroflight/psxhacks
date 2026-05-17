@@ -184,6 +184,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.rules = Rules(self)
         self.blocklist = set()
         self.session_password = None
+        self.observer_session_password = None
 
         # Keep track of when we last sent a filter state warning to EICAS
         self.filter_warning_sent = 0
@@ -481,7 +482,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             upstreaminfo = f"upstream is {self.upstream.ip}:{self.upstream.port}"
             if self.upstream.uuid is not None:
                 upstreaminfo += f":{trimstring(self.upstream.uuid)}"
-            upstreaminfo += f" {self.upstream.display_name}"
+            upstreaminfo += f" {self.upstream.display_name} ({self.upstream.access_level})"
             if len(self.upstream.frdp_ping_rtts) > 0:
                 # Keep the last N samples
                 self.upstream.frdp_ping_rtts = self.upstream.frdp_ping_rtts[-FRDP_KEEP_RTT_SAMPLES:]
@@ -2119,6 +2120,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 await self.send_to_upstream(extra_data['reply'], sender.peername)
             else:
                 await self.client_broadcast(extra_data['reply'], include=[sender.peername])
+                # Inform the connecting frankenrouter of its access level (on change only)
+                _access_map = {'full': 'crew', 'observer': 'observer'}
+                _level = _access_map.get(sender.access_level, 'unknown')
+                if _level != sender.frdp_last_sent_access_level:
+                    await self.client_broadcast(
+                        f"addon=FRANKENROUTER:{self.frdp_version}:ACCESS_LEVEL:{_level}",
+                        include=[sender.peername])
+                    sender.frdp_last_sent_access_level = _level
             self.logger.debug(
                 "Got FRDP PING message from %s, sending PONG: %s",
                 sender_hr, extra_data['reply'])
@@ -2247,6 +2256,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.warning(
                 "Client %s successfully authenticated but already has access: %s",
                 sender_hr, line)
+        elif code == RulesCode.FRDP_ACCESS_LEVEL:
+            self.logger.debug(
+                "Upstream access level: '%s'", sender.access_level)
         elif code == RulesCode.NAME_FROM_FRANKENROUTER:
             self.logger.info("Client %s is a frankenrouter: %s", sender_hr, line)
         elif code == RulesCode.NAME_LEARNED:

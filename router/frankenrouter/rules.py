@@ -110,6 +110,7 @@ class RulesCode(enum.Enum):
     FRDP_AUTH_FAIL = enum.auto()
     FRDP_AUTH_OK = enum.auto()
     FRDP_AUTH_ALREADY_HAS_ACCESS = enum.auto()
+    FRDP_ACCESS_LEVEL = enum.auto()
     NAME_FROM_FRANKENROUTER = enum.auto()
     NAME_LEARNED = enum.auto()
     NAME_NOCHANGE = enum.auto()
@@ -527,6 +528,31 @@ class Rules():  # pylint: disable=too-many-public-methods
         self.router.connection_state_changed()
         return self.myreturn(RulesAction.DROP, RulesCode.FRDP_AUTH_OK)
 
+    def handle_addon_frankenrouter_access_level(self, payload):
+        """Handle FRDP ACCESS_LEVEL message.
+
+        Format:
+        addon=FRANKENROUTER:<protocol version>:ACCESS_LEVEL:<level>
+
+        Sent by the upstream router to inform us of the access level we have
+        been granted. Valid levels: 'crew', 'observer', 'unknown'.
+        """
+        if not self.sender.upstream:
+            return self.myreturn(
+                RulesAction.DROP, RulesCode.MESSAGE_INVALID,
+                message=f"Got ACCESS_LEVEL from non-upstream: {self.line}")
+        if payload not in ('crew', 'observer', 'unknown'):
+            return self.myreturn(
+                RulesAction.DROP, RulesCode.MESSAGE_INVALID,
+                message=f"Invalid ACCESS_LEVEL payload: {self.line}")
+        if payload != self.sender.access_level:
+            self.logger.info(
+                "Upstream access level changed: %s -> %s",
+                self.sender.access_level, payload)
+            self.sender.access_level = payload
+            self.router.status_display_requested = True
+        return self.myreturn(RulesAction.DROP, RulesCode.FRDP_ACCESS_LEVEL)
+
     def handle_addon_frankenrouter(self, rest):  # pylint: disable=too-many-return-statements,too-many-branches
         """Handle FRANKENROUTER addon message."""
         (message_type, _, payload) = rest.partition(":")
@@ -560,6 +586,8 @@ class Rules():  # pylint: disable=too-many-public-methods
             return self.handle_addon_frankenrouter_clientinfo(payload)
         if message_type == 'AUTH':
             return self.handle_addon_frankenrouter_auth(payload)
+        if message_type == 'ACCESS_LEVEL':
+            return self.handle_addon_frankenrouter_access_level(payload)
         # Drop unknown FRDP messages
         return self.myreturn(
             RulesAction.DROP, RulesCode.MESSAGE_INVALID,
@@ -1216,9 +1244,9 @@ class TestRules(unittest.TestCase):
 
         def can_write(self):
             """Check if this client is allowed to write."""
-            if self.access_level == NOACCESS_ACCESS_LEVEL:
-                return False
-            return True
+            if self.access_level == 'full':
+                return True
+            return False
 
         def has_access(self):
             """Return true if client has access."""

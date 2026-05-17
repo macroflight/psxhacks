@@ -267,10 +267,10 @@ _SESSION_PASSWORD_PAGE = (
     '<meta name="color-scheme" content="{rest_api_color_scheme}" />\n' +
     _COMMON_CSS +
     '\n<script>\n'
-    'function copyPassword() {{\n'
-    '  var pwd = document.getElementById("session_pwd").textContent;\n'
+    'function copyPassword(id, btn_id) {{\n'
+    '  var pwd = document.getElementById(id).textContent;\n'
     '  navigator.clipboard.writeText(pwd).then(function() {{\n'
-    '    var btn = document.getElementById("copy_btn");\n'
+    '    var btn = document.getElementById(btn_id);\n'
     '    btn.textContent = "Copied!";\n'
     '    setTimeout(function() {{ btn.textContent = "Copy to clipboard"; }}, 2000);\n'
     '  }});\n'
@@ -279,13 +279,18 @@ _SESSION_PASSWORD_PAGE = (
     '</head>\n<body>\n'
     '<div class="page-title">'
     '<img src="/static/frankentech.png" alt="">'
-    '<h1>Session password</h1>'
+    '<h1>Session passwords</h1>'
     '</div>\n'
+    '<h2>Full access</h2>\n'
     '<div class="card ok">\n'
-    '<p style="margin:0">If you set a session password, anyone can access'
-    ' the master sim using it.</p>\n'
+    '<p style="margin:0">Grants full read/write access to the sim.</p>\n'
     '</div>\n'
     '{password_section}'
+    '<h2>Observer access</h2>\n'
+    '<div class="card ok">\n'
+    '<p style="margin:0">Grants read-only observer access to the sim.</p>\n'
+    '</div>\n'
+    '{observer_password_section}'
     '<hr>\n'
     '<a href="/" class="btn btn-gray">Back</a>\n'
     '</body>\n</html>\n'
@@ -297,7 +302,8 @@ _SESSION_PASSWORD_SET_SECTION = (
     '<p id="session_pwd" style="font-size:1.3em;font-weight:600;font-family:monospace;'
     'letter-spacing:0.1em;margin:0">{password}</p>\n'
     '</div>\n'
-    '<button type="button" id="copy_btn" onclick="copyPassword()" class="btn btn-gray">'
+    '<button type="button" id="copy_btn"'
+    ' onclick="copyPassword(\'session_pwd\', \'copy_btn\')" class="btn btn-gray">'
     'Copy to clipboard</button>\n'
     '<form action="/api/sessionpwd/remove" method="post">\n'
     '<input type="submit" value="Remove session password" class="btn-red">\n'
@@ -307,6 +313,25 @@ _SESSION_PASSWORD_SET_SECTION = (
 _SESSION_PASSWORD_UNSET_SECTION = (
     '<a href="/api/sessionpwd/generate" class="btn btn-green">'
     'Generate session password</a>\n'
+)
+
+_OBSERVER_SESSION_PASSWORD_SET_SECTION = (
+    '<div class="card ok">\n'
+    '<p class="note" style="margin:0 0 0.4em">Current observer session password</p>\n'
+    '<p id="observer_pwd" style="font-size:1.3em;font-weight:600;font-family:monospace;'
+    'letter-spacing:0.1em;margin:0">{password}</p>\n'
+    '</div>\n'
+    '<button type="button" id="observer_copy_btn"'
+    ' onclick="copyPassword(\'observer_pwd\', \'observer_copy_btn\')" class="btn btn-gray">'
+    'Copy to clipboard</button>\n'
+    '<form action="/api/observerpwd/remove" method="post">\n'
+    '<input type="submit" value="Remove observer session password" class="btn-red">\n'
+    '</form>\n'
+)
+
+_OBSERVER_SESSION_PASSWORD_UNSET_SECTION = (
+    '<a href="/api/observerpwd/generate" class="btn btn-green">'
+    'Generate observer session password</a>\n'
 )
 
 _FLIGHTINFO_PAGE = (
@@ -470,13 +495,10 @@ _FLIGHTINFO_PAGE = (
     '<textarea id="comments" name="comments">{comments}</textarea>\n'
     '<label for="scratchpad">Inflight scratchpad</label>\n'
     '<textarea id="scratchpad" name="scratchpad">{scratchpad}</textarea>\n'
-    '<input type="submit" value="Save and broadcast" class="btn-blue">\n'
+    '{action_buttons}'
     '</form>\n'
     '<hr>\n'
-    '<form action="/api/flightinfo/clear" method="post">\n'
-    '<input type="submit" value="Clear all fields" class="btn-gray">\n'
-    '</form>\n'
-    '<hr>\n'
+    '{readonly_notice}'
     '<a href="/flightinfo" class="btn btn-gray">Refresh</a>\n'
     '<a href="/" class="btn btn-gray">Back</a>\n'
     '</body>\n</html>\n'
@@ -541,7 +563,9 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 elevation_source = router.sharedinfo.get('elevation_source_simulator', 'unknown')
                 traffic_source = router.sharedinfo.get('traffic_source_simulator', 'unknown')
                 pilot_flying = router.sharedinfo.get('pilot_flying_simulator', 'unknown')
-                if router.get_router_type() == 'slave':
+                is_observer = (
+                    connected and router.upstream.access_level == 'observer')
+                if router.get_router_type() == 'slave' and not is_observer:
                     if elevation_source == own_sim:
                         elev_btn = (
                             '<a href="/api/filter/elevation/stop_sending" class="btn btn-red">'
@@ -585,8 +609,12 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     'rest_api_color_scheme': router.config.listen.rest_api_color_scheme,
                     'this_sim': router.config.identity.simulator,
                     'upstream_label': upstream_label,
-                    'upstream_status': 'Connected' if connected else 'Not connected',
-                    'upstream_class': 'ok' if connected else 'warn',
+                    'upstream_status': (
+                        router.upstream.access_level.capitalize()
+                        if connected else 'Not connected'),
+                    'upstream_class': (
+                        'ok' if connected and router.upstream.access_level == 'crew'
+                        else 'warn' if connected else 'warn'),
                     'elevation_source': (
                         elevation_source + ' (this sim)'
                         if elevation_source == own_sim else elevation_source),
@@ -818,9 +846,15 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                         password=router.session_password)
                 else:
                     pwd_section = _SESSION_PASSWORD_UNSET_SECTION
+                if router.observer_session_password:
+                    observer_pwd_section = _OBSERVER_SESSION_PASSWORD_SET_SECTION.format(
+                        password=router.observer_session_password)
+                else:
+                    observer_pwd_section = _OBSERVER_SESSION_PASSWORD_UNSET_SECTION
                 data = {
                     'rest_api_color_scheme': router.config.listen.rest_api_color_scheme,
                     'password_section': pwd_section,
+                    'observer_password_section': observer_pwd_section,
                 }
                 return web.json_response(
                     text=_SESSION_PASSWORD_PAGE.format(**data), content_type='text/html')
@@ -837,6 +871,20 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
             async def handle_sessionpwd_remove(_):
                 router.session_password = None
                 router.logger.info("Session password removed")
+                raise web.HTTPFound('/sessionpwd')
+
+            @routes.get('/api/observerpwd/generate')
+            async def handle_observerpwd_generate(_):
+                alphabet = string.ascii_letters + string.digits
+                router.observer_session_password = ''.join(
+                    secrets.choice(alphabet) for _ in range(20))
+                router.logger.info("Observer session password generated")
+                raise web.HTTPFound('/sessionpwd')
+
+            @routes.post('/api/observerpwd/remove')
+            async def handle_observerpwd_remove(_):
+                router.observer_session_password = None
+                router.logger.info("Observer session password removed")
                 raise web.HTTPFound('/sessionpwd')
 
             @routes.get('/upstream')
@@ -1026,16 +1074,37 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
 
             @routes.get('/flightinfo')
             async def handle_flightinfo_get(_):
+                upstream = router.upstream
+                is_observer = (
+                    upstream is not None and upstream.access_level == 'observer')
+                if is_observer:
+                    action_buttons = ''
+                    readonly_notice = (
+                        '<div class="card warn">'
+                        '<p style="margin:0">Observer mode: flight info is read-only.</p>'
+                        '</div>\n<hr>\n')
+                else:
+                    action_buttons = (
+                        '<input type="submit" value="Save and broadcast" class="btn-blue">\n')
+                    readonly_notice = (
+                        '<form action="/api/flightinfo/clear" method="post">\n'
+                        '<input type="submit" value="Clear all fields" class="btn-gray">\n'
+                        '</form>\n<hr>\n')
                 data = {
                     'rest_api_color_scheme': router.config.listen.rest_api_color_scheme,
                     **router.flightinfo,
                     'seat_swap_checked': 'checked' if router.flightinfo.get('seat_swap') else '',
+                    'action_buttons': action_buttons,
+                    'readonly_notice': readonly_notice,
                 }
                 return web.json_response(
                     text=_FLIGHTINFO_PAGE.format(**data), content_type='text/html')
 
             @routes.post('/api/flightinfo')
             async def handle_flightinfo_post(request):
+                upstream = router.upstream
+                if upstream is not None and upstream.access_level == 'observer':
+                    raise web.HTTPFound('/flightinfo')
                 post = await request.post()
                 now_z = datetime.datetime.now(
                     datetime.timezone.utc).strftime('%H:%Mz')
@@ -1065,6 +1134,9 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
 
             @routes.post('/api/flightinfo/clear')
             async def handle_flightinfo_clear(_):
+                upstream = router.upstream
+                if upstream is not None and upstream.access_level == 'observer':
+                    raise web.HTTPFound('/flightinfo')
                 now_z = datetime.datetime.now(
                     datetime.timezone.utc).strftime('%H:%Mz')
                 router.flightinfo = {

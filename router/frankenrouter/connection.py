@@ -103,6 +103,9 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         # List of the most recent FRDP PING RTTs
         self.frdp_ping_rtts = []
 
+        # Last ACCESS_LEVEL value sent to this client (None = never sent)
+        self.frdp_last_sent_access_level = None
+
         # True if we have sent an FRDP IDENT message already
         self.frdp_ident_sent = False
 
@@ -433,7 +436,7 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
                 set_level(access)
                 return
 
-        # No match for config rules; check runtime session password
+        # No match for config rules; check runtime session passwords
         if (
             client_password is not None and
             self.router.session_password is not None and
@@ -444,6 +447,17 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
             if self.display_name_source not in _AUTHORITATIVE_NAME_SOURCES:
                 self.display_name = 'SESSIONPWD'
                 self.display_name_source = 'session password'
+            return
+        if (
+            client_password is not None and
+            self.router.observer_session_password is not None and
+            self.router.observer_session_password == client_password
+        ):
+            self.logger.info("Access level observer granted based on observer session password")
+            self.access_level = 'observer'
+            if self.display_name_source not in _AUTHORITATIVE_NAME_SOURCES:
+                self.display_name = 'OBSERVER'
+                self.display_name_source = 'observer session password'
             return
         # No match for any rule, deny access
         set_level(None)
@@ -457,6 +471,9 @@ class UpstreamConnection(Connection):  # pylint: disable=too-few-public-methods
         super().__init__(reader, writer, router)
 
         self.upstream = True
+
+        # Access level granted by the upstream router ('crew', 'observer', 'unknown')
+        self.access_level = 'unknown'
 
         # True if we have sent an FRDP AUTH upstream
         self.frdp_auth_sent = False
