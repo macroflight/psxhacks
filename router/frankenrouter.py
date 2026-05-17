@@ -230,6 +230,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
         # Keep track of our Qs121 keepalive
         self.qs121_keepalive_last_warning = 0.0
+        self.qs121_keepalive_flip = False
 
     def reset_after_upstream_connect(self):
         """Re-initialize certain variables after upstream connection."""
@@ -1974,6 +1975,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         PSX sends Qs121 at 5 Hz while moving but stops when stationary. Slave
         routers still need it at a steady rate, so we re-send the cached value
         when it has not been updated for more than 1 s.
+
+        PSX main clients may ignore an identical Qs121 value. We alternate ±1
+        µrad on bank (index 1) so each keepalive is unique while remaining
+        physically imperceptible on a stationary aircraft.
         """
         if self.config.identity.type not in ['master', 'standalone']:
             return
@@ -1982,15 +1987,21 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         if not self.cache.has_keyword('Qs121'):
             return
         age = self.cache.get_age('Qs121')
-        value = self.cache.get_value('Qs121')
+        if age <= 1.0:
+            return
+        parts = self.cache.get_value('Qs121').split(';')
+        delta = 1 if self.qs121_keepalive_flip else -1
+        self.qs121_keepalive_flip = not self.qs121_keepalive_flip
+        parts[1] = str(int(parts[1]) + delta)
+        value = ';'.join(parts)
         time_since_warning = time.perf_counter() - self.qs121_keepalive_last_warning
-        if age > 1.0:
-            if time_since_warning > 60.0:
-                self.logger.info(
-                    "No Qs121 seen in %.1fs, re-sending cached value (normal when stationary)",
-                    age)
-                self.qs121_keepalive_last_warning = time.perf_counter()
-            await self.client_broadcast(f"Qs121={value}")
+        if time_since_warning > 60.0:
+            self.logger.info(
+                "No Qs121 seen in %.1fs, re-sending keepalive (normal when stationary)",
+                age)
+            self.qs121_keepalive_last_warning = time.perf_counter()
+        self.logger.info("Qs121 keepalive: %s", value)
+        await self.client_broadcast(f"Qs121={value}")
 
     async def housekeeping_task(self, name):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
         """Miscellaneous housekeeping Task."""
