@@ -5,7 +5,7 @@ a = Analysis(
     ['frankenrouter.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('frankenrouter/static', 'frankenrouter/static')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
