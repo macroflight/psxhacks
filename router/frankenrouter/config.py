@@ -108,9 +108,50 @@ class _RouterConfigPsx:  # pylint: disable=missing-class-docstring,too-few-publi
                     f"Invalid IP address in psx readonly_srsl_ips '{entry}': {exc}") from exc
 
 
+class _RouterConfigCrewMember:  # pylint: disable=missing-class-docstring,too-few-public-methods
+    def __init__(self, data):
+        self.portal_name = data.get('portal_name')
+        if not isinstance(self.portal_name, str):
+            raise RouterConfigError("sharedinfo crew portal_name must be a string")
+        self.callsign_suffix = data.get('callsign_suffix')
+        if not isinstance(self.callsign_suffix, str):
+            raise RouterConfigError("sharedinfo crew callsign_suffix must be a string")
+
+
 class _RouterConfigSharedinfo:  # pylint: disable=missing-class-docstring,too-few-public-methods
     def __init__(self, data):
         self.master = data.get('master', False)
+        crew_data = data.get('crew', [{"portal_name": "MACRO", "callsign_suffix": "M"}])
+        if not isinstance(crew_data, list):
+            raise RouterConfigError("sharedinfo crew must be a list")
+        self.crew = [_RouterConfigCrewMember(m) for m in crew_data]
+        self.airframes = data.get('airframes', ["G-CIVB BAW B744"])
+        if not isinstance(self.airframes, list):
+            raise RouterConfigError("sharedinfo airframes must be a list")
+        if not all(isinstance(a, str) for a in self.airframes):
+            raise RouterConfigError("sharedinfo airframes entries must be strings")
+        self.portal_accounts = data.get('portal_account', ["someemail@somedomain.com"])
+        if not isinstance(self.portal_accounts, list):
+            raise RouterConfigError("sharedinfo portal_account must be a list")
+        if not all(isinstance(a, str) for a in self.portal_accounts):
+            raise RouterConfigError("sharedinfo portal_account entries must be strings")
+        self.airline_icao = data.get(
+            'airline_icao', ["BAW", "BAN", "GST", "DLH", "GTI", "ACX", "CLX"])
+        if not isinstance(self.airline_icao, list):
+            raise RouterConfigError("sharedinfo airline_icao must be a list")
+        if not all(isinstance(a, str) for a in self.airline_icao):
+            raise RouterConfigError("sharedinfo airline_icao entries must be strings")
+        self.checklist = data.get('checklist', [
+            "everyone using the same radio client",
+            "fuel ordered",
+            "VATPRI is elevation master",
+            "VATSIM flight plan filed",
+            "Correct Simbrief account used for plan",
+        ])
+        if not isinstance(self.checklist, list):
+            raise RouterConfigError("sharedinfo checklist must be a list")
+        if not all(isinstance(a, str) for a in self.checklist):
+            raise RouterConfigError("sharedinfo checklist entries must be strings")
 
 
 class _RouterConfigFiltering:  # pylint: disable=missing-class-docstring,too-few-public-methods
@@ -424,6 +465,30 @@ I'm not TOML
         """A few tests with valid input data."""
         with self.assertRaises(RouterConfigError):
             RouterConfig(config_data=self.bad_data_1)
+
+    def test_crew_defaults(self):
+        """Default crew is MACRO/M and default airframe is set when no [sharedinfo] present."""
+        conf = RouterConfig(config_data="")
+        self.assertEqual(len(conf.sharedinfo.crew), 1)
+        self.assertEqual(conf.sharedinfo.crew[0].portal_name, "MACRO")
+        self.assertEqual(conf.sharedinfo.crew[0].callsign_suffix, "M")
+        self.assertEqual(conf.sharedinfo.airframes, ["G-CIVB BAW B744"])
+
+    def test_crew_custom(self):
+        """Custom crew list is parsed correctly."""
+        data = """
+[[sharedinfo.crew]]
+portal_name = "ALPHA"
+callsign_suffix = "A"
+
+[[sharedinfo.crew]]
+portal_name = "BRAVO"
+callsign_suffix = "B"
+"""
+        conf = RouterConfig(config_data=data)
+        self.assertEqual(len(conf.sharedinfo.crew), 2)
+        self.assertEqual(conf.sharedinfo.crew[1].portal_name, "BRAVO")
+        self.assertEqual(conf.sharedinfo.crew[1].callsign_suffix, "B")
 
 
 if __name__ == '__main__':

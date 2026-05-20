@@ -62,7 +62,7 @@ textarea {{
 }}
 .grid2 {{ display: grid; grid-template-columns: 1fr 1fr; gap: 0 1em; }}
 .btn-row {{ display: flex; gap: 0.5em; margin: 0.45em 0; }}
-.btn-row a.btn {{ flex: 1; width: auto; margin: 0; }}
+.btn-row a.btn, .btn-row button.btn {{ flex: 1; width: auto; margin: 0; }}
 .grid3 {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 1em; }}
 .grid4 {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 0 1em; }}
 .check {{ display: flex; align-items: center; gap: 0.5em;
@@ -84,15 +84,32 @@ hr {{ margin: 1em 0; border: none; border-top: 1px solid #2a2f45; }}
 .status-area .card {{ flex: 1; margin-bottom: 0; }}
 .status-logo {{ flex-shrink: 0; }}
 .status-logo img {{ display: block; width: 7em; height: 7em; object-fit: contain; }}
+.toggle-row {{ display: flex; align-items: center; gap: 0.75em; margin: 0.5em 0; cursor: pointer; color: #e2e8f0; }}
+.toggle-switch {{ position: relative; display: inline-block; width: 42px; height: 24px; flex-shrink: 0; }}
+.toggle-switch input {{ opacity: 0; width: 0; height: 0; position: absolute; }}
+.toggle-track {{ position: absolute; inset: 0; background: #374151; border-radius: 12px; transition: background 0.2s; }}
+.toggle-track::after {{ content: ""; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; background: #9ca3af; border-radius: 50%; transition: transform 0.2s, background 0.2s; }}
+.toggle-switch input:checked + .toggle-track {{ background: #16a34a; }}
+.toggle-switch input:checked + .toggle-track::after {{ transform: translateX(18px); background: #fff; }}
+.toggle-switch input:disabled + .toggle-track {{ opacity: 0.5; cursor: not-allowed; }}
 </style>'''
 
 _INDEX_PAGE = (
     '<!DOCTYPE html>\n<html>\n<head>\n'
     '<meta name="color-scheme" content="{rest_api_color_scheme}" />\n' +
     _COMMON_CSS +
-    '\n</head>\n<body>\n'
-    '<h1>Frankenrouter &mdash; {this_sim}</h1>\n'
-    '<div class="status-area">\n'
+    '\n<style>body {{ max-width: 64em; }}</style>\n</head>\n<body>\n'
+    '<div class="page-title">'
+    '<a href="/"><img src="/static/frankentech.png" alt="Frankentech"></a>'
+    '<h1>Frankenrouter &mdash; {this_sim}</h1>'
+    '{checklist_warning}'
+    '<div style="margin-left:auto">'
+    '<a href="/" class="btn btn-gray btn-sm">Refresh</a>'
+    '</div>'
+    '</div>\n'
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5em;align-items:start">\n'
+    '<div>\n'
+    '{critical_errors}'
     '<div class="card {upstream_class}">\n'
     '<table>\n'
     '<tr><td>Upstream</td>'
@@ -109,20 +126,17 @@ _INDEX_PAGE = (
     '<td class="val">{connected_sims}</td></tr>\n'
     '</table>\n'
     '</div>\n'
-    '<div class="status-logo">'
-    '<img src="/static/frankentech.png" alt="Frankentech">'
-    '<a href="/flightinfo" class="btn btn-gray btn-sm">Flight Info</a>'
+    '{change_upstream_button}'
+    '<a href="/flightinfo" class="btn btn-gray">Flight Info</a>\n'
+    '{sessionpwd_button}'
     '</div>\n'
-    '</div>\n'
+    '<div>\n'
     '{observer_mode_notice}'
     '{master_buttons}'
     '{observer_mode_button}'
-    '<hr>\n'
-    '<a href="/upstream" class="btn btn-blue">Change upstream</a>\n'
-    '{sessionpwd_button}'
     '<a href="/shutdown" class="btn btn-red">Shutdown router</a>\n'
-    '<hr>\n'
-    '<a href="/" class="btn btn-gray">Refresh</a>\n'
+    '</div>\n'
+    '</div>\n'
     '</body>\n</html>\n'
 )
 
@@ -132,7 +146,7 @@ _SHUTDOWN_PAGE = (
     _COMMON_CSS +
     '\n</head>\n<body>\n'
     '<div class="page-title">'
-    '<img src="/static/frankentech.png" alt="">'
+    '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
     '<h1>Shutdown router</h1>'
     '</div>\n'
     '<div class="card warn">\n'
@@ -152,7 +166,7 @@ _SHUTDOWN_CONFIRM_PAGE = (
     _COMMON_CSS +
     '\n</head>\n<body>\n'
     '<div class="page-title">'
-    '<img src="/static/frankentech.png" alt="">'
+    '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
     '<h1>Router shutting down</h1>'
     '</div>\n'
     '<p class="note">The router is shutting down. You can close this window.</p>\n'
@@ -165,7 +179,7 @@ _FILTER_PAGE = (
     _COMMON_CSS +
     '\n</head>\n<body>\n'
     '<div class="page-title">'
-    '<img src="/static/frankentech.png" alt="">'
+    '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
     '<h1>Filter source control</h1>'
     '</div>\n'
     '{network_source_section}'
@@ -212,17 +226,23 @@ _UPSTREAM_PAGE = (
     '  return true;\n'
     '}}\n'
     '</script>\n'
+    '<style>body {{ max-width: 64em; }}</style>\n'
     '</head>\n<body>\n'
     '<div class="page-title">'
-    '<img src="/static/frankentech.png" alt="">'
+    '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
     '<h1>Upstream connection</h1>'
+    '<div style="margin-left:auto;display:flex;gap:0.5em">'
+    '<a href="/upstream" class="btn btn-gray btn-sm">Refresh</a>'
+    '<a href="/" class="btn btn-gray btn-sm">Back</a>'
+    '</div>'
     '</div>\n'
-    '<h2>Current connection</h2>\n'
     '<div class="card {status_class}">\n'
     '<table>\n'
     '{current_rows}'
     '</table>\n'
     '</div>\n'
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5em;align-items:start">\n'
+    '<div>\n'
     '<h2>Connect manually</h2>\n'
     '<form action="/api/upstream" method="post">\n'
     '<label for="host">Host</label>\n'
@@ -233,10 +253,11 @@ _UPSTREAM_PAGE = (
     '<input type="text" id="password" name="password" value="{password}">\n'
     '<input type="submit" value="Connect" class="btn-blue">\n'
     '</form>\n'
+    '</div>\n'
+    '<div>\n'
     '{presets}'
-    '<hr>\n'
-    '<a href="/upstream" class="btn btn-gray">Refresh</a>\n'
-    '<a href="/" class="btn btn-gray">Back</a>\n'
+    '</div>\n'
+    '</div>\n'
     '</body>\n</html>\n'
 )
 
@@ -280,7 +301,7 @@ _SESSION_PASSWORD_PAGE = (
     '</script>\n'
     '</head>\n<body>\n'
     '<div class="page-title">'
-    '<img src="/static/frankentech.png" alt="">'
+    '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
     '<h1>Session passwords</h1>'
     '</div>\n'
     '<h2>Full access</h2>\n'
@@ -352,7 +373,7 @@ _FLIGHTINFO_PAGE = (
     'function updateAutosaveBtn() {{\n'
     '  var btn = document.getElementById("autosave_btn");\n'
     '  btn.textContent = "Autosave: " + (autosaveEnabled ? "ON" : "OFF");\n'
-    '  btn.className = "btn btn-sm " + (autosaveEnabled ? "btn-green" : "btn-gray");\n'
+    '  btn.className = "btn " + (autosaveEnabled ? "btn-green" : "btn-gray");\n'
     '}}\n'
     'function toggleAutosave() {{\n'
     '  autosaveEnabled = !autosaveEnabled;\n'
@@ -365,8 +386,19 @@ _FLIGHTINFO_PAGE = (
     '  clearTimeout(autosaveTimer);\n'
     '  autosaveTimer = setTimeout(doAutosave, 5000);\n'
     '}}\n'
+    'function crewValid() {{\n'
+    '  var cap = document.getElementById("captain_code").value.trim();\n'
+    '  var fo = document.getElementById("fo_code").value.trim();\n'
+    '  return !(cap && fo && cap === fo);\n'
+    '}}\n'
     'function doAutosave() {{\n'
     '  autosaveTimer = null;\n'
+    '  if (!crewValid()) {{\n'
+    '    var el = document.getElementById("autosave_status");\n'
+    '    el.textContent = "Captain and FO cannot be the same.";\n'
+    '    setTimeout(function() {{ el.textContent = ""; }}, 3000);\n'
+    '    return;\n'
+    '  }}\n'
     '  var form = document.getElementById("flightinfo_form");\n'
     '  var data = new FormData(form);\n'
     '  fetch("/api/flightinfo", {{method: "POST", body: data, redirect: "manual"}})\n'
@@ -385,6 +417,12 @@ _FLIGHTINFO_PAGE = (
     '  }});\n'
     '  var cb = document.querySelector("input[name=\\"seat_swap\\"]");\n'
     '  if (cb) cb.checked = !!data.seat_swap;\n'
+    '  if (data.checklist) {{\n'
+    '    data.checklist.forEach(function(checked, i) {{\n'
+    '      var el = document.getElementById("chk_" + i);\n'
+    '      if (el) el.checked = checked;\n'
+    '    }});\n'
+    '  }}\n'
     '  var note = document.getElementById("last_updated_note");\n'
     '  if (note) note.textContent ='
     ' "Last updated by: " + (data.last_updated_by || "") + " " + (data.last_updated_at || "");\n'
@@ -426,45 +464,57 @@ _FLIGHTINFO_PAGE = (
     '  var form = document.getElementById("flightinfo_form");\n'
     '  form.addEventListener("input", scheduleAutosave);\n'
     '  form.addEventListener("change", scheduleAutosave);\n'
-    '  form.addEventListener("submit", function() {{ isDirty = false; }});\n'
+    '  form.addEventListener("submit", function(e) {{\n'
+    '    if (!crewValid()) {{\n'
+    '      e.preventDefault();\n'
+    '      document.getElementById("autosave_status").textContent ='
+    ' "Captain and FO cannot be the same.";\n'
+    '      return;\n'
+    '    }}\n'
+    '    isDirty = false;\n'
+    '  }});\n'
     '  setInterval(pollBriefing, 5000);\n'
     '}});\n'
     '</script>\n'
     '</head>\n<body>\n'
     '<div class="page-title">'
-    '<img src="/static/frankentech.png" alt="">'
+    '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
     '<h1>Flight information</h1>'
     '</div>\n'
-    '<div style="display:flex;align-items:center;gap:1em;margin-bottom:0.75em;">'
-    '<p id="last_updated_note" class="note" style="margin:0">'
-    'Last updated by: {last_updated_by} {last_updated_at}</p>'
-    '<button type="button" id="autosave_btn" onclick="toggleAutosave()">Autosave: OFF</button>'
-    '<span id="autosave_status" class="note"></span>'
+    '<p id="last_updated_note" class="note" style="margin:0 0 0.4em">'
+    'Last updated by: {last_updated_by} {last_updated_at}</p>\n'
+    '{clear_form}'
+    '<div class="btn-row">\n'
+    '{header_buttons}'
     '</div>\n'
+    '<span id="autosave_status" class="note"'
+    ' style="display:block;min-height:1.2em;margin:0.2em 0 0.5em"></span>\n'
     '<form id="flightinfo_form" action="/api/flightinfo" method="post">\n'
+    '{checklist_html}'
+    '<label for="scratchpad">Inflight scratchpad</label>\n'
+    '<textarea id="scratchpad" name="scratchpad">{scratchpad}</textarea>\n'
     '<div class="grid3">\n'
     '<div><label for="portal_account">Portal account</label>'
     '<input type="text" id="portal_account" name="portal_account"'
     ' list="dl_portal" value="{portal_account}">'
-    '<datalist id="dl_portal"><option value="pscc@mkro.se"></datalist></div>\n'
+    '{portal_account_datalist}</div>\n'
     '<div><label for="airline_icao">Airline ICAO</label>'
     '<input type="text" id="airline_icao" name="airline_icao"'
     ' list="dl_icao" value="{airline_icao}">'
-    '<datalist id="dl_icao"><option value="BAW"><option value="DLH">'
-    '<option value="GST"></datalist></div>\n'
+    '{airline_icao_datalist}</div>\n'
     '<div><label for="airframe">Airframe</label>'
     '<input type="text" id="airframe" name="airframe"'
     ' list="dl_airframe" value="{airframe}">'
-    '<datalist id="dl_airframe"><option value="BAW B744 G-CCIVB">'
-    '<option value="DLH B744 D-ABVW"><option value="SuperTanker N744ST">'
-    '</datalist></div>\n'
+    '{airframe_datalist}</div>\n'
     '</div>\n'
+    '{crew_datalist}'
     '<div class="grid4">\n'
-    '<div><label for="captain_code">Captain (P1)</label>'
+    '<div><label for="captain_code">Captain (P1) / callsign suffix</label>'
     '<input type="text" id="captain_code" name="captain_code"'
-    ' value="{captain_code}"></div>\n'
-    '<div><label for="fo_code">First Officer (P2)</label>'
-    '<input type="text" id="fo_code" name="fo_code" value="{fo_code}"></div>\n'
+    ' list="dl_crew" value="{captain_code}"></div>\n'
+    '<div><label for="fo_code">First Officer (P2) / callsign suffix</label>'
+    '<input type="text" id="fo_code" name="fo_code"'
+    ' list="dl_crew" value="{fo_code}"></div>\n'
     '<div><label for="dep_airport">Departure (ICAO)</label>'
     '<input type="text" id="dep_airport" name="dep_airport"'
     ' value="{dep_airport}"></div>\n'
@@ -495,14 +545,8 @@ _FLIGHTINFO_PAGE = (
     '</div>\n'
     '<label for="comments">Comments (SOP to use, etc.)</label>\n'
     '<textarea id="comments" name="comments">{comments}</textarea>\n'
-    '<label for="scratchpad">Inflight scratchpad</label>\n'
-    '<textarea id="scratchpad" name="scratchpad">{scratchpad}</textarea>\n'
-    '{action_buttons}'
     '</form>\n'
-    '<hr>\n'
     '{readonly_notice}'
-    '<a href="/flightinfo" class="btn btn-gray">Refresh</a>\n'
-    '<a href="/" class="btn btn-gray">Back</a>\n'
     '</body>\n</html>\n'
 )
 
@@ -565,9 +609,8 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 elevation_source = router.sharedinfo.get('elevation_source_simulator', 'unknown')
                 traffic_source = router.sharedinfo.get('traffic_source_simulator', 'unknown')
                 pilot_flying = router.sharedinfo.get('pilot_flying_simulator', 'unknown')
-                is_observer = (
-                    connected and router.upstream.access_level == 'observer')
-                if router.get_router_type() == 'slave' and not is_observer:
+                if router.get_router_type() == 'slave' and not (
+                        connected and router.upstream.access_level == 'observer'):
                     if elevation_source == own_sim:
                         elev_btn = (
                             '<a href="/api/filter/elevation/stop_sending" class="btn btn-red">'
@@ -602,11 +645,14 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                         pilot_flying, own_sim)
                 else:
                     master_buttons = ''
-                sim_names = sorted({
-                    info['simulator_name']
-                    for info in router.routerinfo.values()
-                    if 'simulator_name' in info
-                })
+                errors = router.sharedinfo.get('errors', [])
+                errors_html = (
+                    '<div class="card warn">\n<b>Critical errors</b>\n'
+                    '<ul style="margin:0.4em 0 0;padding-left:1.4em">\n' +
+                    ''.join(f'<li>{e}</li>\n' for e in errors) +
+                    '</ul>\n</div>\n'
+                    if errors else ''
+                )
                 data = {
                     'rest_api_color_scheme': router.config.listen.rest_api_color_scheme,
                     'this_sim': router.config.identity.simulator,
@@ -615,8 +661,10 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                         router.upstream.access_level.capitalize()
                         if connected else 'Not connected'),
                     'upstream_class': (
-                        'ok' if connected and router.upstream.access_level == 'crew'
-                        else 'warn' if connected else 'warn'),
+                        'ok' if connected and (
+                            router.upstream.access_level == 'crew' or
+                            router.config.identity.type == 'master')
+                        else 'warn'),
                     'elevation_source': (
                         elevation_source + ' (this sim)'
                         if elevation_source == own_sim else elevation_source),
@@ -634,8 +682,20 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                         'ok' if pilot_flying == own_sim
                         else 'warn' if pilot_flying == 'ALL_CONTROL_LOCKS'
                         else 'val'),
-                    'connected_sims': ', '.join(sim_names) if sim_names else 'unknown',
+                    'connected_sims': ', '.join(
+                        f"{s} (observer)" if any(
+                            i.get('observer_mode')
+                            for i in router.routerinfo.values()
+                            if i.get('simulator_name') == s
+                        ) else s
+                        for s in sorted({
+                            i['simulator_name']
+                            for i in router.routerinfo.values()
+                            if 'simulator_name' in i
+                        })
+                    ) or 'unknown',
                     'master_buttons': master_buttons,
+                    'critical_errors': errors_html,
                     'observer_mode_notice': (
                         '<div class="card warn">\n'
                         '<b>Observer mode active</b> &mdash; '
@@ -647,12 +707,29 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                         '<a href="/api/observermode/disable" class="btn btn-green">'
                         'Disable observer mode</a>\n'
                         if router.observer_mode else
+                        '' if router.config.identity.type == 'master' else
                         '<a href="/api/observermode/enable" class="btn btn-amber">'
                         'Enable observer mode</a>\n'
                     ),
                     'sessionpwd_button': (
                         '<a href="/sessionpwd" class="btn btn-blue">Session password</a>\n'
                         if router.get_router_type() == 'master' else ''
+                    ),
+                    'change_upstream_button': (
+                        '' if router.config.identity.type == 'master' else
+                        '<a href="/upstream" class="btn btn-blue">Change upstream</a>\n'
+                    ),
+                    'checklist_warning': (
+                        '' if not router.config.sharedinfo.checklist else
+                        '' if (
+                            len(router.flightinfo.get('checklist', [])) ==
+                            len(router.config.sharedinfo.checklist) and
+                            all(router.flightinfo['checklist'])
+                        ) else
+                        '<a href="/flightinfo" style="background:#92400e;color:#fbbf24;'
+                        'padding:0.2em 0.7em;border-radius:0.4em;font-size:0.85em;'
+                        'font-weight:600;white-space:nowrap;text-decoration:none">'
+                        'Checklist incomplete</a>'
                     ),
                 }
                 return web.json_response(
@@ -1125,25 +1202,92 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 upstream = router.upstream
                 is_observer = (
                     upstream is not None and upstream.access_level == 'observer')
+                autosave_btn = (
+                    '<button type="button" id="autosave_btn"'
+                    ' onclick="toggleAutosave()" class="btn btn-gray">'
+                    'Autosave: OFF</button>\n')
+                nav_btns = (
+                    '<a href="/" class="btn btn-gray">Back</a>\n'
+                    '<a href="/flightinfo" class="btn btn-gray">Refresh</a>\n')
                 if is_observer:
-                    action_buttons = ''
+                    clear_form = ''
+                    header_buttons = nav_btns + autosave_btn
                     readonly_notice = (
                         '<div class="card warn">'
                         '<p style="margin:0">Observer mode: flight info is read-only.</p>'
-                        '</div>\n<hr>\n')
+                        '</div>\n')
                 else:
-                    action_buttons = (
-                        '<input type="submit" value="Save and broadcast" class="btn-blue">\n')
-                    readonly_notice = (
-                        '<form action="/api/flightinfo/clear" method="post">\n'
-                        '<input type="submit" value="Clear all fields" class="btn-gray">\n'
-                        '</form>\n<hr>\n')
+                    clear_form = (
+                        '<form id="flightinfo_clear_form"'
+                        ' action="/api/flightinfo/clear" method="post"'
+                        ' style="display:none"></form>\n')
+                    header_buttons = (
+                        nav_btns + autosave_btn +
+                        '<button type="submit" form="flightinfo_clear_form"'
+                        ' class="btn btn-gray">Clear all fields</button>\n'
+                        '<button type="submit" form="flightinfo_form"'
+                        ' class="btn btn-blue">Save and broadcast</button>\n')
+                    readonly_notice = ''
+                crew_datalist = (
+                    '<datalist id="dl_crew">' +
+                    ''.join(
+                        f'<option value="{m.portal_name} / {m.callsign_suffix}">'
+                        for m in router.config.sharedinfo.crew
+                    ) +
+                    '</datalist>\n')
+                airframe_datalist = (
+                    '<datalist id="dl_airframe">' +
+                    ''.join(
+                        f'<option value="{a}">'
+                        for a in router.config.sharedinfo.airframes
+                    ) +
+                    '</datalist>')
+                portal_account_datalist = (
+                    '<datalist id="dl_portal">' +
+                    ''.join(
+                        f'<option value="{a}">'
+                        for a in router.config.sharedinfo.portal_accounts
+                    ) +
+                    '</datalist>')
+                airline_icao_datalist = (
+                    '<datalist id="dl_icao">' +
+                    ''.join(
+                        f'<option value="{a}">'
+                        for a in router.config.sharedinfo.airline_icao
+                    ) +
+                    '</datalist>')
+                cl_items = router.config.sharedinfo.checklist
+                cl_state = router.flightinfo.get('checklist', [])
+                cl_disabled = ' disabled' if is_observer else ''
+                checklist_html = (
+                    '<h2>Pre-pre-flight checklist</h2>\n'
+                    '<div class="grid3">\n' +
+                    ''.join(
+                        f'<label class="toggle-row">'
+                        f'<span class="toggle-switch">'
+                        f'<input type="checkbox" id="chk_{i}" name="chk_{i}" value="1"'
+                        f'{"  checked" if i < len(cl_state) and cl_state[i] else ""}'
+                        f'{cl_disabled}>'
+                        f'<span class="toggle-track"></span>'
+                        f'</span>'
+                        f'<span>{item[:1].upper() + item[1:]}</span>'
+                        f'</label>\n'
+                        for i, item in enumerate(cl_items)
+                    ) +
+                    '</div>\n'
+                ) if cl_items else ''
                 data = {
                     'rest_api_color_scheme': router.config.listen.rest_api_color_scheme,
                     **router.flightinfo,
                     'seat_swap_checked': 'checked' if router.flightinfo.get('seat_swap') else '',
-                    'action_buttons': action_buttons,
+                    'clear_form': clear_form,
+                    'header_buttons': header_buttons,
                     'readonly_notice': readonly_notice,
+                    'crew_datalist': crew_datalist,
+                    'airframe_datalist': airframe_datalist,
+                    'portal_account_datalist': portal_account_datalist,
+                    'airline_icao_datalist': airline_icao_datalist,
+                    'checklist_html': checklist_html,
                 }
                 return web.json_response(
                     text=_FLIGHTINFO_PAGE.format(**data), content_type='text/html')
@@ -1175,6 +1319,10 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     'eobt': str(post.get('eobt', '')),
                     'comments': str(post.get('comments', '')),
                     'scratchpad': str(post.get('scratchpad', '')),
+                    'checklist': [
+                        post.get(f'chk_{i}', '') == '1'
+                        for i in range(len(router.config.sharedinfo.checklist))
+                    ],
                 }
                 router.logger.info("API: flight information updated and broadcast")
                 await router.send_frdp_flightinfo()
@@ -1188,7 +1336,7 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 now_z = datetime.datetime.now(
                     datetime.timezone.utc).strftime('%H:%Mz')
                 router.flightinfo = {
-                    k: (False if k == 'seat_swap' else '')
+                    k: (False if k == 'seat_swap' else [] if k == 'checklist' else '')
                     for k in router.flightinfo
                 }
                 router.flightinfo['last_updated_by'] = router.config.identity.simulator

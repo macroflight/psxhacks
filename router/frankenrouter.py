@@ -191,6 +191,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             'eobt': '',
             'comments': '',
             'scratchpad': '',
+            'checklist': [],
         }
         self.upstream_reconnect_requested = False
         self.longest_destination_string = 0
@@ -257,6 +258,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             'pilot_flying_simulator': "NO_CONTROL_LOCKS",
             'elevation_source_simulator': "NOSIM",
             'traffic_source_simulator': "NOSIM",
+            'errors': [],
         }
         # Track when we last send the start keyword upstream
         self.start_sent_at = 0.0
@@ -1593,6 +1595,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             },
             "filter_elevation": self.filter_elevation,
             "filter_traffic": self.filter_traffic,
+            "observer_mode": self.observer_mode,
             "errors": self.get_errors(),
         }
         payload['connections'] = []
@@ -1642,6 +1645,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             "pilot_flying_simulator": self.sharedinfo["pilot_flying_simulator"],
             "elevation_source_simulator": self.sharedinfo["elevation_source_simulator"],
             "traffic_source_simulator": self.sharedinfo["traffic_source_simulator"],
+            "errors": self.get_errors(),
         }
         payload_json = json.dumps(payload)
         # Store our own sharedinfo so we have all the data in the same place
