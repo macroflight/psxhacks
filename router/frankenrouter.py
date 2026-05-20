@@ -2039,6 +2039,22 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.qs121_keepalive_last_warning = time.perf_counter()
         await self.client_broadcast(f"Qs121={value}")
 
+    async def _housekeeping_check_write_buffers(self):
+        """Disconnect clients whose write buffer exceeds 50% of the high water mark."""
+        for client in list(self.clients.values()):
+            if client.is_closing:
+                continue
+            transport = client.writer.transport
+            _, high = transport.get_write_buffer_limits()
+            buf = transport.get_write_buffer_size()
+            if buf > high // 2:
+                self.logger.warning(
+                    "!!! Write buffer for %s is %d bytes"
+                    " (50%% of high water mark %d) - forcibly disconnecting",
+                    client.display_name, buf, high)
+                self.status_display_requested = True
+                await self.close_client_connection(client, clean=False)
+
     async def housekeeping_task(self, name):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
         """Miscellaneous housekeeping Task."""
         try:  # pylint: disable=too-many-nested-blocks
@@ -2046,6 +2062,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             while True:
                 await asyncio.sleep(0.5)
                 await self._housekeeping_refresh_qs121()
+                await self._housekeeping_check_write_buffers()
                 if time.perf_counter() - last_run > self.args.housekeeping_interval:
                     last_run = time.perf_counter()
                     self.logger.debug("Performing housekeeping")
