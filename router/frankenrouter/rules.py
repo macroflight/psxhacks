@@ -36,6 +36,11 @@ FLIGHT_CONTROL_INPUT_KEYWORDS = frozenset({'Qs120', 'Qs357', 'Qs436', 'Qh388', '
 # Same for teh traffic keywords
 TRAFFIC_KEYWORDS = frozenset({'Qs450', 'Qs451'})
 
+# PTT buttons and audio panel switches: sim-local only, filtered from other sims
+# Qh82="LcpPttCp"; Qh93="LcpPttFo"; Qh410="SwitchesAudioL";
+# Qh411="SwitchesAudioC"; Qh412="SwitchesAudioR"
+PTT_KEYWORDS = frozenset({'Qh82', 'Qh93', 'Qh410', 'Qh411', 'Qh412'})
+
 
 class RulesAction(enum.Enum):
     """The action the router needs to take for a message.
@@ -130,6 +135,7 @@ class RulesCode(enum.Enum):
     EXIT = enum.auto()
     PBSKAQ = enum.auto()
     LAYOUT = enum.auto()
+    PTT = enum.auto()
     PSXNETVATSIM = enum.auto()
     KEYVALUE_FILTERED_INGRESS_SIM_LOCAL = enum.auto()
     KEYVALUE_FILTERED_EGRESS_SIM_LOCAL = enum.auto()
@@ -919,6 +925,16 @@ class Rules():  # pylint: disable=too-many-public-methods
         if key == 'layout':
             return self.handle_layout()
 
+        if key in PTT_KEYWORDS:
+            if self.sender.is_frankenrouter:
+                if self.router.config.identity.simulator != self.sender.simulator_name:
+                    audio_panel = key in ('Qh410', 'Qh411', 'Qh412')
+                    if not audio_panel or value in ('26', '-1'):
+                        self.logger.info(
+                            "Dropping PTT/audio variable from %s: %s",
+                            self.sender.simulator_name, self.line)
+                        return self.myreturn(RulesAction.DROP, RulesCode.PTT)
+
         if (
                 key in self.router.config.psx.filter_from_other_sim and
                 self.sender.is_frankenrouter and
@@ -1178,12 +1194,20 @@ class TestRules(unittest.TestCase):
             self.filter_to_other_sim = []
             self.readonly_srsl_ips = []
 
+    class DummyConfigIdentity():  # pylint: disable=too-few-public-methods
+        """Implement small parts of the router for unit testing."""
+
+        def __init__(self):
+            """Initialize the identity config."""
+            self.simulator = 'MySim'
+
     class DummyConfig():  # pylint: disable=too-few-public-methods
         """Implement small parts of the router for unit testing."""
 
         def __init__(self):
             """Initialize the config."""
             self.psx = TestRules.DummyConfigPsx()
+            self.identity = TestRules.DummyConfigIdentity()
 
     class DummyFrankenrouter():  # pylint: disable=too-few-public-methods,too-many-instance-attributes
         """Implement small parts of the router for unit testing."""
@@ -1751,3 +1775,43 @@ class TestRules(unittest.TestCase):
         (action, code, *_) = rules.route("Qi17=42", testpeer)
         self.assertEqual(action, RulesAction.NORMAL)
         self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
+
+    def test_ptt_filter(self):
+        """Test PTT/audio variable filtering between sims."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+
+        router.upstream = self.DummyUpstreamConnection()
+        router.clients = {
+            ('127.0.0.1', 12345): self.DummyClientConnection(('127.0.0.1', 12345)),
+        }
+        testpeer = router.clients[('127.0.0.1', 12345)]
+
+        # PTT from a regular (non-frankenrouter) client: always pass
+        testpeer.is_frankenrouter = False
+        (action, code, *_) = rules.route("Qh82=1", testpeer)
+        self.assertEqual(action, RulesAction.NORMAL)
+        self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
+
+        # PTT from a frankenrouter on the same sim: pass
+        testpeer.is_frankenrouter = True
+        testpeer.simulator_name = router.config.identity.simulator
+        (action, code, *_) = rules.route("Qh93=1", testpeer)
+        self.assertEqual(action, RulesAction.NORMAL)
+        self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
+
+        # PTT from a frankenrouter on a different sim: drop with RulesCode.PTT
+        testpeer.simulator_name = 'OtherSim'
+        for key in ('Qh82', 'Qh93'):
+            (action, code, *_) = rules.route(f"{key}=1", testpeer)
+            self.assertEqual(action, RulesAction.DROP, msg=f"{key} should be dropped")
+            self.assertEqual(code, RulesCode.PTT, msg=f"{key} should use PTT code")
+
+        # Audio panel switches (Qh410/411/412): only drop for values "26" or "-1"
+        for key in ('Qh410', 'Qh411', 'Qh412'):
+            for val in ('26', '-1'):
+                (action, code, *_) = rules.route(f"{key}={val}", testpeer)
+                self.assertEqual(action, RulesAction.DROP, msg=f"{key}={val} should be dropped")
+                self.assertEqual(code, RulesCode.PTT, msg=f"{key}={val} should use PTT code")
+            (action, code, *_) = rules.route(f"{key}=1", testpeer)
+            self.assertEqual(action, RulesAction.NORMAL, msg=f"{key}=1 should pass")
