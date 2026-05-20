@@ -114,7 +114,9 @@ _INDEX_PAGE = (
     '<a href="/flightinfo" class="btn btn-gray btn-sm">Flight Info</a>'
     '</div>\n'
     '</div>\n'
+    '{observer_mode_notice}'
     '{master_buttons}'
+    '{observer_mode_button}'
     '<hr>\n'
     '<a href="/upstream" class="btn btn-blue">Change upstream</a>\n'
     '{sessionpwd_button}'
@@ -634,6 +636,20 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                         else 'val'),
                     'connected_sims': ', '.join(sim_names) if sim_names else 'unknown',
                     'master_buttons': master_buttons,
+                    'observer_mode_notice': (
+                        '<div class="card warn">\n'
+                        '<b>Observer mode active</b> &mdash; '
+                        'key-value writes from local clients are blocked.\n'
+                        '</div>\n'
+                        if router.observer_mode else ''
+                    ),
+                    'observer_mode_button': (
+                        '<a href="/api/observermode/disable" class="btn btn-green">'
+                        'Disable observer mode</a>\n'
+                        if router.observer_mode else
+                        '<a href="/api/observermode/enable" class="btn btn-amber">'
+                        'Enable observer mode</a>\n'
+                    ),
                     'sessionpwd_button': (
                         '<a href="/sessionpwd" class="btn btn-blue">Session password</a>\n'
                         if router.get_router_type() == 'master' else ''
@@ -836,6 +852,38 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 router.logger.info("API: sending FLIGHTCONTROLS:ALL_CONTROL_LOCKS upstream")
                 await router.send_to_upstream(
                     f"addon=FRANKENROUTER:{router.frdp_version}:FLIGHTCONTROLS:ALL_CONTROL_LOCKS")
+                await asyncio.sleep(1)
+                raise web.HTTPFound('/')
+
+            @routes.get('/api/observermode/enable')
+            async def handle_observermode_enable(_):
+                router.logger.info("API: enabling observer mode")
+                router.observer_mode = True
+                if router.is_upstream_connected():
+                    own_sim = router.config.identity.simulator
+                    if router.sharedinfo.get('elevation_source_simulator') == own_sim:
+                        router.logger.info("API: observer mode: releasing elevation master")
+                        await router.send_to_upstream(
+                            f"addon=FRANKENROUTER:{router.frdp_version}"
+                            f":ELEVATION_SOURCE:NOSIM")
+                    if router.sharedinfo.get('traffic_source_simulator') == own_sim:
+                        router.logger.info("API: observer mode: releasing traffic master")
+                        await router.send_to_upstream(
+                            f"addon=FRANKENROUTER:{router.frdp_version}"
+                            f":TRAFFIC_SOURCE:NOSIM")
+                    if router.sharedinfo.get('pilot_flying_simulator') == own_sim:
+                        router.logger.info("API: observer mode: releasing flight controls")
+                        await router.send_to_upstream(
+                            f"addon=FRANKENROUTER:{router.frdp_version}"
+                            f":FLIGHTCONTROLS:NO_CONTROL_LOCKS")
+                await asyncio.sleep(1)
+                raise web.HTTPFound('/')
+
+            @routes.get('/api/observermode/disable')
+            async def handle_observermode_disable(_):
+                router.logger.info("API: disabling observer mode")
+                router.observer_mode = False
+                await router.send_to_upstream("bang")
                 await asyncio.sleep(1)
                 raise web.HTTPFound('/')
 

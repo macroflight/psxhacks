@@ -145,6 +145,7 @@ class RulesCode(enum.Enum):
     KEYVALUE_NORMAL = enum.auto()
     SPEEDBRAKE_OVERRIDE = enum.auto()
     PARKING_BRAKE_FORCE_RELEASE = enum.auto()
+    OBSERVER_MODE = enum.auto()
 
 
 class Rules():  # pylint: disable=too-many-public-methods
@@ -969,6 +970,10 @@ class Rules():  # pylint: disable=too-many-public-methods
         if key == 'exit':
             return self.handle_exit()
 
+        # Observer mode: block all key-value writes from local clients
+        if not self.sender.upstream and self.router.observer_mode:
+            return self.myreturn(RulesAction.DROP, RulesCode.OBSERVER_MODE)
+
         # Update router variable stats database
         self.router.variable_stats_add(key, sender.peername)
 
@@ -1226,6 +1231,7 @@ class TestRules(unittest.TestCase):
             self.last_load3 = 0.0
             self.frdp_version = 1
             self.config = TestRules.DummyConfig()
+            self.observer_mode = False
 
         def is_upstream_connected(self):
             """Return dummy value."""
@@ -1341,6 +1347,7 @@ class TestRules(unittest.TestCase):
         self.assertEqual(code, RulesCode.FRDP_IDENT)
         self.assertEqual(router.upstream.simulator_name, 'OtherSim')
         self.assertEqual(router.upstream.router_name, 'OtherRouter')
+        self.assertEqual(router.upstream.client_provided_id, 'OtherSim')
         self.assertEqual(router.upstream.display_name, 'OtherSim/OtherRouter')
         self.assertEqual(router.upstream.uuid, 'fakeuuid')
         self.assertEqual(router.upstream.display_name_source, 'FRDP IDENT')
@@ -1402,6 +1409,7 @@ class TestRules(unittest.TestCase):
         self.assertEqual(code, RulesCode.FRDP_IDENT)
         self.assertEqual(testpeer.simulator_name, 'SomeSim')
         self.assertEqual(testpeer.router_name, 'SomeRouter')
+        self.assertEqual(testpeer.client_provided_id, 'SomeSim')
         self.assertEqual(testpeer.display_name, 'SomeSim/SomeRouter')
         self.assertEqual(testpeer.display_name_source, 'FRDP IDENT')
 

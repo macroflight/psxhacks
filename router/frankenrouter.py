@@ -185,6 +185,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.blocklist = set()
         self.session_password = None
         self.observer_session_password = None
+        self.observer_mode = False
 
         # Keep track of when we last sent a filter state warning to EICAS
         self.filter_warning_sent = 0
@@ -2290,6 +2291,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         self.client_broadcast(line),
                     )
                     await asyncio.sleep(0.2)
+
+        elif code == RulesCode.OBSERVER_MODE:
+            self.logger.debug(
+                "Observer mode: dropped key-value from %s: %s", sender_hr, line)
 
         # Take action
         if action == RulesAction.DROP:
