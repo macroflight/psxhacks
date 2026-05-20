@@ -1671,7 +1671,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         buf_limit = self.config.performance.write_buffer_critical_limit
         rx_limit = self.config.performance.received_messages_per_second_critical_limit
         tx_limit = self.config.performance.sent_messages_per_second_critical_limit
-        bucket = int(time.time() - 1.0)
+        now = int(time.time())
+        rate_window = 30
         for con in conns:
             # Skip test until connection has been established for more
             # than 60 seconds. We always have a high message rate
@@ -1683,18 +1684,22 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 errors.append(
                     f"Write buffer for {con.display_name} is {buf} bytes"
                     f" (limit {buf_limit})")
-            if bucket in con.received_stats:
-                rx = con.received_stats[bucket]['received_messages']
-                if rx > rx_limit:
-                    errors.append(
-                        f"Received message rate for {con.display_name} is {rx}/s"
-                        f" (limit {rx_limit})")
-            if bucket in con.sent_stats:
-                tx = con.sent_stats[bucket]['sent_messages']
-                if tx > tx_limit:
-                    errors.append(
-                        f"Sent message rate for {con.display_name} is {tx}/s"
-                        f" (limit {tx_limit})")
+            rx = sum(
+                con.received_stats.get(now - i, {}).get('received_messages', 0)
+                for i in range(1, rate_window + 1)
+            ) / rate_window
+            if rx > rx_limit:
+                errors.append(
+                    f"Received message rate for {con.display_name} is {rx:.0f}/s"
+                    f" ({rate_window}s avg, limit {rx_limit})")
+            tx = sum(
+                con.sent_stats.get(now - i, {}).get('sent_messages', 0)
+                for i in range(1, rate_window + 1)
+            ) / rate_window
+            if tx > tx_limit:
+                errors.append(
+                    f"Sent message rate for {con.display_name} is {tx:.0f}/s"
+                    f" ({rate_window}s avg, limit {tx_limit})")
         filterstatus = self.get_filter_status()
         if len(filterstatus['elevation']['disabled']) > 1:
             errors.append(
@@ -1716,6 +1721,35 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
     def get_warnings(self):  # pylint: disable=too-many-branches
         """Return warnings for this router (printed locally, not sent in ROUTERINFO)."""
         warnings = []
+        conns = list(self.clients.values())
+        if self.is_upstream_connected():
+            conns.append(self.upstream)
+        perf = self.config.performance
+        now = int(time.time())
+        rate_window = 30
+        for con in conns:
+            if (time.perf_counter() - con.connected_at) < 60:
+                continue
+            rx = sum(
+                con.received_stats.get(now - i, {}).get('received_messages', 0)
+                for i in range(1, rate_window + 1)
+            ) / rate_window
+            if perf.received_messages_per_second_warning_limit < rx \
+                    <= perf.received_messages_per_second_critical_limit:
+                warnings.append(
+                    f"Received message rate for {con.display_name} is {rx:.0f}/s"
+                    f" ({rate_window}s avg,"
+                    f" limit {perf.received_messages_per_second_warning_limit})")
+            tx = sum(
+                con.sent_stats.get(now - i, {}).get('sent_messages', 0)
+                for i in range(1, rate_window + 1)
+            ) / rate_window
+            if perf.sent_messages_per_second_warning_limit < tx \
+                    <= perf.sent_messages_per_second_critical_limit:
+                warnings.append(
+                    f"Sent message rate for {con.display_name} is {tx:.0f}/s"
+                    f" ({rate_window}s avg,"
+                    f" limit {perf.sent_messages_per_second_warning_limit})")
         checks = self.config.check
         if checks is None:
             return warnings
