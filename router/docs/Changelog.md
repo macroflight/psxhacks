@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-05-20: version 1.3.3
+
+- Observer mode controllable from web interface
+- Show critical errors in web interface
+- Check network for new errors (e.g more than one BACARS)
+- Disconnect clients if write buffer too big
+- Improve message rate monitoring
+- Exponential backoff delay when reconnecting to upstream
+- Drop PTT presses from other sims
+- Use UTC in logs
+- Possible workaround for "rubberband bug" (send Qs121 when main server is not)
+
 ## 2026-05-14: version 1.3.2
 
 - Added flight information page in the router web UI. This can be used
