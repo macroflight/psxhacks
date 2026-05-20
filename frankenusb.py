@@ -271,7 +271,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
 
         Used whenever we switch tiller mode on and off.
         """
-        self.logger.info("centreing aileron and tiller")
+        self.logger.info("Centering aileron and tiller")
         await self.psx_axis_queue.put({
             'variable': 'Tiller',
             'indexes': [0],
@@ -1247,14 +1247,15 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             elif button_config['button type'] == 'TILLER_TOGGLE':
                 if self.aileron_tiller_active:
                     # Remove warning, centre aileron and tiller, disable tiller mode
+                    self.logger.info("Tiller toggled off")
                     self.psx.send(MSG_TYPE_TILLER, "")
                     await self.centre_ailerons_and_tiller()
                     self.aileron_tiller_active = False
                 else:
                     # Display warning message, centre aileron and tiller, enable tiller mode
+                    self.logger.info("Tiller toggled on")
                     self.psx.send(MSG_TYPE_TILLER, "TILLER ACTIVE")
                     await self.centre_ailerons_and_tiller()
-                    # Enable tiller mode
                     self.aileron_tiller_active = True
             elif button_config['button type'] == 'ACTION_FLIGHT_PHASE_TRIGGER':
                 for button, phase in button_config['button to phase'].items():
@@ -1728,6 +1729,16 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
 
         # Subscribe to EICAS messages that another addon might set
         self.psx.subscribe(MSG_TYPE_FLT_CTL_LOCK)
+
+        # Disable tiller above 40 kt
+        def groundspeed(_, value):
+            gs = float(value)
+            if gs > 40.0 and self.aileron_tiller_active:
+                self.logger.info("Ground speed %.1f kt > 40 kt, disabling tiller", gs)
+                self.aileron_tiller_active = False
+                self.psx.send(MSG_TYPE_TILLER, "")
+                asyncio.create_task(self.centre_ailerons_and_tiller())
+        self.psx.subscribe("GroundSpeed", groundspeed)
 
         # Needed for autothrottle
         self.psx.subscribe("Afds", self.print_psx_variable)
