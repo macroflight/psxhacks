@@ -278,10 +278,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             '--read-buffer-size', type=int,
             action='store', default=1048576)
         parser.add_argument(
-            '--upstream-reconnect-delay', type=float,
-            action='store', default=1.0,
-            help="How long to wait between upstream connection attempts.")
-        parser.add_argument(
             '--status-interval',
             type=int, action='store', default=60,
             help="How often to print router status to terminal",
@@ -1095,6 +1091,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
     async def upstream_connector_task(self, name):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         """Upstream connector Task."""
         try:  # pylint: disable=too-many-nested-blocks
+            reconnect_delay = 1.0
             while True:  # pylint: disable=too-many-nested-blocks
                 # Pause clients when we have no upstream connection
                 try:
@@ -1107,10 +1104,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 # upstream is down or unreachable
                 except (ConnectionError, OSError):
                     self.logger.warning(
-                        "Upstream connection refused, sleeping %.1f s before retry",
-                        self.args.upstream_reconnect_delay,
+                        "Upstream connection refused, retrying in %.0f s",
+                        reconnect_delay,
                     )
-                    await asyncio.sleep(self.args.upstream_reconnect_delay)
+                    await asyncio.sleep(reconnect_delay)
+                    reconnect_delay = min(reconnect_delay * 2, 60.0)
                     continue
                 except Exception:  # pylint: disable=broad-exception-caught
                     msg = f"Unhandled exception: {traceback.format_exc()}"
@@ -1122,6 +1120,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.upstream = connection.UpstreamConnection(
                     reader, writer, self)
                 self.upstream_connections += 1
+                reconnect_delay = 1.0
                 self.logger.info("Connected to upstream: %s", self.upstream.peername)
                 await self.log_connect_evt(self.upstream.peername)
 
@@ -1170,12 +1169,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         data = await self.upstream.read_line_from_stream()
                     except connection.ConnectionClosed as exc:
                         self.logger.info(
-                            "Upstream connection broke (%s), sleeping %.1f s before reconnect",
-                            exc,
-                            self.args.upstream_reconnect_delay,
+                            "Upstream connection broke (%s), reconnecting in %.0f s",
+                            exc, reconnect_delay,
                         )
                         await self.close_upstream_connection()
-                        await asyncio.sleep(self.args.upstream_reconnect_delay)
+                        await asyncio.sleep(reconnect_delay)
+                        reconnect_delay = min(reconnect_delay * 2, 60.0)
                         break
                     except Exception:  # pylint: disable=broad-exception-caught
                         msg = f"Unhandled exception: {traceback.format_exc()}"
