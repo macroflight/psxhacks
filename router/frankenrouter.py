@@ -73,6 +73,19 @@ PSX_RESUME_ELEVATION_AFTER = 60
 # How often to sent master caution if filter status is bad
 FILTER_WARNING_INTERVAL = 60
 
+# Addon client patterns checked on the master router.
+# More than one match is always a critical error.
+MASTER_ADDON_PATTERNS = [
+    r'.*BACARS.*',
+    r'.*TURB.*',
+    r'.*UTIL.*',
+    r'.*TANKER.*',
+]
+# Subset where zero matches is also a warning.
+MASTER_ADDON_REQUIRED_PATTERNS = [
+    r'.*BACARS.*',
+]
+
 
 def trimstring(longname, maxlen=11, sep=".."):
     """Shorten string."""
@@ -1593,6 +1606,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 "upstream": con.upstream,
                 "uuid": con.uuid,
                 "client_id": con.client_id,
+                "client_provided_id": con.client_provided_id,
                 "is_frankenrouter": con.is_frankenrouter,
                 "display_name": con.display_name,
                 "connected_time": int(time.perf_counter() - con.connected_at),
@@ -1660,6 +1674,17 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             exclude_non_frankenrouter=True)
         # End of send_frdp_flightinfo()
 
+    def _find_network_clients_matching(self, pattern):
+        """Return list of (simulator_name, display_name) for matching non-router clients."""
+        matches = []
+        for router in self.routerinfo.values():
+            for conn in router.get('connections', []):
+                if conn.get('upstream') or conn.get('is_frankenrouter'):
+                    continue
+                if re.match(pattern, conn.get('display_name', '')):
+                    matches.append((router.get('simulator_name', '?'), conn.get('display_name')))
+        return matches
+
     def get_errors(self):  # pylint: disable=too-many-branches
         """Return errors for this router (sent in FRDP ROUTERINFO)."""
         errors = []
@@ -1716,6 +1741,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 errors.append("No sim is sending MSFS elevation to PSX")
             if len(filterstatus['traffic']['disabled']) < 1:
                 errors.append("No sim is sending vPilot traffic data")
+        if self.config.identity.type == 'master':
+            for pattern in MASTER_ADDON_PATTERNS:
+                matches = self._find_network_clients_matching(pattern)
+                if len(matches) > 1:
+                    errors.append(
+                        f"More than one client matching '{pattern}'"
+                        f" ({len(matches)} clients in:"
+                        f" {', '.join(sim for sim, _ in matches)})")
         return errors
 
     def get_warnings(self):  # pylint: disable=too-many-branches
@@ -1772,6 +1805,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     warnings.append(f"Too few ({count}) clients matching {regexp}")
                 if check.limit_max and count > check.limit_max:
                     warnings.append(f"Too many ({count}) clients matching {regexp}")
+        if self.config.identity.type == 'master':
+            for pattern in MASTER_ADDON_REQUIRED_PATTERNS:
+                if not self._find_network_clients_matching(pattern):
+                    warnings.append(f"No client matching '{pattern}'")
         return warnings
 
     def print_client_errors(self):
