@@ -2003,7 +2003,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 "No Qs121 seen in %.1fs, re-sending keepalive (normal when stationary)",
                 age)
             self.qs121_keepalive_last_warning = time.perf_counter()
-        self.logger.info("Qs121 keepalive: %s", value)
         await self.client_broadcast(f"Qs121={value}")
 
     async def housekeeping_task(self, name):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
