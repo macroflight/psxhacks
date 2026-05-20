@@ -629,11 +629,11 @@ class Rules():  # pylint: disable=too-many-public-methods
             return self.handle_addon_frankenrouter(payload)
 
         # Drop addon=PSXNETVATSIM:SELECT_ACP:* from other sims
-        if addon == 'PSXNETVATSIM':
+        if addon == 'PSXNETVATSIM' and 'SELECT_ACP:' in payload:
             if self.sender.is_frankenrouter:
                 if self.router.config.identity.simulator != self.sender.simulator_name:
                     self.logger.info(
-                        "Dropping addon=PSXNETVATSIM from other sim %s: %s",
+                        "Dropping addon=PSXNETVATSIM:SELECT_ACP from other sim %s: %s",
                         self.sender.simulator_name, self.line)
                     return self.myreturn(RulesAction.DROP, RulesCode.PSXNETVATSIM)
 
