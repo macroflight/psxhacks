@@ -184,7 +184,10 @@ class Rules():  # pylint: disable=too-many-public-methods
             return self.myreturn(
                 RulesAction.DROP,
                 RulesCode.MESSAGE_INVALID,
-                message=f"Unexpected ID {payload}, expected {expected_id}"
+                message=(
+                    f"Unexpected PONG ID {payload}, expected {expected_id}"
+                    f" from {self.sender.display_name}"
+                )
             )
         frdp_rtt = time.perf_counter() - self.sender.frdp_ping_sent
         # FIXME: ignore RTT numbers in a period after upstream or a
@@ -209,7 +212,8 @@ class Rules():  # pylint: disable=too-many-public-methods
             )
         self.sender.simulator_name = simname
         self.sender.router_name = routername
-        self.sender.display_name = routername
+        self.sender.client_provided_id = simname
+        self.sender.display_name = f"{simname}/{routername}"
         self.sender.uuid = uuid
         self.sender.display_name_source = "FRDP IDENT"
         self.router.connection_state_changed()
@@ -1337,7 +1341,7 @@ class TestRules(unittest.TestCase):
         self.assertEqual(code, RulesCode.FRDP_IDENT)
         self.assertEqual(router.upstream.simulator_name, 'OtherSim')
         self.assertEqual(router.upstream.router_name, 'OtherRouter')
-        self.assertEqual(router.upstream.display_name, 'OtherRouter')
+        self.assertEqual(router.upstream.display_name, 'OtherSim/OtherRouter')
         self.assertEqual(router.upstream.uuid, 'fakeuuid')
         self.assertEqual(router.upstream.display_name_source, 'FRDP IDENT')
 
@@ -1398,7 +1402,7 @@ class TestRules(unittest.TestCase):
         self.assertEqual(code, RulesCode.FRDP_IDENT)
         self.assertEqual(testpeer.simulator_name, 'SomeSim')
         self.assertEqual(testpeer.router_name, 'SomeRouter')
-        self.assertEqual(testpeer.display_name, 'SomeRouter')
+        self.assertEqual(testpeer.display_name, 'SomeSim/SomeRouter')
         self.assertEqual(testpeer.display_name_source, 'FRDP IDENT')
 
         # CLIENTINFO from client
