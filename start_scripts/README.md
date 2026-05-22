@@ -67,7 +67,7 @@ The topology would then look like this:
     +----------------------+
 ```
 
-In this situation, you would not be using your own master PSX instance (and router, if applicable). Instead, you would rely on the the remote master PSX instance allowing for  shared cockpit operations and flying together over the internet!
+In this situation, you would not be using your own master PSX instance (and router, if applicable). Instead, you would rely on the the remote master PSX instance allowing for shared cockpit operations and flying together over the internet!
 
 ### Hosting the master sim
 As mentioned, when you're using a core Frankenrouter others can connect to it over the internet for shared cockpit operations. This does require port forwarding on your internet router to the IP address of your core Frankenrouter though.
