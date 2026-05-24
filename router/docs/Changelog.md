@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-05-24: version 1.3.4
+
+- Remove temporary SRSL filter (SRSL 0.3 now supports shared cockpit)
+- Add possible workaround for IRS alignment failures
+
 ## 2026-05-20: version 1.3.3
 
 - Observer mode controllable from web interface
