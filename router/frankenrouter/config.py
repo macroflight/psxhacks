@@ -100,15 +100,6 @@ class _RouterConfigPsx:  # pylint: disable=missing-class-docstring,too-few-publi
             raise RouterConfigError("psx filter_to_other_sim must be a list")
         if not all(isinstance(k, str) for k in self.filter_to_other_sim):
             raise RouterConfigError("psx filter_to_other_sim entries must be strings")
-        self.readonly_srsl_ips = data.get('readonly_srsl_ips', ['127.0.0.1'])
-        if not isinstance(self.readonly_srsl_ips, list):
-            raise RouterConfigError("psx readonly_srsl_ips must be a list")
-        for entry in self.readonly_srsl_ips:
-            try:
-                ipaddress.ip_address(entry)
-            except ValueError as exc:
-                raise RouterConfigError(
-                    f"Invalid IP address in psx readonly_srsl_ips '{entry}': {exc}") from exc
 
 
 class _RouterConfigCrewMember:  # pylint: disable=missing-class-docstring,too-few-public-methods
