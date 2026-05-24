@@ -61,6 +61,12 @@ if ($StartFrankenwind ) {
     Invoke-WindowPosition "frankenwind"
 }
 
+if ($StartSrslPsxSlave ) {
+    Write-Output "Starting SRSL-PSX..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_srsl_psx_slave.ps1"
+    Invoke-WindowPosition "SRSL-PSX slave"
+}
+
 if ($StartAcarsPrint ) {
     Write-Output "Starting ACARS Print..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_acarsprint.ps1"

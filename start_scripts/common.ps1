@@ -81,6 +81,11 @@ $SimObjectRouterDir    = "$SimBase\sim_object_router"
 # Where the ACARS Print app is installed
 $AcarsPrintDir      = "$SimBase\acars_print\AcarsPrintV1_1"
 
+# Location of SRSL-PSX (SmartRunway, SmartLanding) — master and slave instances
+# are in separate directories since they connect to different PSX instances.
+$SrslPsxMasterDir   = "$SimBase\SRSL-PSX\2026-05-23-master"
+$SrslPsxSlaveDir    = "$SimBase\SRSL-PSX\2026-05-23"
+
 # Flavor-derived variables — overridden at runtime by psxhacks-current-flavor.ps1.
 # These defaults apply when configure_flavor.ps1 has not yet been run.
 $AirlineIcao    = "BAW"
@@ -160,6 +165,9 @@ $StartPsxNetGroundCrew   = $false
 
 $StartFrankencduproxy = $false
 $StartCsCdu           = $false
+
+$StartSrslPsxMaster = $false
+$StartSrslPsxSlave  = $false
 $CsCduExe = "$SimBase\hw\cs_cdu\CockpitSimulator v2025.2.7.exe"
 
 #
@@ -179,6 +187,7 @@ $StopBeforeMsfsStart       = $true
 
 # Retry interval and timeout (seconds) used by apply_window_positions.ps1 when
 # waiting for an addon window to appear after the addon is started.
+$WindowPositionInitialDelay    = 2
 $WindowPositionSleepSeconds    = 0.5
 $WindowPositionSleepSecondsMax = 5
 
@@ -208,6 +217,8 @@ $SimAddonNames = [ordered]@{
     "PSX.NET.WeatherRadar"   = "PSX.NET WeatherRadar"
     "PSX.NET.GroundCrew"     = "PSX.NET GroundCrew"
     "SimObjectRouter"        = "SimObjectRouter"
+    "SRSL-PSX master"        = "SRSL-PSX (master)"
+    "SRSL-PSX slave"         = "SRSL-PSX (slave)"
 }
 
 

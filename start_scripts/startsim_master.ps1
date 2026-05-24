@@ -62,3 +62,9 @@ if ($StartFrankenturb ) {
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenturb.ps1"
     Invoke-WindowPosition "frankenturb"
 }
+
+if ($StartSrslPsxMaster ) {
+    Write-Output "Starting SRSL-PSX..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_srsl_psx_master.ps1"
+    Invoke-WindowPosition "SRSL-PSX master"
+}

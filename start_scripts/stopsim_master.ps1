@@ -24,6 +24,7 @@ KillPythonScript "frankenturb.py"
 
 KillProcess "PSX.Bacars.UI"
 KillProcess "PSX.NET"
+KillJavaJar "$SrslPsxMasterDir\SRSL-PSX.jar"
 
 # Ask PSX server to shut down gracefully before killing java.exe
 Write-Output "Shutting down PSX server..."
