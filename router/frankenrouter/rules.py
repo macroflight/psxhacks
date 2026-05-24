@@ -137,6 +137,7 @@ class RulesCode(enum.Enum):
     LAYOUT = enum.auto()
     PTT = enum.auto()
     PSXNETVATSIM = enum.auto()
+    CDUPROXY = enum.auto()
     KEYVALUE_FILTERED_INGRESS_SIM_LOCAL = enum.auto()
     KEYVALUE_FILTERED_EGRESS_SIM_LOCAL = enum.auto()
     KEYVALUE_FILTERED_INGRESS = enum.auto()
@@ -614,13 +615,14 @@ class Rules():  # pylint: disable=too-many-public-methods
             self.logger.debug("Got unsupported addon message: %s", rest)
             addon = rest
             payload = ""
+        # Drop addon=FRANKENCDUPROXY from from other sims
         if addon == 'FRANKENCDUPROXY':
             if (self.sender.is_frankenrouter and
                     self.router.config.identity.simulator != self.sender.simulator_name):
                 self.logger.info(
                     "Dropping FRANKENCDUPROXY addon from other-sim frankenrouter %s",
                     self.sender.simulator_name)
-                return self.myreturn(RulesAction.DROP, RulesCode.ADDON_FORWARDED)
+                return self.myreturn(RulesAction.DROP, RulesCode.CDUPROXY)
 
         if addon == 'FRANKENROUTER':
             if ':' not in payload:
