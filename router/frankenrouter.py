@@ -79,14 +79,14 @@ IRS_ALIGN_FIX_TIMEOUT = 120.0
 # Addon client patterns checked on the master router.
 # More than one match is always a critical error.
 MASTER_ADDON_PATTERNS = [
-    r'.*BACARS.*',
+    r'.*(BA ACARS|BACARS).*',
     r'.*TURB.*',
     r'.*UTIL.*',
     r'.*TANKER.*',
 ]
 # Subset where zero matches is also a warning.
 MASTER_ADDON_REQUIRED_PATTERNS = [
-    r'.*BACARS.*',
+    r'.*(BA ACARS|BACARS).*',
 ]
 
 
