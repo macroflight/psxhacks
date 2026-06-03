@@ -1155,7 +1155,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
     async def handle_button(self, event):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         """Handle button press/release."""
 
-        async def handle_button_helper():  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
+        async def handle_button_helper():  # pylint: disable=too-many-branches,too-many-statements,too-many-locals,too-many-return-statements
             if button_config['button type'] == "SET":
                 # Set a PSX variable to the value in config
                 self.psx_send_and_set(
@@ -1686,7 +1686,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         """Log the value of a PSX variable."""
         self.logger.info("PSX variable %s is now %s", key, value)
 
-    async def setup_psx_connection(self):
+    async def setup_psx_connection(self):  # pylint: disable=too-many-statements
         """Set up the PSX connection."""
         def setup():
             self.psx.send("demand", "GroundSpeed")
@@ -1761,6 +1761,12 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                     if 'psx variables' in action:
                         for keytuple in action['psx variables']:
                             psx_variables.add(keytuple[0])
+        # Also subscribe to the seat-translated equivalent of any translatable variable
+        for var in list(psx_variables):
+            if var in LEFT_RIGHT_CONTROLS:
+                psx_variables.add(LEFT_RIGHT_CONTROLS[var])
+            elif var in _RIGHT_LEFT_CONTROLS:
+                psx_variables.add(_RIGHT_LEFT_CONTROLS[var])
         self.logger.info("Subscribing to PSX variables %s", psx_variables)
         for psx_variable in psx_variables:
             self.psx.subscribe(psx_variable)
