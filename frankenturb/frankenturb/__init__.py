@@ -29,6 +29,7 @@ from .terrain import TileCache, ElevationGrid
 from .turbulence import TerrainTurbulenceModel, TurbulenceState
 from .wind import WindProfile, WindFetcher, make_fixed_wind_profile
 from .cb_turbulence import compute_cb_turbulence
+from .pirep import PirepFetcher, PirepRecord, compute_pirep_turbulence
 
 log = logging.getLogger(__name__)
 
@@ -245,4 +246,7 @@ __all__ = [
     "ElevationGrid",
     "parse_pibahealtas",
     "compute_cb_turbulence",
+    "PirepFetcher",
+    "PirepRecord",
+    "compute_pirep_turbulence",
 ]

@@ -19,6 +19,7 @@ from frankenturb.cb import (
     find_nearest_cb, parse_wx_zone_basic, parse_wx_zone_position, parse_wx_clust,
 )
 from frankenturb.cb_turbulence import compute_cb_turbulence
+from frankenturb.pirep import PirepFetcher, compute_pirep_turbulence
 
 
 __MYNAME__ = 'frankenturb'
@@ -219,7 +220,11 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self.engine = TurbulenceEngine()
         self._turb_print_count = 0
 
-        self.type_biases = {'wave': 100, 'rotor': 100, 'mechanical': 100, 'shear': 100, 'cb': 100}
+        self.type_biases = {
+            'wave': 100, 'rotor': 100, 'mechanical': 100,
+            'shear': 100, 'cb': 100, 'pirep': 100,
+        }
+        self.pirep_fetcher = PirepFetcher()
         self.lateral_size_bias = 50  # % of nearest-neighbour zone radius; tune to match radar
 
         self._cdu_status_kind = "none"
@@ -382,11 +387,14 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self._enter_type_bias(mcdu, 'cb')
         elif value == "5R":
             self._enter_lat_size_bias(mcdu)
+        elif value == "6L":
+            self._enter_type_bias(mcdu, 'pirep')
         elif value == "6R":
             self.turb_enabled = False
             self.intensity_bias = 100
             self.type_biases = {
-                'wave': 100, 'rotor': 100, 'mechanical': 100, 'shear': 100, 'cb': 100,
+                'wave': 100, 'rotor': 100, 'mechanical': 100,
+                'shear': 100, 'cb': 100, 'pirep': 100,
             }
             self.lateral_size_bias = 50
             self.wind_mode = "live"
@@ -420,7 +428,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 "Unhandled MCDU event from %s: %s=%s", mcdu.location, event_type, value)
 
     def _paint_cdu_status_row(self):
-        """Paint the compact turbulence status on row 11 of all active MCDUs."""
+        """Paint PIREP label (left) and compact turbulence status (right) on row 11."""
         _abbr = {"none": "---", "light": "LGT", "moderate": "MOD",
                  "severe": "SEV", "extreme": "EXT"}
         label = _intensity_label(self._cdu_status_intensity)
@@ -428,9 +436,10 @@ class Script():  # pylint: disable=too-many-instance-attributes
         kind = self._cdu_status_kind.upper()
         pct = int(self._cdu_status_intensity * 100)
         color = "cyan" if self._cdu_status_intensity >= 0.10 else "amber"
-        text = f"{kind:<6}{abbr}  {pct:3d}%"
+        status = f"{kind:<6}{abbr}  {pct:3d}%"  # 15 chars; starts at col 9
         for mcdu in self.active_mcdus:
-            mcdu.paint(11, 0, "small", color, text)
+            mcdu.paint(11, 0, "small", "amber", "PIREP")
+            mcdu.paint(11, 9, "small", color, status)
 
     async def paintMainPage(self, mcdu):
         """Paint the PSX Turb main page on the MCDU."""
@@ -482,6 +491,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
                    f"{str(self.lateral_size_bias) + '%>':>12}")
 
         self._paint_cdu_status_row()
+        mcdu.paint(12, 0, L, C, f"{'<' + str(self.type_biases['pirep']) + '%':<12}")
         mcdu.paint(12, 18, L, A, "RESET>")
         if self.scratchpad_text:
             mcdu.paint(13, 0, "large", "magenta", self.scratchpad_text)
@@ -562,11 +572,13 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 if ground_speed_kt < 30.0:
                     continue
 
-                # Wind fetch + turbulence compute may do an HTTP request on the
-                # first call.  Run in a thread so the event loop stays responsive
-                # and the PSX connection does not time out.
-                state = await loop.run_in_executor(
-                    None, self.engine.compute, lat, lon, alt_ft)
+                # Wind/terrain and PIREP fetches may both do HTTP on first call.
+                # Run them in parallel threads so the event loop stays responsive.
+                state, pirep_rec = await asyncio.gather(
+                    loop.run_in_executor(None, self.engine.compute, lat, lon, alt_ft),
+                    loop.run_in_executor(
+                        None, self.pirep_fetcher.find_relevant, lat, lon, alt_ft),
+                )
 
                 # CB proximity turbulence (fast — no I/O, just PSX cache + math).
                 cb = self._get_nearest_cb(lat, lon)
@@ -575,6 +587,13 @@ class Script():  # pylint: disable=too-many-instance-attributes
                     cb_state = compute_cb_turbulence(alt_ft, cb)
                     if cb_state.intensity > state.intensity:
                         state = cb_state
+
+                # PIREP turbulence — whichever source is most intense governs.
+                pirep_state = None
+                if pirep_rec is not None:
+                    pirep_state = compute_pirep_turbulence(alt_ft, pirep_rec)
+                    if pirep_state.intensity > state.intensity:
+                        state = pirep_state
 
                 # --- Inject WxBurst into PSX ------------------------------------
                 # intensity_bias and the per-kind type_bias both scale intensity:
@@ -659,6 +678,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
                         self.logger.info(
                             "           [CB turb] %s %.2f",
                             cb_state.reason, cb_state.intensity)
+                if pirep_rec is not None:
+                    self.logger.info(
+                        "           [PIREP] %s at %.0fnm FL%.0f age=%.0fmin int=%.2f",
+                        pirep_rec.raw_int, pirep_rec.distance_nm,
+                        pirep_rec.alt_ft / 100.0, pirep_rec.age_min,
+                        pirep_state.intensity if pirep_state else 0.0)
                 if self.args.accelerations and accel is not None:
                     self.logger.info(
                         "           [acc] heave=%+.2fG surge=%+.2fG sway=%+.2fG "
