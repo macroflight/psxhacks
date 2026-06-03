@@ -20,6 +20,7 @@ from frankenturb.cb import (
 )
 from frankenturb.cb_turbulence import compute_cb_turbulence
 from frankenturb.pirep import PirepFetcher, compute_pirep_turbulence
+from frankenturb.cape import CapeFetcher, compute_cape_turbulence
 
 
 __MYNAME__ = 'frankenturb'
@@ -55,6 +56,16 @@ _BURST_BANK = 100
 _BURST_YAW = 200
 _BURST_SPD = 300
 _BURST_GUST = 400
+
+# CDU status display abbreviations.
+_STATUS_KIND = {
+    "none": "NONE", "wave": "WAVE", "rotor": "ROTR", "mechanical": "MECH",
+    "shear": "SHER", "cb": "CB", "pirep": "PIRP", "cape": "CAPE",
+}
+_STATUS_ABBR = {
+    "none": "---", "light": "LGT", "moderate": "MOD",
+    "severe": "SEV", "extreme": "EXT",
+}
 
 
 def _sign(v):
@@ -132,7 +143,15 @@ def _pick_burst(state, intensity):
             (_BURST_SPD, r([-1, 1]), "SPD", 1.5),
             (_BURST_YAW, r([-1, 1]), "YAW", 0.5),
         ]
-    else:  # shear, shear+*, none
+    elif state.kind == 'cape':
+        # CAPE convective turbulence: strong updrafts/downdrafts with bank.
+        candidates = [
+            (_BURST_SINK, r([-1, 1]), "SINK", 2.5),
+            (_BURST_BANK, r([-1, 1]), "BANK", 1.5),
+            (_BURST_SPD, r([-1, 1]), "SPD", 1.0),
+            (_BURST_YAW, r([-1, 1]), "YAW", 0.3),
+        ]
+    else:  # shear, shear+*, pirep, none
         candidates = [
             (_BURST_SINK, r([-1, 1]), "SINK", 1.0),
             (_BURST_BANK, r([-1, 1]), "BANK", 1.0),
@@ -222,9 +241,10 @@ class Script():  # pylint: disable=too-many-instance-attributes
 
         self.type_biases = {
             'wave': 100, 'rotor': 100, 'mechanical': 100,
-            'shear': 100, 'cb': 100, 'pirep': 100,
+            'shear': 100, 'cb': 100, 'pirep': 100, 'cape': 100,
         }
         self.pirep_fetcher = PirepFetcher()
+        self.cape_fetcher = CapeFetcher()
         self.lateral_size_bias = 50  # % of nearest-neighbour zone radius; tune to match radar
 
         self._cdu_status_kind = "none"
@@ -390,24 +410,29 @@ class Script():  # pylint: disable=too-many-instance-attributes
         elif value == "6L":
             self._enter_type_bias(mcdu, 'pirep')
         elif value == "6R":
-            self.turb_enabled = False
-            self.intensity_bias = 100
-            self.type_biases = {
-                'wave': 100, 'rotor': 100, 'mechanical': 100,
-                'shear': 100, 'cb': 100, 'pirep': 100,
-            }
-            self.lateral_size_bias = 50
-            self.wind_mode = "live"
-            self.psx_wind = None
-            self.engine.clear_fixed_wind()
-            self.repaint_req_by.add("reset")
+            self._enter_type_bias(mcdu, 'cape')
         elif value == "CLR":
-            self.scratchpad_text = ''
-            mcdu.paint(13, 0, "large", "white", " " * 24)
+            if self.scratchpad_text:
+                self.scratchpad_text = ''
+                mcdu.paint(13, 0, "small", "amber", "     CLR=RESET".ljust(24))
+            else:
+                self.turb_enabled = False
+                self.intensity_bias = 100
+                self.type_biases = {
+                    'wave': 100, 'rotor': 100, 'mechanical': 100,
+                    'shear': 100, 'cb': 100, 'pirep': 100, 'cape': 100,
+                }
+                self.lateral_size_bias = 50
+                self.wind_mode = "live"
+                self.psx_wind = None
+                self.engine.clear_fixed_wind()
+                self.repaint_req_by.add("reset")
         elif value == "DEL":
             self.scratchpad_text = self.scratchpad_text[:-1]
-            mcdu.paint(13, 0, "large", "magenta" if self.scratchpad_text else "white",
-                       self.scratchpad_text.ljust(24))
+            if self.scratchpad_text:
+                mcdu.paint(13, 0, "large", "magenta", self.scratchpad_text.ljust(24))
+            else:
+                mcdu.paint(13, 0, "small", "amber", "     CLR=RESET".ljust(24))
         elif value in ('0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '/', '+/-'):
             if len(self.scratchpad_text) < 10:
                 self.scratchpad_text += value
@@ -427,19 +452,16 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.logger.debug(
                 "Unhandled MCDU event from %s: %s=%s", mcdu.location, event_type, value)
 
-    def _paint_cdu_status_row(self):
-        """Paint PIREP label (left) and compact turbulence status (right) on row 11."""
-        _abbr = {"none": "---", "light": "LGT", "moderate": "MOD",
-                 "severe": "SEV", "extreme": "EXT"}
+    def _paint_cdu_status(self):
+        """Paint compact turbulence status on row 1 left (cols 0–14)."""
         label = _intensity_label(self._cdu_status_intensity)
-        abbr = _abbr[label]
-        kind = self._cdu_status_kind.upper()
+        abbr = _STATUS_ABBR[label]
+        kind = _STATUS_KIND.get(self._cdu_status_kind, self._cdu_status_kind[:4].upper())
         pct = int(self._cdu_status_intensity * 100)
         color = "cyan" if self._cdu_status_intensity >= 0.10 else "amber"
-        status = f"{kind:<6}{abbr}  {pct:3d}%"  # 15 chars; starts at col 9
+        status = f"{kind:<4} {abbr}  {pct:3d}%"  # 14 chars; cols 0-13
         for mcdu in self.active_mcdus:
-            mcdu.paint(11, 0, "small", "amber", "PIREP")
-            mcdu.paint(11, 9, "small", color, status)
+            mcdu.paint(1, 0, "small", color, status)
 
     async def paintMainPage(self, mcdu):
         """Paint the PSX Turb main page on the MCDU."""
@@ -490,11 +512,15 @@ class Script():  # pylint: disable=too-many-instance-attributes
                    f"{'<' + str(self.type_biases['cb']) + '%':<12}"
                    f"{str(self.lateral_size_bias) + '%>':>12}")
 
-        self._paint_cdu_status_row()
+        self._paint_cdu_status()
+        mcdu.paint(11, 0, S, A, "PIREP")
+        mcdu.paint(11, 19, S, A, "CAPE>")
         mcdu.paint(12, 0, L, C, f"{'<' + str(self.type_biases['pirep']) + '%':<12}")
-        mcdu.paint(12, 18, L, A, "RESET>")
+        mcdu.paint(12, 12, L, C, f"{str(self.type_biases['cape']) + '%>':>12}")
         if self.scratchpad_text:
             mcdu.paint(13, 0, "large", "magenta", self.scratchpad_text)
+        else:
+            mcdu.paint(13, 0, "small", A, "     CLR=RESET".ljust(24))
 
     def _get_nearest_cb(self, lat: float, lon: float):
         """Collect CB data from PSX and return the nearest active storm cell.
@@ -572,12 +598,14 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 if ground_speed_kt < 30.0:
                     continue
 
-                # Wind/terrain and PIREP fetches may both do HTTP on first call.
-                # Run them in parallel threads so the event loop stays responsive.
-                state, pirep_rec = await asyncio.gather(
+                # Wind/terrain, PIREP, and CAPE fetches may all do HTTP on first
+                # call.  Run them in parallel threads so the event loop stays
+                # responsive.
+                state, pirep_rec, cape_sample = await asyncio.gather(
                     loop.run_in_executor(None, self.engine.compute, lat, lon, alt_ft),
                     loop.run_in_executor(
                         None, self.pirep_fetcher.find_relevant, lat, lon, alt_ft),
+                    loop.run_in_executor(None, self.cape_fetcher.get, lat, lon),
                 )
 
                 # CB proximity turbulence (fast — no I/O, just PSX cache + math).
@@ -594,6 +622,13 @@ class Script():  # pylint: disable=too-many-instance-attributes
                     pirep_state = compute_pirep_turbulence(alt_ft, pirep_rec)
                     if pirep_state.intensity > state.intensity:
                         state = pirep_state
+
+                # CAPE convective turbulence.
+                cape_state = None
+                if cape_sample is not None:
+                    cape_state = compute_cape_turbulence(alt_ft, cape_sample)
+                    if cape_state.intensity > state.intensity:
+                        state = cape_state
 
                 # --- Inject WxBurst into PSX ------------------------------------
                 # intensity_bias and the per-kind type_bias both scale intensity:
@@ -621,7 +656,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
                     self._cdu_last_status_update = now_mono
                     self._cdu_status_kind = state.kind
                     self._cdu_status_intensity = effective_intensity
-                    self._paint_cdu_status_row()
+                    self._paint_cdu_status()
 
                 # --- Throttle console output to once per second -----------------
                 now = time.monotonic()
@@ -684,6 +719,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
                         pirep_rec.raw_int, pirep_rec.distance_nm,
                         pirep_rec.alt_ft / 100.0, pirep_rec.age_min,
                         pirep_state.intensity if pirep_state else 0.0)
+                if cape_sample is not None and cape_state is not None:
+                    li = cape_sample.lifted_index_c
+                    li_str = f"{li:+.1f}" if not _isnan(li) else "N/A"
+                    self.logger.info(
+                        "           [CAPE ] %.0f J/kg LI=%s deg-C -> %.2f",
+                        cape_sample.cape_j_kg, li_str, cape_state.intensity)
                 if self.args.accelerations and accel is not None:
                     self.logger.info(
                         "           [acc] heave=%+.2fG surge=%+.2fG sway=%+.2fG "

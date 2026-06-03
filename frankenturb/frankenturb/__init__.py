@@ -30,6 +30,7 @@ from .turbulence import TerrainTurbulenceModel, TurbulenceState
 from .wind import WindProfile, WindFetcher, make_fixed_wind_profile
 from .cb_turbulence import compute_cb_turbulence
 from .pirep import PirepFetcher, PirepRecord, compute_pirep_turbulence
+from .cape import CapeFetcher, CapeSample, compute_cape_turbulence
 
 log = logging.getLogger(__name__)
 
@@ -249,4 +250,7 @@ __all__ = [
     "PirepFetcher",
     "PirepRecord",
     "compute_pirep_turbulence",
+    "CapeFetcher",
+    "CapeSample",
+    "compute_cape_turbulence",
 ]
