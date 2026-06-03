@@ -21,6 +21,7 @@ from frankenturb.cb import (
 from frankenturb.cb_turbulence import compute_cb_turbulence
 from frankenturb.pirep import PirepFetcher, compute_pirep_turbulence
 from frankenturb.cape import CapeFetcher, compute_cape_turbulence
+from frankenturb.gairmet import GairmetFetcher, compute_gairmet_turbulence
 
 
 __MYNAME__ = 'frankenturb'
@@ -61,6 +62,7 @@ _BURST_GUST = 400
 _STATUS_KIND = {
     "none": "NONE", "wave": "WAVE", "rotor": "ROTR", "mechanical": "MECH",
     "shear": "SHER", "cb": "CB", "pirep": "PIRP", "cape": "CAPE",
+    "gairmet": "GARM",
 }
 _STATUS_ABBR = {
     "none": "---", "light": "LGT", "moderate": "MOD",
@@ -150,6 +152,14 @@ def _pick_burst(state, intensity):
             (_BURST_BANK, r([-1, 1]), "BANK", 1.5),
             (_BURST_SPD, r([-1, 1]), "SPD", 1.0),
             (_BURST_YAW, r([-1, 1]), "YAW", 0.3),
+        ]
+    elif state.kind == 'gairmet':
+        # G-AIRMET: jet-stream CAT and mountain wave — airspeed-heavy, some sink.
+        candidates = [
+            (_BURST_SPD, r([-1, 1]), "SPD", 2.0),
+            (_BURST_SINK, r([-1, 1]), "SINK", 1.5),
+            (_BURST_BANK, r([-1, 1]), "BANK", 1.0),
+            (_BURST_YAW, r([-1, 1]), "YAW", 0.5),
         ]
     else:  # shear, shear+*, pirep, none
         candidates = [
@@ -241,10 +251,11 @@ class Script():  # pylint: disable=too-many-instance-attributes
 
         self.type_biases = {
             'wave': 100, 'rotor': 100, 'mechanical': 100,
-            'shear': 100, 'cb': 100, 'pirep': 100, 'cape': 100,
+            'shear': 100, 'cb': 100, 'pirep': 100, 'cape': 100, 'gairmet': 100,
         }
         self.pirep_fetcher = PirepFetcher()
         self.cape_fetcher = CapeFetcher()
+        self.gairmet_fetcher = GairmetFetcher()
         self.lateral_size_bias = 50  # % of nearest-neighbour zone radius; tune to match radar
 
         self._cdu_status_kind = "none"
@@ -420,7 +431,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 self.intensity_bias = 100
                 self.type_biases = {
                     'wave': 100, 'rotor': 100, 'mechanical': 100,
-                    'shear': 100, 'cb': 100, 'pirep': 100, 'cape': 100,
+                    'shear': 100, 'cb': 100, 'pirep': 100, 'cape': 100, 'gairmet': 100,
                 }
                 self.lateral_size_bias = 50
                 self.wind_mode = "live"
@@ -598,14 +609,16 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 if ground_speed_kt < 30.0:
                     continue
 
-                # Wind/terrain, PIREP, and CAPE fetches may all do HTTP on first
-                # call.  Run them in parallel threads so the event loop stays
-                # responsive.
-                state, pirep_rec, cape_sample = await asyncio.gather(
+                # Wind/terrain, PIREP, CAPE, and G-AIRMET fetches may all do
+                # HTTP on first call.  Run them in parallel threads so the
+                # event loop stays responsive.
+                state, pirep_rec, cape_sample, gairmet_region = await asyncio.gather(
                     loop.run_in_executor(None, self.engine.compute, lat, lon, alt_ft),
                     loop.run_in_executor(
                         None, self.pirep_fetcher.find_relevant, lat, lon, alt_ft),
                     loop.run_in_executor(None, self.cape_fetcher.get, lat, lon),
+                    loop.run_in_executor(
+                        None, self.gairmet_fetcher.get_active, lat, lon, alt_ft),
                 )
 
                 # CB proximity turbulence (fast — no I/O, just PSX cache + math).
@@ -629,6 +642,13 @@ class Script():  # pylint: disable=too-many-instance-attributes
                     cape_state = compute_cape_turbulence(alt_ft, cape_sample)
                     if cape_state.intensity > state.intensity:
                         state = cape_state
+
+                # G-AIRMET declared turbulence area.
+                gairmet_state = None
+                if gairmet_region is not None:
+                    gairmet_state = compute_gairmet_turbulence(alt_ft, gairmet_region)
+                    if gairmet_state.intensity > state.intensity:
+                        state = gairmet_state
 
                 # --- Inject WxBurst into PSX ------------------------------------
                 # intensity_bias and the per-kind type_bias both scale intensity:
@@ -725,6 +745,14 @@ class Script():  # pylint: disable=too-many-instance-attributes
                     self.logger.info(
                         "           [CAPE ] %.0f J/kg LI=%s deg-C -> %.2f",
                         cape_sample.cape_j_kg, li_str, cape_state.intensity)
+                if gairmet_region is not None and gairmet_state is not None:
+                    self.logger.info(
+                        "           [GARM ] %s FL%.0f-%.0f %s -> %.2f",
+                        gairmet_region.severity,
+                        gairmet_region.alt_low_ft / 100.0,
+                        gairmet_region.alt_high_ft / 100.0,
+                        gairmet_region.due_to,
+                        gairmet_state.intensity)
                 if self.args.accelerations and accel is not None:
                     self.logger.info(
                         "           [acc] heave=%+.2fG surge=%+.2fG sway=%+.2fG "
