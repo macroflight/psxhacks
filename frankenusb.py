@@ -487,8 +487,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         # Get current PSX Tla value
         try:
             psx_tlas = self.psx.get('Tla').split(';')
-        except AttributeError:
-            # Safe default
+        except (AttributeError, TypeError):
             psx_tlas = [0, 0, 0, 0]
 
         # If we need to send a new Tla to PSX
@@ -688,7 +687,9 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         psx_value = None
         (lowerlimit, upperlimit) = (0, 0)
 
-        psx_current_value = int(self.psx.get(axis_config['psx variable']))
+        psx_current_value = self.psx_get_int(axis_config['psx variable'])
+        if psx_current_value is None:
+            return
         (psx_current_lowerlimit, psx_current_upperlimit) = (0, 0)
 
         for zone in axis_config['zones']:
@@ -854,7 +855,11 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
 
         def printstate():
             index0 = axis_config['engine indexes'][0]
-            tla = int(self.psx.get('Tla').split(';')[index0])
+            try:
+                tla = int(self.psx.get('Tla').split(';')[index0])
+            except (AttributeError, IndexError, TypeError, ValueError):
+                self.logger.error("printstate: could not read Tla[%s] from PSX", index0)
+                return
             self.logger.info(
                 "thrustaxis=%s, PSX Tla: %.0f, last update: %.0f, latched=%s",
                 thrustaxis, tla, get_last_update(), get_latch_state()
@@ -925,8 +930,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             # Defaults to current PSX throttle position
             try:
                 tla = int(self.psx.get('Tla').split(';')[axis_config['engine indexes'][0]])
-            except AttributeError:
-                # Safe default
+            except (AttributeError, IndexError, TypeError, ValueError):
                 tla = 0
             self.logger.info("Initializing %s on %s to %s", thrustaxis, joystick_name, tla)
             self.thrustaxis_last_update[joystick_name][thrustaxis] = tla
@@ -975,7 +979,11 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
 
         # Get current PSX value (for the first of the thrust levers we
         # control with this axis)
-        tla = int(self.psx.get('Tla').split(';')[axis_config['engine indexes'][0]])
+        try:
+            tla = int(self.psx.get('Tla').split(';')[axis_config['engine indexes'][0]])
+        except (AttributeError, IndexError, TypeError, ValueError):
+            self.logger.error("Could not read Tla[%s] from PSX", axis_config['engine indexes'][0])
+            return
 
         diff_psx_vs_newinput = abs(tla - psx_value)
         diff_psx_vs_lastinput = abs(tla - get_last_update())
@@ -1195,7 +1203,9 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                     await self.handle_stepped_reverse_toggle(joystick_name, button_config)
             elif button_config['button type'] == 'INCREMENT':
                 psx_var = self.translate_var(button_config['psx variable'])
-                value = int(self.psx.get(psx_var))
+                value = self.psx_get_int(psx_var)
+                if value is None:
+                    return
                 increment = int(button_config['increment'])
                 new_value = value + increment
                 wrap = False
@@ -1215,9 +1225,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                     self.psx_send_and_set(psx_var, new_value)
             elif button_config['button type'] == 'INCREMENT_MULTI':
                 for (key, increment, minval, maxval, wrap) in button_config['psx variables']:
-                    cur = self.psx.get(self.translate_var(key))
-                    self.logger.info("INCREMENT_MULTI got %s for %s", cur, key)
-                    value = int(cur)
+                    value = self.psx_get_int(self.translate_var(key))
+                    self.logger.info("INCREMENT_MULTI got %s for %s", value, key)
+                    if value is None:
+                        continue
                     new_value = value + increment
                     if new_value < minval:
                         if wrap:
@@ -1234,7 +1245,9 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             elif button_config['button type'] == 'BIGMOMPSH':
                 psx_var = self.translate_var(button_config['psx variable'])
                 self.logger.debug("BIGMOMPSH event for %s", psx_var)
-                value = int(self.psx.get(psx_var))
+                value = self.psx_get_int(psx_var)
+                if value is None:
+                    return
                 new_value = value | 1
                 if new_value != value:
                     self.psx_send_and_set(psx_var, new_value)
@@ -1785,6 +1798,15 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             if name in _RIGHT_LEFT_CONTROLS:
                 return _RIGHT_LEFT_CONTROLS[name]
         return name
+
+    def psx_get_int(self, key):
+        """Get a PSX variable as int, logging an error and returning None on failure."""
+        raw = self.psx.get(key)
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            self.logger.error("PSX variable %s: expected int, got %r", key, raw)
+            return None
 
     def psx_send_and_set(self, psx_variable, new_psx_value):
         """Send variable to PSX and store in local db."""
