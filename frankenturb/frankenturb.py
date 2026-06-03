@@ -621,6 +621,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
                         None, self.gairmet_fetcher.get_active, lat, lon, alt_ft),
                 )
 
+                # Save terrain result before non-terrain sources may override state.
+                terrain_state = state
+
                 # CB proximity turbulence (fast — no I/O, just PSX cache + math).
                 cb = self._get_nearest_cb(lat, lon)
                 cb_state = None
@@ -718,41 +721,30 @@ class Script():  # pylint: disable=too-many-instance-attributes
                     vert_str, roll_str, gust_str,
                     last_burst_str if self.turb_enabled else "-",
                 )
-                if self.turb_enabled and effective_intensity >= 0.01 and state.reason:
+                # All active sources sorted by effective intensity.
+                # '>' marks the governing source; others shown for awareness.
+                all_sources = []
+                for src_s in [
+                    terrain_state, cb_state, pirep_state, cape_state, gairmet_state
+                ]:
+                    if src_s is None or src_s.intensity < 0.01:
+                        continue
+                    src_eff = min(1.0, src_s.intensity * self.intensity_bias *
+                                  self.type_biases.get(src_s.kind, 100) / 10000.0)
+                    all_sources.append((src_eff, src_s))
+                all_sources.sort(key=lambda t: t[0], reverse=True)
+                for src_eff, src in all_sources:
+                    marker = ">" if (src is state) else " "
                     self.logger.info(
-                        "           [why] %s %s",
-                        intensity_label.upper(), state.reason)
-                if cb is not None:
-                    self.logger.info(
-                        "           [CB ] %s brg=%03.0f° rng=%.0fnm "
-                        "edge=%+.0fnm base=%.0fft top=%.0fft cov=%d",
-                        cb.source, cb.bearing_deg, cb.range_center_nm,
-                        cb.range_edge_nm, cb.cloud_base_ft_msl,
-                        cb.cloud_top_ft_msl, cb.coverage)
-                    if cb_state is not None and cb_state.intensity >= 0.01:
+                        "           [%s%-10s] %.2f %s",
+                        marker, src.kind, src_eff, src.reason or "")
+                    if src.kind == 'cb' and cb is not None:
                         self.logger.info(
-                            "           [CB turb] %s %.2f",
-                            cb_state.reason, cb_state.intensity)
-                if pirep_rec is not None:
-                    self.logger.info(
-                        "           [PIREP] %s at %.0fnm FL%.0f age=%.0fmin int=%.2f",
-                        pirep_rec.raw_int, pirep_rec.distance_nm,
-                        pirep_rec.alt_ft / 100.0, pirep_rec.age_min,
-                        pirep_state.intensity if pirep_state else 0.0)
-                if cape_sample is not None and cape_state is not None:
-                    li = cape_sample.lifted_index_c
-                    li_str = f"{li:+.1f}" if not _isnan(li) else "N/A"
-                    self.logger.info(
-                        "           [CAPE ] %.0f J/kg LI=%s deg-C -> %.2f",
-                        cape_sample.cape_j_kg, li_str, cape_state.intensity)
-                if gairmet_region is not None and gairmet_state is not None:
-                    self.logger.info(
-                        "           [GARM ] %s FL%.0f-%.0f %s -> %.2f",
-                        gairmet_region.severity,
-                        gairmet_region.alt_low_ft / 100.0,
-                        gairmet_region.alt_high_ft / 100.0,
-                        gairmet_region.due_to,
-                        gairmet_state.intensity)
+                            "           [  cb-geo   ] %s brg=%03.0f° rng=%.0fnm "
+                            "edge=%+.0fnm base=%.0fft top=%.0fft cov=%d",
+                            cb.source, cb.bearing_deg, cb.range_center_nm,
+                            cb.range_edge_nm, cb.cloud_base_ft_msl,
+                            cb.cloud_top_ft_msl, cb.coverage)
                 if self.args.accelerations and accel is not None:
                     self.logger.info(
                         "           [acc] heave=%+.2fG surge=%+.2fG sway=%+.2fG "
