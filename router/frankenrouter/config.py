@@ -136,10 +136,9 @@ class _RouterConfigSharedinfo:  # pylint: disable=missing-class-docstring,too-fe
         if not all(isinstance(a, str) for a in self.airline_icao):
             raise RouterConfigError("sharedinfo airline_icao entries must be strings")
         self.checklist = data.get('checklist', [
-            "everyone using the same radio client",
             "fuel ordered",
             "VATPRI is elevation master",
-            "VATSIM flight plan filed",
+            "VATSIM flight plan filed with correct callsign",
             "Correct Simbrief account used for plan",
         ])
         if not isinstance(self.checklist, list):
