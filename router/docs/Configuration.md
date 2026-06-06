@@ -294,6 +294,62 @@ limit_max = 1
 comment = "There should be exactly one BACARS"
 ```
 
+### `[sharedinfo]`
+
+This section configures the dropdown options shown on the flight info
+page in the web interface. All entries are optional; if omitted the
+router uses built-in defaults.
+
+- `crew`: a list of pilot entries. Each entry has two keys:
+    - `portal_name`: the pilot's name as it appears in the Worldflight
+      portal (shown in the Captain / First Officer dropdowns).
+    - `callsign_suffix`: the callsign suffix used by this pilot (e.g
+      `"M"` for MACRO/M). This is appended to the airline ICAO code to
+      form the full VATSIM callsign.
+- `airframes`: a list of airframe strings shown in the Airframe
+  dropdown. Use any format that is meaningful to your crew, e.g
+  registration and type.
+- `portal_account`: a list of Worldflight portal account e-mail
+  addresses shown in the Portal account dropdown.
+- `airline_icao`: a list of airline ICAO codes shown in the Airline
+  ICAO dropdown.
+- `checklist`: a list of checklist item strings shown as toggles in
+  the pre-pre-flight checklist section of the flight info page.
+
+Example:
+
+```text
+[sharedinfo]
+airframes = [
+    "G-CIVB BAW B744",
+    "G-BNLY BAW B744",
+    "D-ABVW DLH B744",
+]
+portal_account = [
+    "captain@example.com",
+    "firstofficer@example.com",
+]
+airline_icao = ["BAW", "DLH"]
+checklist = [
+    "fuel ordered",
+    "VATPRI is elevation master",
+    "VATSIM flight plan filed with correct callsign",
+    "Correct Simbrief account used for plan",
+]
+
+[[sharedinfo.crew]]
+portal_name = "MACRO"
+callsign_suffix = "M"
+
+[[sharedinfo.crew]]
+portal_name = "SOMEUSER"
+callsign_suffix = "S"
+```
+
+Note that `crew` uses double-bracket (`[[sharedinfo.crew]]`) syntax
+because it is a list of tables, while the other entries in
+`[sharedinfo]` use normal array syntax.
+
 ### `[performance]`
 
 Various limits that control when the router prints warning messages
