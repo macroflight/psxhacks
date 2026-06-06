@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-06-06: version 1.3.5
+
+- Document how to configure the flight info page
+- Make it more clear that observer mode is passive observer mode (you
+  cannot be observer and e.g do pushback)
+- Add new flight info toggle "Captain is VATPRI"
+- Make the state cache file opt-in. We probably don't want or need the
+  variable cache to be persistent. Make it opt-in and consider
+  removing later.
+
 ## 2026-05-24: version 1.3.4
 
 - Remove temporary SRSL filter (SRSL 0.3 now supports shared cockpit)
