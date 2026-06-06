@@ -185,6 +185,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             'captain_code': '',
             'fo_code': '',
             'seat_swap': False,
+            'p1_is_vatpri': False,
             'observers': '',
             'flight_number': '',
             'vatsim_callsign': '',

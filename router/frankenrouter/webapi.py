@@ -417,6 +417,8 @@ _FLIGHTINFO_PAGE = (
     '  }});\n'
     '  var cb = document.querySelector("input[name=\\"seat_swap\\"]");\n'
     '  if (cb) cb.checked = !!data.seat_swap;\n'
+    '  var cb2 = document.querySelector("input[name=\\"p1_is_vatpri\\"]");\n'
+    '  if (cb2) cb2.checked = !!data.p1_is_vatpri;\n'
     '  if (data.checklist) {{\n'
     '    data.checklist.forEach(function(checked, i) {{\n'
     '      var el = document.getElementById("chk_" + i);\n'
@@ -535,8 +537,12 @@ _FLIGHTINFO_PAGE = (
     '<div><label for="eobt">EOBT (HHMMz)</label>'
     '<input type="text" id="eobt" name="eobt" value="{eobt}"></div>\n'
     '</div>\n'
+    '<div style="display:flex;gap:2em;flex-wrap:wrap">\n'
     '<label class="check"><input type="checkbox" name="seat_swap"'
     ' value="1" {seat_swap_checked}>Seat swap (Captain in right seat)</label>\n'
+    '<label class="check"><input type="checkbox" name="p1_is_vatpri"'
+    ' value="1" {p1_is_vatpri_checked}>VATPRI swap (Captain is VATPRI)</label>\n'
+    '</div>\n'
     '<div class="grid2">\n'
     '<div><label for="observers">Observers</label>'
     '<textarea id="observers" name="observers">{observers}</textarea></div>\n'
@@ -1280,6 +1286,8 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     'rest_api_color_scheme': router.config.listen.rest_api_color_scheme,
                     **router.flightinfo,
                     'seat_swap_checked': 'checked' if router.flightinfo.get('seat_swap') else '',
+                    'p1_is_vatpri_checked': (
+                        'checked' if router.flightinfo.get('p1_is_vatpri') else ''),
                     'clear_form': clear_form,
                     'header_buttons': header_buttons,
                     'readonly_notice': readonly_notice,
@@ -1309,6 +1317,7 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     'captain_code': str(post.get('captain_code', '')),
                     'fo_code': str(post.get('fo_code', '')),
                     'seat_swap': post.get('seat_swap', '') == '1',
+                    'p1_is_vatpri': post.get('p1_is_vatpri', '') == '1',
                     'observers': str(post.get('observers', '')),
                     'flight_number': str(post.get('flight_number', '')),
                     'vatsim_callsign': str(post.get('vatsim_callsign', '')),
@@ -1336,7 +1345,8 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 now_z = datetime.datetime.now(
                     datetime.timezone.utc).strftime('%H:%Mz')
                 router.flightinfo = {
-                    k: (False if k == 'seat_swap' else [] if k == 'checklist' else '')
+                    k: (False if k in ('seat_swap', 'p1_is_vatpri')
+                        else [] if k == 'checklist' else '')
                     for k in router.flightinfo
                 }
                 router.flightinfo['last_updated_by'] = router.config.identity.simulator
