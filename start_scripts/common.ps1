@@ -136,6 +136,22 @@ $FrankenidentMasterOptions = @("--psx-port=10748")
 $FrankenutilOptions = @()
 $FrankencduproxyOptions = @()
 
+# Per-addon alternative psxhacks repo directory name.
+# Set to the name of a sibling directory to run that addon from a different
+# checkout of the psxhacks repo.  Leave $null to use $PsxhacksDevel.
+# Example: $FrankenusbRepo = "psxhacks-frankenusb-devel"
+#   -> runs C:\fs\psxhacks-frankenusb-devel\frankenusb.py
+$FrankencduproxyRepo    = $null
+$FrankenfreezeRepo      = $null
+$FrankenidentRepo       = $null
+$FrankenidentMasterRepo = $null
+$FrankentankerRepo      = $null
+$FrankenturbRepo        = $null
+$FrankenusbRepo         = $null
+$FrankenutilRepo        = $null
+$FrankenwindRepo        = $null
+$CpdlcRepo              = $null
+
 # Which of the addons that we can manage you actually want started in
 # your sim. You can override these in the override file.
 
@@ -259,6 +275,13 @@ function start_nonscripted_apps {
         Write-Output "Starting $app..."
         Start-Process $app
     }
+}
+
+# Returns the psxhacks directory for a given addon.
+# If $repoName is set, resolves $SimBase\$repoName; otherwise $PsxhacksDevel.
+function Resolve-AddonRepo([string]$repoName) {
+    if ([string]::IsNullOrWhiteSpace($repoName)) { return $PsxhacksDevel }
+    return Join-Path $SimBase $repoName
 }
 
 if (Test-Path $OverrideFile) { . $OverrideFile }

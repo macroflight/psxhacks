@@ -5,8 +5,9 @@ KillPythonScript "frankenusb.py"
 
 Set-Location $FrankenusbDir
 
-$env:PYTHONPATH = $PsxhacksDevel
+$repo = Resolve-AddonRepo $FrankenusbRepo
+$env:PYTHONPATH = $repo
 
-& $PsxhacksPython "$PsxhacksDevel\frankenusb.py" @FrankenusbOptions
+& $PsxhacksPython "$repo\frankenusb.py" @FrankenusbOptions
 
 # Read-Host -Prompt "Press Enter to exit"

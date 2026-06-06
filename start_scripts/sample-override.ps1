@@ -107,6 +107,27 @@ $StartSrslPsxSlave       = $false   # SRSL-PSX SmartRunway/SmartLanding (slave)
 
 
 # ---------------------------------------------------------------------------
+# Alternative psxhacks repo per addon
+# Set to the name of a sibling directory (relative to the psxhacks parent)
+# to run that specific addon from a different checkout of the repo.
+# All other addons continue to use the main $PsxhacksDevel directory.
+# Leave commented out (or $null) to use the normal psxhacks directory.
+# Example: $FrankenusbRepo = "psxhacks-frankenusb-devel"
+#   -> runs C:\fs\psxhacks-frankenusb-devel\frankenusb.py
+# ---------------------------------------------------------------------------
+#$FrankencduproxyRepo    = $null
+#$FrankenfreezeRepo      = $null
+#$FrankenidentRepo       = $null
+#$FrankenidentMasterRepo = $null
+#$FrankentankerRepo      = $null
+#$FrankenturbRepo        = $null
+#$FrankenusbRepo         = $null
+#$FrankenutilRepo        = $null
+#$FrankenwindRepo        = $null
+#$CpdlcRepo              = $null
+
+
+# ---------------------------------------------------------------------------
 # Extra command-line options for individual addons
 # Uncomment and populate the ones you need.
 # ---------------------------------------------------------------------------

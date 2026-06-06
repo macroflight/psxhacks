@@ -5,8 +5,9 @@ Set-Location $FrankenRouterDir
 $Host.UI.RawUI.WindowTitle = "FrankenRouterIDENT Master"
 KillPythonScript "frankenrouter_ident.py"
 
-$env:PYTHONPATH = $PsxhacksDevel
+$repo = Resolve-AddonRepo $FrankenidentMasterRepo
+$env:PYTHONPATH = $repo
 
-& $PsxhacksPython "$PsxhacksDevel\frankenrouter_ident.py" @FrankenidentMasterOptions
+& $PsxhacksPython "$repo\frankenrouter_ident.py" @FrankenidentMasterOptions
 
 # Read-Host -Prompt "Press Enter to exit"

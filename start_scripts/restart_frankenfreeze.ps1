@@ -3,8 +3,9 @@
 $Host.UI.RawUI.WindowTitle = "FrankenFREEZE"
 KillPythonScript "frankenfreeze.py"
 
-$env:PYTHONPATH = $PsxhacksDevel
+$repo = Resolve-AddonRepo $FrankenfreezeRepo
+$env:PYTHONPATH = $repo
 
-& $PsxhacksPython "$PsxhacksDevel\frankenfreeze.py" @FrankenfreezeOptions
+& $PsxhacksPython "$repo\frankenfreeze.py" @FrankenfreezeOptions
 
 # Read-Host -Prompt "Press Enter to exit"

@@ -3,8 +3,9 @@
 $Host.UI.RawUI.WindowTitle = "FrankenTanker"
 KillPythonScript "frankentanker.py"
 
-$env:PYTHONPATH = $PsxhacksDevel
+$repo = Resolve-AddonRepo $FrankentankerRepo
+$env:PYTHONPATH = $repo
 
-& $PsxhacksPython "$PsxhacksDevel\frankentanker.py" @FrankentankerOptions
+& $PsxhacksPython "$repo\frankentanker.py" @FrankentankerOptions
 
 # Read-Host -Prompt "Press Enter to exit"
