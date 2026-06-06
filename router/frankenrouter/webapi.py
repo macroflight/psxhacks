@@ -705,7 +705,9 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     'observer_mode_notice': (
                         '<div class="card warn">\n'
                         '<b>Observer mode active</b> &mdash; '
-                        'key-value writes from local clients are blocked.\n'
+                        'key-value writes from local clients are blocked; '
+                        'this also prevents active observer ground crew duties'
+                        ' like pushback and external power connect/disconnect.\n'
                         '</div>\n'
                         if router.observer_mode else ''
                     ),
@@ -715,7 +717,7 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                         if router.observer_mode else
                         '' if router.config.identity.type == 'master' else
                         '<a href="/api/observermode/enable" class="btn btn-amber">'
-                        'Enable observer mode</a>\n'
+                        'Enable read-only observer mode</a>\n'
                     ),
                     'sessionpwd_button': (
                         '<a href="/sessionpwd" class="btn btn-blue">Session password</a>\n'
