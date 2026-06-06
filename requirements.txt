@@ -1,0 +1,17 @@
+# psxhacks requirements
+# Install with: pip install -r requirements.txt
+#
+# Note: pywin32 and SimConnect are Windows-only.
+# rasterio is only needed for frankenturb.
+
+aiohttp>=3.9
+numpy>=1.26
+psutil>=5.9
+pygame>=2.5
+pyproj>=3.6
+rasterio>=1.3
+requests>=2.31
+
+# Windows-only
+pywin32>=306
+SimConnect
