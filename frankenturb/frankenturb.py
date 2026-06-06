@@ -624,33 +624,39 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 # Save terrain result before non-terrain sources may override state.
                 terrain_state = state
 
+                # Bias-adjusted intensity for source comparison.  type_biases
+                # are per-kind percentages; division by 100 cancels in relative
+                # comparison so we just multiply for cheaper math.
+                def _eff(s):
+                    return s.intensity * self.type_biases.get(s.kind, 100)
+
                 # CB proximity turbulence (fast — no I/O, just PSX cache + math).
                 cb = self._get_nearest_cb(lat, lon)
                 cb_state = None
                 if cb is not None:
                     cb_state = compute_cb_turbulence(alt_ft, cb)
-                    if cb_state.intensity > state.intensity:
+                    if _eff(cb_state) > _eff(state):
                         state = cb_state
 
                 # PIREP turbulence — whichever source is most intense governs.
                 pirep_state = None
                 if pirep_rec is not None:
                     pirep_state = compute_pirep_turbulence(alt_ft, pirep_rec)
-                    if pirep_state.intensity > state.intensity:
+                    if _eff(pirep_state) > _eff(state):
                         state = pirep_state
 
                 # CAPE convective turbulence.
                 cape_state = None
                 if cape_sample is not None:
                     cape_state = compute_cape_turbulence(alt_ft, cape_sample)
-                    if cape_state.intensity > state.intensity:
+                    if _eff(cape_state) > _eff(state):
                         state = cape_state
 
                 # G-AIRMET declared turbulence area.
                 gairmet_state = None
                 if gairmet_region is not None:
                     gairmet_state = compute_gairmet_turbulence(alt_ft, gairmet_region)
-                    if gairmet_state.intensity > state.intensity:
+                    if _eff(gairmet_state) > _eff(state):
                         state = gairmet_state
 
                 # --- Inject WxBurst into PSX ------------------------------------
@@ -731,6 +737,8 @@ class Script():  # pylint: disable=too-many-instance-attributes
                         continue
                     src_eff = min(1.0, src_s.intensity * self.intensity_bias *
                                   self.type_biases.get(src_s.kind, 100) / 10000.0)
+                    if src_eff < 0.01:
+                        continue
                     all_sources.append((src_eff, src_s))
                 all_sources.sort(key=lambda t: t[0], reverse=True)
                 for src_eff, src in all_sources:

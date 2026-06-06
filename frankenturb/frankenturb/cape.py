@@ -26,10 +26,12 @@ CACHE_DEG_GRID = 1.0
 CACHE_HOURS = 1
 
 # CAPE (J/kg) thresholds for turbulence intensity segments.
-_CAPE_MIN_J_KG = 500.0
-_CAPE_MOD_J_KG = 1500.0
-_CAPE_SEV_J_KG = 3000.0
-_CAPE_EXT_J_KG = 5000.0
+# Raised to avoid over-triggering in regions with moderate convective
+# instability that do not produce significant in-flight turbulence.
+_CAPE_MIN_J_KG = 1000.0
+_CAPE_MOD_J_KG = 2500.0
+_CAPE_SEV_J_KG = 4500.0
+_CAPE_EXT_J_KG = 7000.0
 
 # Altitude (ft) above which CAPE-driven turbulence decays (approx. tropopause).
 _CAPE_TROPO_FT = 35000.0
@@ -188,7 +190,7 @@ def compute_cape_turbulence(alt_ft: float, sample: CapeSample) -> TurbulenceStat
         elif li > 0.0:
             intensity *= 1.0 - (li / 2.0) * 0.90
         elif li < -4.0:
-            intensity = min(1.0, intensity * 1.20)
+            intensity = min(1.0, intensity * 1.10)
 
     # Decay above the tropopause.
     if alt_ft > _CAPE_TROPO_FT:
