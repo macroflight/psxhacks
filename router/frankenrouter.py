@@ -313,19 +313,24 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             '--state-cache-file',
             type=str, action='store', default="AUTO",
             help=(
-                "This file contains PSX state that is automatically read on startup" +
-                " and used until we have connected to the upstream router or PSX main" +
-                " server. We also save the current state to this file on shutdown."
+                "Path to the state cache file. Only used when --use-state-cache is given."
+                " Default: AUTO (a name based on the router identity)."
+            ),
+        )
+        parser.add_argument(
+            '--use-state-cache',
+            action='store_true',
+            help=(
+                "Read the state cache file on startup (if it exists) and save the current"
+                " state to the file periodically and on shutdown. Without this option the"
+                " router will only provide a fake client ID and PSX version to clients that"
+                " connect before it has connected to the PSX main server."
             ),
         )
         parser.add_argument(
             '--no-state-cache-file',
             action='store_true',
-            help=(
-                "Do not read the cached data on startup. In this case, the router" +
-                " will only provide a fake client ID and PSX version to clients that" +
-                " connect before it has connected to the PSX main server."
-            ),
+            help=argparse.SUPPRESS,
         )
         parser.add_argument(
             '--debug',
@@ -2157,8 +2162,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 if time.perf_counter() - last_run > self.args.housekeeping_interval:
                     last_run = time.perf_counter()
                     self.logger.debug("Performing housekeeping")
-                    # Write chache to disk
-                    self.cache.write_to_file()
+                    if self.args.use_state_cache:
+                        self.cache.write_to_file()
 
                     # Call housekeeping functions
                     self._housekeeping_disable_filters_if_standalone()
@@ -2871,7 +2876,10 @@ shared cockpit master sim.
         # Initialize the router cache
         self.cache = routercache.RouterCache(
             f"frankenrouter-{self.config.identity.router}.cache.json", self.config)
-        if not self.args.no_state_cache_file:
+        if self.args.no_state_cache_file:
+            print("WARNING: --no-state-cache-file is deprecated and has no effect."
+                  " State cache is now opt-in via --use-state-cache.")
+        if self.args.use_state_cache:
             self.cache.read_from_file()
 
         if self.args.debug:
@@ -2935,6 +2943,8 @@ shared cockpit master sim.
                 raise SystemExit(f"{msg}\nRouter is stop-minded so shutting down now")  # pylint: disable=raise-missing-from
             self.logger.critical("%s\nRouter is go-minded so trying to continue", msg)
 
+        if self.args.use_state_cache:
+            self.cache.write_to_file()
         self.logger.info("All tasks ended, shutting down")
 
 
