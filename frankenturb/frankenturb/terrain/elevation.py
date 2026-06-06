@@ -309,6 +309,49 @@ class ElevationGrid:
         valid = elevations[np.isfinite(elevations)]
         return float(np.max(valid)) if len(valid) > 0 else 0.0
 
+    def max_upwind_barrier(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+        self,
+        lat: float,
+        lon: float,
+        wind_dir_deg: float,
+        distance_km: float = 80.0,
+        half_angle_deg: float = 30.0,
+        n_bearings: int = 5,
+    ) -> Optional[tuple[float, float, float]]:
+        """Scan a fan of bearings upwind and return the dominant terrain peak.
+
+        Scans ``n_bearings`` evenly spaced directions within ``±half_angle_deg``
+        of ``wind_dir_deg``.  For each bearing the peak elevation is weighted by
+        ``cos(offset)`` so that terrain directly in the wind direction scores
+        fully while terrain 30° to the side scores ~87%.  Returns
+        ``(peak_elevation_m, ridge_dist_km, bearing_deg)`` for the highest
+        cosine-weighted peak, or None if no terrain data is available on any
+        bearing.
+        """
+        offsets = np.linspace(-half_angle_deg, half_angle_deg, n_bearings)
+        best_weighted = 0.0
+        best_elev = 0.0
+        best_dist = 0.0
+        best_bearing = wind_dir_deg
+        any_data = False
+
+        for offset in offsets:
+            bearing = (wind_dir_deg + float(offset)) % 360.0
+            dists, elevs = self.upwind_profile(lat, lon, bearing, distance_km)
+            if not np.any(np.isfinite(elevs)):
+                continue
+            any_data = True
+            peak_idx = int(np.nanargmax(elevs))
+            peak_elev = float(elevs[peak_idx])
+            weighted = peak_elev * math.cos(math.radians(abs(float(offset))))
+            if weighted > best_weighted:
+                best_weighted = weighted
+                best_elev = peak_elev
+                best_dist = float(dists[peak_idx])
+                best_bearing = bearing
+
+        return (best_elev, best_dist, best_bearing) if any_data else None
+
 
 # ------------------------------------------------------------------
 # Internal helpers

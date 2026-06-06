@@ -44,7 +44,6 @@ Wind shear CAT contribution
 
 import math
 from dataclasses import dataclass, field, replace
-import numpy as np  # pylint: disable=import-error
 
 from .terrain.elevation import ElevationGrid
 from .wind.profile import WindProfile
@@ -189,18 +188,20 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
         if surface_wind_ms < MIN_WIND_MS:
             return _CALM
 
-        # ---- 1. Upwind terrain scan ----------------------------------------
-        distances_km, elevations_m = self._grid.upwind_profile(
+        # ---- 1. Upwind terrain scan (fan ±30° to catch off-bearing peaks) ---
+        barrier_result = self._grid.max_upwind_barrier(
             lat, lon, surface_dir_deg, self._upwind_km
         )
-        valid = np.isfinite(elevations_m)
-        if not np.any(valid):
+        if barrier_result is None:
             return _CALM
 
-        max_upwind_m = float(np.nanmax(elevations_m))
-        barrier_height_m = max(0.0, max_upwind_m - terrain_m)
-        ridge_idx = int(np.nanargmax(elevations_m))
-        ridge_dist_km = float(distances_km[ridge_idx])
+        max_upwind_m, ridge_dist_km, ridge_bearing_deg = barrier_result
+        raw_barrier_m = max(0.0, max_upwind_m - terrain_m)
+        # Reduce effective barrier for terrain that is off-axis relative to the
+        # wind: a peak 30° to the side generates weaker waves than one directly
+        # upwind.  cos(offset) provides a smooth, physically-motivated reduction.
+        angle_offset = abs((ridge_bearing_deg - surface_dir_deg + 180.0) % 360.0 - 180.0)
+        barrier_height_m = raw_barrier_m * math.cos(math.radians(angle_offset))
 
         # ---- 2. Terrain roughness ------------------------------------------
         roughness_m = self._grid.terrain_roughness(lat, lon, self._roughness_km)
@@ -223,7 +224,7 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
             state.reason = (
                 f"Lee rotor: wind {surface_dir_deg:.0f}° {surface_spd_kt:.0f}kt "
                 f"hitting {ridge_top_m_ft:.0f}ft terrain bearing "
-                f"{surface_dir_deg:.0f}° distance {ridge_dist_km:.0f}km"
+                f"{ridge_bearing_deg:.0f}° distance {ridge_dist_km:.0f}km"
             )
         elif wave["active"]:
             state = self._wave_state(
@@ -233,7 +234,7 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
             state.reason = (
                 f"Mountain wave: wind {ridge_top_dir_deg:.0f}° {ridge_top_spd_kt:.0f}kt "
                 f"hitting {ridge_top_m_ft:.0f}ft terrain bearing "
-                f"{surface_dir_deg:.0f}° distance {ridge_dist_km:.0f}km"
+                f"{ridge_bearing_deg:.0f}° distance {ridge_dist_km:.0f}km"
             )
         else:
             state = self._mechanical_state(roughness_m, surface_wind_ms, agl_m)
