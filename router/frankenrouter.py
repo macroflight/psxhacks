@@ -8,6 +8,7 @@ import itertools
 import json
 import logging
 import logging.handlers
+import datetime
 import math
 import os
 import pathlib
@@ -1332,6 +1333,27 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         if self.get_errors():
             self.logger.info("!!! After filter change, errors may remain for up to 60s")
 
+    @staticmethod
+    def _worldflight_countdown_str():
+        """Return a short countdown string to the next Worldflight start."""
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        # Worldflight starts at 08:00 AEDT (UTC+11) on the first Sunday in November,
+        # which is 21:00 UTC on the preceding Saturday.
+        year = now_utc.year
+        nov1 = datetime.datetime(year, 11, 1, tzinfo=datetime.timezone.utc)
+        days_until_sunday = (6 - nov1.weekday()) % 7  # weekday(): Mon=0 … Sun=6
+        first_sunday = nov1 + datetime.timedelta(days=days_until_sunday)
+        sat_21z = first_sunday.replace(hour=21, minute=0, second=0, microsecond=0)
+        wf_start = sat_21z - datetime.timedelta(days=1)
+        if wf_start <= now_utc:
+            nov1 = datetime.datetime(year + 1, 11, 1, tzinfo=datetime.timezone.utc)
+            days_until_sunday = (6 - nov1.weekday()) % 7
+            first_sunday = nov1 + datetime.timedelta(days=days_until_sunday)
+            sat_21z = first_sunday.replace(hour=21, minute=0, second=0, microsecond=0)
+            wf_start = sat_21z - datetime.timedelta(days=1)
+        total_hours = int((wf_start - now_utc).total_seconds() // 3600)
+        return f"ttwf={total_hours // 24}dh{total_hours % 24}"
+
     def print_aircraft_status(self):
         """Display a basic aircraft status line to verify sane data."""
         try:
@@ -1349,8 +1371,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             lat = math.degrees(float(PiBaHeAlTas[5]))
             lon = math.degrees(float(PiBaHeAlTas[6]))
             self.logger.info(
-                "pitch=%.1f bank=%.1f heading=%.0f altitude_true=%.0f TAS=%.0f lat=%.6f lon=%.6f",
-                pitch, bank, heading_true, alt_true_ft, tas, lat, lon
+                "pitch=%.1f bank=%.1f heading=%.0f altitude_true=%.0f"
+                " TAS=%.0f lat=%.6f lon=%.6f %s",
+                pitch, bank, heading_true, alt_true_ft, tas, lat, lon,
+                self._worldflight_countdown_str()
             )
 
     async def logging_task(self, name):  # pylint: disable=too-many-branches
