@@ -1025,25 +1025,26 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.psx_connected = True
             self.psx_paused = False
             self.active_mcdus.clear()
-            cdus = self.args.cdus.upper()
-            side = self.args.menu_side.upper()
-            row = self.args.menu_row
-            text = "<TURB" if side == "L" else "TURB>"
-            if "L" in cdus:
-                if self.mcduL is None:
-                    self.mcduL = psx.MCDU("L", side, row, text, self.mcduEvent)
-                self.mcduL.plugin_to(self.psx)
-                self.active_mcdus.append(self.mcduL)
-            if "R" in cdus:
-                if self.mcduR is None:
-                    self.mcduR = psx.MCDU("R", side, row, text, self.mcduEvent)
-                self.mcduR.plugin_to(self.psx)
-                self.active_mcdus.append(self.mcduR)
-            if "C" in cdus:
-                if self.mcduC is None:
-                    self.mcduC = psx.MCDU("C", side, row, text, self.mcduEvent)
-                self.mcduC.plugin_to(self.psx)
-                self.active_mcdus.append(self.mcduC)
+            if not self.args.no_cdu_interface:
+                cdus = self.args.cdus.upper()
+                side = self.args.menu_side.upper()
+                row = self.args.menu_row
+                text = "<TURB" if side == "L" else "TURB>"
+                if "L" in cdus:
+                    if self.mcduL is None:
+                        self.mcduL = psx.MCDU("L", side, row, text, self.mcduEvent)
+                    self.mcduL.plugin_to(self.psx)
+                    self.active_mcdus.append(self.mcduL)
+                if "R" in cdus:
+                    if self.mcduR is None:
+                        self.mcduR = psx.MCDU("R", side, row, text, self.mcduEvent)
+                    self.mcduR.plugin_to(self.psx)
+                    self.active_mcdus.append(self.mcduR)
+                if "C" in cdus:
+                    if self.mcduC is None:
+                        self.mcduC = psx.MCDU("C", side, row, text, self.mcduEvent)
+                    self.mcduC.plugin_to(self.psx)
+                    self.active_mcdus.append(self.mcduC)
 
         try:
             self.logger.debug("Starting %s", inspect.currentframe().f_code.co_name)
@@ -1201,6 +1202,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
             '--config-file',
             type=str, default=None, metavar='PATH',
             help="JSON config file.  Loaded on startup; SAVE/LOAD buttons appear on CDU.",
+        )
+        parser.add_argument(
+            '--no-cdu-interface',
+            action='store_true',
+            help="Disable the CDU interface entirely.  Config file and console output "
+                 "are unaffected.",
         )
         parser.add_argument(
             '--debug',
