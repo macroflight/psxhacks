@@ -253,14 +253,20 @@ class Script():  # pylint: disable=too-many-instance-attributes
             'wave': 100, 'rotor': 100, 'mechanical': 100,
             'shear': 100, 'cb': 100, 'pirep': 100, 'cape': 100, 'gairmet': 100,
         }
+        self.type_enabled = {
+            'wave': True, 'rotor': True, 'mechanical': True, 'shear': True,
+            'cb': True, 'pirep': True, 'cape': True, 'gairmet': True,
+        }
         self.pirep_fetcher = PirepFetcher()
         self.cape_fetcher = CapeFetcher()
         self.gairmet_fetcher = GairmetFetcher()
         self.lateral_size_bias = 50  # % of nearest-neighbour zone radius; tune to match radar
 
-        self._cdu_status_kind = "none"
-        self._cdu_status_intensity = 0.0
-        self._cdu_last_status_update = 0.0
+        self._cdu_page = 0  # 0=main, 1=types, 2=intens
+        self._cdu_sources_snapshot = []  # list of (src_eff, TurbulenceState, is_winner)
+        self._cdu_update_kind = "none"
+        self._cdu_update_intensity = 0.0
+        self._cdu_last_main_update = 0.0
 
         self.latest_accel_state: Optional[AccelerationState] = None
 
@@ -272,12 +278,20 @@ class Script():  # pylint: disable=too-many-instance-attributes
     async def repaint_all_mcdus(self):
         """Trigger a repaint of all active MCDUs, cancelling any pending paint tasks first."""
         self.logger.debug("Refreshing all active MCDUs, requested by: %s", self.repaint_req_by)
+        page_fn = {0: self.paintMainPage, 1: self.paintTypesPage, 2: self.paintIntensPage}
+        paint = page_fn.get(self._cdu_page, self.paintMainPage)
         for mcdu in self.active_mcdus:
             existing = self.pending_paint_tasks.get(mcdu)
             if existing and not existing.done():
                 existing.cancel()
-            self.pending_paint_tasks[mcdu] = asyncio.create_task(self.paintMainPage(mcdu))
+            self.pending_paint_tasks[mcdu] = asyncio.create_task(paint(mcdu))
         self.repaint_req_by = set()
+
+    def _type_effective_bias(self, kind):
+        """Return the combined type bias: 0 when disabled, else type_biases value."""
+        if not self.type_enabled.get(kind, True):
+            return 0
+        return self.type_biases.get(kind, 100)
 
     def _enter_bias(self, mcdu):
         """Process scratchpad as an intensity bias percentage (0–999) and apply it."""
@@ -320,6 +334,61 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 self.repaint_req_by.add(f"type-bias-{kind}")
         except ValueError:
             pass
+
+    def _load_config(self, path):
+        """Load settings from a JSON config file, silently ignoring missing keys."""
+        import json  # pylint: disable=import-outside-toplevel
+        try:
+            with open(path, encoding="utf-8") as fh:
+                cfg = json.load(fh)
+        except FileNotFoundError:
+            import pathlib  # pylint: disable=import-outside-toplevel
+            p = pathlib.Path(path)
+            if p.parent.exists():
+                print(f"Config file {path} not found, creating empty file")
+                try:
+                    p.write_text("{}\n", encoding="utf-8")
+                except Exception as exc2:  # pylint: disable=broad-except
+                    print(f"Could not create config file: {exc2}")
+            else:
+                print(f"Config file {path} not found, using defaults")
+            return
+        except Exception as exc:  # pylint: disable=broad-except
+            print(f"Config file load failed: {exc}")
+            return
+
+        if "turb_enabled" in cfg:
+            self.turb_enabled = bool(cfg["turb_enabled"])
+        if "intensity_bias" in cfg:
+            self.intensity_bias = int(cfg["intensity_bias"])
+        if "lateral_size_bias" in cfg:
+            self.lateral_size_bias = int(cfg["lateral_size_bias"])
+        for kind in self.type_biases:
+            if "type_biases" in cfg and kind in cfg["type_biases"]:
+                self.type_biases[kind] = int(cfg["type_biases"][kind])
+            if "type_enabled" in cfg and kind in cfg["type_enabled"]:
+                self.type_enabled[kind] = bool(cfg["type_enabled"][kind])
+        log = self.logger or __import__('logging').getLogger(__MYNAME__)
+        log.info("Loaded config from %s", path)
+
+    def _save_config(self, path):
+        """Save current settings to a JSON config file."""
+        import json  # pylint: disable=import-outside-toplevel
+        cfg = {
+            "turb_enabled": self.turb_enabled,
+            "intensity_bias": self.intensity_bias,
+            "lateral_size_bias": self.lateral_size_bias,
+            "type_biases": dict(self.type_biases),
+            "type_enabled": dict(self.type_enabled),
+        }
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(cfg, fh, indent=2)
+                fh.write("\n")
+        except Exception as exc:  # pylint: disable=broad-except
+            self.logger.warning("Config file save failed: %s", exc)
+            return
+        self.logger.info("Saved config to %s", path)
 
     def _cycle_wind_mode(self):
         """Cycle the wind source: live → psx → manual → live."""
@@ -395,59 +464,107 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
             self.logger.critical(traceback.format_exc())
 
-    def _handle_keypress(self, mcdu, value):  # pylint: disable=too-many-branches
-        """Dispatch a single CDU keypress to the appropriate action."""
+    def _handle_keypress(self, mcdu, value):
+        """Dispatch a single CDU keypress based on the current page."""
+        if value == "CLR":
+            self._handle_clr(mcdu)
+        elif value == "DEL":
+            self.scratchpad_text = self.scratchpad_text[:-1]
+            hint = "     CLR=RESET".ljust(24)
+            if self.scratchpad_text:
+                mcdu.paint(13, 0, "large", "magenta", self.scratchpad_text.ljust(24))
+            else:
+                mcdu.paint(13, 0, "small", "amber", hint)
+        elif value in ('0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '/', '+/-'):
+            if len(self.scratchpad_text) < 10:
+                self.scratchpad_text += value
+                mcdu.paint(13, 0, "large", "magenta", self.scratchpad_text)
+        elif self._cdu_page == 0:
+            self._handle_main_keypress(mcdu, value)
+        elif self._cdu_page == 1:
+            self._handle_types_keypress(mcdu, value)
+        elif self._cdu_page == 2:
+            self._handle_intens_keypress(mcdu, value)
+
+    def _handle_clr(self, mcdu):
+        """CLR key: clear scratchpad, or RESET all settings when scratchpad is empty."""
+        if self.scratchpad_text:
+            self.scratchpad_text = ''
+            mcdu.paint(13, 0, "small", "amber", "     CLR=RESET".ljust(24))
+        else:
+            self.turb_enabled = True
+            self.intensity_bias = 100
+            self.type_biases = {
+                'wave': 100, 'rotor': 100, 'mechanical': 100,
+                'shear': 100, 'cb': 100, 'pirep': 100, 'cape': 100, 'gairmet': 100,
+            }
+            self.type_enabled = {
+                'wave': True, 'rotor': True, 'mechanical': True, 'shear': True,
+                'cb': True, 'pirep': True, 'cape': True, 'gairmet': True,
+            }
+            self.lateral_size_bias = 50
+            self.wind_mode = "live"
+            self.psx_wind = None
+            self.engine.clear_fixed_wind()
+            self.repaint_req_by.add("reset")
+
+    def _handle_main_keypress(self, mcdu, value):  # pylint: disable=too-many-branches
+        """Handle key presses on the main page."""
         if value == "1L":
             self.turb_enabled = not self.turb_enabled
             self.repaint_req_by.add("enable-toggle")
         elif value == "1R":
             self._enter_bias(mcdu)
         elif value == "2L":
-            self._enter_type_bias(mcdu, 'wave')
-        elif value == "2R":
             self._cycle_wind_mode()
-        elif value == "3L":
-            self._enter_type_bias(mcdu, 'rotor')
-        elif value == "3R":
+        elif value == "2R":
             self._apply_manual_wind(mcdu)
-        elif value == "4L":
-            self._enter_type_bias(mcdu, 'mechanical')
-        elif value == "4R":
-            self._enter_type_bias(mcdu, 'shear')
         elif value == "5L":
-            self._enter_type_bias(mcdu, 'cb')
+            self._cdu_page = 1
+            self.repaint_req_by.add("page-types")
         elif value == "5R":
+            self._cdu_page = 2
+            self.repaint_req_by.add("page-intens")
+        elif value == "6L" and self.args.config_file:
+            self._save_config(self.args.config_file)
+            self.repaint_req_by.add("cfg-saved")
+        elif value == "6R" and self.args.config_file:
+            self._load_config(self.args.config_file)
+            self.repaint_req_by.add("cfg-loaded")
+
+    def _handle_types_keypress(self, _mcdu, value):  # pylint: disable=unused-argument
+        """Handle key presses on the type enable/disable subpage."""
+        _toggle_map = {
+            '1L': 'wave', '1R': 'rotor',
+            '2L': 'mechanical', '2R': 'shear',
+            '3L': 'cb', '3R': 'pirep',
+            '4L': 'cape', '4R': 'gairmet',
+        }
+        if value in _toggle_map:
+            kind = _toggle_map[value]
+            self.type_enabled[kind] = not self.type_enabled[kind]
+            self.repaint_req_by.add(f"type-toggle-{kind}")
+        elif value == "6L":
+            self._cdu_page = 0
+            self.scratchpad_text = ''
+            self.repaint_req_by.add("page-main")
+
+    def _handle_intens_keypress(self, mcdu, value):  # pylint: disable=too-many-branches
+        """Handle key presses on the intensity subpage."""
+        _bias_map = {
+            '1L': 'wave', '1R': 'rotor',
+            '2L': 'mechanical', '2R': 'shear',
+            '3L': 'cb', '3R': 'pirep',
+            '4L': 'cape', '4R': 'gairmet',
+        }
+        if value in _bias_map:
+            self._enter_type_bias(mcdu, _bias_map[value])
+        elif value == "5L":
             self._enter_lat_size_bias(mcdu)
         elif value == "6L":
-            self._enter_type_bias(mcdu, 'pirep')
-        elif value == "6R":
-            self._enter_type_bias(mcdu, 'cape')
-        elif value == "CLR":
-            if self.scratchpad_text:
-                self.scratchpad_text = ''
-                mcdu.paint(13, 0, "small", "amber", "     CLR=RESET".ljust(24))
-            else:
-                self.turb_enabled = False
-                self.intensity_bias = 100
-                self.type_biases = {
-                    'wave': 100, 'rotor': 100, 'mechanical': 100,
-                    'shear': 100, 'cb': 100, 'pirep': 100, 'cape': 100, 'gairmet': 100,
-                }
-                self.lateral_size_bias = 50
-                self.wind_mode = "live"
-                self.psx_wind = None
-                self.engine.clear_fixed_wind()
-                self.repaint_req_by.add("reset")
-        elif value == "DEL":
-            self.scratchpad_text = self.scratchpad_text[:-1]
-            if self.scratchpad_text:
-                mcdu.paint(13, 0, "large", "magenta", self.scratchpad_text.ljust(24))
-            else:
-                mcdu.paint(13, 0, "small", "amber", "     CLR=RESET".ljust(24))
-        elif value in ('0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '/', '+/-'):
-            if len(self.scratchpad_text) < 10:
-                self.scratchpad_text += value
-                mcdu.paint(13, 0, "large", "magenta", self.scratchpad_text)
+            self._cdu_page = 0
+            self.scratchpad_text = ''
+            self.repaint_req_by.add("page-main")
 
     def mcduEvent(self, mcdu, event_type, value=None):
         """Handle CDU C key events."""
@@ -463,19 +580,28 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.logger.debug(
                 "Unhandled MCDU event from %s: %s=%s", mcdu.location, event_type, value)
 
-    def _paint_cdu_status(self):
-        """Paint compact turbulence status on row 1 left (cols 0–14)."""
-        label = _intensity_label(self._cdu_status_intensity)
-        abbr = _STATUS_ABBR[label]
-        kind = _STATUS_KIND.get(self._cdu_status_kind, self._cdu_status_kind[:4].upper())
-        pct = int(self._cdu_status_intensity * 100)
-        color = "cyan" if self._cdu_status_intensity >= 0.10 else "amber"
-        status = f"{kind:<4} {abbr}  {pct:3d}%"  # 14 chars; cols 0-13
-        for mcdu in self.active_mcdus:
-            mcdu.paint(1, 0, "small", color, status)
+    def _paint_cdu_source_rows(self, mcdu):  # pylint: disable=too-many-locals
+        """Paint rows 5–8 on the main page with the current turbulence source summary."""
+        A = "amber"
+        C = "cyan"
+        S = "small"
+        for row_idx in range(4):
+            row = 5 + row_idx
+            if row_idx < len(self._cdu_sources_snapshot):
+                src_eff, src_s, is_winner = self._cdu_sources_snapshot[row_idx]
+                marker = ">" if is_winner else " "
+                kind = _STATUS_KIND.get(src_s.kind, src_s.kind[:4].upper())
+                eff_pct = int(src_eff * 100)
+                raw = (src_s.reason or "").upper()
+                reason = ''.join(c for c in raw if ord(c) < 128)[:13]
+                line = f"{marker}{kind:<4} {eff_pct:3d}% {reason}"
+                color = C if is_winner else A
+                mcdu.paint(row, 0, S, color, line[:24].ljust(24))
+            else:
+                mcdu.paint(row, 0, S, A, " " * 24)
 
     async def paintMainPage(self, mcdu):
-        """Paint the PSX Turb main page on the MCDU."""
+        """Paint the main status and control page on the MCDU."""
         await asyncio.sleep(0.5)
 
         A = "amber"
@@ -485,53 +611,101 @@ class Script():  # pylint: disable=too-many-instance-attributes
 
         title = "   TURB ACTIVE          " if self.turb_enabled else "   FRANKENTURB          "
         enable_label = "<DISABLE" if self.turb_enabled else "<ENABLE"
-        bias_str = f"{self.intensity_bias}%"
+        bias_str = f"{self.intensity_bias}%>"
 
         if self.wind_mode == "live":
-            src_str = "LIVE>"
+            src_str = "<LIVE"
         elif self.wind_mode == "psx":
-            src_str = "PSX>"
+            src_str = "<PSX"
         else:
-            src_str = "MANUAL>"
-
-        wave_str = f"<{self.type_biases['wave']}%"
-        rotor_str = f"<{self.type_biases['rotor']}%"
-        mech_str = f"<{self.type_biases['mechanical']}%"
-        shear_str = f"{self.type_biases['shear']}%>"
+            src_str = "<MANUAL"
 
         mcdu.clear()
         #                          123456789012345678901234
         mcdu.paint(0, 0, S, A, title)
+        mcdu.paint(1, 0, S, A, "TURB")
         mcdu.paint(1, 15, S, A, "INT BIAS>")
         mcdu.paint(2, 0, L, C, f"{enable_label:<12}{bias_str:>12}")
-        mcdu.paint(3, 0, S, A, "WAVE")
-        mcdu.paint(3, 15, S, A, "WIND SRC>")
-        mcdu.paint(4, 0, L, C, f"{wave_str:<12}{src_str:>12}")
-        mcdu.paint(5, 0, S, A, "ROTOR")
+        mcdu.paint(3, 0, S, A, "WIND SRC")
         if self.wind_mode == "manual":
-            mcdu.paint(5, 19, S, A, "WIND>")
+            mcdu.paint(3, 19, S, A, "WIND>")
             wind_str = f"{self.manual_wind_dir:03d}/{self.manual_wind_spd:03d}KT>"
-            mcdu.paint(6, 0, L, C, f"{rotor_str:<12}{wind_str:>12}")
+            mcdu.paint(4, 0, L, C, f"{src_str:<12}{wind_str:>12}")
         else:
-            mcdu.paint(6, 0, L, C, f"{rotor_str:<12}")
-        mcdu.paint(7, 0, S, A, "MECH")
-        mcdu.paint(7, 18, S, A, "SHEAR>")
-        mcdu.paint(8, 0, L, C, f"{mech_str:<12}{shear_str:>12}")
-        mcdu.paint(9, 0, S, A, "CB")
-        mcdu.paint(9, 15, S, A, "LAT SIZE>")
-        mcdu.paint(10, 0, L, C,
-                   f"{'<' + str(self.type_biases['cb']) + '%':<12}"
-                   f"{str(self.lateral_size_bias) + '%>':>12}")
-
-        self._paint_cdu_status()
-        mcdu.paint(11, 0, S, A, "PIREP")
-        mcdu.paint(11, 19, S, A, "CAPE>")
-        mcdu.paint(12, 0, L, C, f"{'<' + str(self.type_biases['pirep']) + '%':<12}")
-        mcdu.paint(12, 12, L, C, f"{str(self.type_biases['cape']) + '%>':>12}")
+            mcdu.paint(4, 0, L, C, src_str)
+        self._paint_cdu_source_rows(mcdu)
+        mcdu.paint(10, 0, L, C, "<TYPES")
+        mcdu.paint(10, 17, L, C, "CONFIG>")
+        mcdu.paint(11, 6, S, A, "CLR TO RESET")
+        if self.args.config_file:
+            mcdu.paint(12, 0, L, C, "<SAVE")
+            mcdu.paint(12, 19, L, C, "LOAD>")
         if self.scratchpad_text:
-            mcdu.paint(13, 0, "large", "magenta", self.scratchpad_text)
-        else:
-            mcdu.paint(13, 0, "small", A, "     CLR=RESET".ljust(24))
+            mcdu.paint(13, 0, L, "magenta", self.scratchpad_text)
+
+    async def paintTypesPage(self, mcdu):
+        """Paint the turbulence type enable/disable subpage."""
+        await asyncio.sleep(0.5)
+
+        A = "amber"
+        C = "cyan"
+        L = "large"
+        S = "small"
+
+        def _en(kind):
+            return "ON " if self.type_enabled.get(kind, True) else "OFF"
+
+        mcdu.clear()
+        mcdu.paint(0, 0, S, A, "  TYPE ENABLE/DISABLE   ")
+        mcdu.paint(1, 0, S, A, "WAVE")
+        mcdu.paint(1, 18, S, A, "ROTOR>")
+        mcdu.paint(2, 0, L, C, f"<{_en('wave'):<11}{_en('rotor'):>10}>")
+        mcdu.paint(3, 0, S, A, "MECHANICAL")
+        mcdu.paint(3, 18, S, A, "SHEAR>")
+        mcdu.paint(4, 0, L, C, f"<{_en('mechanical'):<11}{_en('shear'):>10}>")
+        mcdu.paint(5, 0, S, A, "CB")
+        mcdu.paint(5, 18, S, A, "PIREP>")
+        mcdu.paint(6, 0, L, C, f"<{_en('cb'):<11}{_en('pirep'):>10}>")
+        mcdu.paint(7, 0, S, A, "CAPE")
+        mcdu.paint(7, 16, S, A, "GAIRMET>")
+        mcdu.paint(8, 0, L, C, f"<{_en('cape'):<11}{_en('gairmet'):>10}>")
+        mcdu.paint(11, 0, S, A, "BACK")
+        mcdu.paint(12, 0, L, C, "<BACK")
+        if self.scratchpad_text:
+            mcdu.paint(13, 0, L, "magenta", self.scratchpad_text)
+
+    async def paintIntensPage(self, mcdu):
+        """Paint the per-type intensity bias subpage."""
+        await asyncio.sleep(0.5)
+
+        A = "amber"
+        C = "cyan"
+        L = "large"
+        S = "small"
+
+        def _b(kind):
+            return f"{self.type_biases.get(kind, 100)}%"
+
+        mcdu.clear()
+        mcdu.paint(0, 0, S, A, "  TYPE INTENSITIES      ")
+        mcdu.paint(1, 0, S, A, "WAVE")
+        mcdu.paint(1, 18, S, A, "ROTOR>")
+        mcdu.paint(2, 0, L, C, f"<{_b('wave'):<11}{_b('rotor'):>10}>")
+        mcdu.paint(3, 0, S, A, "MECHANICAL")
+        mcdu.paint(3, 18, S, A, "SHEAR>")
+        mcdu.paint(4, 0, L, C, f"<{_b('mechanical'):<11}{_b('shear'):>10}>")
+        mcdu.paint(5, 0, S, A, "CB")
+        mcdu.paint(5, 18, S, A, "PIREP>")
+        mcdu.paint(6, 0, L, C, f"<{_b('cb'):<11}{_b('pirep'):>10}>")
+        mcdu.paint(7, 0, S, A, "CAPE")
+        mcdu.paint(7, 16, S, A, "GAIRMET>")
+        mcdu.paint(8, 0, L, C, f"<{_b('cape'):<11}{_b('gairmet'):>10}>")
+        mcdu.paint(9, 0, S, A, "CB LAT SIZE")
+        mcdu.paint(10, 0, L, C, f"<{str(self.lateral_size_bias) + '%':<11}")
+        mcdu.paint(11, 0, S, A, "BACK")
+        mcdu.paint(12, 0, L, C, "<BACK")
+        if self.scratchpad_text:
+            mcdu.paint(13, 0, L, "magenta", self.scratchpad_text)
 
     def _get_nearest_cb(self, lat: float, lon: float):
         """Collect CB data from PSX and return the nearest active storm cell.
@@ -579,7 +753,6 @@ class Script():  # pylint: disable=too-many-instance-attributes
         """Compute turbulence, inject WxBurst events into PSX, and log state."""
         myname = inspect.currentframe().f_code.co_name
         last_print = 0.0
-        last_burst_str = "-"
         try:
             self.logger.debug("Starting %s", myname)
             loop = asyncio.get_running_loop()
@@ -624,11 +797,11 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 # Save terrain result before non-terrain sources may override state.
                 terrain_state = state
 
-                # Bias-adjusted intensity for source comparison.  type_biases
-                # are per-kind percentages; division by 100 cancels in relative
-                # comparison so we just multiply for cheaper math.
+                # Bias-adjusted intensity for source comparison.  type_enabled
+                # and type_biases are combined; division by 100 cancels in
+                # relative comparison so we just multiply for cheaper math.
                 def _eff(s):
-                    return s.intensity * self.type_biases.get(s.kind, 100)
+                    return s.intensity * self._type_effective_bias(s.kind)
 
                 # CB proximity turbulence (fast — no I/O, just PSX cache + math).
                 cb = self._get_nearest_cb(lat, lon)
@@ -663,10 +836,10 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 # intensity_bias and the per-kind type_bias both scale intensity:
                 # each is 0–999 % (100 = 1×).  Combined: bias×type/10000.
                 # WxBurst magnitude is capped at 99 (PSX maximum).
-                type_bias = self.type_biases.get(state.kind, 100)
                 effective_intensity = min(
                     1.0,
-                    state.intensity * self.intensity_bias * type_bias / 10000.0,
+                    state.intensity * self.intensity_bias *
+                    self._type_effective_bias(state.kind) / 10000.0,
                 )
                 if self.turb_enabled and effective_intensity >= 0.01:
                     inject_prob = (effective_intensity ** 0.5) * (self.args.rate / 100.0)
@@ -676,16 +849,41 @@ class Script():  # pylint: disable=too-many-instance-attributes
                         magnitude = min(99, raw_mag)
                         psx_value = direction * (base + magnitude)
                         self.psx_send_and_set("WxBurst", str(psx_value))
-                        last_burst_str = f"{label}{'+' if direction > 0 else '-'}{magnitude:02d}"
-                        self.logger.debug("Injected WxBurst=%d (%s)", psx_value, last_burst_str)
+                        self.logger.debug("Injected WxBurst=%d (%s%s%02d)",
+                                          psx_value, label,
+                                          '+' if direction > 0 else '-', magnitude)
 
-                # --- Update CDU status row on configured interval ---------------
+                # --- Build sorted source list (console + CDU) ------------------
+                all_sources = []
+                for src_s in [
+                    terrain_state, cb_state, pirep_state, cape_state, gairmet_state
+                ]:
+                    if src_s is None or src_s.intensity < 0.01:
+                        continue
+                    src_eff = min(1.0, src_s.intensity * self.intensity_bias *
+                                  self._type_effective_bias(src_s.kind) / 10000.0)
+                    if src_eff < 0.01:
+                        continue
+                    all_sources.append((src_eff, src_s))
+                all_sources.sort(key=lambda t: t[0], reverse=True)
+
+                # --- Update CDU main page source rows --------------------------
+                # Refresh at most every 30 s, and only when something changed.
                 now_mono = time.monotonic()
-                if now_mono - self._cdu_last_status_update >= self.args.cdu_status_interval:
-                    self._cdu_last_status_update = now_mono
-                    self._cdu_status_kind = state.kind
-                    self._cdu_status_intensity = effective_intensity
-                    self._paint_cdu_status()
+                kind_changed = state.kind != self._cdu_update_kind
+                intens_changed = abs(effective_intensity - self._cdu_update_intensity) > 0.05
+                sources_changed = kind_changed or intens_changed
+                time_due = sources_changed and now_mono - self._cdu_last_main_update >= 30.0
+                if time_due:
+                    self._cdu_update_kind = state.kind
+                    self._cdu_update_intensity = effective_intensity
+                    self._cdu_last_main_update = now_mono
+                    self._cdu_sources_snapshot = [
+                        (e, s, s is state) for e, s in all_sources
+                    ]
+                    if self._cdu_page == 0:
+                        for mcdu in self.active_mcdus:
+                            self._paint_cdu_source_rows(mcdu)
 
                 # --- Throttle console output to once per second -----------------
                 now = time.monotonic()
@@ -694,20 +892,25 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 last_print = now
 
                 intensity_label = _intensity_label(effective_intensity)
-                vert_str = f"{state.vertical:+.2f}" if not _isnan(state.vertical) else "rand"
-                roll_str = f"{state.roll:+.2f}" if not _isnan(state.roll) else "rand"
-                gust_str = f"{state.gust:+.2f}" if not _isnan(state.gust) else "rand"
                 enabled_str = "ON " if self.turb_enabled else "OFF"
+                if effective_intensity >= 0.01:
+                    kind_str = state.kind
+                    vert_str = f"{state.vertical:+.2f}" if not _isnan(state.vertical) else "rand"
+                    roll_str = f"{state.roll:+.2f}" if not _isnan(state.roll) else "rand"
+                    gust_str = f"{state.gust:+.2f}" if not _isnan(state.gust) else "rand"
+                else:
+                    kind_str = "none"
+                    vert_str = roll_str = gust_str = "---"
 
                 if self._turb_print_count % 20 == 0:
                     self.logger.info(
                         "--- Turbulence %s", "-" * 73)
                     self.logger.info(
                         "     [   ] Position                    Type        Severity          "
-                        "Directional components          Last injected")
+                        "Directional components")
                     self.logger.info(
                         "     [   ] lat(°)   lon(°)   alt(ft)  kind        label      (0-1)  "
-                        "vert              roll               gust         WxBurst")
+                        "vert              roll               gust")
                     self.logger.info(
                         "     [   ]                                         none/light/        "
                         "-1=sink  +1=updft  -1=left  +1=right  -1=headwnd  +1=tailwnd")
@@ -720,27 +923,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
 
                 self.logger.info(
                     "Turbulence [%s] lat=%.3f lon=%.3f alt=%.0fft | "
-                    "%-10s | %-8s (%.2f) | vert=%s roll=%s gust=%s | %s",
+                    "%-10s | %-8s (%.2f) | vert=%s roll=%s gust=%s",
                     enabled_str, lat, lon, alt_ft,
-                    state.kind,
+                    kind_str,
                     intensity_label, effective_intensity,
                     vert_str, roll_str, gust_str,
-                    last_burst_str if self.turb_enabled else "-",
                 )
-                # All active sources sorted by effective intensity.
-                # '>' marks the governing source; others shown for awareness.
-                all_sources = []
-                for src_s in [
-                    terrain_state, cb_state, pirep_state, cape_state, gairmet_state
-                ]:
-                    if src_s is None or src_s.intensity < 0.01:
-                        continue
-                    src_eff = min(1.0, src_s.intensity * self.intensity_bias *
-                                  self.type_biases.get(src_s.kind, 100) / 10000.0)
-                    if src_eff < 0.01:
-                        continue
-                    all_sources.append((src_eff, src_s))
-                all_sources.sort(key=lambda t: t[0], reverse=True)
                 for src_eff, src in all_sources:
                     marker = ">" if (src is state) else " "
                     self.logger.info(
@@ -760,7 +948,6 @@ class Script():  # pylint: disable=too-many-instance-attributes
                         accel.heave_g, accel.surge_g, accel.sway_g,
                         accel.roll_rate_dps, accel.pitch_rate_dps, accel.yaw_rate_dps,
                         accel.ground_speed_kt)
-                last_burst_str = "-"
 
         except Exception as exc:  # pylint:disable=broad-exception-caught
             self.logger.critical(
@@ -1011,9 +1198,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
             help="Port of the PSX boost server.",
         )
         parser.add_argument(
-            '--cdu-status-interval',
-            type=float, default=30.0, metavar='SECONDS',
-            help="How often (seconds) to refresh the CDU turbulence status row.",
+            '--config-file',
+            type=str, default=None, metavar='PATH',
+            help="JSON config file.  Loaded on startup; SAVE/LOAD buttons appear on CDU.",
         )
         parser.add_argument(
             '--debug',
@@ -1036,6 +1223,8 @@ class Script():  # pylint: disable=too-many-instance-attributes
     async def run(self):
         """Start everything."""
         self.handle_args()
+        if self.args.config_file:
+            self._load_config(self.args.config_file)
 
         log_format = "%(asctime)s: %(message)s"
         logging.basicConfig(
