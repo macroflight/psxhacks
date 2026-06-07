@@ -33,9 +33,11 @@ _CAPE_MOD_J_KG = 2500.0
 _CAPE_SEV_J_KG = 4500.0
 _CAPE_EXT_J_KG = 7000.0
 
-# Altitude (ft) above which CAPE-driven turbulence decays (approx. tropopause).
-_CAPE_TROPO_FT = 35000.0
-_CAPE_TROPO_SCALE_FT = 8000.0
+# Altitude above which CAPE turbulence decays.  CAPE is a surface instability
+# signal; in-flight turbulence from it is primarily a low/mid-troposphere
+# phenomenon.  Active CBs at cruise altitude are handled by the CB source.
+_CAPE_ALT_DECAY_FT = 15_000.0   # FL150: start of altitude decay
+_CAPE_ALT_SCALE_FT = 7_000.0    # e-folding scale above FL150
 
 
 @dataclass
@@ -192,9 +194,10 @@ def compute_cape_turbulence(alt_ft: float, sample: CapeSample) -> TurbulenceStat
         elif li < -4.0:
             intensity = min(1.0, intensity * 1.10)
 
-    # Decay above the tropopause.
-    if alt_ft > _CAPE_TROPO_FT:
-        intensity *= math.exp(-(alt_ft - _CAPE_TROPO_FT) / _CAPE_TROPO_SCALE_FT)
+    # Decay above FL150 — convective turbulence from surface instability
+    # diminishes rapidly through the mid-troposphere.
+    if alt_ft > _CAPE_ALT_DECAY_FT:
+        intensity *= math.exp(-(alt_ft - _CAPE_ALT_DECAY_FT) / _CAPE_ALT_SCALE_FT)
 
     if intensity < 0.01:
         return TurbulenceState()
