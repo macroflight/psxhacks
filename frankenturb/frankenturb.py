@@ -99,27 +99,30 @@ def _pick_burst(state, intensity):
         roll_dir = _sign(state.roll) if not _isnan(state.roll) else r([-1, 1])
         spd_dir = _sign(state.gust) if not _isnan(state.gust) else r([-1, 1])
         if intensity < 0.25:
-            # Light: airspeed fluctuations dominate; sink and bank barely perceptible.
+            # Light: airspeed fluctuations only; sink/bank barely perceptible.
+            # Real 747 experience: no instrument indication at light intensity.
             candidates = [
-                (_BURST_SPD, spd_dir, "SPD", 4.0),
-                (_BURST_SINK, vert_dir, "SINK", 0.3),
-                (_BURST_BANK, roll_dir, "BANK", 0.2),
+                (_BURST_SPD, spd_dir, "SPD", 6.0),
+                (_BURST_GUST, spd_dir, "GUST", 1.0),
+                (_BURST_SINK, vert_dir, "SINK", 0.1),
+                (_BURST_BANK, roll_dir, "BANK", 0.1),
             ]
         elif intensity < 0.5:
-            # Medium: larger SPD changes; sink growing but still secondary.
+            # Moderate: speed jolts dominate; VS moves barely, pitch 0.5-1 deg max.
+            # Real 747 experience: speed jolts primary, tiny VS, almost no pitch change.
+            candidates = [
+                (_BURST_SPD, spd_dir, "SPD", 5.0),
+                (_BURST_GUST, spd_dir, "GUST", 1.0),
+                (_BURST_SINK, vert_dir, "SINK", 0.2),
+                (_BURST_BANK, roll_dir, "BANK", 0.1),
+            ]
+        else:
+            # Severe: SPD still leads; sink/updraft present but not dominant.
             candidates = [
                 (_BURST_SPD, spd_dir, "SPD", 3.0),
                 (_BURST_SINK, vert_dir, "SINK", 1.0),
+                (_BURST_GUST, spd_dir, "GUST", 0.8),
                 (_BURST_BANK, roll_dir, "BANK", 0.5),
-                (_BURST_GUST, spd_dir, "GUST", 0.3),
-            ]
-        else:
-            # Severe: strong sink/updraft and SPD roughly equal; some roll.
-            candidates = [
-                (_BURST_SINK, vert_dir, "SINK", 2.5),
-                (_BURST_SPD, spd_dir, "SPD", 2.0),
-                (_BURST_BANK, roll_dir, "BANK", 1.0),
-                (_BURST_GUST, spd_dir, "GUST", 0.5),
             ]
     elif state.kind == 'rotor':
         # Rotors are roll-dominant and highly chaotic.
