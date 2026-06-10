@@ -80,7 +80,13 @@ SHEAR_MODERATE = 6.0
 SHEAR_SEVERE = 10.0
 
 # Maximum wind speed (m/s) used for normalisation.
-WIND_NORM_MS = 30.0
+# Rotor uses surface wind; wave uses ridge-top wind with a lower norm so that
+# strong-wind / moderate-barrier scenarios (e.g. Greenland ice cap: BGTL
+# chart calls for severe turbulence at 30kt from 125-225°T) reach the
+# moderate-to-severe range rather than staying in the light range.
+WIND_NORM_MS = 30.0        # rotor: normalise at 58 kt (high threshold OK for rotors)
+WAVE_WIND_NORM_MS = 20.0   # wave: normalise at 39 kt; 30 kt → factor 0.77
+WAVE_BARRIER_NORM_M = 2000.0  # consistent with rotor; 1500 m barrier → factor 0.75
 
 # Height above terrain used to sample "surface" wind from the profile.
 SURFACE_SAMPLE_AGL_M = 300.0
@@ -341,8 +347,8 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
         wind_dir_deg: float,
         _agl_m: float,
     ) -> TurbulenceState:
-        wind_factor = min(1.0, ridge_top_wind_ms / WIND_NORM_MS)
-        barrier_factor = min(1.0, wave["barrier_height_m"] / 3000.0)
+        wind_factor = min(1.0, ridge_top_wind_ms / WAVE_WIND_NORM_MS)
+        barrier_factor = min(1.0, wave["barrier_height_m"] / WAVE_BARRIER_NORM_M)
         intensity = 0.7 * wind_factor * barrier_factor * wave["alt_factor"]
 
         phase = self._wave_phase(lat, lon, wind_dir_deg, wave["half_lambda_m"])
