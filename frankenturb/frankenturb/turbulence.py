@@ -76,8 +76,12 @@ ROTOR_HEIGHT_FRACTION = 1.2   # rotor ceiling = terrain + barrier * this
 ROTOR_DISTANCE_KM = 15.0      # max distance downwind for active rotor
 
 # Vertical wind shear thresholds (kt / 1000 ft).
-SHEAR_MODERATE = 6.0
-SHEAR_SEVERE = 10.0
+# 7 kt/1000ft (just above FAA "significant" threshold) produced VSI swings of
+# ~700 fpm in testing — too strong for what should be light chop.  Raising the
+# onset to 8 kt/1000ft and severe to 14 kt/1000ft calibrates 10 kt → light and
+# 14 kt → moderate, matching real-world reports.
+SHEAR_MODERATE = 8.0
+SHEAR_SEVERE = 14.0
 
 # Maximum wind speed (m/s) used for normalisation.
 # Rotor uses surface wind; wave uses ridge-top wind with a lower norm so that
