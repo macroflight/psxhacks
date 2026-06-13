@@ -57,7 +57,7 @@ class Client():
       await asyncio.sleep(2)
       self.logger(f"Connecting to PSX Main Server at {host}:{port}...")
       try:
-        self.reader, self.writer = await asyncio.open_connection(host, port)
+        self.reader, self.writer = await asyncio.open_connection(host, port, limit=2**20)
       except OSError:
         self.logger("Oops, that failed. Has the PSX Main Server been started?")
         self.logger("Will retry in 10 seconds")
