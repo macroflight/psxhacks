@@ -6,6 +6,7 @@ import inspect
 import json
 import logging
 import math
+import os
 import random
 import re
 import sys
@@ -34,6 +35,7 @@ _OM_VARS = (
 )
 
 _UCAR_STATIONS_URL = "https://weather.rap.ucar.edu/surface/stations.txt"
+_STATIONS_CACHE = os.path.join(os.path.expanduser("~"), ".cache", "frankenweather", "stations.txt")
 _VATSIM_ALL_URL = "https://metar.vatsim.net/all"
 _VATSIM_CACHE_MAX_S = 1800             # re-fetch VATSIM METARs every 30 minutes
 _AIRPORT_SNAP_NM = 25.0               # snap zone to a real airport if within this radius
@@ -134,6 +136,22 @@ def download_airports(url: str) -> dict:
     with urllib.request.urlopen(url, timeout=30) as resp:
         text = resp.read().decode('latin-1')
     return _parse_airports_lines(text.splitlines())
+
+
+def get_airports(url: str, cache_path: str) -> tuple:
+    """Return airports dict loaded from cache, or downloaded and cached if absent.
+
+    Returns ``(airports, source_description)`` where source_description is a
+    human-readable string suitable for logging.
+    """
+    if os.path.exists(cache_path):
+        return load_airports(cache_path), f"cache ({cache_path})"
+    with urllib.request.urlopen(url, timeout=30) as resp:
+        text = resp.read().decode('latin-1')
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+    with open(cache_path, "w", encoding="latin-1") as fh:
+        fh.write(text)
+    return _parse_airports_lines(text.splitlines()), url
 
 
 # ---------------------------------------------------------------------------
@@ -1650,9 +1668,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self.logger.info("Loaded %d airports from %s",
                              len(self.airports), self.args.stations)
         else:
-            self.logger.info("Downloading stations from %s", _UCAR_STATIONS_URL)
-            self.airports = download_airports(_UCAR_STATIONS_URL)
-            self.logger.info("Downloaded %d airports", len(self.airports))
+            self.airports, source = get_airports(_UCAR_STATIONS_URL, _STATIONS_CACHE)
+            self.logger.info("Loaded %d airports from %s", len(self.airports), source)
 
         async with asyncio.TaskGroup() as self.taskgroup:
             task = self.taskgroup.create_task(self.monitor_coro(), name="Monitor")
