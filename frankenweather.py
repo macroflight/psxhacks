@@ -19,6 +19,7 @@ import aiohttp
 from pyproj import Geod
 
 import psx
+import wind_corridor
 
 
 __MYNAME__ = 'frankenweather'
@@ -291,6 +292,8 @@ def _update_metar_qnh(metar: str, qnh_hpa: float) -> str:
     """Replace the Q-format QNH token in a METAR string with a new value."""
     return re.sub(r'\bQ\d{4}\b', f"Q{int(round(qnh_hpa)):04d}", metar)
 
+
+_WIND_UPDATE_INTERVAL_S = 60.0
 
 _SIGMET_COORD_RE = re.compile(r'([NS])(\d{2})(\d{2})\s+([EW])(\d{3})(\d{2})')
 _SIGMET_ALT_RE = re.compile(
@@ -657,6 +660,14 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self.focused_zone: int = 0          # 0 = WxBasic, 1-7 = Wx1-Wx7
         self.cloud_sync_last_alt_ft: float = 0.0
 
+        # MSFS wind state (--msfs-wind-sync via frankenmsfsbridge)
+        self.msfs_wind_dir: Optional[float] = None
+        self.msfs_wind_spd: Optional[float] = None
+        self.msfs_oat_c: Optional[float] = None
+        self._wind_last_encoded: Optional[str] = None
+        self._wind_last_updated: float = 0.0
+        self._corridor_txt: Optional[str] = None
+
     # ------------------------------------------------------------------
     # PSX helpers
     # ------------------------------------------------------------------
@@ -776,9 +787,53 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self.msfs_qnh_hpa = new_qnh
             if prev is None or abs(new_qnh - prev) > 0.5:
                 changed = True
+        if "oat_c" in data:
+            self.msfs_oat_c = float(data["oat_c"])
+        if "wind_dir" in data:
+            self.msfs_wind_dir = float(data["wind_dir"])
+        if "wind_spd" in data:
+            self.msfs_wind_spd = float(data["wind_spd"])
         self._msfs_bridge_last_seen = time.monotonic()
         if changed:
             self._apply_msfs_sync()
+        if self.args.msfs_wind_sync:
+            self._apply_wind_injection()
+
+    def _handle_corridor(self, _key: str, value: str) -> None:
+        """Cache the current PSX wind corridor text for wind injection."""
+        self._corridor_txt = value
+
+    def _apply_wind_injection(self) -> None:
+        """Inject MSFS wind into the PSX wind corridor as a FWIND waypoint."""
+        if not self.args.msfs_wind_sync:
+            return
+        corridor = getattr(self, '_corridor_txt', None)
+        if not corridor:
+            return
+        if (self.msfs_wind_dir is None or self.msfs_wind_spd is None or
+                self.msfs_oat_c is None):
+            return
+        if self.ac_lat is None:
+            return
+
+        encoded = (f"{self.msfs_wind_dir:.0f}/{self.msfs_wind_spd:.0f}"
+                   f"/{self.msfs_oat_c:.0f}")
+        now = time.monotonic()
+        if (encoded == self._wind_last_encoded and
+                now - self._wind_last_updated < _WIND_UPDATE_INTERVAL_S):
+            return
+
+        new_corridor, msg = wind_corridor.update_corridor(
+            corridor,
+            self.ac_lat, self.ac_lon, self.ac_alt_ft,
+            self.msfs_wind_dir, self.msfs_wind_spd, self.msfs_oat_c)
+        if new_corridor is None:
+            self.logger.debug("Wind corridor: %s", msg)
+            return
+        self.logger.info("Wind corridor: %s", msg)
+        self.psx.send("WxCorridorTxt", new_corridor)
+        self._wind_last_encoded = encoded
+        self._wind_last_updated = now
 
     def _sigmet_cb_override(self, wx_str: str, pos: tuple,
                             om: dict, zone_label: str) -> str:
@@ -1449,6 +1504,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self.psx.subscribe("FmcRte2", self.handle_fmc_change)
             self.psx.subscribe("WxSigmet", self.handle_sigmet_change)
             self.psx.subscribe("addon", self._handle_addon)
+            self.psx.subscribe("WxCorridorTxt", self._handle_corridor)
 
             for i in range(1, 8):
                 self.psx.subscribe(f"Wx{i}", self.handle_wx_change)
@@ -1560,6 +1616,10 @@ class Script:  # pylint: disable=too-many-instance-attributes
         parser.add_argument(
             '--msfs-qnh-check-maxdiff', type=float, default=2.0, metavar='HPA',
             help="QNH difference threshold in hPa for --msfs-qnh-check.")
+        parser.add_argument(
+            '--msfs-wind-sync', action='store_true',
+            help="Inject MSFS wind at current altitude into the PSX wind corridor as "
+                 "a FWIND waypoint (via frankenmsfsbridge).")
         parser.add_argument(
             '--fake-cb', type=_parse_cb_arg, default=None, metavar='O:B:T',
             help="Override CB in all zones: O=oktas (0-8), B=base ft, T=top ft "

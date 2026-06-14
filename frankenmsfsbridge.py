@@ -15,7 +15,13 @@ except ImportError:
     _sc_mod = None
 
 _MY_ADDON = "FRANKENMSFSBRIDGE"
-_SIMVARS = ("AMBIENT_IN_CLOUD", "SEA_LEVEL_PRESSURE")
+_SIMVARS = (
+    "AMBIENT_IN_CLOUD",
+    "SEA_LEVEL_PRESSURE",
+    "AMBIENT_TEMPERATURE",
+    "AMBIENT_WIND_DIRECTION",
+    "AMBIENT_WIND_VELOCITY",
+)
 _HEARTBEAT_S = 60.0
 
 
@@ -58,6 +64,15 @@ class Bridge:  # pylint: disable=too-few-public-methods
             raw = aq.get("SEA_LEVEL_PRESSURE")
             if raw is not None:
                 data["qnh_hpa"] = round(float(raw), 2)
+            raw = aq.get("AMBIENT_TEMPERATURE")
+            if raw is not None:
+                data["oat_c"] = round(float(raw), 1)
+            raw = aq.get("AMBIENT_WIND_DIRECTION")
+            if raw is not None:
+                data["wind_dir"] = round(float(raw), 1)
+            raw = aq.get("AMBIENT_WIND_VELOCITY")
+            if raw is not None:
+                data["wind_spd"] = round(float(raw), 1)
             if not data:
                 continue
             now = time.monotonic()

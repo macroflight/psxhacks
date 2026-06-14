@@ -131,7 +131,13 @@ Features:
   QNH is never updated for zones whose weather comes from a real METAR
   (the METAR is authoritative for those zones).
 
-- The MSFS in-cloud and QNH data is provided by `frankenmsfsbridge.py`
+- Optional MSFS wind corridor sync (`--msfs-wind-sync`): reads the MSFS
+  wind direction, speed and OAT at the current aircraft altitude and
+  injects them into the PSX wind corridor as a synthetic `FWIND` waypoint
+  near the aircraft position. Supports PSX wind corridor Formats A and E;
+  Formats B, C and D are left unchanged.
+
+- The MSFS in-cloud, QNH and wind data is provided by `frankenmsfsbridge.py`
   running on the MSFS slave sim.
 
 Requires `aiohttp` and `pyproj`:
@@ -148,6 +154,7 @@ Key options:
 --msfs-in-cloud-sync     Sync PSX in-cloud state with MSFS (via frankenmsfsbridge)
 --msfs-qnh-check CHECK|USE  Warn or correct QNH mismatch vs MSFS (via frankenmsfsbridge)
 --msfs-qnh-check-maxdiff HPA  Threshold in hPa (default: 2)
+--msfs-wind-sync         Inject MSFS wind into the PSX wind corridor as FWIND waypoint
 --cruise-alt FT          Altitude above which cruise zone rules apply (default: 18000)
 --arpt-zone-dist NM      Snap dep/dst airport zone within this range (default: 200)
 --disable-psx-weather-updates  Dry run: fetch and log but do not write to PSX
@@ -158,8 +165,9 @@ Key options:
 
 Companion to `frankenweather.py` for setups where frankenweather runs
 on the PSX master sim but MSFS runs on a separate slave sim. The bridge
-runs on the slave sim, reads `AMBIENT_IN_CLOUD` and
-`SEA_LEVEL_PRESSURE` from MSFS via SimConnect, and publishes them to
+runs on the slave sim, reads `AMBIENT_IN_CLOUD`, `SEA_LEVEL_PRESSURE`,
+`AMBIENT_TEMPERATURE`, `AMBIENT_WIND_DIRECTION` and
+`AMBIENT_WIND_VELOCITY` from MSFS via SimConnect, and publishes them to
 the PSX network as `addon=FRANKENMSFSBRIDGE:{...}` messages every time
 the data changes, and at least every 60 seconds as a heartbeat.
 Frankenweather picks up these messages and uses them in place of a
@@ -176,19 +184,6 @@ Key options:
 --interval SEC    SimConnect poll interval in seconds (default: 5)
 --debug           Verbose logging
 ```
-
-### frankenwind.py
-
-This will replace the PSX wind corridor data with the current MSFS
-wind at your altitude when the altimeter is set to STD, and restore
-the PSX data when the altimeter is set to QNH. The reasoning behind
-this is that the PSX wind data will match MSFS anyway when near an
-airport (i.e low, so QNH set).
-
-Use this if you feel that your winds are very different than other
-VATSIM users when enroute. Personally, I'm not convinced that this is
-needed, my enroute winds (from Simbrief) seems to match MSFS quite
-well.
 
 ### frankentanker.py
 
@@ -286,7 +281,7 @@ c:\fs\psx\psxpython\venv-1\Scripts\pip install pygame
 c:\fs\psx\psxpython\venv-1\Scripts\pip install aiohttp
 ```
 
-SimConnect is needed for scripts that talk to MSFS (e.g frankenwind.py).
+SimConnect is needed for scripts that talk to MSFS (e.g frankenmsfsbridge.py).
 
 Pygame is needed for frankenusb.py.
 

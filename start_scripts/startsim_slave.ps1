@@ -55,12 +55,6 @@ if ($StartFrankenusb ) {
     Invoke-WindowPosition "frankenusb"
 }
 
-if ($StartFrankenwind ) {
-    Write-Output "Starting FrankenWind..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenwind.ps1"
-    Invoke-WindowPosition "frankenwind"
-}
-
 if ($StartSrslPsxSlave ) {
     Write-Output "Starting SRSL-PSX..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_srsl_psx_slave.ps1"

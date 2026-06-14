@@ -85,7 +85,6 @@ $StartFrankencduproxy    = $false   # FrankenCDU proxy (CS CDU Bridge <-> PSX)
 $StartCsCdu              = $false   # Cockpit Simulator CDU hardware
 $StartFrankentanker      = $false   # FrankenTanker (in-flight refuelling)
 $StartFrankenturb        = $false   # FrankenTurb (terrain/wind turbulence)
-$StartFrankenwind        = $false   # FrankenWind (wind injection)
 $StartFrankenident       = $false   # FrankenIDENT (slave)
 $StartFrankenidentMaster = $false   # FrankenIDENT (master instance)
 $StartFrankenutil        = $false   # FrankenUtil (misc utility addon)
@@ -121,7 +120,6 @@ $StartSrslPsxSlave       = $false   # SRSL-PSX SmartRunway/SmartLanding (slave)
 #$FrankenturbRepo        = $null
 #$FrankenusbRepo         = $null
 #$FrankenutilRepo        = $null
-#$FrankenwindRepo        = $null
 #$CpdlcRepo              = $null
 
 
@@ -133,7 +131,6 @@ $StartSrslPsxSlave       = $false   # SRSL-PSX SmartRunway/SmartLanding (slave)
 #$FrankenrouterSlaveOptions  = @("--config-file=frankensim-client.toml")
 #$FrankentankerOptions       = @()
 #$FrankenusbOptions          = @()
-#$FrankenwindOptions         = @()
 #$FrankenturbOptions         = @()
 #$FrankenidentOptions        = @()
 #$FrankenidentMasterOptions  = @("--psx-port=10748")
