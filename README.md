@@ -131,14 +131,10 @@ Features:
   QNH is never updated for zones whose weather comes from a real METAR
   (the METAR is authoritative for those zones).
 
-- The MSFS in-cloud and QNH data can come from SimConnect running
-  locally on the same machine as MSFS, or from `frankenmsfsbridge.py`
-  running on the MSFS slave sim when frankenweather itself runs on the
-  PSX master sim.
+- The MSFS in-cloud and QNH data is provided by `frankenmsfsbridge.py`
+  running on the MSFS slave sim.
 
-Requires `aiohttp` and `pyproj` in addition to the packages listed
-below. SimConnect is only needed if using `--msfs-in-cloud-sync` or
-`--msfs-qnh-check` without `frankenmsfsbridge.py`.
+Requires `aiohttp` and `pyproj`:
 
 ```
 pip install aiohttp pyproj
@@ -149,8 +145,8 @@ Key options:
 ```
 --psx-host HOST          PSX server hostname (default: 127.0.0.1)
 --psx-port PORT          PSX server port (default: 10747)
---msfs-in-cloud-sync     Sync PSX in-cloud state with MSFS
---msfs-qnh-check CHECK|USE  Warn or correct QNH mismatch vs MSFS
+--msfs-in-cloud-sync     Sync PSX in-cloud state with MSFS (via frankenmsfsbridge)
+--msfs-qnh-check CHECK|USE  Warn or correct QNH mismatch vs MSFS (via frankenmsfsbridge)
 --msfs-qnh-check-maxdiff HPA  Threshold in hPa (default: 2)
 --cruise-alt FT          Altitude above which cruise zone rules apply (default: 18000)
 --arpt-zone-dist NM      Snap dep/dst airport zone within this range (default: 200)

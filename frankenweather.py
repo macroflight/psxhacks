@@ -20,12 +20,6 @@ from pyproj import Geod
 
 import psx
 
-try:
-    import SimConnect as _simconnect_mod  # pylint: disable=import-error
-    _HAVE_SIMCONNECT = True
-except ImportError:
-    _simconnect_mod = None
-    _HAVE_SIMCONNECT = False
 
 __MYNAME__ = 'frankenweather'
 __MY_CLIENT_ID__ = 'FWXR'
@@ -656,15 +650,12 @@ class Script:  # pylint: disable=too-many-instance-attributes
         # Parsed TS SIGMETs used to lift WMO/showers CB suppression when CAPE agrees
         self.ts_sigmets: list = []
 
-        # MSFS SimConnect state (--msfs-in-cloud-sync / --msfs-qnh-check)
-        self.msfs_sc = None
-        self.msfs_aq = None
-        self.msfs_connected: bool = False
+        # MSFS bridge state (--msfs-in-cloud-sync / --msfs-qnh-check via frankenmsfsbridge)
         self.msfs_in_cloud: Optional[bool] = None
         self.msfs_qnh_hpa: Optional[float] = None
         self._msfs_bridge_last_seen: Optional[float] = None
         self.focused_zone: int = 0          # 0 = WxBasic, 1-7 = Wx1-Wx7
-        self.cloud_sync_last_alt_ft: Optional[float] = None
+        self.cloud_sync_last_alt_ft: float = 0.0
 
     # ------------------------------------------------------------------
     # PSX helpers
@@ -827,9 +818,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
 
     def _apply_msfs_sync(self) -> None:  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
         """Apply MSFS→PSX sync for the focused zone: clouds and/or QNH."""
-        need_cloud = (getattr(self.args, 'msfs_in_cloud_sync', False) and
-                      self.msfs_in_cloud is not None)
-        need_qnh = bool(getattr(self.args, 'msfs_qnh_check', None))
+        need_cloud = self.args.msfs_in_cloud_sync and self.msfs_in_cloud is not None
+        need_qnh = bool(self.args.msfs_qnh_check)
         if not need_cloud and not need_qnh:
             return
         if self.ac_alt_ft is None:
@@ -1385,65 +1375,6 @@ class Script:  # pylint: disable=too-many-instance-attributes
     # Coroutines
     # ------------------------------------------------------------------
 
-    async def _msfs_poll_loop(self, need_cloud: bool, need_qnh: bool) -> None:
-        """Inner SimConnect poll loop — runs until connection is lost."""
-        while True:
-            await asyncio.sleep(5.0)
-            if need_cloud:
-                raw = self.msfs_aq.get("AMBIENT_IN_CLOUD")
-                if raw is None:
-                    raise ConnectionError("AMBIENT_IN_CLOUD unavailable")
-                new_cloud = bool(int(raw) == 1)
-                if new_cloud != self.msfs_in_cloud:
-                    self.logger.info("MSFS in-cloud: %s → %s", self.msfs_in_cloud, new_cloud)
-                    self.msfs_in_cloud = new_cloud
-                    self._apply_msfs_sync()
-            if need_qnh:
-                raw = self.msfs_aq.get("SEA_LEVEL_PRESSURE")
-                if raw is not None:
-                    new_qnh = float(raw)
-                    prev = self.msfs_qnh_hpa
-                    self.msfs_qnh_hpa = new_qnh
-                    if (self.args.msfs_qnh_check == "USE" and
-                            (prev is None or abs(new_qnh - prev) > 0.5)):
-                        self._apply_msfs_sync()
-
-    async def _msfs_coro(self) -> None:
-        """Connect to MSFS via SimConnect and poll in-cloud state and QNH."""
-        myname = inspect.currentframe().f_code.co_name
-        need_cloud = getattr(self.args, 'msfs_in_cloud_sync', False)
-        need_qnh = bool(getattr(self.args, 'msfs_qnh_check', None))
-        try:
-            while True:
-                self.msfs_connected = False
-                try:
-                    import ctypes  # pylint: disable=import-outside-toplevel
-                    ctypes.windll.kernel32.SetDllDirectoryW(None)  # pylint: disable=no-member
-                except (ImportError, AttributeError):
-                    pass
-                try:
-                    self.msfs_sc = _simconnect_mod.SimConnect()
-                    self.msfs_aq = _simconnect_mod.AircraftRequests(self.msfs_sc)
-                except Exception as exc:  # pylint: disable=broad-exception-caught
-                    self.logger.warning("SimConnect unavailable (%s), retrying in 30s", exc)
-                    await asyncio.sleep(30.0)
-                    continue
-                for var in ("AMBIENT_IN_CLOUD", "SEA_LEVEL_PRESSURE"):
-                    v = self.msfs_aq.find(var)
-                    if v:
-                        v.time = 2000
-                self.msfs_connected = True
-                self.logger.info("SimConnect: connected to MSFS")
-                try:
-                    await self._msfs_poll_loop(need_cloud, need_qnh)
-                except Exception as exc:  # pylint: disable=broad-exception-caught
-                    self.logger.warning("MSFS connection lost (%s), reconnecting in 30s", exc)
-                    self.msfs_connected = False
-                    await asyncio.sleep(30.0)
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            self.logger.critical("Unhandled exception %s in %s", exc, myname)
-            self.logger.critical(traceback.format_exc())
-
     async def weather_update_coro(self) -> None:
         """Periodically update PSX weather zones from Open-Meteo."""
         myname = inspect.currentframe().f_code.co_name
@@ -1555,8 +1486,6 @@ class Script:  # pylint: disable=too-many-instance-attributes
                     ("PSXConnection", self.get_psx_connection_coro),
                     ("WeatherUpdate", self.weather_update_coro),
                 ]
-                if self.args.msfs_in_cloud_sync or self.args.msfs_qnh_check:
-                    coros.append(("MSFSSync", self._msfs_coro))
                 for name, coro_fn in coros:
                     if name not in running:
                         self.logger.info("Starting %s...", name)
@@ -1620,12 +1549,14 @@ class Script:  # pylint: disable=too-many-instance-attributes
                  "if within this distance (0 to disable).")
         parser.add_argument(
             '--msfs-in-cloud-sync', action='store_true',
-            help="Use MSFS SimConnect to keep PSX in-cloud state in sync with MSFS.")
+            help="Adjust PSX cloud layers to match MSFS in-cloud state "
+                 "(data supplied by frankenmsfsbridge).")
         parser.add_argument(
             '--msfs-qnh-check', choices=('CHECK', 'USE'), default=None,
             metavar='CHECK|USE',
-            help="CHECK: warn when MSFS QNH differs from active PSX zone by more than "
-                 "--msfs-qnh-check-maxdiff. USE: also update PSX QNH to match MSFS.")
+            help="CHECK: warn when MSFS QNH (from frankenmsfsbridge) differs from the "
+                 "active PSX zone by more than --msfs-qnh-check-maxdiff. "
+                 "USE: also update the PSX QNH and METAR to match.")
         parser.add_argument(
             '--msfs-qnh-check-maxdiff', type=float, default=2.0, metavar='HPA',
             help="QNH difference threshold in hPa for --msfs-qnh-check.")
@@ -1653,13 +1584,6 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self.logger = logging.getLogger(__MYNAME__)
         if self.args.debug:
             self.logger.setLevel(logging.DEBUG)
-
-        if self.args.msfs_in_cloud_sync or self.args.msfs_qnh_check:
-            if not _HAVE_SIMCONNECT:
-                self.logger.error(
-                    "SimConnect not available — install the SimConnect Python package")
-                sys.exit(1)
-            self.cloud_sync_last_alt_ft = 0.0
 
         if self.args.stations:
             self.airports = load_airports(self.args.stations)
