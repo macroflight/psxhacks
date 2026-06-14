@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import inspect
+import json
 import logging
 import math
 import random
@@ -44,6 +45,7 @@ _AIRPORT_SNAP_NM = 25.0               # snap zone to a real airport if within th
 _REPOSITION_DIST_NM = 500.0           # zone this far away → aircraft was repositioned
 _REFRESH_MAX_S = 300                  # always refresh weather after this many seconds
 _PUSH_COOLDOWN_S = 5.0                # ignore Wx echo-backs for this long after our write
+_MSFS_BRIDGE_TIMEOUT_S = 300.0        # stop using bridge data after this silence period
 _NM_TO_M = 1852.0
 
 # Default Wx field values — we override [0-5], [18-20], [22-23] from Open-Meteo.
@@ -653,6 +655,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self.msfs_connected: bool = False
         self.msfs_in_cloud: Optional[bool] = None
         self.msfs_qnh_hpa: Optional[float] = None
+        self._msfs_bridge_last_seen: Optional[float] = None
         self.focused_zone: int = 0          # 0 = WxBasic, 1-7 = Wx1-Wx7
         self.cloud_sync_last_alt_ft: Optional[float] = None
 
@@ -751,6 +754,34 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self.logger.info("SIGMETs: %d active TS areas (raw %d bytes)",
                          len(self.ts_sigmets), len(value))
 
+    def _handle_addon(self, _key: str, value: str) -> None:
+        """Process FRANKENMSFSBRIDGE addon messages from the slave sim."""
+        prefix = "FRANKENMSFSBRIDGE:"
+        if not value.startswith(prefix):
+            return
+        try:
+            data = json.loads(value[len(prefix):])
+        except (ValueError, KeyError):
+            self.logger.warning("Malformed FRANKENMSFSBRIDGE addon: %s", value[:80])
+            return
+        changed = False
+        if "in_cloud" in data:
+            new_cloud = bool(data["in_cloud"])
+            if new_cloud != self.msfs_in_cloud:
+                self.logger.info("MSFS in-cloud (bridge): %s → %s",
+                                 self.msfs_in_cloud, new_cloud)
+                self.msfs_in_cloud = new_cloud
+                changed = True
+        if "qnh_hpa" in data:
+            new_qnh = float(data["qnh_hpa"])
+            prev = self.msfs_qnh_hpa
+            self.msfs_qnh_hpa = new_qnh
+            if prev is None or abs(new_qnh - prev) > 0.5:
+                changed = True
+        self._msfs_bridge_last_seen = time.monotonic()
+        if changed:
+            self._apply_msfs_sync()
+
     def _sigmet_cb_override(self, wx_str: str, pos: tuple,
                             om: dict, zone_label: str) -> str:
         """Restore CAPE-suppressed CBs if the zone lies inside a TS SIGMET polygon.
@@ -796,6 +827,11 @@ class Script:  # pylint: disable=too-many-instance-attributes
             return
         if self.ac_alt_ft is None:
             return
+        if self._msfs_bridge_last_seen is not None:
+            bridge_age = time.monotonic() - self._msfs_bridge_last_seen
+            if bridge_age > _MSFS_BRIDGE_TIMEOUT_S:
+                self.logger.debug("MSFS bridge data stale (%.0fs), skipping sync", bridge_age)
+                return
         zone_key = "WxBasic" if self.focused_zone == 0 else f"Wx{self.focused_zone}"
         wx = self.psx.get(zone_key) if self.psx else None
         if not wx:
@@ -1461,6 +1497,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self.psx.subscribe("FmcRte1", self.handle_fmc_change)
             self.psx.subscribe("FmcRte2", self.handle_fmc_change)
             self.psx.subscribe("WxSigmet", self.handle_sigmet_change)
+            self.psx.subscribe("addon", self._handle_addon)
 
             for i in range(1, 8):
                 self.psx.subscribe(f"Wx{i}", self.handle_wx_change)

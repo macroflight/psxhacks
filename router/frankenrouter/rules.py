@@ -624,6 +624,13 @@ class Rules():  # pylint: disable=too-many-public-methods
                     self.sender.simulator_name)
                 return self.myreturn(RulesAction.DROP, RulesCode.CDUPROXY)
 
+        # Drop addon=FRANKENMSFSBRIDGE from non-elevation-master sources
+        if addon == 'FRANKENMSFSBRIDGE' and self.router.filter_elevation:
+            return self.myreturn(
+                RulesAction.DROP,
+                RulesCode.KEYVALUE_FILTERED_INGRESS_SILENT,
+                message="filtered FRANKENMSFSBRIDGE addon as filter_elevation is set")
+
         if addon == 'FRANKENROUTER':
             if ':' not in payload:
                 return self.myreturn(
