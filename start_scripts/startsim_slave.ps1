@@ -126,12 +126,6 @@ if ($StartSimObjectRouter ) {
     Invoke-WindowPosition "SimObjectRouter"
 }
 
-if ($StartFrankenfreeze ) {
-    Write-Output "Starting Frankenfreeze..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenfreeze.ps1"
-    Invoke-WindowPosition "frankenfreeze"
-}
-
 Write-Output "Starting non-scripted apps..."
 start_nonscripted_apps
 

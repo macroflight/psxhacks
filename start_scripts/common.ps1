@@ -126,7 +126,6 @@ $FrankenrouterSlaveWeb      = "http://localhost:8747"
 # sim, and my master sim is on port 10748
 #
 # $ExampleOptions = @("--foo", "--bar=123")
-$FrankenfreezeOptions  = @()
 $FrankenweatherOptions = @()
 $FrankentankerOptions  = @()
 $FrankenusbOptions  = @()
@@ -144,7 +143,6 @@ $FrankenmsfsbridgeOptions = @()
 # Example: $FrankenusbRepo = "psxhacks-frankenusb-devel"
 #   -> runs C:\fs\psxhacks-frankenusb-devel\frankenusb.py
 $FrankencduproxyRepo    = $null
-$FrankenfreezeRepo      = $null
 $FrankenweatherRepo     = $null
 $FrankenidentRepo       = $null
 $FrankenidentMasterRepo = $null
@@ -163,7 +161,6 @@ $FrankenmsfsbridgeRepo  = $null
 # Addons that run in the master sim (if enabled)
 #
 
-$StartFrankenfreeze  = $false
 $StartFrankenweather     = $false
 $StartFrankenmsfsbridge  = $false
 $StartFrankentanker  = $false
@@ -226,7 +223,6 @@ $SimAddonNames = [ordered]@{
     "PSX.NET.EFB"          = "PSX.NET EFB"
     "ACARS Print App"      = "ACARS Print App"
     "frankenusb"           = "FrankenUSB"
-    "frankenfreeze"        = "FrankenFreeze"
     "frankenweather"       = "FrankenWeather"
     "frankentanker"        = "FrankenTanker"
     "frankenwind"          = "FrankenWind"

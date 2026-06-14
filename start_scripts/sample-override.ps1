@@ -83,7 +83,6 @@ $StartPsxNetMsfsRouter   = $false   # PSX.NET MSFS router (default: true)
 $StartCpdlc              = $false   # HAFAP CPDLC client
 $StartFrankencduproxy    = $false   # FrankenCDU proxy (CS CDU Bridge <-> PSX)
 $StartCsCdu              = $false   # Cockpit Simulator CDU hardware
-$StartFrankenfreeze      = $false   # FrankenFreeze (pause/freeze helper)
 $StartFrankentanker      = $false   # FrankenTanker (in-flight refuelling)
 $StartFrankenturb        = $false   # FrankenTurb (terrain/wind turbulence)
 $StartFrankenwind        = $false   # FrankenWind (wind injection)
@@ -116,7 +115,6 @@ $StartSrslPsxSlave       = $false   # SRSL-PSX SmartRunway/SmartLanding (slave)
 #   -> runs C:\fs\psxhacks-frankenusb-devel\frankenusb.py
 # ---------------------------------------------------------------------------
 #$FrankencduproxyRepo    = $null
-#$FrankenfreezeRepo      = $null
 #$FrankenidentRepo       = $null
 #$FrankenidentMasterRepo = $null
 #$FrankentankerRepo      = $null
@@ -133,7 +131,6 @@ $StartSrslPsxSlave       = $false   # SRSL-PSX SmartRunway/SmartLanding (slave)
 # ---------------------------------------------------------------------------
 #$FrankenrouterMasterOptions = @("--config-file=frankensim-core.toml")
 #$FrankenrouterSlaveOptions  = @("--config-file=frankensim-client.toml")
-#$FrankenfreezeOptions       = @()
 #$FrankentankerOptions       = @()
 #$FrankenusbOptions          = @()
 #$FrankenwindOptions         = @()

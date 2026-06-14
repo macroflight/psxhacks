@@ -15,7 +15,6 @@ KillProcess "vPilot"
 KillProcess "GeoVR.PSX.Client.Wpf"
 KillProcess "CockpitSimulator"
 
-KillPythonScript "frankenfreeze.py"
 KillPythonScript "frankenrouter_ident.py"
 KillPythonScript "frankencduproxy.py"
 KillPythonScript "frankenmsfsbridge.py"
