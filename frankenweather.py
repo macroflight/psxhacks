@@ -292,6 +292,12 @@ _METAR_TEMP_RE = re.compile(r'^(M?\d{1,2})/(M?\d{1,2})$')
 _METAR_QNH_RE = re.compile(r'^Q(\d{4})$')
 _METAR_ALT_RE = re.compile(r'^A(\d{4})$')
 
+
+def _update_metar_qnh(metar: str, qnh_hpa: float) -> str:
+    """Replace the Q-format QNH token in a METAR string with a new value."""
+    return re.sub(r'\bQ\d{4}\b', f"Q{int(round(qnh_hpa)):04d}", metar)
+
+
 _SIGMET_COORD_RE = re.compile(r'([NS])(\d{2})(\d{2})\s+([EW])(\d{3})(\d{2})')
 _SIGMET_ALT_RE = re.compile(
     r'(?:TOP\s+FL(\d{3}))'
@@ -635,6 +641,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
         # Our current desired zone values (zone_num → string)
         self.zone_wx: dict = {}
         self.zone_mode: dict = {}
+        self.zone_is_metar: dict = {}
         self.last_write_time = 0.0
 
         # Fixed zone positions: zone_num (1-7) → (lat, lon, icao)
@@ -833,6 +840,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 self.logger.debug("MSFS bridge data stale (%.0fs), skipping sync", bridge_age)
                 return
         zone_key = "WxBasic" if self.focused_zone == 0 else f"Wx{self.focused_zone}"
+        metar_zone_num = max(self.focused_zone, 1)
         wx = self.psx.get(zone_key) if self.psx else None
         if not wx:
             return
@@ -841,6 +849,10 @@ class Script:  # pylint: disable=too-many-instance-attributes
             return
 
         changed = False
+
+        if need_qnh and self.zone_is_metar.get(metar_zone_num, False):
+            self.logger.debug("QNH sync skipped [%s]: zone uses real METAR", zone_key)
+            need_qnh = False
 
         if need_qnh and self.msfs_qnh_hpa is not None:
             psx_qnh_hpa = int(data[23]) / 2.953
@@ -852,6 +864,11 @@ class Script:  # pylint: disable=too-many-instance-attributes
                         "QNH sync [%s]: %.1f → %.1f hPa",
                         zone_key, psx_qnh_hpa, self.msfs_qnh_hpa)
                     changed = True
+                    old_metar = self.psx.get(f"Metar{metar_zone_num}")
+                    if old_metar:
+                        new_metar = _update_metar_qnh(old_metar, self.msfs_qnh_hpa)
+                        if new_metar != old_metar:
+                            self.psx_send_and_set(f"Metar{metar_zone_num}", new_metar)
                 else:
                     self.logger.warning(
                         "*** QNH mismatch [%s]: MSFS %.1f hPa  PSX %.1f hPa  Δ%.1f ***",
@@ -1336,6 +1353,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
             for i, wxmode in enumerate(new_modes):
                 zone_num = i + 1
                 self.zone_mode[zone_num] = wxmode
+                self.zone_is_metar[zone_num] = raw_metars[i] is not None
                 src = "VATSIM" if raw_metars[i] else "OM"
                 self.psx_send_and_set(f"WxMode{zone_num}", wxmode)
                 self.logger.info("Zone %d [%s]: %s @ %.3f/%.3f%s",
