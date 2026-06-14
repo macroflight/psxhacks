@@ -6,6 +6,6 @@ KillPythonScript "frankenturb.py"
 $repo = Resolve-AddonRepo $FrankenturbRepo
 $env:PYTHONPATH = $repo
 
-& $PsxhacksPython "$repo\frankenturb\frankenturb.py" @FrankenturbOptions
+& $PsxhacksPython "$repo\frankenturb.py" @FrankenturbOptions
 
 # Read-Host -Prompt "Press Enter to exit"
