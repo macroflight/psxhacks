@@ -748,11 +748,17 @@ class Script:  # pylint: disable=too-many-instance-attributes
     def handle_sigmet_change(self, _key: str, value: str) -> None:
         """Re-parse TS SIGMETs when PSX downloads updated SIGMET data."""
         self.ts_sigmets = _parse_ts_sigmets(value)
-        self.logger.info("SIGMETs: %d active TS areas", len(self.ts_sigmets))
+        self.logger.info("SIGMETs: %d active TS areas (raw %d bytes)",
+                         len(self.ts_sigmets), len(value))
 
     def _sigmet_cb_override(self, wx_str: str, pos: tuple,
                             om: dict, zone_label: str) -> str:
-        """Restore CAPE-suppressed CBs if the zone lies inside a TS SIGMET polygon."""
+        """Restore CAPE-suppressed CBs if the zone lies inside a TS SIGMET polygon.
+
+        TS SIGMETs are observational — controllers report actual thunderstorms.
+        Trust the SIGMET even when CAPE is zero; minimum 4 oktas when CAPE
+        doesn't contribute more.
+        """
         if not self.ts_sigmets:
             return wx_str
         fields = wx_str.split(';')
@@ -765,17 +771,15 @@ class Script:  # pylint: disable=too-many-instance-attributes
             hi = datetime.now(timezone.utc).hour
             cape = float((hourly.get("cape") or [0])[hi])
             cin = float((hourly.get("convective_inhibition") or [0])[hi])
-            cape_oktas = _cape_to_cb_oktas(cape, cin)
-            if cape_oktas == 0:
-                break  # CAPE doesn't support CBs — SIGMET alone is not enough
             h_temp = float((hourly.get("temperature_2m") or [15.0])[hi])
             h_dp = float((hourly.get("dewpoint_2m") or [10.0])[hi])
+            cb_oktas = max(_cape_to_cb_oktas(cape, cin), 4)
             cb_tops = max(_cb_tops_ft(cape), sig['top_ft'])
-            fields[9] = str(cape_oktas)
+            fields[9] = str(cb_oktas)
             fields[10] = str(cb_tops)
             fields[11] = str(_cb_base_ft(h_temp, h_dp))
             self.logger.info("%s: CB suppression lifted by TS SIGMET (%d oktas top=%dft)",
-                             zone_label, cape_oktas, cb_tops)
+                             zone_label, cb_oktas, cb_tops)
             return ';'.join(fields)
         return wx_str
 
