@@ -920,7 +920,9 @@ class Script:  # pylint: disable=too-many-instance-attributes
         if changed:
             self.cloud_sync_last_alt_ft = self.ac_alt_ft
             self.last_write_time = time.time()
-            self.psx_send_and_set(zone_key, ";".join(data))
+            new_wx = ";".join(data)
+            self.psx_send_and_set(zone_key, new_wx)
+            self.zone_wx[self.focused_zone] = new_wx
 
     # ------------------------------------------------------------------
     # Zone geometry
