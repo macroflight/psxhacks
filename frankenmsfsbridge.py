@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import sys
+import time
 from typing import Optional
 
 import psx
@@ -15,6 +16,7 @@ except ImportError:
 
 _MY_ADDON = "FRANKENMSFSBRIDGE"
 _SIMVARS = ("AMBIENT_IN_CLOUD", "SEA_LEVEL_PRESSURE")
+_HEARTBEAT_S = 60.0
 
 
 class Bridge:  # pylint: disable=too-few-public-methods
@@ -25,6 +27,8 @@ class Bridge:  # pylint: disable=too-few-public-methods
         self.args = args
         self._logger = logging.getLogger(_MY_ADDON)
         self._poll_task: Optional[asyncio.Task] = None
+        self._last_sent: dict = {}
+        self._last_sent_at: float = 0.0
         self._psx = psx.Client()
         self._psx.logger = lambda msg: self._logger.debug("PSX: %s", msg)
         self._psx.onConnect = self._on_psx_connect
@@ -32,6 +36,7 @@ class Bridge:  # pylint: disable=too-few-public-methods
 
     def _on_psx_connect(self) -> None:
         """Start SimConnect polling when PSX connects."""
+        self._last_sent_at = 0.0  # force immediate send on first poll
         if self._poll_task and not self._poll_task.done():
             self._poll_task.cancel()
         self._poll_task = asyncio.create_task(self._sc_coro())
@@ -53,9 +58,15 @@ class Bridge:  # pylint: disable=too-few-public-methods
             raw = aq.get("SEA_LEVEL_PRESSURE")
             if raw is not None:
                 data["qnh_hpa"] = round(float(raw), 2)
-            if data:
+            if not data:
+                continue
+            now = time.monotonic()
+            changed = data != self._last_sent
+            if changed or now - self._last_sent_at >= _HEARTBEAT_S:
                 self._psx.send("addon", f"{_MY_ADDON}:{json.dumps(data)}")
-                self._logger.debug("Sent: %s", data)
+                self._logger.debug("Sent (%s): %s", "changed" if changed else "heartbeat", data)
+                self._last_sent = data
+                self._last_sent_at = now
 
     async def _sc_coro(self) -> None:
         """Connect to MSFS via SimConnect and run the poll loop."""
