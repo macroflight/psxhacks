@@ -2400,6 +2400,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         elif code == RulesCode.ADDON_FORWARDED:
             self.logger.info("Non-frankenrouter addon message from %s forwarded: %s",
                              sender_hr, line)
+        elif code == RulesCode.ADDON_FORWARDED_KNOWN:
+            self.logger.debug("Known addon message from %s forwarded: %s",
+                              sender_hr, line)
         elif code == RulesCode.AGAIN:
             self.logger.info("Keyword again from %s forwarded: %s", sender_hr, line)
         elif code == RulesCode.BANG:

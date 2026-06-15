@@ -41,6 +41,10 @@ TRAFFIC_KEYWORDS = frozenset({'Qs450', 'Qs451'})
 # Qh411="SwitchesAudioC"; Qh412="SwitchesAudioR"
 PTT_KEYWORDS = frozenset({'Qh82', 'Qh93', 'Qh410', 'Qh411', 'Qh412'})
 
+# Addon names that are expected to produce regular addon= traffic; their
+# forwarded messages are logged at debug rather than info.
+_KNOWN_ADDONS = frozenset(('FRANKENCDUPROXY', 'FRANKENMSFSBRIDGE'))
+
 
 class RulesAction(enum.Enum):
     """The action the router needs to take for a message.
@@ -125,6 +129,7 @@ class RulesCode(enum.Enum):
     NOWRITE = enum.auto()
     DEMAND = enum.auto()
     ADDON_FORWARDED = enum.auto()
+    ADDON_FORWARDED_KNOWN = enum.auto()
     AGAIN = enum.auto()
     START = enum.auto()
     LOAD1 = enum.auto()
@@ -662,7 +667,9 @@ class Rules():  # pylint: disable=too-many-public-methods
         # clients that are allowed to write.
         if not self.allow_write():
             return self.myreturn(RulesAction.DROP, RulesCode.NOWRITE)
-        return self.myreturn(RulesAction.NORMAL, RulesCode.ADDON_FORWARDED)
+        code = (RulesCode.ADDON_FORWARDED_KNOWN if addon in _KNOWN_ADDONS
+                else RulesCode.ADDON_FORWARDED)
+        return self.myreturn(RulesAction.NORMAL, code)
 
     def handle_name(self, rest):
         """Handle a name= message.
