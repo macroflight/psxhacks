@@ -229,6 +229,7 @@ $SimAddonNames = [ordered]@{
     "frankenident_master"  = "FrankenIDENT Master"
     "frankenutil"          = "FrankenUtil"
     "frankencduproxy"      = "FrankenCDU Proxy"
+    "frankenmsfsbridge"    = "FrankenMSFSBridge"
     "frankenrouter slave"    = "FrankenRouter (slave)"
     "frankenrouter master"   = "FrankenRouter (master)"
     "PSX.NET.WeatherRadar"   = "PSX.NET WeatherRadar"

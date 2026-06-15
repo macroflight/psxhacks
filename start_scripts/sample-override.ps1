@@ -102,6 +102,7 @@ $StartSimObjectRouter    = $false   # SimObjectRouter
 $StartEfb                = $false   # PSX.NET EFB
 $StartAcarsPrint         = $false   # ACARS Print App
 $StartSrslPsxSlave       = $false   # SRSL-PSX SmartRunway/SmartLanding (slave)
+$StartFrankenmsfsbridge  = $false   # FrankenMSFSBridge (MSFS → PSX data bridge)
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +115,7 @@ $StartSrslPsxSlave       = $false   # SRSL-PSX SmartRunway/SmartLanding (slave)
 #   -> runs C:\fs\psxhacks-frankenusb-devel\frankenusb.py
 # ---------------------------------------------------------------------------
 #$FrankencduproxyRepo    = $null
+#$FrankenmsfsbridgeRepo  = $null
 #$FrankenidentRepo       = $null
 #$FrankenidentMasterRepo = $null
 #$FrankentankerRepo      = $null
@@ -135,6 +137,7 @@ $StartSrslPsxSlave       = $false   # SRSL-PSX SmartRunway/SmartLanding (slave)
 #$FrankenidentOptions        = @()
 #$FrankenidentMasterOptions  = @("--psx-port=10748")
 #$FrankencduproxyOptions     = @()
+#$FrankenmsfsbridgeOptions   = @()
 #$FrakenrouterSlavePort      = 10747
 #$FrankenrouterMasterPort    = 10748
 #$CpdlcOptions = "--stealth","--no-no-comm","--min-interval=15","--max-interval=30"
