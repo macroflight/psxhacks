@@ -39,6 +39,11 @@ class Bridge:  # pylint: disable=too-few-public-methods
         self._psx.logger = lambda msg: self._logger.debug("PSX: %s", msg)
         self._psx.onConnect = self._on_psx_connect
         self._psx.onDisconnect = self._on_psx_disconnect
+        self._psx.subscribe("version", self._on_psx_version)
+
+    def _on_psx_version(self, _key: str, _value: str) -> None:
+        """Send addon identity when PSX version is received."""
+        self._psx.send("name", "MSFSBRDG:FrankenMSFSBridge")
 
     def _on_psx_connect(self) -> None:
         """Start SimConnect polling when PSX connects."""

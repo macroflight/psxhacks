@@ -25,7 +25,7 @@ from frankenturb.gairmet import GairmetFetcher, compute_gairmet_turbulence
 
 
 __MYNAME__ = 'frankenturb'
-__MY_CLIENT_ID__ = 'FRANKENTURB'
+__MY_CLIENT_ID__ = 'TURB'
 __MY_DISPLAY_NAME__ = 'FrankenTurb'
 __MY_DESCRIPTION__ = 'Wind-driven bumps'
 

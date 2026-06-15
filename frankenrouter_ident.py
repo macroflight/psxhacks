@@ -182,13 +182,15 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 'writer': writer,
             }
             self.psx_connection_is_new = True
-            self.psx_connection['writer'].write(
-                "name=IDENT:FRANKEN.PY client identifier".encode() +
-                PSX_PROTOCOL_SEPARATOR)
+            name_sent = False
             while True:
                 # Read and discard any arriving traffic
                 try:
                     data = await reader.readline()
+                    if not name_sent and data.startswith(b'version='):
+                        writer.write("name=IDENT:FrankenIdent".encode() +
+                                     PSX_PROTOCOL_SEPARATOR)
+                        name_sent = True
                     if not data:
                         self.logger.info(
                             "Router connection closed, sleeping %.1f s before reconnect",
