@@ -101,6 +101,7 @@ $StartPsxNetGroundCrew   = $false   # PSX.NET GroundCrew
 $StartSimObjectRouter    = $false   # SimObjectRouter
 $StartEfb                = $false   # PSX.NET EFB
 $StartAcarsPrint         = $false   # ACARS Print App
+$StartFrankenprint       = $false   # FrankenPrinter (replacement for ACARS Print App)
 $StartSrslPsxSlave       = $false   # SRSL-PSX SmartRunway/SmartLanding (slave)
 $StartFrankenmsfsbridge  = $false   # FrankenMSFSBridge (MSFS → PSX data bridge)
 
@@ -116,6 +117,7 @@ $StartFrankenmsfsbridge  = $false   # FrankenMSFSBridge (MSFS → PSX data bridg
 # ---------------------------------------------------------------------------
 #$FrankencduproxyRepo    = $null
 #$FrankenmsfsbridgeRepo  = $null
+#$FrankenprintRepo       = $null
 #$FrankenidentRepo       = $null
 #$FrankenidentMasterRepo = $null
 #$FrankentankerRepo      = $null
@@ -138,6 +140,7 @@ $StartFrankenmsfsbridge  = $false   # FrankenMSFSBridge (MSFS → PSX data bridg
 #$FrankenidentMasterOptions  = @("--psx-port=10748")
 #$FrankencduproxyOptions     = @()
 #$FrankenmsfsbridgeOptions   = @()
+#$FrankenprintOptions        = @()
 #$FrakenrouterSlavePort      = 10747
 #$FrankenrouterMasterPort    = 10748
 #$CpdlcOptions = "--stealth","--no-no-comm","--min-interval=15","--max-interval=30"

@@ -61,10 +61,16 @@ if ($StartSrslPsxSlave ) {
     Invoke-WindowPosition "SRSL-PSX slave"
 }
 
-if ($StartAcarsPrint ) {
+if ($StartAcarsPrint -and -not $StartFrankenprint ) {
     Write-Output "Starting ACARS Print..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_acarsprint.ps1"
     Invoke-WindowPosition "ACARS Print App"
+}
+
+if ($StartFrankenprint ) {
+    Write-Output "Starting FrankenPrinter..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenprint.ps1"
+    Invoke-WindowPosition "frankenprint"
 }
 
 if ($StartEfb ) {

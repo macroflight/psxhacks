@@ -136,6 +136,7 @@ $FrankenidentMasterOptions = @("--psx-port=10748")
 $FrankenutilOptions = @()
 $FrankencduproxyOptions = @()
 $FrankenmsfsbridgeOptions = @()
+$FrankenprintOptions = @()
 
 # Per-addon alternative psxhacks repo directory name.
 # Set to the name of a sibling directory to run that addon from a different
@@ -153,6 +154,7 @@ $FrankenutilRepo        = $null
 $FrankenwindRepo        = $null
 $CpdlcRepo              = $null
 $FrankenmsfsbridgeRepo  = $null
+$FrankenprintRepo       = $null
 
 # Which of the addons that we can manage you actually want started in
 # your sim. You can override these in the override file.
@@ -174,6 +176,7 @@ $StartPsxSounds     = $false
 $StartVpilot        = $false
 $StartPsxNetVatsim  = $false
 $StartAcarsPrint    = $false
+$StartFrankenprint  = $false
 $StartEfb           = $false
 $StartSimObjectRouter    = $false
 
@@ -230,6 +233,7 @@ $SimAddonNames = [ordered]@{
     "frankenutil"          = "FrankenUtil"
     "frankencduproxy"      = "FrankenCDU Proxy"
     "frankenmsfsbridge"    = "FrankenMSFSBridge"
+    "frankenprint"         = "FrankenPrinter"
     "frankenrouter slave"    = "FrankenRouter (slave)"
     "frankenrouter master"   = "FrankenRouter (master)"
     "PSX.NET.WeatherRadar"   = "PSX.NET WeatherRadar"
