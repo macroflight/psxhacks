@@ -178,6 +178,17 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self.logger.info("Towing direction: %s -> %s", current, new_towing)
         self.psx_send_and_set('Towing', new_towing)
 
+    def do_towing_radius_adjust(self, delta_ft):
+        """Adjust the tow turn radius by delta_ft feet, clamped to a minimum of 0."""
+        current = self.psx.get('TowTurnRadius')
+        try:
+            radius = int(current) if current is not None else 0
+        except ValueError:
+            radius = 0
+        new_radius = max(0, radius + delta_ft)
+        self.logger.info("Towing radius: %s -> %s", current, new_radius)
+        self.psx_send_and_set('TowTurnRadius', str(new_radius))
+
     async def repaint_all_mcdus(self):
         """Trigger a repaint of all MCDUs, cancelling any pending paint tasks first."""
         self.logger.debug("Refreshing all active MCDUs, requested by: %s", self.repaint_req_by)
@@ -277,6 +288,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
                             self.repaint_req_by.add("towing-radius-set")
                         except ValueError:
                             pass
+                elif value == "4L":
+                    self.do_towing_radius_adjust(-10)
+                    self.repaint_req_by.add("towing-radius-dec")
+                elif value == "4R":
+                    self.do_towing_radius_adjust(10)
+                    self.repaint_req_by.add("towing-radius-inc")
             if self.repaint_req_by:
                 asyncio.create_task(self.repaint_all_mcdus())
         else:
@@ -317,7 +334,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         mcdu.paint(8, 0, L, C, "<LEFT 1         RIGHT 1>")
         mcdu.paint(12, 0, L, C, "<BACK                   ")
 
-    async def paintTowingPage(self, mcdu):  # pylint: disable=too-many-branches
+    async def paintTowingPage(self, mcdu):  # pylint: disable=too-many-branches,too-many-statements
         """Paint the TOWING menu page."""
         await asyncio.sleep(0.5)
         A = "amber"
@@ -366,6 +383,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         mcdu.paint(4, 0, L, C, "<TOGGLE MODE            ")
         mcdu.paint(5, 0, S, C, " TARGET HDG      RADIUS ")
         mcdu.paint(6, 0, L, C, f" {hdg_str}                {radius_str:>3}>")
+        mcdu.paint(8, 0, L, C, "<RAD -10        RAD +10>")
         mcdu.paint(12, 0, L, C, "<BACK                   ")
         if self.scratchpad_text:
             mcdu.paint(13, 0, "large", "magenta", self.scratchpad_text)
