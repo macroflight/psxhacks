@@ -72,21 +72,30 @@ function Get-WinRect([IntPtr]$hWnd) {
 
 function Select-Addon {
     $idx = 0
-    Clear-Host
-    Write-Host "=== Configure Window Positions ===" -ForegroundColor White
-    Write-Host ""
-    Write-Host "Select sim addon:" -ForegroundColor White
-    $startRow = [Console]::CursorTop
+    $total = $SimAddons.Length
+    $maxList = [Math]::Max(5, [Console]::WindowHeight - 6)
 
     $draw = {
-        [Console]::SetCursorPosition(0, $startRow)
-        for ($i = 0; $i -lt $SimAddons.Length; $i++) {
-            $label = $SimAddonNames[$SimAddons[$i]]
-            if ($i -eq $idx) {
+        $scrollOffset = 0
+        if ($idx -ge $maxList) { $scrollOffset = $idx - $maxList + 1 }
+        $displayCount = [Math]::Min($total, $maxList)
+
+        Clear-Host
+        Write-Host "=== Configure Window Positions ===" -ForegroundColor White
+        Write-Host ""
+        Write-Host "Select sim addon:" -ForegroundColor White
+        for ($i = 0; $i -lt $displayCount; $i++) {
+            $ai = $i + $scrollOffset
+            $label = $SimAddonNames[$SimAddons[$ai]]
+            if ($ai -eq $idx) {
                 Write-Host ("  > " + $label) -ForegroundColor Cyan
             } else {
                 Write-Host ("    " + $label) -ForegroundColor DarkGray
             }
+        }
+        $remaining = $total - $scrollOffset - $displayCount
+        if ($remaining -gt 0) {
+            Write-Host ("    ... and " + $remaining + " more") -ForegroundColor DarkGray
         }
         Write-Host ""
         Write-Host "Up/Down to navigate, Enter to select, Esc to quit" -ForegroundColor Yellow
@@ -98,8 +107,8 @@ function Select-Addon {
         while ($true) {
             $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
             switch ($key.VirtualKeyCode) {
-                38 { if ($idx -gt 0)                   { $idx--; & $draw } }
-                40 { if ($idx -lt $SimAddons.Length-1) { $idx++; & $draw } }
+                38 { if ($idx -gt 0)        { $idx--; & $draw } }
+                40 { if ($idx -lt $total-1) { $idx++; & $draw } }
                 13 { return $SimAddons[$idx] }
                 27 { return $null }
             }
