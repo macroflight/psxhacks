@@ -2412,14 +2412,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.info("Forcing parking brake release due to %s (%s)",
                              sender_hr, message)
             for line in ['Qs357=1000;1000', 'Qh397=0']:
-                for repeat in range(0, 1):
-                    self.logger.info("Forcing parking brake release %d due to %s (%s)",
-                                     repeat, sender_hr, message)
-                    await asyncio.gather(
-                        self.send_to_upstream(line),
-                        self.client_broadcast(line),
-                    )
-                    await asyncio.sleep(0.2)
+                await asyncio.gather(
+                    self.send_to_upstream(line),
+                    self.client_broadcast(line),
+                )
+                await asyncio.sleep(0.2)
+            self.cache.update('Qh397', 0)
 
         elif code == RulesCode.OBSERVER_MODE:
             self.logger.debug(
