@@ -158,6 +158,13 @@ directory = 'C:\fs\PSX\Routerlogs'
   slave sim routers, i.e giving you control. This can be handy if you
   don't use frankenusb for your controls but still wants to use the
   flight control lock.
+- `parking_brake_fix`: defaults to false. If set to true, the router
+  will automatically release the parking brake when the slave sim sends
+  near-maximum brake pressure (>99%) while the parking brake is set.
+  This works around badly calibrated brake pedals that prevent the
+  parking brake from releasing when pressed. Only enable this if you
+  actually experience the problem.
+  Only applies to slave sim routers.
 
 Example:
 

@@ -90,6 +90,9 @@ class _RouterConfigPsx:  # pylint: disable=missing-class-docstring,too-few-publi
         self.irs_align_fix = data.get('irs_align_fix', True)
         if not isinstance(self.irs_align_fix, bool):
             raise RouterConfigError("psx irs_align_fix must be true or false")
+        self.parking_brake_fix = data.get('parking_brake_fix', False)
+        if not isinstance(self.parking_brake_fix, bool):
+            raise RouterConfigError("psx parking_brake_fix must be true or false")
         self.filter_from_other_sim = data.get('filter_from_other_sim', [])
         if not isinstance(self.filter_from_other_sim, list):
             raise RouterConfigError("psx filter_from_other_sim must be a list")

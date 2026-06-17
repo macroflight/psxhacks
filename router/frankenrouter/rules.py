@@ -1033,13 +1033,13 @@ class Rules():  # pylint: disable=too-many-public-methods
                             )
                         )
 
-        # Testing a parking brake fix to make it less likely they get
-        # stuck on.
         # Qs357="Brakes"; Mode=ECON; Min=3; Max=9;
         # Qh397="ParkBrkLev"; Mode=ECON; Min=0; Max=1;
         if key == 'Qs357':
-            # Parking brake release fix
-            if not self.sender.upstream and self.router.get_router_type() == 'slave':
+            # Parking brake release fix (opt-in via psx.parking_brake_fix config)
+            if (self.router.config.psx.parking_brake_fix and
+                    not self.sender.upstream and
+                    self.router.get_router_type() == 'slave'):
                 if (self.router.cache.get_value('Qh397') == 1 and
                         self.router.cache.get_age('Qh397') > 5.0):
                     (left, right) = value.split(';', 1)
