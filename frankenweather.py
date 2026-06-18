@@ -13,6 +13,7 @@ import sys
 import time
 import traceback
 import urllib.request
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -703,6 +704,20 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self._wind_last_updated: float = 0.0
         self._corridor_txt: Optional[str] = None
 
+        # API state broadcast
+        self._instance_uuid: str = str(uuid.uuid4())
+        self.zone_reason: dict = {}               # zone_num → human-readable reason string
+        self._state_changed_event: asyncio.Event = asyncio.Event()
+
+        # Conflict detection — suspend PSX changes when a higher-UUID instance is present
+        self._conflict_uuid: Optional[str] = None
+        self._conflict_last_seen: float = 0.0
+
+        # Operational mode: "enabled" | "paused" | "disabled"
+        # paused  = stop updating PSX weather; keep WxAutoSet=0 (existing zones remain)
+        # disabled = stop updating; set WxAutoSet=1 (PSX resumes its own auto-weather)
+        self._fw_mode: str = "enabled"
+
     # ------------------------------------------------------------------
     # PSX helpers
     # ------------------------------------------------------------------
@@ -799,7 +814,10 @@ class Script:  # pylint: disable=too-many-instance-attributes
                          len(self.ts_sigmets), len(value))
 
     def _handle_addon(self, _key: str, value: str) -> None:
-        """Process FRANKENMSFSBRIDGE addon messages from the slave sim."""
+        """Process addon messages: FRANKENMSFSBRIDGE (slave sim) and FRANKENWEATHER (conflict)."""
+        if value.startswith("FRANKENWEATHER:"):
+            self._handle_fw_addon(value)
+            return
         prefix = "FRANKENMSFSBRIDGE:"
         if not value.startswith(prefix):
             return
@@ -833,6 +851,55 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self._apply_msfs_sync()
         if self.args.msfs_wind_sync:
             self._apply_wind_injection()
+
+    def _handle_fw_addon(self, value: str) -> None:
+        """Dispatch FRANKENWEATHER addon messages: COMMAND or STATE broadcast."""
+        rest = value[len("FRANKENWEATHER:"):]
+        if rest.startswith("COMMAND:"):
+            self._handle_fw_command(rest[len("COMMAND:"):])
+            return
+        if not rest.startswith("STATE:"):
+            return
+        # State broadcast — UUID conflict detection.
+        # UUID v4 strings (hex+hyphens) compare correctly as plain strings.
+        rest = rest[len("STATE:"):]
+        colon = rest.find(':')
+        if colon <= 0:
+            return
+        recv_uuid = rest[:colon]
+        if recv_uuid == self._instance_uuid:
+            return
+        if recv_uuid > self._instance_uuid:
+            if self._conflict_uuid != recv_uuid:
+                self.logger.error(
+                    "CONFLICT: another FRANKENWEATHER instance detected "
+                    "(UUID %s > ours %s) — suspending PSX weather changes",
+                    recv_uuid, self._instance_uuid)
+            self._conflict_uuid = recv_uuid
+            self._conflict_last_seen = time.monotonic()
+
+    def _handle_fw_command(self, json_str: str) -> None:
+        """Apply a FRANKENWEATHER:COMMAND message received via PSX addon."""
+        try:
+            cmd = json.loads(json_str)
+        except ValueError:
+            self.logger.warning("Malformed FRANKENWEATHER COMMAND: %s", json_str[:80])
+            return
+        new_mode = cmd.get("mode")
+        if new_mode not in ("enabled", "paused", "disabled"):
+            self.logger.warning("FRANKENWEATHER COMMAND: unknown mode %r", new_mode)
+            return
+        old_mode = self._fw_mode
+        if new_mode == old_mode:
+            return
+        self._fw_mode = new_mode
+        self.logger.info("FRANKENWEATHER mode: %s → %s (via COMMAND)", old_mode, new_mode)
+        if self.psx_connected:
+            if new_mode == "disabled":
+                self.psx_send_and_set("WxAutoSet", "1")
+            elif old_mode == "disabled":
+                self.psx_send_and_set("WxAutoSet", "0")
+        self._state_changed_event.set()
 
     def _handle_corridor(self, _key: str, value: str) -> None:
         """Cache the current PSX wind corridor text for wind injection."""
@@ -1436,6 +1503,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self.logger.debug("fake-cb applied: %d oktas, base %dft, top %dft",
                               oktas, base_ft, top_ft)
 
+        arpt_set = {self.fmc_dep_icao, self.fmc_dst_icao} - {None}
         cb_suffixes = []
         for i in range(7):
             parts = new_wxs[i].split(';')
@@ -1456,6 +1524,18 @@ class Script:  # pylint: disable=too-many-instance-attributes
             else:
                 cb_part = ""
             cb_suffixes.append(f"  CAPE={cape:.0f} J/kg{cb_part}")
+
+            # Build zone reason for API broadcast
+            src = "VATSIM" if raw_metars[i] else "OM"
+            stored_icao = self.zone_positions.get(i + 1, (None, None, ""))[2]
+            reason = f"{src} {snap_icaos[i]}"
+            if stored_icao in arpt_set:
+                reason += " (dep/dst arpt)"
+            if cb_oktas > 0:
+                reason += f" CB {cb_oktas}ok {parts[11]}-{parts[10]}ft"
+            elif _cape_to_cb_oktas(cape, cin) > 0 and showers_mm < 0.5:
+                reason += f" CAPE={cape:.0f}J/kg suppressed"
+            self.zone_reason[i + 1] = reason[:100]
 
         if self.args.disable_psx_weather_updates:
             self.logger.info("PSX updates disabled — logging zones only")
@@ -1494,12 +1574,102 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 if metar:
                     self.psx_send_and_set(f"Metar{i + 1}", metar)
 
+        self._state_changed_event.set()
         self._apply_msfs_sync()
         self.logger.info("Zone update complete")
 
     # ------------------------------------------------------------------
+    # API state broadcast
+    # ------------------------------------------------------------------
+
+    def _build_state_message(self) -> str:
+        """Build the FRANKENWEATHER:<uuid>:<json> addon message payload."""
+        cfg = self.args
+        config = {
+            "cruise_alt": cfg.cruise_alt,
+            "cruise_behind_dist": cfg.cruise_behind_dist,
+            "low_alt_dist": cfg.low_alt_dist,
+            "new_zone_infront_range": list(cfg.new_zone_infront_range),
+            "new_zone_leftright_range": list(cfg.new_zone_leftright_range),
+            "new_zone_notnear": cfg.new_zone_notnear,
+            "cape_squeeze": list(cfg.cape_squeeze) if cfg.cape_squeeze else None,
+            "arpt_zone_dist": cfg.arpt_zone_dist,
+            "fake_cb": list(cfg.fake_cb) if cfg.fake_cb else None,
+            "disable_psx_weather_updates": cfg.disable_psx_weather_updates,
+            "msfs_in_cloud_sync": cfg.msfs_in_cloud_sync,
+            "msfs_qnh_check": cfg.msfs_qnh_check,
+            "msfs_qnh_check_maxdiff": cfg.msfs_qnh_check_maxdiff,
+            "msfs_wind_sync": cfg.msfs_wind_sync,
+        }
+        zones = []
+        for zone_num in range(1, 8):
+            if zone_num not in self.zone_positions:
+                continue
+            lat, lon, icao = self.zone_positions[zone_num]
+            zones.append({
+                "zone": zone_num,
+                "icao": icao,
+                "lat": round(lat, 4),
+                "lon": round(lon, 4),
+                "source": "VATSIM" if self.zone_is_metar.get(zone_num) else "OM",
+                "reason": self.zone_reason.get(zone_num, ""),
+            })
+        state = {
+            "fw_mode": self._fw_mode,
+            "mode": "MANEUVERING" if self._maneuvering else "CRUISE",
+            "ac_lat": round(self.ac_lat, 4) if self.ac_lat is not None else None,
+            "ac_lon": round(self.ac_lon, 4) if self.ac_lon is not None else None,
+            "ac_hdg": round(self.ac_hdg, 1) if self.ac_hdg is not None else None,
+            "ac_alt_ft": round(self.ac_alt_ft) if self.ac_alt_ft is not None else None,
+            "zones": zones,
+            "config": config,
+        }
+        payload = json.dumps(state, separators=(',', ':'))
+        return f"FRANKENWEATHER:STATE:{self._instance_uuid}:{payload}"
+
+    async def state_broadcast_coro(self) -> None:
+        """Broadcast current state as a PSX addon message on change or every 60 seconds."""
+        myname = inspect.currentframe().f_code.co_name
+        try:
+            self.logger.debug("Starting %s", myname)
+            while True:
+                try:
+                    await asyncio.wait_for(self._state_changed_event.wait(), timeout=60.0)
+                except asyncio.TimeoutError:
+                    pass
+                self._state_changed_event.clear()
+                if not self.psx_connected:
+                    continue
+                msg = self._build_state_message()
+                self.psx.send("addon", msg)
+                self.logger.debug("State broadcast sent (%d bytes)", len(msg))
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
+            self.logger.critical(traceback.format_exc())
+
+    # ------------------------------------------------------------------
     # Coroutines
     # ------------------------------------------------------------------
+
+    def _should_skip_wx_update(self) -> bool:
+        """Return True (and log) when the zone weather update should be suppressed."""
+        if self._fw_mode in ("paused", "disabled"):
+            self.logger.debug("Weather update skipped: fw_mode=%s", self._fw_mode)
+            return True
+        if self._conflict_uuid is None:
+            return False
+        age = time.monotonic() - self._conflict_last_seen
+        if age < 300.0:
+            self.logger.error(
+                "CONFLICT: FRANKENWEATHER %s is primary (ours: %s) — "
+                "PSX weather changes suspended (last seen %.0fs ago)",
+                self._conflict_uuid, self._instance_uuid, age)
+            return True
+        self.logger.info(
+            "Conflict with FRANKENWEATHER %s expired (%.0fs) — resuming",
+            self._conflict_uuid, age)
+        self._conflict_uuid = None
+        return False
 
     async def weather_update_coro(self) -> None:
         """Periodically update PSX weather zones from Open-Meteo."""
@@ -1537,6 +1707,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
                     elapsed = time.time() - last_update_time
                     if not any_relocated and elapsed < _REFRESH_MAX_S:
                         continue
+                    if self._should_skip_wx_update():
+                        continue
                     await self._update_zones(session)
                     last_update_time = time.time()
         except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -1553,6 +1725,9 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 self.logger.info("PSX CONNECTED")
                 self.psx_connected = True
                 self.psx.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
+                self._state_changed_event.set()
+                if self._fw_mode == "disabled":
+                    self.psx_send_and_set("WxAutoSet", "1")
 
             def disconnected():
                 self.logger.info("PSX DISCONNECTED")
@@ -1616,6 +1791,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 coros = [
                     ("PSXConnection", self.get_psx_connection_coro),
                     ("WeatherUpdate", self.weather_update_coro),
+                    ("StateBroadcast", self.state_broadcast_coro),
                 ]
                 for name, coro_fn in coros:
                     if name not in running:

@@ -2,6 +2,7 @@
 # pylint: disable=fixme,invalid-name,too-many-lines
 import asyncio
 import datetime
+import json
 import math
 import pathlib
 import re
@@ -94,6 +95,24 @@ hr {{ margin: 1em 0; border: none; border-top: 1px solid #2a2f45; }}
 .toggle-switch input:disabled + .toggle-track {{ opacity: 0.5; cursor: not-allowed; }}
 </style>'''
 
+_LEAFLET_HEAD = (
+    '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>\n'
+    '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>\n'
+    '<style>\n'
+    '#map { height: 580px; border-radius: 8px; border: 1px solid #2a2f45; }\n'
+    '.zone-label { background: rgba(28,32,51,0.92) !important;\n'
+    '  border: 1px solid #2a2f45 !important; color: #f1f5f9 !important;\n'
+    '  border-radius: 4px !important; font-size: 11px;\n'
+    '  padding: 2px 6px !important; box-shadow: none !important; }\n'
+    '.zone-label::before { display: none !important; }\n'
+    '.dark-popup .leaflet-popup-content-wrapper { background: #1c2033;\n'
+    '  border: 1px solid #2a2f45; color: #f1f5f9; border-radius: 6px; }\n'
+    '.dark-popup .leaflet-popup-tip { background: #1c2033; }\n'
+    '.dark-popup .leaflet-popup-close-button { color: #94a3b8; }\n'
+    '.zone-label-focused { border-left: 3px solid #3b82f6 !important; }\n'
+    '</style>\n'
+)
+
 _INDEX_PAGE = (
     '<!DOCTYPE html>\n<html>\n<head>\n'
     '<meta name="color-scheme" content="{rest_api_color_scheme}" />\n' +
@@ -128,6 +147,7 @@ _INDEX_PAGE = (
     '</div>\n'
     '{change_upstream_button}'
     '<a href="/flightinfo" class="btn btn-gray">Flight Info</a>\n'
+    '<a href="/weather" class="btn btn-gray">Weather</a>\n'
     '{sessionpwd_button}'
     '</div>\n'
     '<div>\n'
@@ -555,6 +575,421 @@ _FLIGHTINFO_PAGE = (
     '{readonly_notice}'
     '</body>\n</html>\n'
 )
+
+
+def _parse_wx_brief(wx_str):  # pylint: disable=too-many-locals
+    """Return a dict of human-readable weather summary fields from a PSX Wx string."""
+    if not wx_str:
+        return {}
+    parts = wx_str.split(';')
+    if len(parts) < 24:
+        return {}
+    try:
+        wind_enc = parts[18]                          # "VVVDDDss" or "000DDDss"
+        wind_dir = int(wind_enc[3:6]) if len(wind_enc) >= 8 else 0
+        wind_spd = int(wind_enc[6:8]) if len(wind_enc) >= 8 else 0
+        wind_gust = int(parts[19])
+        gust_str = f' G{wind_gust}' if wind_gust > wind_spd + 5 else ''
+        lo_oktas = int(parts[3])
+        lo_base = int(parts[5])
+        hi_oktas = int(parts[0])
+        hi_base = int(parts[2])
+        cb_oktas = int(parts[9])
+        cb_base = int(parts[11])
+        cb_top = int(parts[10])
+        vis_m = int(parts[20])
+        temp_c = int(parts[22])
+        qnh_raw = int(parts[23])
+        qnh_hpa = round(qnh_raw / 2.953)
+    except (ValueError, IndexError):
+        return {}
+    return {
+        'wind': f'{wind_dir:03d}°/{wind_spd}kt{gust_str}',
+        'lo_cloud': f'{lo_oktas} oktas base {lo_base} ft' if lo_oktas else 'None',
+        'hi_cloud': f'{hi_oktas} oktas base {hi_base} ft' if hi_oktas else 'None',
+        'cb': f'{cb_oktas} oktas {cb_base}–{cb_top} ft' if cb_oktas else 'None',
+        'cb_raw': {'oktas': cb_oktas, 'base': cb_base, 'top': cb_top} if cb_oktas else None,
+        'vis': f'{vis_m} m' if vis_m < 9999 else '≥10 km',
+        'temp': f'{temp_c}°C',
+        'qnh': f'{qnh_hpa} hPa',
+    }
+
+
+def _build_weather_map_page(router, color_scheme):  # pylint: disable=too-many-locals
+    """Render the /weather page with a Leaflet tile map centred on the aircraft."""
+    from frankenrouter import routercache  # pylint: disable=import-outside-toplevel
+
+    now = time.time()
+    state = router.frankenweather_state
+    received_at = router.frankenweather_received_at
+    age_s = now - received_at if received_at else float('inf')
+    stale = state is None or age_s > 300.0
+
+    def _page(body):
+        return (
+            '<!DOCTYPE html>\n<html>\n<head>\n'
+            f'<meta name="color-scheme" content="{color_scheme}" />\n' +
+            _COMMON_CSS.format() +
+            '\n<style>body { max-width: 80em; }</style>\n' +
+            _LEAFLET_HEAD +
+            '</head>\n<body>\n'
+            '<div class="page-title">'
+            '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
+            '<h1>Weather</h1>'
+            '<div style="margin-left:auto">'
+            '<a href="/weather" class="btn btn-gray btn-sm">Refresh</a>'
+            '</div>'
+            '</div>\n' + body + '</body>\n</html>\n'
+        )
+
+    if stale:
+        msg = 'No data received from frankenweather, check PSX Instructor station'
+        if state is not None:
+            age_min = int(age_s // 60)
+            msg = (f'No recent frankenweather data (last received {age_min} min ago), '
+                   'check PSX Instructor station')
+        return _page(f'<div class="card warn"><p style="margin:0">{msg}</p></div>\n'
+                     '<a href="/" class="btn btn-gray">Back</a>\n')
+
+    ac_lat = state.get('ac_lat') or 0.0
+    ac_lon = state.get('ac_lon') or 0.0
+    ac_hdg = state.get('ac_hdg') or 0.0
+    zones = state.get('zones', [])
+    fw_mode = state.get('fw_mode', 'enabled')
+    nav_mode = state.get('mode', '?')
+
+    def _cache_get(name):
+        key = router.variables.get_keyword_for_name(name) or name
+        try:
+            return router.cache.get_value(key)
+        except routercache.RouterCacheException:
+            return None
+
+    focused_zone = None
+    try:
+        fz_val = _cache_get('FocussedWxZone')
+        if fz_val is not None:
+            focused_zone = int(fz_val)
+    except (ValueError, TypeError):
+        pass
+
+    zone_data = []
+    for zone in zones:
+        zone_num = zone.get('zone')
+        source = zone.get('source', 'OM')
+        icao = zone.get('icao', '?')
+        wx_str = _cache_get(f'Wx{zone_num}') or ''
+        is_fake_icao = len(icao) == 4 and icao[0] == 'X' and icao[1:].isdigit()
+        metar = None
+        if not is_fake_icao:
+            metar = _cache_get(f'Metar{zone_num}') or None
+        wx = _parse_wx_brief(wx_str) or {}
+        if not wx.get('cb_raw'):
+            cb_m = re.search(r'CB (\d+)ok (\d+)-(\d+)ft', zone.get('reason', ''))
+            if cb_m:
+                wx['cb_raw'] = {
+                    'oktas': int(cb_m.group(1)),
+                    'base': int(cb_m.group(2)),
+                    'top': int(cb_m.group(3)),
+                }
+        zone_data.append({
+            'zone': zone_num,
+            'icao': icao,
+            'lat': zone.get('lat') or 0.0,
+            'lon': zone.get('lon') or 0.0,
+            'source': source,
+            'source_label': 'VATSIM' if source == 'VATSIM' else 'OpenMeteo',
+            'reason': zone.get('reason', ''),
+            'is_focused': focused_zone is not None and zone_num == focused_zone,
+            'wx': wx,
+            'metar': metar,
+        })
+
+    zones_js = json.dumps(zone_data)
+    script = (
+        '<script>\n'
+        f'var acLat={ac_lat},acLon={ac_lon},acHdg={ac_hdg:.0f};\n'
+        f'var zones={zones_js};\n'
+        "var map=L.map('map').setView([acLat,acLon],7);\n"
+        "L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{\n"
+        "  attribution:'&copy; <a href=\"https://www.openstreetmap.org/copyright\">"
+        "OpenStreetMap</a> &copy; <a href=\"https://carto.com/attributions\">CARTO</a>',\n"
+        "  subdomains:'abcd',maxZoom:19\n"
+        "}).addTo(map);\n"
+        "var acSvg='<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\"'"
+        "  +' viewBox=\"-12 -12 24 24\" style=\"transform:rotate('+acHdg+'deg)\">'"
+        "  +'<polygon points=\"0,-10 -6,7 6,7\" fill=\"#3b82f6\"/></svg>';\n"
+        "L.marker([acLat,acLon],"
+        "{icon:L.divIcon({html:acSvg,className:'',iconAnchor:[12,12]})}).addTo(map);\n"
+        "var bounds=L.latLngBounds([[acLat,acLon]]);\n"
+        "zones.forEach(function(z){\n"
+        "  bounds.extend([z.lat,z.lon]);\n"
+        "  var c=z.is_focused?'#3b82f6':(z.source==='VATSIM'?'#22c55e':'#94a3b8');\n"
+        "  var dot='<div style=\"width:10px;height:10px;border-radius:50%;background:'"
+        "    +c+';border:2px solid rgba(255,255,255,0.3)\"></div>';\n"
+        "  var m=L.marker([z.lat,z.lon],{icon:L.divIcon({html:dot,className:'',"
+        "iconAnchor:[5,5]})}).addTo(map);\n"
+        "  var wx=z.wx;\n"
+        "  var cbLabel='';\n"
+        "  if(wx.cb_raw){\n"
+        "    var cr=wx.cb_raw;\n"
+        "    cbLabel='<br>⛈ '+cr.oktas+\"/8 \"+cr.base+\"'-\"+cr.top+\"'\";\n"
+        "  }\n"
+        "  var tip='<b>WX'+z.zone+'</b> '+z.icao+cbLabel;\n"
+        "  var tipCls=z.is_focused?'zone-label zone-label-focused':'zone-label';\n"
+        "  if(z.is_focused)L.circleMarker([z.lat,z.lon],"
+        "{radius:12,color:'#3b82f6',weight:2,fill:false,opacity:0.85}).addTo(map);\n"
+        "  m.bindTooltip(tip,{permanent:true,direction:'right',"
+        "offset:[8,0],className:tipCls});\n"
+        "  var cbRow=wx.cb_raw"
+        "?'<tr><td style=\"color:#f87171\">⛈ CB</td><td style=\"color:#f87171\">'"
+        "+wx.cb_raw.oktas+'/8 '+wx.cb_raw.base+\"'-\"+wx.cb_raw.top+\"'</td></tr>\":'';\n"
+        "  var metarLbl=z.source==='VATSIM'?'METAR':'METAR (gen)';\n"
+        "  var metarRow=z.metar"
+        "?'<tr><td style=\"vertical-align:top;color:#94a3b8;font-size:10px;"
+        "white-space:nowrap\">'+metarLbl+'</td>"
+        "<td style=\"font-family:monospace;font-size:10px;color:#94a3b8;"
+        "word-break:break-all\">'+z.metar+'</td></tr>':'';\n"
+        "  var pop='<div style=\"min-width:180px\">'"
+        "    +'<b>WX'+z.zone+' — '+z.icao+'</b>'"
+        "    +'<br><span style=\"color:#94a3b8;font-size:11px\">'+z.source_label+'</span>'"
+        "    +(z.reason?'<br><span style=\"font-size:10px;color:#94a3b8\">'+z.reason+'</span>':'')"
+        "    +'<table style=\"width:100%;border-collapse:collapse;margin-top:4px\">'"
+        "    +(wx.wind?'<tr><td>Wind</td><td>'+wx.wind+'</td></tr>':'')"
+        "    +(wx.lo_cloud?'<tr><td>Lo cloud</td><td>'+wx.lo_cloud+'</td></tr>':'')"
+        "    +(wx.hi_cloud?'<tr><td>Hi cloud</td><td>'+wx.hi_cloud+'</td></tr>':'')"
+        "    +cbRow"
+        "    +(wx.vis?'<tr><td>Vis</td><td>'+wx.vis+'</td></tr>':'')"
+        "    +(wx.temp?'<tr><td>Temp/QNH</td><td>'+wx.temp+' / '+wx.qnh+'</td></tr>':'')"
+        "    +metarRow"
+        "    +'</table></div>';\n"
+        "  m.bindPopup(pop,{className:'dark-popup',maxWidth:320});\n"
+        "  L.polyline([[acLat,acLon],[z.lat,z.lon]],{color:c,weight:1.5,"
+        "dashArray:'5,5',opacity:0.5}).addTo(map);\n"
+        "});\n"
+        "if(zones.length>0)map.fitBounds(bounds.pad(0.4));\n"
+        '</script>\n'
+    )
+
+    mode_color = '#f59e0b' if nav_mode == 'MANEUVERING' else '#22c55e'
+    fw_color = '#f59e0b' if fw_mode != 'enabled' else '#22c55e'
+    age_str = f'{int(age_s)}s ago'
+    body = (
+        '<div id="map"></div>\n' +
+        script +
+        '<div style="display:flex;gap:1.5em;margin-top:0.5em;'
+        'font-size:0.85em;color:#94a3b8;flex-wrap:wrap;align-items:center">\n'
+        f'<span>Data: <b style="color:#e2e8f0">{age_str}</b></span>\n'
+        f'<span>Nav: <b style="color:{mode_color}">{nav_mode}</b></span>\n'
+        f'<span>FW: <b style="color:{fw_color}">{fw_mode}</b></span>\n'
+        '<span style="margin-left:auto">'
+        '<a href="/weather/settings" class="btn btn-gray btn-sm">Weather settings</a>'
+        '</span>\n'
+        '</div>\n'
+    )
+    return _page(body)
+
+
+def _build_weather_settings_page(router, color_scheme):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+    """Render the /weather/settings HTML page from the cached FRANKENWEATHER state."""
+    from frankenrouter import routercache  # pylint: disable=import-outside-toplevel
+
+    now = time.time()
+    state = router.frankenweather_state
+    received_at = router.frankenweather_received_at
+    age_s = now - received_at if received_at else float('inf')
+    stale = state is None or age_s > 300.0
+
+    def _page(body):
+        return (
+            '<!DOCTYPE html>\n<html>\n<head>\n'
+            f'<meta name="color-scheme" content="{color_scheme}" />\n' +
+            _COMMON_CSS.format() +
+            '\n<style>body { max-width: 64em; }</style>\n</head>\n<body>\n'
+            '<div class="page-title">'
+            '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
+            '<h1>Weather settings</h1>'
+            '<div style="margin-left:auto;display:flex;gap:0.5em">'
+            '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
+            '<a href="/weather/settings" class="btn btn-gray btn-sm">Refresh</a>'
+            '</div>'
+            '</div>\n' +
+            body +
+            '</body>\n</html>\n'
+        )
+
+    if stale:
+        msg = ('No data received from frankenweather, '
+               'check PSX Instructor station')
+        if state is not None:
+            age_min = int(age_s // 60)
+            msg = (f'No recent frankenweather data (last received {age_min} min ago), '
+                   'check PSX Instructor station')
+        return _page(f'<div class="card warn"><p style="margin:0">{msg}</p></div>\n'
+                     '<a href="/weather" class="btn btn-gray">Back</a>\n')
+
+    # -- Header status card --
+    age_str = f'{int(age_s)}s ago'
+    mode = state.get('mode', '?')
+    mode_class = 'warn' if mode == 'MANEUVERING' else 'ok'
+    ac_lat = state.get('ac_lat')
+    ac_lon = state.get('ac_lon')
+    ac_hdg = state.get('ac_hdg')
+    ac_alt = state.get('ac_alt_ft')
+    pos_str = (f'{ac_lat:.2f}°, {ac_lon:.2f}°' if ac_lat is not None else '—')
+    hdg_str = f'{ac_hdg:.0f}°' if ac_hdg is not None else '—'
+    alt_str = f'{int(ac_alt):,} ft' if ac_alt is not None else '—'
+    body = (
+        '<div class="card ok">\n<table>\n'
+        f'<tr><td>Data age</td><td class="val">{age_str}</td></tr>\n'
+        f'<tr><td>Mode</td><td class="{mode_class}">{mode}</td></tr>\n'
+        f'<tr><td>Aircraft position</td><td class="val">{pos_str}</td></tr>\n'
+        f'<tr><td>Heading / Altitude</td><td class="val">{hdg_str} / {alt_str}</td></tr>\n'
+        '</table>\n</div>\n'
+    )
+
+    # -- Mode control --
+    fw_mode = state.get('fw_mode', 'enabled')
+    fw_mode_class = 'ok' if fw_mode == 'enabled' else 'warn'
+    _MODE_BTN = {'enabled': 'btn-green', 'paused': 'btn-amber', 'disabled': 'btn-red'}
+    _MODE_LABEL = {'enabled': 'Enable', 'paused': 'Pause', 'disabled': 'Disable'}
+    other_modes = [m for m in ('enabled', 'paused', 'disabled') if m != fw_mode]
+    body += (
+        '<h2>Mode control</h2>\n'
+        '<div class="card ok">\n<table>\n'
+        f'<tr><td>Current mode</td><td class="{fw_mode_class}">{fw_mode}</td></tr>\n'
+        '</table>\n</div>\n'
+        '<div class="btn-row">\n'
+    )
+    for m in other_modes:
+        body += (
+            f'<form action="/api/weather/mode" method="post" style="display:inline">\n'
+            f'<input type="hidden" name="mode" value="{m}">\n'
+            f'<button type="submit" class="btn {_MODE_BTN[m]}">{_MODE_LABEL[m]}</button>\n'
+            '</form>\n'
+        )
+    body += '</div>\n'
+
+    # -- Config --
+    cfg = state.get('config', {})
+    infront = cfg.get('new_zone_infront_range', [0, 0])
+    leftright = cfg.get('new_zone_leftright_range', [0, 0])
+    squeeze = cfg.get('cape_squeeze')
+    fake_cb = cfg.get('fake_cb')
+
+    def _yn(v):
+        return '<span style="color:#4ade80">Yes</span>' if v else 'No'
+
+    body += (
+        '<h2>Configuration</h2>\n'
+        '<div class="card ok">\n<table>\n'
+        f'<tr><td>Cruise altitude</td><td class="val">{cfg.get("cruise_alt", "?")} ft</td></tr>\n'
+        f'<tr><td>Cruise behind relocation</td>'
+        f'<td class="val">{cfg.get("cruise_behind_dist", "?")} nm</td></tr>\n'
+        f'<tr><td>Low-alt relocation</td>'
+        f'<td class="val">{cfg.get("low_alt_dist", "?")} nm</td></tr>\n'
+        f'<tr><td>Zone range ahead</td>'
+        f'<td class="val">{infront[0]}–{infront[1]} nm</td></tr>\n'
+        f'<tr><td>Zone range lateral</td>'
+        f'<td class="val">{leftright[0]}–{leftright[1]} nm</td></tr>\n'
+        f'<tr><td>Min zone separation</td>'
+        f'<td class="val">{cfg.get("new_zone_notnear", "?")} nm</td></tr>\n'
+        f'<tr><td>Dep/dst airport zone dist</td>'
+        f'<td class="val">{cfg.get("arpt_zone_dist", "?")} nm</td></tr>\n' +
+        (f'<tr><td>CAPE squeeze</td><td class="val">'
+         f'at {squeeze[0]} J/kg → min {squeeze[1]} nm ahead</td></tr>\n'
+         if squeeze else '') +
+        (f'<tr><td>Fake CB override</td><td class="warn">'
+         f'{fake_cb[0]} oktas base {fake_cb[1]} ft top {fake_cb[2]} ft</td></tr>\n'
+         if fake_cb else '') +
+        ('<tr><td>PSX updates</td><td class="warn">DISABLED</td></tr>\n'
+         if cfg.get('disable_psx_weather_updates') else '') +
+        f'<tr><td>MSFS in-cloud sync</td>'
+        f'<td class="val">{_yn(cfg.get("msfs_in_cloud_sync"))}</td></tr>\n'
+        f'<tr><td>MSFS QNH check</td>'
+        f'<td class="val">{cfg.get("msfs_qnh_check") or "Off"}</td></tr>\n'
+        f'<tr><td>MSFS wind sync</td>'
+        f'<td class="val">{_yn(cfg.get("msfs_wind_sync"))}</td></tr>\n'
+        '</table>\n</div>\n'
+    )
+
+    # -- Zones --
+    zones = state.get('zones', [])
+    body += '<h2>Weather zones</h2>\n'
+    body += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1em;align-items:start">\n'
+
+    def _cache_get_s(name):
+        key = router.variables.get_keyword_for_name(name) or name
+        try:
+            return router.cache.get_value(key)
+        except routercache.RouterCacheException:
+            return None
+
+    focused_zone = None
+    try:
+        fz_val = _cache_get_s('FocussedWxZone')
+        if fz_val is not None:
+            focused_zone = int(fz_val)
+    except (ValueError, TypeError):
+        pass
+
+    for zone in zones:
+        zone_num = zone.get('zone', '?')
+        icao = zone.get('icao', '?')
+        lat = zone.get('lat')
+        lon = zone.get('lon')
+        source = zone.get('source', '?')
+        reason = zone.get('reason', '')
+        pos_str2 = f'{lat:.2f}/{lon:.2f}' if lat is not None else '—'
+        src_color = '#4ade80' if source == 'VATSIM' else '#94a3b8'
+
+        wx_str = _cache_get_s(f'Wx{zone_num}') or ''
+        wx = _parse_wx_brief(wx_str)
+
+        metar_str = None
+        if source == 'VATSIM':
+            metar_str = _cache_get_s(f'Metar{zone_num}')
+
+        is_focused = (focused_zone is not None and zone_num == focused_zone)
+        border_style = 'border-left: 4px solid #3b82f6' if is_focused else ''
+        focused_badge = (
+            ' <span style="font-size:0.8em;color:#3b82f6">●</span>'
+            if is_focused else ''
+        )
+        body += (
+            f'<div class="card ok" style="{border_style}">\n'
+            f'<div style="display:flex;justify-content:space-between;align-items:baseline;'
+            f'margin-bottom:0.4em">\n'
+            f'<b>Zone {zone_num} &mdash; {icao}</b>{focused_badge}\n'
+            f'<span style="font-size:0.82em;color:{src_color}">{source}</span>\n'
+            '</div>\n'
+            f'<p class="note" style="margin:0 0 0.4em">{reason or "—"}</p>\n'
+        )
+        if metar_str:
+            body += (
+                f'<p style="font-family:monospace;font-size:0.82em;'
+                f'word-break:break-all;color:#94a3b8;margin:0 0 0.4em">'
+                f'{metar_str}</p>\n'
+            )
+        if wx:
+            body += (
+                '<table>\n'
+                f'<tr><td>Position</td><td class="val">{pos_str2}</td></tr>\n'
+                f'<tr><td>Wind</td><td class="val">{wx["wind"]}</td></tr>\n'
+                f'<tr><td>Visibility</td><td class="val">{wx["vis"]}</td></tr>\n'
+                f'<tr><td>Lo cloud</td><td class="val">{wx["lo_cloud"]}</td></tr>\n'
+                f'<tr><td>Hi cloud</td><td class="val">{wx["hi_cloud"]}</td></tr>\n'
+            )
+            if wx['cb'] != 'None':
+                body += f'<tr><td>CB</td><td class="warn">{wx["cb"]}</td></tr>\n'
+            body += (
+                f'<tr><td>Temp / QNH</td><td class="val">{wx["temp"]} / {wx["qnh"]}</td></tr>\n'
+                '</table>\n'
+            )
+        body += '</div>\n'
+    body += '</div>\n'
+    body += '<hr>\n<a href="/weather" class="btn btn-gray">Back to map</a>\n'
+    return _page(body)
 
 
 def _fc_buttons_html(pilot_flying, own_sim):
@@ -1360,6 +1795,31 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
             @routes.get('/api/briefing')
             async def handle_briefing_get(_):
                 return web.json_response(router.flightinfo)
+
+            @routes.get('/weather')
+            async def handle_weather_get(_):
+                html = _build_weather_map_page(
+                    router, router.config.listen.rest_api_color_scheme)
+                return web.json_response(text=html, content_type='text/html')
+
+            @routes.get('/weather/settings')
+            async def handle_weather_settings_get(_):
+                html = _build_weather_settings_page(
+                    router, router.config.listen.rest_api_color_scheme)
+                return web.json_response(text=html, content_type='text/html')
+
+            @routes.post('/api/weather/mode')
+            async def handle_weather_mode(request):
+                data = await request.post()
+                new_mode = str(data.get('mode', ''))
+                if new_mode not in ('enabled', 'paused', 'disabled'):
+                    return web.Response(text="Invalid mode", status=400)
+                cmd = f'{{"mode":"{new_mode}"}}'
+                line = f"addon=FRANKENWEATHER:COMMAND:{cmd}"
+                await router.send_to_upstream(line)
+                await router.client_broadcast(line)
+                await asyncio.sleep(3)
+                raise web.HTTPFound('/weather/settings')
 
             @routes.get('/shutdown')
             async def handle_shutdown_get(_):

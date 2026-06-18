@@ -43,7 +43,7 @@ PTT_KEYWORDS = frozenset({'Qh82', 'Qh93', 'Qh410', 'Qh411', 'Qh412'})
 
 # Addon names that are expected to produce regular addon= traffic; their
 # forwarded messages are logged at debug rather than info.
-_KNOWN_ADDONS = frozenset(('FRANKENCDUPROXY', 'FRANKENMSFSBRIDGE'))
+_KNOWN_ADDONS = frozenset(('FRANKENCDUPROXY', 'FRANKENMSFSBRIDGE', 'FRANKENWEATHER'))
 
 
 class RulesAction(enum.Enum):

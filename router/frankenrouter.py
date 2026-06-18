@@ -176,6 +176,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.frdp_routerinfo_requested = False
         self.frdp_sharedinfo_requested = False
         self.frdp_flightinfo_requested = False
+        self.frankenweather_state: dict = None
+        self.frankenweather_received_at: float = 0.0
         self.flightinfo = {
             'last_updated_by': '',
             'last_updated_at': '',
@@ -1715,6 +1717,23 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             exclude_non_frankenrouter=True)
         # End of send_frdp_flightinfo()
 
+    def cache_frankenweather_addon(self, line: str) -> None:
+        """Parse and cache a FRANKENWEATHER:STATE addon message for the web UI."""
+        # line: "addon=FRANKENWEATHER:STATE:<uuid>:<json>"
+        rest = line[len("addon=FRANKENWEATHER:"):]
+        if not rest.startswith("STATE:"):
+            return
+        rest = rest[len("STATE:"):]
+        colon = rest.find(':')
+        if colon <= 0:
+            return
+        json_str = rest[colon + 1:]
+        try:
+            self.frankenweather_state = json.loads(json_str)
+            self.frankenweather_received_at = time.time()
+        except ValueError:
+            self.logger.warning("Malformed FRANKENWEATHER STATE addon: %s", line[:80])
+
     def _find_network_clients_matching(self, pattern):
         """Return list of (simulator_name, display_name) for matching non-router clients."""
         matches = []
@@ -2403,6 +2422,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         elif code == RulesCode.ADDON_FORWARDED_KNOWN:
             self.logger.debug("Known addon message from %s forwarded: %s",
                               sender_hr, line)
+            if line.startswith("addon=FRANKENWEATHER:"):
+                self.cache_frankenweather_addon(line)
         elif code == RulesCode.AGAIN:
             self.logger.info("Keyword again from %s forwarded: %s", sender_hr, line)
         elif code == RulesCode.BANG:
