@@ -153,7 +153,9 @@ class FrankenPrint:
     def _print_job(self, text: str) -> None:
         """Send a print job: initialise, text (^ → newline), feed, then partial cut."""
         lines = text.replace('^', '\n')
-        encoded = lines.encode('ascii', errors='replace')
+        pre = '\n' * self.args.lines_before
+        post = '\n' * self.args.lines_after
+        encoded = (pre + lines + post).encode('ascii', errors='replace')
         self.logger.info("Printing:\n%s", lines)
         self._send(_ESC_INIT + encoded + _ESC_FEED + _GS_CUT)
 
@@ -207,6 +209,12 @@ class FrankenPrint:
             help="Windows printer name, COM port (e.g. COM3), or TCP address "
                  "(e.g. 192.168.1.10:9100). If omitted and exactly one printer "
                  "is installed it is used automatically.")
+        parser.add_argument(
+            '--lines-before', type=int, default=0, metavar='N',
+            help="Blank lines to print before the message.")
+        parser.add_argument(
+            '--lines-after', type=int, default=0, metavar='N',
+            help="Blank lines to print after the message (before the cut).")
         parser.add_argument(
             '--test-print', action='store_true',
             help="Print a short test message on each PSX connection.")
