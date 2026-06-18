@@ -459,13 +459,8 @@ async def run_scan(args: argparse.Namespace) -> None:
                 results.append(ScanResult(pt, None, None, 0, 'NO_DATA'))
                 continue
 
-            fw_oktas, _, _ = om_cb_fields(om.raw)
-
-            # Skip entirely uninteresting points (low CAPE, no radar, no SIGMET needed)
-            if fw_oktas == 0 and om.cape < args.min_cape:
-                continue
-
-            # Radar tile lookup (cached by tile coord)
+            # Radar tile lookup (cached by tile coord) — must happen before om_cb_fields
+            # so fw_oktas reflects what FrankenWeather actually predicts (it passes radar_echo).
             radar_echo = 0
             if radar_path and _HAS_PIL:
                 tx, ty = _tile_xy(pt.lat, pt.lon, _ZOOM)
@@ -476,6 +471,12 @@ async def run_scan(args: argparse.Namespace) -> None:
                 if tile_img:
                     px, py = _pixel_in_tile(pt.lat, pt.lon, _ZOOM)
                     radar_echo = _tile_echo(tile_img, px, py)
+
+            fw_oktas, _, _ = om_cb_fields(om.raw, radar_echo=radar_echo)
+
+            # Skip entirely uninteresting points (low CAPE, no radar, no SIGMET needed)
+            if fw_oktas == 0 and om.cape < args.min_cape:
+                continue
 
             ev = _check_evidence(om, radar_echo, sigmet_polys, ts_metars, pt)
             v = _verdict(fw_oktas, ev)
