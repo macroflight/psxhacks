@@ -93,97 +93,21 @@ Quickstart Guide:
 Most of the individual scripts can be run independently, e.g
 double-click start_cpdlc.ps1 to restart the CPDLC client.
 
-### frankenweather.py
+### frankenweather.py, frankenmsfsbridge.py, and frankenturb.py
 
-Replaces PSX's built-in weather with real-world data fetched from
-[Open-Meteo](https://open-meteo.com/) and VATSIM live METARs. Up to 7
-PSX weather zones are placed and maintained around the aircraft, and
-updated every few minutes as the aircraft moves.
+Real-world weather and turbulence injection.
 
-Features:
+- **frankenweather.py** replaces PSX's built-in weather with live data
+  from [Open-Meteo](https://open-meteo.com/) and VATSIM METARs,
+  including CAPE-based CB generation and optional MSFS sync.
+- **frankenmsfsbridge.py** is a companion for split-PC setups that
+  streams MSFS in-cloud state, QNH and wind to the PSX master over the
+  network.
+- **frankenturb.py** injects wind-driven terrain turbulence (wave,
+  rotor, mechanical, shear CAT) using Open-Meteo winds and Copernicus
+  GLO-30 DEMs.
 
-- Zones snap to the nearest real airport when one is within 25 nm; the
-  weather for that zone is taken from the live VATSIM METAR for that
-  airport when available, otherwise from Open-Meteo.
-
-- CAPE-based CB (cumulonimbus) generation: computes CB coverage and
-  tops from Open-Meteo CAPE/CIN data, with convective inhibition
-  suppression when CIN is high. TS SIGMETs downloaded by PSX are
-  honoured: if the aircraft is in a TS SIGMET area, CBs are always
-  generated (minimum 4 oktas) even when CAPE is zero, since TS SIGMETs
-  report observed thunderstorms.
-
-- Zone placement adapts to flight phase: in cruise (above
-  `--cruise-alt`, default 18 000 ft) stale zones behind the aircraft
-  are relocated ahead; at low altitude all zones are kept within a
-  tighter radius. The FMC departure and destination airports always get
-  their own dedicated zone.
-
-- Optional MSFS in-cloud sync (`--msfs-in-cloud-sync`): reads the MSFS
-  in-cloud state and adjusts the active PSX weather zone's cloud layers
-  so that PSX shows the aircraft as in-cloud when MSFS does. This keeps
-  PSX icing in sync with MSFS conditions.
-
-- Optional MSFS QNH sync (`--msfs-qnh-check CHECK|USE`): compares the
-  MSFS sea-level pressure with the active PSX zone QNH. `CHECK` logs a
-  warning when they differ by more than `--msfs-qnh-check-maxdiff` hPa
-  (default 2 hPa); `USE` also updates the PSX QNH and METAR to match.
-  QNH is never updated for zones whose weather comes from a real METAR
-  (the METAR is authoritative for those zones).
-
-- Optional MSFS wind corridor sync (`--msfs-wind-sync`): reads the MSFS
-  wind direction, speed and OAT at the current aircraft altitude and
-  injects them into the PSX wind corridor as a synthetic `FWIND` waypoint
-  near the aircraft position. Supports PSX wind corridor Formats A and E;
-  Formats B, C and D are left unchanged.
-
-- The MSFS in-cloud, QNH and wind data is provided by `frankenmsfsbridge.py`
-  running on the MSFS slave sim.
-
-Requires `aiohttp` and `pyproj`:
-
-```
-pip install aiohttp pyproj
-```
-
-Key options:
-
-```
---psx-host HOST          PSX server hostname (default: 127.0.0.1)
---psx-port PORT          PSX server port (default: 10747)
---msfs-in-cloud-sync     Sync PSX in-cloud state with MSFS (via frankenmsfsbridge)
---msfs-qnh-check CHECK|USE  Warn or correct QNH mismatch vs MSFS (via frankenmsfsbridge)
---msfs-qnh-check-maxdiff HPA  Threshold in hPa (default: 2)
---msfs-wind-sync         Inject MSFS wind into the PSX wind corridor as FWIND waypoint
---cruise-alt FT          Altitude above which cruise zone rules apply (default: 18000)
---arpt-zone-dist NM      Snap dep/dst airport zone within this range (default: 200)
---disable-psx-weather-updates  Dry run: fetch and log but do not write to PSX
---debug                  Verbose logging
-```
-
-### frankenmsfsbridge.py
-
-Companion to `frankenweather.py` for setups where frankenweather runs
-on the PSX master sim but MSFS runs on a separate slave sim. The bridge
-runs on the slave sim, reads `AMBIENT_IN_CLOUD`, `SEA_LEVEL_PRESSURE`,
-`AMBIENT_TEMPERATURE`, `AMBIENT_WIND_DIRECTION` and
-`AMBIENT_WIND_VELOCITY` from MSFS via SimConnect, and publishes them to
-the PSX network as `addon=FRANKENMSFSBRIDGE:{...}` messages every time
-the data changes, and at least every 60 seconds as a heartbeat.
-Frankenweather picks up these messages and uses them in place of a
-local SimConnect connection. Bridge data that has not been refreshed
-for more than 5 minutes is considered stale and is not applied.
-
-Requires SimConnect on the machine it runs on (the MSFS slave).
-
-Key options:
-
-```
---psx-host HOST   PSX server hostname (default: 127.0.0.1)
---psx-port PORT   PSX server port (default: 10747)
---interval SEC    SimConnect poll interval in seconds (default: 5)
---debug           Verbose logging
-```
+[Full documentation →](docs/frankenweather.md)
 
 ### frankentanker.py
 

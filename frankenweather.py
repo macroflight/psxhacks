@@ -32,6 +32,15 @@ from frankenturb import (
 from frankenturb.cb import (
     find_nearest_cb, parse_wx_zone_basic, parse_wx_zone_position, parse_wx_clust,
 )
+from fw_cb import (
+    WX_DEFAULTS as _WX_DEFAULTS,
+    cape_to_cb_oktas as _cape_to_cb_oktas,
+    cb_base_ft as _cb_base_ft,
+    cb_tops_ft as _cb_tops_ft,
+    om_cb_fields as _om_cb_fields,
+    apply_om_cb as _apply_om_cb,
+    apply_fake_cb as _apply_fake_cb,
+)
 
 
 __MYNAME__ = 'frankenweather'
@@ -60,39 +69,10 @@ _HDG_WINDOW_S = 300.0                 # heading-change detection window (5 min)
 _MANEUVER_ENTER_DEG = 180.0           # total hdg change to enter maneuvering mode
 _MANEUVER_EXIT_DEG = 60.0             # total hdg change to exit maneuvering mode
 
-# Default Wx field values — we override [0-5], [18-20], [22-23] from Open-Meteo.
-# Indices match the PSX forum field order for WxBasic/Wx1-Wx7.
-_WX_DEFAULTS = [
-    "0",        # [0]  hiCloudCov (oktas 0-8)
-    "45000",    # [1]  hiCloudTop  ft
-    "45000",    # [2]  hiCloudBase ft
-    "0",        # [3]  loCloudCov
-    "45000",    # [4]  loCloudTop  ft
-    "45000",    # [5]  loCloudBase ft
-    "0",        # [6]  turbIntensity
-    "5000",     # [7]  turbTop     ft
-    "0",        # [8]  turbBase    ft
-    "0",        # [9]  cbCloudCov
-    "35000",    # [10] cbCloudTop  ft
-    "3000",     # [11] cbCloudBase ft
-    "0",        # [12] microburstMode
-    "0",        # [13] microburstRandom
-    "400",      # [14] microburstOutflow
-    "0",        # [15] inversionOn
-    "2320",     # [16] inversionTop ft
-    "50",       # [17] inversionTmp
-    "0000000",  # [18] arptWindVarDirSpd: VVV+DDD+SS (e.g. "00027015")
-    "0",        # [19] arptWindGust kt
-    "9999",     # [20] visibMtrs
-    "0",        # [21] precipLevel
-    "15",       # [22] surfaceTmp  °C
-    "2992",     # [23] QNH        inHg×100 (2992 ≈ 1013 hPa)
-]
-
-
 # ---------------------------------------------------------------------------
 # Coordinate parsing (UCAR stations.txt format)
 # ---------------------------------------------------------------------------
+
 
 def _parse_ucar_lat(s: str) -> Optional[float]:
     s = s.strip()
@@ -235,37 +215,6 @@ def _cloud_base_ft(wmo_code: int) -> int:
 # Reverse map: CB oktas → representative CAPE (J/kg), used to estimate
 # regional convective intensity from already-computed zone weather strings.
 _OKTAS_TO_CAPE = {0: 0.0, 2: 300.0, 4: 1000.0, 6: 2250.0, 8: 4000.0}
-
-
-def _cape_to_cb_oktas(cape_jkg: float, cin_jkg: float) -> int:
-    """Convert CAPE and CIN to CB cloud coverage in oktas.
-
-    Strong convective inhibition (CIN < -200 J/kg) suppresses CBs even with
-    high CAPE. Otherwise coverage scales with CAPE magnitude.
-    """
-    if cape_jkg < 100.0 or cin_jkg < -200.0:
-        return 0
-    if cape_jkg < 500.0:
-        return 2
-    if cape_jkg < 1500.0:
-        return 4
-    if cape_jkg < 3000.0:
-        return 6
-    return 8
-
-
-def _cb_base_ft(temp_c: float, dp_c: float) -> int:
-    """Estimate CB base in feet from LCL: 125 m per °C of dewpoint depression."""
-    return max(1500, int((temp_c - dp_c) * 125.0 * 3.28084))
-
-
-def _cb_tops_ft(cape_jkg: float) -> int:
-    """Estimate CB tops in feet from CAPE (J/kg).
-
-    Formula targets ~40000 ft at CAPE 1000 J/kg (typical tropical CB) and
-    saturates at 55000 ft for severe convection above ~2000 J/kg.
-    """
-    return max(25000, min(55000, 20000 + int(cape_jkg * 20)))
 
 
 def _metar_wind_str(wind_dir: int, wind_spd: int, wind_gust: int) -> str:
@@ -583,78 +532,6 @@ def build_wxmode_string(lat_deg: float, lon_deg: float,
     lat_rad = math.radians(lat_deg)
     lon_rad = math.radians(lon_deg)
     return f"{lat_rad:.8f};{lon_rad:.8f};320;{int(round(elevation_m))};{month:02d};{icao}00n"
-
-
-def _apply_fake_cb(wx_str: str, oktas: int, base_ft: int, top_ft: int) -> str:
-    """Overwrite the CB fields in a PSX Wx semicolon string."""
-    fields = wx_str.split(';')
-    fields[9] = str(oktas)
-    fields[10] = str(top_ft)
-    fields[11] = str(base_ft)
-    return ';'.join(fields)
-
-
-def _om_cb_fields(om: dict, metar_showers: bool = False, metar_ts: bool = False) -> tuple:
-    """Return (cb_oktas, cb_tops_ft, cb_base_ft) derived from Open-Meteo data.
-
-    Returns (0, default_tops, default_base) when no convective activity is detected.
-    metar_showers: METAR observed SH-type precip (SHRA, TCU…) — confirms showers.
-    metar_ts: METAR observed thunderstorm (TS, GR, LTG overhead…) — bypasses precip gate.
-    """
-    hourly = om.get("hourly", {})
-    hour_idx = datetime.now(timezone.utc).hour
-
-    def _h(key, default):
-        lst = hourly.get(key) or []
-        return float(lst[hour_idx]) if hour_idx < len(lst) else float(default)
-
-    wmo_code = int((om.get("current") or {}).get("weather_code", 0))
-    temp_c = float((om.get("current") or {}).get("temperature_2m", 15))
-    cape = _h("cape", 0)
-    cin = _h("convective_inhibition", 0)
-    h_temp = _h("temperature_2m", temp_c)
-    h_dp = _h("dewpoint_2m", h_temp - 5.0)
-    showers_mm = _h("showers", 0)
-    # Frontal systems report as "precipitation" not "showers" in OM; use total precip
-    # as fallback for the showers gate when WMO explicitly codes a thunderstorm.
-    if wmo_code in (95, 96, 99) and showers_mm < 0.5:
-        showers_mm = _h("precipitation", 0)
-    is_ts = wmo_code in (95, 96, 99) or metar_ts
-
-    cb_oktas = _cape_to_cb_oktas(cape, cin)
-
-    if is_ts:
-        # Thunderstorm directly observed (WMO 95/96/99 or METAR TS/GR/LTG/FC) —
-        # no precipitation gate; WMO/METAR are station observations, not forecasts.
-        # Give minimum 4 oktas when CAPE is negligible but CIN allows convection.
-        if cb_oktas == 0 and cin > -200.0:
-            cb_oktas = 4
-    elif showers_mm >= 0.5 or metar_showers:
-        # Showers confirmed by OM data or METAR (SHRA/TCU); cap coverage by intensity
-        if showers_mm < 2.0:
-            cb_oktas = min(cb_oktas, 2)
-        elif showers_mm < 5.0:
-            cb_oktas = min(cb_oktas, 4)
-        elif showers_mm < 15.0:
-            cb_oktas = min(cb_oktas, 6)
-    else:
-        cb_oktas = 0
-
-    if cb_oktas == 0:
-        return 0, int(_WX_DEFAULTS[10]), int(_WX_DEFAULTS[11])
-    return cb_oktas, _cb_tops_ft(cape), _cb_base_ft(h_temp, h_dp)
-
-
-def _apply_om_cb(wx_str: str, om: dict,
-                 metar_showers: bool = False, metar_ts: bool = False) -> str:
-    """Replace CB fields in a PSX Wx string with Open-Meteo derived values."""
-    cb_oktas, cb_tops, cb_base = _om_cb_fields(
-        om, metar_showers=metar_showers, metar_ts=metar_ts)
-    fields = wx_str.split(';')
-    fields[9] = str(cb_oktas)
-    fields[10] = str(cb_tops)
-    fields[11] = str(cb_base)
-    return ';'.join(fields)
 
 
 def _parse_cb_arg(s: str) -> tuple:
