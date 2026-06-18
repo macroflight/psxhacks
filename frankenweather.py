@@ -556,9 +556,11 @@ def _om_cb_fields(om: dict) -> tuple:
     h_dp = float((hourly.get("dewpoint_2m") or [h_temp - 5.0])[hour_idx])
     showers_mm = float((hourly.get("showers") or [0])[hour_idx])
     cb_oktas = _cape_to_cb_oktas(cape, cin)
-    if wmo_code in (95, 96, 99) and cb_oktas == 0:
+    # WMO thunderstorm codes guarantee minimum coverage only when precipitation backs it up
+    if wmo_code in (95, 96, 99) and showers_mm >= 0.5 and cb_oktas == 0:
         cb_oktas = 4
-    if wmo_code < 80 and showers_mm == 0:
+    # Suppress CBs when no measurable shower precipitation — WMO code alone is unreliable
+    if showers_mm < 0.5:
         cb_oktas = 0
     if cb_oktas == 0:
         return 0, int(_WX_DEFAULTS[10]), int(_WX_DEFAULTS[11])
@@ -1369,7 +1371,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 parsed = _parse_metar(raw_metars[i])
                 new_modes.append(build_wxmode_string(lat, lon, 0.0, month, icao))
                 wx = metar_to_wx_string(parsed)
-                if om:
+                if om and parsed.get('ts_oktas', 0) > 0:
                     wx = _apply_om_cb(wx, om)
                 new_metars.append(raw_metars[i])
             else:
@@ -1397,9 +1399,11 @@ class Script:  # pylint: disable=too-many-instance-attributes
             wmo_code = int((om.get("current") or {}).get("weather_code", 0))
             if cb_oktas > 0:
                 cb_part = (f"  CB {cb_oktas} oktas"
-                           f" base={parts[11]}ft tops={parts[10]}ft")
-            elif _cape_to_cb_oktas(cape, cin) > 0 and wmo_code < 80 and showers_mm == 0:
-                cb_part = f"  (CAPE suppressed: WMO={wmo_code} showers=0)"
+                           f" base={parts[11]}ft tops={parts[10]}ft"
+                           f" (WMO={wmo_code} showers={showers_mm:.2f}mm/h)")
+            elif _cape_to_cb_oktas(cape, cin) > 0 and showers_mm < 0.5:
+                cb_part = (f"  (CAPE suppressed: WMO={wmo_code}"
+                           f" showers={showers_mm:.2f}mm/h)")
             else:
                 cb_part = ""
             cb_suffixes.append(f"  CAPE={cape:.0f} J/kg{cb_part}")
