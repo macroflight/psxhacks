@@ -102,6 +102,7 @@ class TurbulenceEngine:
         roughness_radius_km: float = 20.0,
         max_tiles: int = 9,
         wind_models: str = "best_match",
+        om_proxy: Optional[str] = None,
     ):
         """Initialize the TurbulenceEngine, setting up all subsystems."""
         kwargs = {"cache_dir": cache_dir} if cache_dir else {}
@@ -112,7 +113,7 @@ class TurbulenceEngine:
             upwind_km=upwind_km,
             roughness_radius_km=roughness_radius_km,
         )
-        self.wind_fetcher = WindFetcher(models=wind_models)
+        self.wind_fetcher = WindFetcher(models=wind_models, proxy=om_proxy)
         self._last_profile: Optional[WindProfile] = None
         self._fixed_profile: Optional[WindProfile] = None
 

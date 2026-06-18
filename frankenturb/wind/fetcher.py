@@ -96,9 +96,10 @@ class WindFetcher:  # pylint: disable=too-few-public-methods
 
     """
 
-    def __init__(self, models: str = "best_match"):
+    def __init__(self, models: str = "best_match", proxy: Optional[str] = None):
         """Initialize the wind fetcher with the specified model."""
         self._models = models
+        self._proxy = proxy
         # Cache: (pos_bucket, time_bucket) → WindProfile
         self._cache: dict[tuple, WindProfile] = {}
         self._rate_limit_until: float = 0.0
@@ -172,9 +173,10 @@ class WindFetcher:  # pylint: disable=too-few-public-methods
             "models": self._models,
         }
 
+        proxies = {'http': self._proxy, 'https': self._proxy} if self._proxy else None
         try:
             r = requests.get(
-                OPEN_METEO_URL, params=params, timeout=REQUEST_TIMEOUT_S
+                OPEN_METEO_URL, params=params, timeout=REQUEST_TIMEOUT_S, proxies=proxies
             )
             r.raise_for_status()
             data = r.json()

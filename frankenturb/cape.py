@@ -67,9 +67,10 @@ def _time_bucket(dt: datetime) -> tuple[int, int]:
 class CapeFetcher:
     """Fetch and cache CAPE + Lifted Index from Open-Meteo."""
 
-    def __init__(self, models: str = "best_match") -> None:
+    def __init__(self, models: str = "best_match", proxy: Optional[str] = None) -> None:
         """Initialise with an empty cache."""
         self._models = models
+        self._proxy = proxy
         self._cache: dict[tuple, CapeSample] = {}
         self._rate_limit_until: float = 0.0
 
@@ -122,8 +123,10 @@ class CapeFetcher:
             "forecast_days": 2,
             "models": self._models,
         }
+        proxies = {'http': self._proxy, 'https': self._proxy} if self._proxy else None
         try:
-            r = requests.get(OPEN_METEO_URL, params=params, timeout=REQUEST_TIMEOUT_S)
+            r = requests.get(OPEN_METEO_URL, params=params, timeout=REQUEST_TIMEOUT_S,
+                             proxies=proxies)
             r.raise_for_status()
             data = r.json()
         except requests.exceptions.HTTPError as exc:

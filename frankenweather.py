@@ -19,6 +19,7 @@ from io import BytesIO
 from typing import Optional
 
 import aiohttp
+import requests  # pylint: disable=import-error
 
 try:
     from PIL import Image as _PIL_Image
@@ -1940,8 +1941,17 @@ class Script:  # pylint: disable=too-many-instance-attributes
     # Open-Meteo fetch
     # ------------------------------------------------------------------
 
-    async def _fetch_om_batch(self, session: aiohttp.ClientSession,
-                              positions: list) -> list:
+    @staticmethod
+    def _om_get_sync(url: str, proxies: Optional[dict]) -> tuple:
+        """Run a blocking Open-Meteo GET; intended for run_in_executor.
+
+        Returns (status_code, json_body_or_None).
+        """
+        r = requests.get(url, proxies=proxies, timeout=30)
+        body = r.json() if r.status_code in (200, 429) else None
+        return r.status_code, body
+
+    async def _fetch_om_batch(self, positions: list) -> list:
         """Fetch Open-Meteo current weather for all positions. Returns list of dicts."""
         lats = ','.join(f"{p[0]:.4f}" for p in positions)
         lons = ','.join(
@@ -1950,26 +1960,29 @@ class Script:  # pylint: disable=too-many-instance-attributes
                f"&current={_OM_VARS}&wind_speed_unit=kn&timezone=UTC"
                f"&hourly=cape,convective_inhibition,temperature_2m,dewpoint_2m,showers"
                f"&forecast_days=1")
-        try:
-            for attempt in range(2):
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as r:
-                    if r.status == 429:
-                        if attempt == 0:
-                            self.logger.warning("Open-Meteo rate limited — sleeping 60s")
-                            await asyncio.sleep(60)
-                            continue
-                        self.logger.warning("Open-Meteo still rate limited after retry")
-                        return []
-                    if r.status != 200:
-                        body = await r.text()
-                        self.logger.warning("Open-Meteo HTTP %d: %s", r.status, body[:120])
-                        return []
-                    resp = await r.json(content_type=None)
-                    if isinstance(resp, dict):
-                        resp = [resp]
-                    return resp
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            self.logger.warning("Open-Meteo fetch failed: %s", exc)
+        proxies = ({'http': self.args.om_proxy, 'https': self.args.om_proxy}
+                   if self.args.om_proxy else None)
+        loop = asyncio.get_running_loop()
+        for attempt in range(2):
+            try:
+                status, body = await loop.run_in_executor(
+                    None, self._om_get_sync, url, proxies)
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                self.logger.warning("Open-Meteo fetch failed: %s", exc)
+                return []
+            if status == 429:
+                if attempt == 0:
+                    self.logger.warning("Open-Meteo rate limited — sleeping 60s")
+                    await asyncio.sleep(60)
+                    continue
+                self.logger.warning("Open-Meteo still rate limited after retry")
+                return []
+            if status != 200:
+                self.logger.warning("Open-Meteo HTTP %d", status)
+                return []
+            if isinstance(body, dict):
+                body = [body]
+            return body or []
         return []
 
     # ------------------------------------------------------------------
@@ -2144,7 +2157,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
                         i + 1, stored_icao, _AIRPORT_SNAP_NM)
 
         # Fetch Open-Meteo for all 7 zones — CB always comes from OM even for METAR zones
-        om_batch = await self._fetch_om_batch(session, snap_positions)
+        om_batch = await self._fetch_om_batch(snap_positions)
         if not om_batch:
             if not self._om_unavailable:
                 self._om_unavailable = True
@@ -2636,6 +2649,10 @@ class Script:  # pylint: disable=too-many-instance-attributes
             '--disable-psx-weather-updates', action='store_true',
             help="Fetch and log weather data but do not write anything to PSX.")
         parser.add_argument(
+            '--om-proxy', type=str, default=None, metavar='URL',
+            help="Proxy URL for all Open-Meteo requests, e.g. socks5h://localhost:1080."
+                 " Requires PySocks (pip install requests[socks]).")
+        parser.add_argument(
             '--debug', action='store_true',
             help="Log PSX weather changes, every value sent to PSX, and all PSX traffic.")
         parser.add_argument(
@@ -2678,9 +2695,9 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self._turb_intensity_bias = max(0, min(999, self.args.turb_intensity_bias))
             if self.args.turb_config_file:
                 self._turb_load_config(self.args.turb_config_file)
-            self._turb_engine = TurbulenceEngine()
+            self._turb_engine = TurbulenceEngine(om_proxy=self.args.om_proxy)
             self._turb_pirep_fetcher = PirepFetcher()
-            self._turb_cape_fetcher = CapeFetcher()
+            self._turb_cape_fetcher = CapeFetcher(proxy=self.args.om_proxy)
             self._turb_gairmet_fetcher = GairmetFetcher()
             self.logger.info("Turbulence engine initialized")
             # Trigger initial TURBSTATE broadcast so the router has config data immediately.
