@@ -67,13 +67,21 @@ def cb_tops_ft(cape_jkg: float) -> int:
     return max(25000, min(55000, 20000 + int(cape_jkg * 20)))
 
 
-def om_cb_fields(om: dict, metar_showers: bool = False, metar_ts: bool = False) -> tuple:
+_RADAR_CAPE_MIN = 300.0   # J/kg — minimum CAPE required for radar/lightning to gate CBs
+_LIGHTNING_CAPE_MIN = 200.0  # J/kg — lower threshold for lightning alone (more direct evidence)
+
+
+def om_cb_fields(  # pylint: disable=too-many-locals,too-many-branches
+        om: dict, metar_showers: bool = False, metar_ts: bool = False,
+        radar_echo: int = 0, lightning: bool = False) -> tuple:
     """Return (cb_oktas, cb_tops_ft, cb_base_ft) derived from Open-Meteo data.
 
     Returns (0, default_tops, default_base) when no convective activity detected.
 
     metar_showers: METAR observed SH-type precip (SHRA, TCU) — confirms showers.
     metar_ts: METAR observed thunderstorm (TS, GR, LTG, FC) — bypasses precip gate.
+    radar_echo: RainViewer echo strength 0-3 (0=none, 1=light, 2=moderate, 3=heavy).
+    lightning: Blitzortung strike detected within zone radius in last 20 min.
     """
     hourly = om.get("hourly") or {}
     hour_idx = datetime.now(timezone.utc).hour
@@ -97,17 +105,29 @@ def om_cb_fields(om: dict, metar_showers: bool = False, metar_ts: bool = False) 
 
     oktas = cape_to_cb_oktas(cape, cin)
 
+    # When radar or lightning provides observational confirmation but OM showers are
+    # absent/weak, substitute a synthetic shower rate that reflects echo intensity so
+    # the existing cap logic produces an appropriate oktas ceiling.
+    effective_showers = showers_mm
+    if showers_mm < 0.5 and not metar_showers and not is_ts:
+        if radar_echo >= 3 and cape >= _RADAR_CAPE_MIN:
+            effective_showers = 10.0   # heavy echo → treat as heavy showers
+        elif radar_echo >= 2 and cape >= _RADAR_CAPE_MIN:
+            effective_showers = 2.5    # moderate echo → moderate showers
+        elif lightning and cape >= _LIGHTNING_CAPE_MIN:
+            effective_showers = 0.5    # strike present → minimum gate
+
     if is_ts:
         # Thunderstorm directly observed — no precipitation gate needed.
         if oktas == 0 and cin > -200.0:
             oktas = 4
-    elif showers_mm >= 0.5 or metar_showers:
-        # Showers confirmed; cap coverage by intensity
-        if showers_mm < 2.0:
+    elif effective_showers >= 0.5 or metar_showers:
+        # Showers confirmed (by OM, METAR, radar, or lightning); cap by intensity.
+        if effective_showers < 2.0:
             oktas = min(oktas, 2)
-        elif showers_mm < 5.0:
+        elif effective_showers < 5.0:
             oktas = min(oktas, 4)
-        elif showers_mm < 15.0:
+        elif effective_showers < 15.0:
             oktas = min(oktas, 6)
     else:
         oktas = 0
@@ -117,10 +137,14 @@ def om_cb_fields(om: dict, metar_showers: bool = False, metar_ts: bool = False) 
     return oktas, cb_tops_ft(cape), cb_base_ft(h_temp, h_dp)
 
 
-def apply_om_cb(wx_str: str, om: dict,
-                metar_showers: bool = False, metar_ts: bool = False) -> str:
+def apply_om_cb(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        wx_str: str, om: dict,
+        metar_showers: bool = False, metar_ts: bool = False,
+        radar_echo: int = 0, lightning: bool = False) -> str:
     """Replace CB fields in a PSX Wx string with Open-Meteo derived values."""
-    oktas, tops, base = om_cb_fields(om, metar_showers=metar_showers, metar_ts=metar_ts)
+    oktas, tops, base = om_cb_fields(
+        om, metar_showers=metar_showers, metar_ts=metar_ts,
+        radar_echo=radar_echo, lightning=lightning)
     fields = wx_str.split(';')
     fields[9] = str(oktas)
     fields[10] = str(tops)

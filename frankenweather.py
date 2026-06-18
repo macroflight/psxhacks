@@ -14,10 +14,18 @@ import time
 import traceback
 import urllib.request
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from io import BytesIO
 from typing import Optional
 
 import aiohttp
+
+try:
+    from PIL import Image as _PIL_Image
+    _HAS_PIL = True
+except ImportError:
+    _PIL_Image = None
+    _HAS_PIL = False
 from pyproj import Geod
 
 import psx
@@ -68,6 +76,22 @@ _NM_TO_M = 1852.0
 _HDG_WINDOW_S = 300.0                 # heading-change detection window (5 min)
 _MANEUVER_ENTER_DEG = 180.0           # total hdg change to enter maneuvering mode
 _MANEUVER_EXIT_DEG = 60.0             # total hdg change to exit maneuvering mode
+
+# ---------------------------------------------------------------------------
+# Radar (RainViewer) and lightning (Blitzortung) constants
+# ---------------------------------------------------------------------------
+
+_RV_API = "https://api.rainviewer.com/public/weather-maps.json"
+_RV_TILE = "https://tilecache.rainviewer.com"
+_RV_ZOOM = 6           # zoom 6 → ~22 km/pixel at equator, ~5°×5° per tile
+_RV_TILE_PX = 256
+_RV_ECHO_RADIUS = 3    # pixel radius to sample around target point
+_RV_TIMEOUT = aiohttp.ClientTimeout(total=15)
+
+_BZ_URL = "https://data.blitzortung.org/Data_1/strikes"
+_BZ_LOOKBACK_MIN = 20  # fetch this many recent minute-files of strike data
+_BZ_RADIUS_NM = 80.0   # strike within this radius → lightning signal for CB gate
+_BZ_CACHE_S = 240.0    # re-fetch Blitzortung no more often than this
 
 # ---------------------------------------------------------------------------
 # Coordinate parsing (UCAR stations.txt format)
@@ -301,6 +325,52 @@ def _sigmet_top_ft(text: str) -> int:
     return 35000
 
 
+# ---------------------------------------------------------------------------
+# Radar helpers (RainViewer colour scheme 2 — logic shared with fw_scanner.py)
+# ---------------------------------------------------------------------------
+
+def _rv_pixel_echo_strength(r: int, g: int, b: int, a: int) -> int:
+    """Map an RGBA pixel from RainViewer scheme 2 to echo strength 0–3."""
+    if a < 30:
+        return 0
+    if b > max(r, g):
+        return 1   # blue-dominant: light rain (15-30 dBZ)
+    if g >= r:
+        return 2   # green-dominant: moderate (35-50 dBZ)
+    return 3       # warm (yellow/orange/red): heavy / CB core (50+ dBZ)
+
+
+def _rv_tile_xy(lat: float, lon: float, zoom: int) -> tuple:
+    """Convert lat/lon to slippy-map tile (tx, ty) at given zoom."""
+    n = 2 ** zoom
+    tx = int((lon + 180) / 360 * n)
+    lat_r = math.radians(lat)
+    ty = int((1 - math.log(math.tan(lat_r) + 1 / math.cos(lat_r)) / math.pi) / 2 * n)
+    return tx, ty
+
+
+def _rv_pixel_in_tile(lat: float, lon: float, zoom: int) -> tuple:
+    """Pixel (x, y) within the tile that contains this lat/lon."""
+    n = 2 ** zoom
+    lat_r = math.radians(lat)
+    px = int(((lon + 180) / 360 * n * _RV_TILE_PX) % _RV_TILE_PX)
+    log_term = math.log(math.tan(lat_r) + 1 / math.cos(lat_r))
+    py = int(((1 - log_term / math.pi) / 2 * n * _RV_TILE_PX) % _RV_TILE_PX)
+    return px, py
+
+
+def _rv_tile_echo(img: object, px: int, py: int) -> int:
+    """Maximum echo strength in a small box around pixel (px, py) in a PIL image."""
+    w, h = img.size
+    best = 0
+    for dy in range(-_RV_ECHO_RADIUS, _RV_ECHO_RADIUS + 1):
+        for dx in range(-_RV_ECHO_RADIUS, _RV_ECHO_RADIUS + 1):
+            x, y = px + dx, py + dy
+            if 0 <= x < w and 0 <= y < h:
+                best = max(best, _rv_pixel_echo_strength(*img.getpixel((x, y))))
+    return best
+
+
 def _point_in_polygon(lat: float, lon: float, polygon: list) -> bool:
     """Ray-casting point-in-polygon test for (lat, lon) vertex lists."""
     n = len(polygon)
@@ -489,7 +559,8 @@ def metar_to_wx_string(parsed: dict) -> str:
     return ";".join(data)
 
 
-def om_to_wx_string(om: dict) -> str:  # pylint: disable=too-many-locals
+def om_to_wx_string(om: dict, radar_echo: int = 0,  # pylint: disable=too-many-locals
+                    lightning: bool = False) -> str:
     """Convert Open-Meteo current-weather dict to PSX Wx semicolon string."""
     data = list(_WX_DEFAULTS)
     cur = om.get("current", {})
@@ -511,7 +582,7 @@ def om_to_wx_string(om: dict) -> str:  # pylint: disable=too-many-locals
         data[4] = str(cloud_top_ft)
         data[5] = str(cloud_base_ft)
 
-    cb_oktas, cb_tops, cb_base = _om_cb_fields(om)
+    cb_oktas, cb_tops, cb_base = _om_cb_fields(om, radar_echo=radar_echo, lightning=lightning)
     if cb_oktas > 0:
         data[9] = str(cb_oktas)
         data[10] = str(cb_tops)
@@ -737,6 +808,14 @@ class Script:  # pylint: disable=too-many-instance-attributes
         # Maneuvering mode detection
         self._hdg_history: list = []   # [(monotonic_time, heading_deg)]
         self._maneuvering: bool = False
+
+        # Radar (RainViewer) tile cache — keyed by (tx, ty), cleared on new frame
+        self._rv_frame_path: Optional[str] = None
+        self._rv_tile_cache: dict = {}
+
+        # Blitzortung lightning strikes — list of (lat, lon) from last _BZ_LOOKBACK_MIN minutes
+        self._bz_strikes: list = []
+        self._bz_fetch_time: float = 0.0
 
         # MSFS wind state (--msfs-wind-sync via frankenmsfsbridge)
         self.msfs_wind_dir: Optional[float] = None
@@ -1650,8 +1729,10 @@ class Script:  # pylint: disable=too-many-instance-attributes
         search_nm = fwd_max + (0.0 if initial else lat_max) + _AIRPORT_SNAP_NM
         airports_nearby = self._airports_within_nm(self.ac_lat, self.ac_lon, search_nm)
 
-        last: tuple = None
-        for _ in range(11):
+        # Generate a pool of candidates; score by radar echo to bias toward active cells.
+        # When radar is unavailable all echoes are 0 → reduces to clearance-only selection.
+        candidates: list = []
+        for _ in range(10):
             if initial or self._maneuvering:
                 bearing = random.uniform(0.0, 360.0)
                 dist_m = random.uniform(0.0, fwd_max) * _NM_TO_M
@@ -1673,15 +1754,16 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 icao, lat_c, lon_c = best_ap
             else:
                 icao = f"X{random.randint(100, 999):03d}"
-            last = (lat_c, lon_c, icao)
-            if not others:
-                break
-            too_close = any(self._dist_nm(lat_c, lon_c, o[0], o[1]) < min_sep
-                            for o in others)
-            if not too_close:
-                break
+            too_close = bool(others and
+                             any(self._dist_nm(lat_c, lon_c, o[0], o[1]) < min_sep
+                                 for o in others))
+            echo = self._rv_echo_at(lat_c, lon_c)
+            candidates.append((echo, not too_close, lat_c, lon_c, icao))
 
-        return last
+        # Sort: clearance-passing first (-True < -False), then highest echo within each group.
+        candidates.sort(key=lambda c: (-c[1], -c[0]))
+        _, _, lat_c, lon_c, icao = candidates[0]
+        return lat_c, lon_c, icao
 
     def _place_all_zones(self) -> None:
         """Place all 7 zones randomly around the aircraft on startup."""
@@ -1886,6 +1968,117 @@ class Script:  # pylint: disable=too-many-instance-attributes
         return []
 
     # ------------------------------------------------------------------
+    # Radar (RainViewer) helpers
+    # ------------------------------------------------------------------
+
+    async def _fetch_rv_frame(self, session: aiohttp.ClientSession) -> None:
+        """Refresh the RainViewer radar frame path; clear tile cache when frame changes."""
+        try:
+            async with session.get(_RV_API, timeout=_RV_TIMEOUT) as resp:
+                if resp.status != 200:
+                    return
+                data = await resp.json(content_type=None)
+            past = (data.get('radar') or {}).get('past') or []
+            path = past[-1].get('path') if past else None
+            if path and path != self._rv_frame_path:
+                self._rv_frame_path = path
+                self._rv_tile_cache.clear()
+                self.logger.debug("RainViewer: new frame %s", path)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.debug("RainViewer frame fetch failed: %s", exc)
+
+    async def _fetch_rv_tiles(self, session: aiohttp.ClientSession,
+                              positions: list) -> None:
+        """Fetch and cache RainViewer tiles for the given (lat, lon) positions."""
+        if not _HAS_PIL or self._rv_frame_path is None:
+            return
+        needed = {_rv_tile_xy(lat, lon, _RV_ZOOM) for lat, lon in positions}
+        to_fetch = needed - set(self._rv_tile_cache)
+        if not to_fetch:
+            return
+
+        async def _get_tile(tx: int, ty: int) -> tuple:
+            url = (f"{_RV_TILE}{self._rv_frame_path}"
+                   f"/{_RV_TILE_PX}/{_RV_ZOOM}/{tx}/{ty}/2/1_1.png")
+            try:
+                async with session.get(url, timeout=_RV_TIMEOUT) as r:
+                    if r.status != 200:
+                        return tx, ty, None
+                    data = await r.read()
+                return tx, ty, _PIL_Image.open(BytesIO(data)).convert('RGBA')
+            except Exception:  # pylint: disable=broad-exception-caught
+                return tx, ty, None
+
+        results = await asyncio.gather(*[_get_tile(tx, ty) for tx, ty in to_fetch])
+        for tx, ty, img in results:
+            if img is not None:
+                self._rv_tile_cache[(tx, ty)] = img
+        self.logger.debug("RainViewer: fetched %d/%d tiles",
+                          sum(1 for _, _, img in results if img is not None), len(to_fetch))
+
+    def _rv_echo_at(self, lat: float, lon: float) -> int:
+        """Return cached RainViewer echo strength 0-3 at (lat, lon), or 0 if not available."""
+        if not _HAS_PIL or self._rv_frame_path is None:
+            return 0
+        tx, ty = _rv_tile_xy(lat, lon, _RV_ZOOM)
+        img = self._rv_tile_cache.get((tx, ty))
+        if img is None:
+            return 0
+        px, py = _rv_pixel_in_tile(lat, lon, _RV_ZOOM)
+        return _rv_tile_echo(img, px, py)
+
+    # ------------------------------------------------------------------
+    # Lightning (Blitzortung) helpers
+    # ------------------------------------------------------------------
+
+    async def _fetch_bz_strikes(self, session: aiohttp.ClientSession) -> None:
+        """Refresh Blitzortung strike list from the last _BZ_LOOKBACK_MIN minutes."""
+        if time.monotonic() - self._bz_fetch_time < _BZ_CACHE_S:
+            return
+        now_utc = datetime.now(timezone.utc)
+        strikes = []
+
+        async def _get_minute(dt: datetime) -> list:
+            url = (f"{_BZ_URL}/{dt.year}/{dt.month:02d}/{dt.day:02d}"
+                   f"/{dt.hour:02d}/{dt.minute:02d}.json")
+            try:
+                async with session.get(url, timeout=_RV_TIMEOUT) as r:
+                    if r.status != 200:
+                        return []
+                    data = await r.json(content_type=None)
+                    if not isinstance(data, list):
+                        return []
+                    return [(float(s['lat']), float(s['lon']))
+                            for s in data if 'lat' in s and 'lon' in s]
+            except Exception:  # pylint: disable=broad-exception-caught
+                return []
+
+        minutes = [
+            (now_utc - timedelta(minutes=offset)).replace(second=0, microsecond=0)
+            for offset in range(1, _BZ_LOOKBACK_MIN + 1)
+        ]
+        results = await asyncio.gather(*[_get_minute(dt) for dt in minutes])
+        for batch in results:
+            strikes.extend(batch)
+
+        old_count = len(self._bz_strikes)
+        self._bz_strikes = strikes
+        self._bz_fetch_time = time.monotonic()
+        if strikes or old_count:
+            self.logger.debug("Blitzortung: %d strikes (last %d min)",
+                              len(strikes), _BZ_LOOKBACK_MIN)
+
+    def _bz_near(self, lat: float, lon: float) -> bool:
+        """Return True if a recent Blitzortung strike lies within _BZ_RADIUS_NM."""
+        lat_tol = 2.0   # fast coarse filter before expensive _dist_nm call
+        for slat, slon in self._bz_strikes:
+            if abs(slat - lat) > lat_tol:
+                continue
+            if self._dist_nm(lat, lon, slat, slon) <= _BZ_RADIUS_NM:
+                return True
+        return False
+
+    # ------------------------------------------------------------------
     # Zone update
     # ------------------------------------------------------------------
 
@@ -1949,6 +2142,11 @@ class Script:  # pylint: disable=too-many-instance-attributes
         om_batch = await self._fetch_om_batch(session, snap_positions)
         om_by_zone: dict = {i: om_batch[i] for i in range(min(len(om_batch), 7))}
 
+        # Refresh radar and lightning sources; failures degrade to echo=0 / no lightning
+        await self._fetch_rv_frame(session)
+        await self._fetch_rv_tiles(session, snap_positions)
+        await self._fetch_bz_strikes(session)
+
         now = datetime.now(timezone.utc)
         month = now.month
 
@@ -1959,17 +2157,22 @@ class Script:  # pylint: disable=too-many-instance-attributes
             lat, lon = snap_positions[i]
             icao = snap_icaos[i]
             om = om_by_zone.get(i, {})
+            radar_echo = self._rv_echo_at(lat, lon)
+            has_lightning = self._bz_near(lat, lon)
             if raw_metars[i] is not None:
                 parsed = _parse_metar(raw_metars[i])
                 new_modes.append(build_wxmode_string(lat, lon, 0.0, month, icao))
                 wx = metar_to_wx_string(parsed)
                 ts_oktas = parsed.get('ts_oktas', 0)
                 has_showers = parsed.get('showers', False)
-                if om and (ts_oktas > 0 or has_showers):
+                need_cb = ts_oktas > 0 or has_showers or radar_echo >= 2 or has_lightning
+                if om and need_cb:
                     refined = _apply_om_cb(
                         wx, om,
                         metar_showers=has_showers,
-                        metar_ts=ts_oktas > 0)
+                        metar_ts=ts_oktas > 0,
+                        radar_echo=radar_echo,
+                        lightning=has_lightning)
                     if refined.split(';')[9] != '0':
                         wx = refined
                     elif ts_oktas > 0:
@@ -1980,7 +2183,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
             else:
                 elev = float(om.get("elevation", 0)) if om else 0.0
                 new_modes.append(build_wxmode_string(lat, lon, elev, month, icao))
-                wx = om_to_wx_string(om) if om else ";".join(_WX_DEFAULTS)
+                wx = (om_to_wx_string(om, radar_echo=radar_echo, lightning=has_lightning)
+                      if om else ";".join(_WX_DEFAULTS))
                 new_metars.append(_gen_metar(icao, om, now) if om else None)
             new_wxs.append(self._sigmet_cb_override(wx, (lat, lon), om, f"Zone {i + 1} {icao}"))
 
