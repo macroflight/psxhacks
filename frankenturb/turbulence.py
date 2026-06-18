@@ -331,7 +331,11 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
             return {"active": False}
 
         half_lambda_m = ridge_top_wind_ms * T_WAVE_S / 2.0
-        alt_factor = math.exp(-agl_m / WAVE_SCALE_M)
+        # Waves are strongest near ridge height and weaker below it (aircraft is under
+        # the wave, not in it).  Scale linearly from zero at ground to 1.0 at the
+        # barrier summit, then let the exponential handle high-altitude decay above.
+        below_factor = min(1.0, agl_m / barrier_height_m)
+        alt_factor = below_factor * math.exp(-agl_m / WAVE_SCALE_M)
 
         if alt_factor < 0.02:
             return {"active": False}
