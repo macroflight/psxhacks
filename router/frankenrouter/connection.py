@@ -396,14 +396,21 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
 
             valid_ip = False
             matching_network = None
-            if access.match_ipv4 is not None:
-                for elem in access.match_ipv4:
+            if access.match_ip is not None:
+                for elem in access.match_ip:
                     if elem == 'ANY':
                         valid_ip = True
                         matching_network = elem
                     else:
                         network = ipaddress.ip_network(elem)
-                        if client_ip in network:
+                        # Unwrap IPv4-mapped IPv6 (e.g. ::ffff:192.168.1.1) so it
+                        # matches against IPv4 rules in the config.
+                        cmp_ip = client_ip
+                        if (client_ip.version == 6 and
+                                client_ip.ipv4_mapped is not None and
+                                network.version == 4):
+                            cmp_ip = client_ip.ipv4_mapped
+                        if cmp_ip.version == network.version and cmp_ip in network:
                             self.logger.info("Match: %s in %s", client_ip, network)
                             valid_ip = True
                             matching_network = network
@@ -411,7 +418,7 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
             self.logger.debug("Checking against %s, valid_password=%s, valid_ip=%s",
                               access, valid_password, valid_ip)
 
-            if access.match_ipv4 is not None and access.match_password is None:
+            if access.match_ip is not None and access.match_password is None:
                 # Only IP match required
                 if valid_ip:
                     self.logger.info("Access level %s granted based on IP match - %s in %s",
@@ -419,7 +426,7 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
                     set_level(access)
                     return
 
-            if access.match_password is not None and access.match_ipv4 is None:
+            if access.match_password is not None and access.match_ip is None:
                 # Only password match required
                 if valid_password:
                     self.logger.info("Access level %s granted based on password - %s is valid",

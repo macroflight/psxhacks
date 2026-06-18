@@ -209,24 +209,30 @@ class _RouterConfigAccess:  # pylint: disable=missing-class-docstring,too-few-pu
         if self.display_name is None:
             raise RouterConfigError(f"An access rule must have a display_name: {data}")
 
-        self.match_ipv4 = data.get('match_ipv4', None)
+        # Accept match_ip (preferred) or match_ipv4 (backward-compatible alias)
+        if 'match_ipv4' in data and 'match_ip' not in data:
+            logging.getLogger(__name__).warning(
+                "Config key 'match_ipv4' is deprecated; rename it to 'match_ip' "
+                "(IPv6 addresses are also supported now)"
+            )
+        self.match_ip = data.get('match_ip', data.get('match_ipv4', None))
         self.is_frankenrouter = data.get('is_frankenrouter', None)
         self.match_password = data.get('match_password', None)
         self.level = data.get('level', None)
 
         # Sanity checks
-        if self.match_ipv4 is None and self.match_password is None:
-            raise RouterConfigError("An access rule must use password or match_ipv4")
+        if self.match_ip is None and self.match_password is None:
+            raise RouterConfigError("An access rule must use match_password or match_ip")
 
-        if self.match_ipv4 is not None:
-            for network in self.match_ipv4:
+        if self.match_ip is not None:
+            for network in self.match_ip:
                 if network == 'ANY':
                     continue
                 try:
                     ipaddress.ip_network(network)
                 except ValueError as exc:
                     raise RouterConfigError(
-                        f"Invalid IPv4 network in config file: {network}: {exc}") from exc
+                        f"Invalid network address in config file: {network}: {exc}") from exc
         if self.match_password is not None:
             if self.match_password == "":
                 raise RouterConfigError(
@@ -351,7 +357,7 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
             self.logger.info("No [[access]] section in config, allowing all clients to connect.")
             self.access.append(_RouterConfigAccess({
                 'display_name': 'all clients allowed',
-                'match_ipv4': ['ANY'],
+                'match_ip': ['ANY'],
                 'level': 'full'
             }))
         self.check = []

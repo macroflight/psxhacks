@@ -200,14 +200,15 @@ displayed in the status display.
       access to the PSX network.
     - If set to `observer`, the client will have read-only access to
       the PSX network (but can send the demand keyword).
-- `match ipv4`: If is set, any client connecting from this list of
-  IPv4 networks will match. Note: to allow just one IP and not a
-  larger network, use the IP/32 notation. To allow any IP to connect,
-  set to `[ "ANY" ]`.
+- `match_ip`: If set, any client connecting from this list of IPv4 or
+  IPv6 networks will match. Note: to allow just one IP and not a
+  larger network, use the `/32` (IPv4) or `/128` (IPv6) prefix notation.
+  To allow any IP to connect, set to `[ "ANY" ]`.
+  The old key name `match_ipv4` still works but is deprecated.
 - `match_password`: If set, the router requires that the client provides
   this password to be given access.
 
-Note: if both `match_password` and `match ipv4` are set, the client must
+Note: if both `match_password` and `match_ip` are set, the client must
 have both an approved IP address and provide the password.
 
 Example:
@@ -215,25 +216,31 @@ Example:
 ```text
 [[access]]
 display_name = "Main sim PC"
-match_ipv4 = [ "127.0.0.1/32", "192.168.86.9/32" ]
+match_ip = [ "127.0.0.1/32", "192.168.86.9/32" ]
 level = "full"
 
 [[access]]
 display_name = "Remote CDU on iPad"
-match_ipv4 = [ "192.168.86.8/32" ]
+match_ip = [ "192.168.86.8/32" ]
 level = "full"
 
 [[access]]
 display_name = "A board in my sim I/O network"
-match_ipv4 = [ "192.168.52.0/24" ]
+match_ip = [ "192.168.52.0/24" ]
+level = "full"
+
+# RemoteSim can only connect from this IPv6 address
+[[access]]
+display_name = "RemoteSim IPv6"
+match_ip = [ "2001:db8::42/128" ]
 level = "full"
 
 # RemoteSim can only connect from this IP address and must provide a password
 [[access]]
 display_name = "RemoteSim"
-match_ipv4 = [ "123.123.123.123/32" ]
+match_ip = [ "123.123.123.123/32" ]
 match_password = "some secret"
-level = "full"`
+level = "full"
 
 # RemoteSim2 can connect if a password is provided
 [[access]]
@@ -255,7 +262,7 @@ Internet):
 ```text
 [[access]]
 display_name = "Any client"
-match_ipv4 = [ "ANY" ]
+match_ip = [ "ANY" ]
 level = "full"
 ```
 

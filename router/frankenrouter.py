@@ -2875,7 +2875,7 @@ shared cockpit master sim.
             for rule in self.config.access:
                 try:
                     print(f"config: access/{i}/display_name = {rule.display_name}")
-                    print(f"config: access/{i}/match_ipv4 = {rule.match_ipv4}")
+                    print(f"config: access/{i}/match_ip = {rule.match_ip}")
                     print(f"config: access/{i}/is_frankenrouter = {rule.is_frankenrouter}")
                 except AttributeError as exc:
                     print(f"Missing attribute - continuing: {exc}")
