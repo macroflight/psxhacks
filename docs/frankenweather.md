@@ -1,4 +1,4 @@
-# FrankenWeather, FrankenTurb, and FrankenMSFS Bridge
+# FrankenWeather and FrankenMSFS Bridge
 
 Real-world weather and turbulence injection for Aerowinx PSX.
 
@@ -30,6 +30,17 @@ Features:
   tighter radius. The FMC departure and destination airports always get
   their own dedicated zone.
 
+- Terrain turbulence (from the `frankenturb` engine, now integrated):
+  fetches real-time wind from Open-Meteo and terrain elevation from
+  Copernicus GLO-30 DEMs, then injects `WxBurst` events into PSX at up
+  to 5 Hz. Turbulence kinds modelled: terrain wave, rotor, mechanical,
+  wind-shear CAT, CB, CAPE-driven convective, PIREPs, and G-AIRMET
+  regions. The MCDU C (observer panel CDU) shows a live status display
+  and allows tuning of intensity per turbulence type. DEM tiles (~26 MB
+  each, 1°×1°) are downloaded on demand and cached at
+  `~/.cache/frankenturb/terrain/` (up to 9 tiles ≈ 235 MB). Use
+  `--no-turbulence` to disable the subsystem entirely.
+
 - Optional MSFS in-cloud sync (`--msfs-in-cloud-sync`): reads the MSFS
   in-cloud state and adjusts the active PSX weather zone's cloud layers
   so that PSX shows the aircraft as in-cloud when MSFS does. This keeps
@@ -51,25 +62,29 @@ Features:
 - The MSFS in-cloud, QNH and wind data is provided by `frankenmsfsbridge.py`
   running on the MSFS slave sim.
 
-Requires `aiohttp` and `pyproj`:
+Requires `aiohttp`, `pyproj`, `numpy`, `rasterio`, and `requests`:
 
 ```
-pip install aiohttp pyproj
+pip install aiohttp pyproj numpy rasterio requests
 ```
 
 Key options:
 
 ```
---psx-host HOST          PSX server hostname (default: 127.0.0.1)
---psx-port PORT          PSX server port (default: 10747)
---msfs-in-cloud-sync     Sync PSX in-cloud state with MSFS (via frankenmsfsbridge)
---msfs-qnh-check CHECK|USE  Warn or correct QNH mismatch vs MSFS (via frankenmsfsbridge)
---msfs-qnh-check-maxdiff HPA  Threshold in hPa (default: 2)
---msfs-wind-sync         Inject MSFS wind into the PSX wind corridor as FWIND waypoint
---cruise-alt FT          Altitude above which cruise zone rules apply (default: 18000)
---arpt-zone-dist NM      Snap dep/dst airport zone within this range (default: 200)
+--psx-host HOST                PSX server hostname (default: 127.0.0.1)
+--psx-port PORT                PSX server port (default: 10747)
+--msfs-in-cloud-sync           Sync PSX in-cloud state with MSFS (via frankenmsfsbridge)
+--msfs-qnh-check CHECK|USE     Warn or correct QNH mismatch vs MSFS (via frankenmsfsbridge)
+--msfs-qnh-check-maxdiff HPA   Threshold in hPa (default: 2)
+--msfs-wind-sync               Inject MSFS wind into the PSX wind corridor as FWIND waypoint
+--cruise-alt FT                Altitude above which cruise zone rules apply (default: 18000)
+--arpt-zone-dist NM            Snap dep/dst airport zone within this range (default: 200)
 --disable-psx-weather-updates  Dry run: fetch and log but do not write to PSX
---debug                  Verbose logging
+--no-turbulence                Disable the turbulence subsystem entirely
+--turb-rate 0-100              Scale turbulence injection frequency (100 = normal, up to 5 Hz)
+--turb-intensity-bias 0-999    Global turbulence intensity bias percentage (100 = normal)
+--turb-config-file PATH        JSON file for persisting turbulence settings
+--debug                        Verbose logging
 ```
 
 ## frankenmsfsbridge.py
@@ -95,48 +110,3 @@ Key options:
 --interval SEC    SimConnect poll interval in seconds (default: 5)
 --debug           Verbose logging
 ```
-
-## frankenturb.py
-
-Wind-driven terrain turbulence simulator for Aerowinx PSX. Fetches
-real-time wind data from Open-Meteo and terrain elevation from
-Copernicus GLO-30 satellite DEMs, then injects `WxBurst` events into
-PSX at up to 5 Hz.
-
-Turbulence kinds modelled: terrain wave, rotor, mechanical, and
-wind-shear CAT. The terrain scan looks 80 km upwind for barriers and
-evaluates them in priority order. The MCDU C (observer panel CDU) shows
-a live status display and allows tuning of the intensity.
-
-Requires `numpy`, `rasterio`, and `requests`:
-
-```
-pip install numpy rasterio requests
-```
-
-DEM tiles (~26 MB each, 1°×1°) are downloaded on demand from the
-Copernicus S3 bucket and cached at `~/.cache/frankenturb/terrain/`
-(up to 9 tiles ≈ 235 MB).
-
-Key options:
-
-```
-python frankenturb.py --psx-main-server-host 127.0.0.1 --psx-main-server-port 10747 --rate 100
-python frankenturb.py --rate 100 --accelerations --boost-server-host 127.0.0.1 --boost-server-port 10749
-python frankenturb.py --debug
-```
-
-`--rate 100` sets the injection rate to ~5 Hz (the base rate scales
-linearly). `--accelerations` enables the optional high-frequency
-body-frame acceleration logger via the PSX boost server.
-
-### Building a standalone executable
-
-Run from the psxhacks repo root:
-
-```
-pyinstaller frankenturb.spec
-```
-
-The spec file bundles rasterio/GDAL/PROJ shared libraries and CA
-certificates.
