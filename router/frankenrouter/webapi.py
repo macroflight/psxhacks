@@ -707,7 +707,9 @@ def _build_weather_map_page(router, color_scheme):  # pylint: disable=too-many-l
             'lat': zone.get('lat') or 0.0,
             'lon': zone.get('lon') or 0.0,
             'source': source,
-            'source_label': 'VATSIM' if source == 'VATSIM' else 'OpenMeteo',
+            'source_label': ('VATSIM' if source == 'VATSIM'
+                             else 'PSX auto' if source == 'PSX'
+                             else 'OpenMeteo'),
             'reason': zone.get('reason', ''),
             'is_focused': focused_zone is not None and zone_num == focused_zone,
             'wx': wx,

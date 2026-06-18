@@ -205,9 +205,9 @@ class TurbulenceEngine:
         profile = self.wind_fetcher.get(lat, lon, sim_time_utc)
         if profile is None:
             if self._last_profile is None:
-                log.warning("No wind profile available — returning calm")
+                log.debug("No wind profile available — returning calm")
                 return TurbulenceState()
-            log.warning("Wind fetch failed — reusing last profile")
+            log.debug("Wind fetch failed — reusing last profile")
             profile = self._last_profile
         else:
             self._last_profile = profile

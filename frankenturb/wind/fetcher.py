@@ -18,6 +18,7 @@ bucket hit the cache.
 
 import logging
 import math
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -40,6 +41,7 @@ LEVELS_HPA: list[int] = [
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 REQUEST_TIMEOUT_S = 15
+RATE_LIMIT_BACKOFF_S = 300.0  # pause all fetches after a 429 for this long
 
 # Cache granularity
 CACHE_DEG_GRID = 1.0    # degrees — position bucket size
@@ -99,6 +101,7 @@ class WindFetcher:  # pylint: disable=too-few-public-methods
         self._models = models
         # Cache: (pos_bucket, time_bucket) → WindProfile
         self._cache: dict[tuple, WindProfile] = {}
+        self._rate_limit_until: float = 0.0
 
     def get(
         self,
@@ -136,6 +139,11 @@ class WindFetcher:  # pylint: disable=too-few-public-methods
             log.debug("Wind cache hit for %s", cache_key)
             return self._cache[cache_key]
 
+        remaining = self._rate_limit_until - time.monotonic()
+        if remaining > 0:
+            log.debug("Wind fetch skipped — OM rate limited (%.0fs remaining)", remaining)
+            return None
+
         log.info(
             "Fetching wind profile at (%.2f, %.2f) valid %s …",
             lat, lon, sim_time_utc.strftime("%Y-%m-%dT%H:%M")
@@ -170,6 +178,13 @@ class WindFetcher:  # pylint: disable=too-few-public-methods
             )
             r.raise_for_status()
             data = r.json()
+        except requests.exceptions.HTTPError as exc:
+            if exc.response is not None and exc.response.status_code == 429:
+                self._rate_limit_until = time.monotonic() + RATE_LIMIT_BACKOFF_S
+                log.warning("Wind fetch: OM rate limited — backing off %.0fs", RATE_LIMIT_BACKOFF_S)
+            else:
+                log.error("Wind fetch failed: %s", exc)
+            return None
         except requests.RequestException as exc:
             log.error("Wind fetch failed: %s", exc)
             return None

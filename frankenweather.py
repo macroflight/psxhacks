@@ -838,6 +838,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
         # paused  = stop updating PSX weather; keep WxAutoSet=0 (existing zones remain)
         # disabled = stop updating; set WxAutoSet=1 (PSX resumes its own auto-weather)
         self._fw_mode: str = "enabled"
+        # True when OM is temporarily unavailable; WxAutoSet=1 until it recovers.
+        self._om_unavailable: bool = False
 
         # -------------------------------------------------------------------
         # Turbulence subsystem (merged from frankenturb)
@@ -1326,6 +1328,9 @@ class Script:  # pylint: disable=too-many-instance-attributes
                     continue
 
                 if self._turb_engine is None:
+                    continue
+
+                if self._om_unavailable:
                     continue
 
                 state, pirep_rec, cape_sample, gairmet_region = await asyncio.gather(
@@ -2140,6 +2145,21 @@ class Script:  # pylint: disable=too-many-instance-attributes
 
         # Fetch Open-Meteo for all 7 zones — CB always comes from OM even for METAR zones
         om_batch = await self._fetch_om_batch(session, snap_positions)
+        if not om_batch:
+            if not self._om_unavailable:
+                self._om_unavailable = True
+                self.logger.warning(
+                    "Open-Meteo unavailable — reverting to PSX default weather")
+                if not self.args.disable_psx_weather_updates:
+                    self.psx_send_and_set("WxAutoSet", "1")
+                self._state_changed_event.set()
+            return
+        if self._om_unavailable:
+            self._om_unavailable = False
+            self.logger.info("Open-Meteo available again — resuming FrankenWeather")
+            if not self.args.disable_psx_weather_updates:
+                self.psx_send_and_set("WxAutoSet", "0")
+            self._state_changed_event.set()
         om_by_zone: dict = {i: om_batch[i] for i in range(min(len(om_batch), 7))}
 
         # Refresh radar and lightning sources; failures degrade to echo=0 / no lightning
@@ -2278,7 +2298,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
     # API state broadcast
     # ------------------------------------------------------------------
 
-    def _build_state_message(self) -> str:
+    def _build_state_message(self) -> str:  # pylint: disable=too-many-locals
         """Build the FRANKENWEATHER:<uuid>:<json> addon message payload."""
         cfg = self.args
         config = {
@@ -2297,18 +2317,30 @@ class Script:  # pylint: disable=too-many-instance-attributes
             "msfs_qnh_check_maxdiff": cfg.msfs_qnh_check_maxdiff,
             "msfs_wind_sync": cfg.msfs_wind_sync,
         }
+        wx_auto = self._fw_mode == "disabled" or self._om_unavailable
         zones = []
         for zone_num in range(1, 8):
-            if zone_num not in self.zone_positions:
+            raw_mode = self.psx.get(f"WxMode{zone_num}") if self.psx else None
+            pos = parse_wx_zone_position(raw_mode) if raw_mode else None
+            if pos is None:
                 continue
-            lat, lon, icao = self.zone_positions[zone_num]
+            lat, lon = pos[0], pos[1]
+            mode_parts = raw_mode.split(';')
+            icao_raw = mode_parts[5] if len(mode_parts) >= 6 else ""
+            icao = icao_raw[:4] if len(icao_raw) >= 4 else ""
+            if wx_auto:
+                source = "PSX"
+                reason = "Set by PSX"
+            else:
+                source = "VATSIM" if self.zone_is_metar.get(zone_num) else "OM"
+                reason = self.zone_reason.get(zone_num, "")
             zones.append({
                 "zone": zone_num,
                 "icao": icao,
                 "lat": round(lat, 4),
                 "lon": round(lon, 4),
-                "source": "VATSIM" if self.zone_is_metar.get(zone_num) else "OM",
-                "reason": self.zone_reason.get(zone_num, ""),
+                "source": source,
+                "reason": reason,
             })
         sigmets = [
             {"polygon": [[round(la, 4), round(lo, 4)] for la, lo in s["polygon"]],
@@ -2317,6 +2349,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
         ]
         state = {
             "fw_mode": self._fw_mode,
+            "om_unavailable": self._om_unavailable,
             "mode": "MANEUVERING" if self._maneuvering else "CRUISE",
             "ac_lat": round(self.ac_lat, 4) if self.ac_lat is not None else None,
             "ac_lon": round(self.ac_lon, 4) if self.ac_lon is not None else None,
@@ -2391,7 +2424,13 @@ class Script:  # pylint: disable=too-many-instance-attributes
                     if self.ac_lat is None:
                         continue
                     entered_maneuvering = self._update_maneuvering_mode()
-                    if not self.zone_positions:
+                    # When PSX manages its own weather (WxAutoSet=1), don't reposition
+                    # zones — PSX will move them and we'd overwrite that on recovery.
+                    # The last known zone_positions are preserved for STATE broadcasts.
+                    wx_auto = self._fw_mode == "disabled" or self._om_unavailable
+                    if wx_auto:
+                        any_relocated = False
+                    elif not self.zone_positions:
                         self._place_all_zones()
                         any_relocated = True
                     elif any(self._dist_nm(self.ac_lat, self.ac_lon, lat, lon) >

@@ -9,6 +9,7 @@ Cache strategy mirrors WindFetcher: 1° position bucket, 1-hour time bucket.
 
 import logging
 import math
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
@@ -21,6 +22,7 @@ log = logging.getLogger(__name__)
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 REQUEST_TIMEOUT_S = 15
+RATE_LIMIT_BACKOFF_S = 300.0  # pause all fetches after a 429 for this long
 
 CACHE_DEG_GRID = 1.0
 CACHE_HOURS = 1
@@ -69,6 +71,7 @@ class CapeFetcher:
         """Initialise with an empty cache."""
         self._models = models
         self._cache: dict[tuple, CapeSample] = {}
+        self._rate_limit_until: float = 0.0
 
     def get(
         self,
@@ -92,6 +95,11 @@ class CapeFetcher:
 
         if cache_key in self._cache:
             return self._cache[cache_key]
+
+        remaining = self._rate_limit_until - time.monotonic()
+        if remaining > 0:
+            log.debug("CAPE fetch skipped — OM rate limited (%.0fs remaining)", remaining)
+            return None
 
         log.info("Fetching CAPE at (%.2f, %.2f) …", lat, lon)
         sample = self._fetch(lat, lon, sim_time_utc)
@@ -118,6 +126,13 @@ class CapeFetcher:
             r = requests.get(OPEN_METEO_URL, params=params, timeout=REQUEST_TIMEOUT_S)
             r.raise_for_status()
             data = r.json()
+        except requests.exceptions.HTTPError as exc:
+            if exc.response is not None and exc.response.status_code == 429:
+                self._rate_limit_until = time.monotonic() + RATE_LIMIT_BACKOFF_S
+                log.warning("CAPE fetch: OM rate limited — backing off %.0fs", RATE_LIMIT_BACKOFF_S)
+            else:
+                log.error("CAPE fetch failed: %s", exc)
+            return None
         except requests.RequestException as exc:
             log.error("CAPE fetch failed: %s", exc)
             return None
