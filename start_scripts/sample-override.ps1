@@ -84,7 +84,6 @@ $StartCpdlc              = $false   # HAFAP CPDLC client
 $StartFrankencduproxy    = $false   # FrankenCDU proxy (CS CDU Bridge <-> PSX)
 $StartCsCdu              = $false   # Cockpit Simulator CDU hardware
 $StartFrankentanker      = $false   # FrankenTanker (in-flight refuelling)
-$StartFrankenturb        = $false   # FrankenTurb (terrain/wind turbulence)
 $StartFrankenident       = $false   # FrankenIDENT (slave)
 $StartFrankenidentMaster = $false   # FrankenIDENT (master instance)
 $StartFrankenutil        = $false   # FrankenUtil (misc utility addon)
@@ -121,7 +120,6 @@ $StartFrankenmsfsbridge  = $false   # FrankenMSFSBridge (MSFS → PSX data bridg
 #$FrankenidentRepo       = $null
 #$FrankenidentMasterRepo = $null
 #$FrankentankerRepo      = $null
-#$FrankenturbRepo        = $null
 #$FrankenusbRepo         = $null
 #$FrankenutilRepo        = $null
 #$CpdlcRepo              = $null
@@ -135,7 +133,6 @@ $StartFrankenmsfsbridge  = $false   # FrankenMSFSBridge (MSFS → PSX data bridg
 #$FrankenrouterSlaveOptions  = @("--config-file=frankensim-client.toml")
 #$FrankentankerOptions       = @()
 #$FrankenusbOptions          = @()
-#$FrankenturbOptions         = @()
 #$FrankenidentOptions        = @()
 #$FrankenidentMasterOptions  = @("--psx-port=10748")
 #$FrankencduproxyOptions     = @()

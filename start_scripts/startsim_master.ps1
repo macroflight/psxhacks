@@ -57,12 +57,6 @@ if ($StartFrankentanker ) {
     Invoke-WindowPosition "frankentanker"
 }
 
-if ($StartFrankenturb ) {
-    Write-Output "Starting FrankenTurb..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenturb.ps1"
-    Invoke-WindowPosition "frankenturb"
-}
-
 if ($StartFrankenweather ) {
     Write-Output "Starting FrankenWeather..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenweather.ps1"

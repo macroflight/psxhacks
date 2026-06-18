@@ -103,8 +103,9 @@ _LEAFLET_HEAD = (
     '.zone-label { background: rgba(28,32,51,0.92) !important;\n'
     '  border: 1px solid #2a2f45 !important; color: #f1f5f9 !important;\n'
     '  border-radius: 4px !important; font-size: 11px;\n'
-    '  padding: 2px 6px !important; box-shadow: none !important; }\n'
-    '.zone-label::before { display: none !important; }\n'
+    '  padding: 2px 6px !important; box-shadow: none !important;\n'
+    '  pointer-events: auto !important; cursor: pointer; }\n'
+    '.zone-label::before { border-right-color: #2a2f45 !important; }\n'
     '.dark-popup .leaflet-popup-content-wrapper { background: #1c2033;\n'
     '  border: 1px solid #2a2f45; color: #f1f5f9; border-radius: 6px; }\n'
     '.dark-popup .leaflet-popup-tip { background: #1c2033; }\n'
@@ -615,7 +616,7 @@ def _parse_wx_brief(wx_str):  # pylint: disable=too-many-locals
     }
 
 
-def _build_weather_map_page(router, color_scheme):  # pylint: disable=too-many-locals
+def _build_weather_map_page(router, color_scheme):  # pylint: disable=too-many-locals,too-many-statements
     """Render the /weather page with a Leaflet tile map centred on the aircraft."""
     from frankenrouter import routercache  # pylint: disable=import-outside-toplevel
 
@@ -630,7 +631,15 @@ def _build_weather_map_page(router, color_scheme):  # pylint: disable=too-many-l
             '<!DOCTYPE html>\n<html>\n<head>\n'
             f'<meta name="color-scheme" content="{color_scheme}" />\n' +
             _COMMON_CSS.format() +
-            '\n<style>body { max-width: 80em; }</style>\n' +
+            '\n<style>'
+            'body { max-width: none; }'
+            '#map { width: min(calc(100vh - 7rem), 72vw);'
+            ' height: min(calc(100vh - 7rem), 72vw);'
+            ' border-radius: 8px; border: 1px solid #2a2f45; flex-shrink: 0; }'
+            '.wx-map-wrap { display: flex; gap: 1.5em; align-items: flex-start; }'
+            '.wx-map-side { flex: 1; min-width: 180px; display: flex;'
+            ' flex-direction: column; gap: 1em; }'
+            '</style>\n' +
             _LEAFLET_HEAD +
             '</head>\n<body>\n'
             '<div class="page-title">'
@@ -703,18 +712,82 @@ def _build_weather_map_page(router, color_scheme):  # pylint: disable=too-many-l
             'is_focused': focused_zone is not None and zone_num == focused_zone,
             'wx': wx,
             'metar': metar,
+            'wx_raw': wx_str,
         })
 
     zones_js = json.dumps(zone_data)
+    sigmets_js = json.dumps(state.get('sigmets', []))
+    ac_alt_ft = state.get('ac_alt_ft') or 0
+    turbstate = router.frankenweather_turbstate or {}
+    turb_src_lat = turbstate.get('source_lat')
+    turb_src_lon = turbstate.get('source_lon')
+    turb_kind = turbstate.get('active_kind', 'none')
+    turb_intensity = turbstate.get('active_intensity', 0.0)
+    turb_pct = int(turb_intensity * 100)
+    turb_label = _TURB_KIND_LABELS.get(turb_kind, turb_kind) if turbstate else '—'
+    turb_color = '#22c55e' if turb_intensity < 0.25 else (
+        '#f59e0b' if turb_intensity < 0.5 else '#ef4444')
+    turb_intensity_label = (
+        'none' if turb_intensity < 0.10 else
+        'light' if turb_intensity < 0.25 else
+        'moderate' if turb_intensity < 0.50 else
+        'severe' if turb_intensity < 0.75 else
+        'extreme'
+    )
+    turb_summary_js = json.dumps({
+        'kind': turb_kind,
+        'pct': turb_pct,
+        'label': turb_label,
+        'intensity_label': turb_intensity_label,
+        'reason': turbstate.get('active_reason', ''),
+    })
+    turb_js = 'null'
+    if turb_src_lat is not None and turb_src_lon is not None:
+        turb_js = json.dumps({
+            'src_lat': turb_src_lat,
+            'src_lon': turb_src_lon,
+            'kind': turb_kind,
+            'reason': turbstate.get('active_reason', ''),
+        })
     script = (
         '<script>\n'
-        f'var acLat={ac_lat},acLon={ac_lon},acHdg={ac_hdg:.0f};\n'
+        'function destPoint(lat,lon,brng,dist){'
+        'var R=6371,d=dist/R,b=brng*Math.PI/180,la=lat*Math.PI/180,lo=lon*Math.PI/180;'
+        'var la2=Math.asin(Math.sin(la)*Math.cos(d)+Math.cos(la)*Math.sin(d)*Math.cos(b));'
+        'var lo2=lo+Math.atan2(Math.sin(b)*Math.sin(d)*Math.cos(la),'
+        'Math.cos(d)-Math.sin(la)*Math.sin(la2));'
+        'return[la2*180/Math.PI,lo2*180/Math.PI];}\n'
+        'function gcdNm(la1,lo1,la2,lo2){'
+        'var R=3440.065,r=Math.PI/180;'
+        'var dla=(la2-la1)*r,dlo=(lo2-lo1)*r;'
+        'var a=Math.sin(dla/2)*Math.sin(dla/2)+'
+        'Math.cos(la1*r)*Math.cos(la2*r)*Math.sin(dlo/2)*Math.sin(dlo/2);'
+        'return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));}\n'
+        'function pointInPoly(lat,lon,poly){'
+        'var inside=false,n=poly.length;'
+        'for(var i=0,j=n-1;i<n;j=i++){'
+        'var xi=poly[i][0],yi=poly[i][1],xj=poly[j][0],yj=poly[j][1];'
+        'if(((yi>lon)!==(yj>lon))&&(lat<(xj-xi)*(lon-yi)/(yj-yi)+xi))inside=!inside;}'
+        'return inside;}\n'
+        'function parseSavedView(){'
+        'var h=location.hash.slice(1).split(",");'
+        'if(h.length===3){var la=parseFloat(h[0]),lo=parseFloat(h[1]),z=parseFloat(h[2]);'
+        'if(!isNaN(la)&&!isNaN(lo)&&!isNaN(z))return{lat:la,lon:lo,zoom:z};}'
+        'return null;}\n'
+        f'var acLat={ac_lat},acLon={ac_lon},acHdg={ac_hdg:.0f},acAlt={ac_alt_ft};\n'
+        f'var fwMode={json.dumps(fw_mode)},navMode={json.dumps(nav_mode)};\n'
         f'var zones={zones_js};\n'
-        "var map=L.map('map').setView([acLat,acLon],7);\n"
-        "L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{\n"
-        "  attribution:'&copy; <a href=\"https://www.openstreetmap.org/copyright\">"
-        "OpenStreetMap</a> &copy; <a href=\"https://carto.com/attributions\">CARTO</a>',\n"
-        "  subdomains:'abcd',maxZoom:19\n"
+        f'var turbInfo={turb_js};\n'
+        f'var turbSummary={turb_summary_js};\n'
+        f'var sigmets={sigmets_js};\n'
+        "var _sv=parseSavedView();\n"
+        "var map=L.map('map',{zoomSnap:0.25,zoomDelta:0.5,wheelPxPerZoomLevel:120})"
+        ".setView(_sv?[_sv.lat,_sv.lon]:[acLat,acLon],_sv?_sv.zoom:7);\n"
+        "L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',{\n"
+        "  attribution:'Map data: &copy; <a href=\"https://www.openstreetmap.org/copyright\">"
+        "OpenStreetMap</a> contributors, SRTM | "
+        "Map style: &copy; <a href=\"https://opentopomap.org\">OpenTopoMap</a> (CC-BY-SA)',\n"
+        "  subdomains:'abc',maxZoom:17\n"
         "}).addTo(map);\n"
         "var acSvg='<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\"'"
         "  +' viewBox=\"-12 -12 24 24\" style=\"transform:rotate('+acHdg+'deg)\">'"
@@ -722,13 +795,21 @@ def _build_weather_map_page(router, color_scheme):  # pylint: disable=too-many-l
         "L.marker([acLat,acLon],"
         "{icon:L.divIcon({html:acSvg,className:'',iconAnchor:[12,12]})}).addTo(map);\n"
         "var bounds=L.latLngBounds([[acLat,acLon]]);\n"
+        "sigmets.forEach(function(s){\n"
+        "  var pts=s.polygon.map(function(p){return[p[0],p[1]];});\n"
+        "  var topFL=Math.round(s.top_ft/100);\n"
+        "  L.polygon(pts,{color:'#ef4444',weight:2,opacity:0.9,"
+        "fillColor:'#ef4444',fillOpacity:0.15})"
+        ".bindTooltip('<b>TS SIGMET</b><br>Top FL'+topFL,"
+        "{sticky:true,className:'sigmet-label'})"
+        ".addTo(map);\n"
+        "});\n"
         "zones.forEach(function(z){\n"
         "  bounds.extend([z.lat,z.lon]);\n"
         "  var c=z.is_focused?'#3b82f6':(z.source==='VATSIM'?'#22c55e':'#94a3b8');\n"
-        "  var dot='<div style=\"width:10px;height:10px;border-radius:50%;background:'"
-        "    +c+';border:2px solid rgba(255,255,255,0.3)\"></div>';\n"
-        "  var m=L.marker([z.lat,z.lon],{icon:L.divIcon({html:dot,className:'',"
-        "iconAnchor:[5,5]})}).addTo(map);\n"
+        "  var m=L.circleMarker([z.lat,z.lon],"
+        "{radius:9,color:'#fff',weight:2,fillColor:c,fillOpacity:0.9,opacity:0.95})"
+        ".addTo(map);\n"
         "  var wx=z.wx;\n"
         "  var cbLabel='';\n"
         "  if(wx.cb_raw){\n"
@@ -738,9 +819,9 @@ def _build_weather_map_page(router, color_scheme):  # pylint: disable=too-many-l
         "  var tip='<b>WX'+z.zone+'</b> '+z.icao+cbLabel;\n"
         "  var tipCls=z.is_focused?'zone-label zone-label-focused':'zone-label';\n"
         "  if(z.is_focused)L.circleMarker([z.lat,z.lon],"
-        "{radius:12,color:'#3b82f6',weight:2,fill:false,opacity:0.85}).addTo(map);\n"
+        "{radius:14,color:'#3b82f6',weight:2.5,fill:false,opacity:0.9}).addTo(map);\n"
         "  m.bindTooltip(tip,{permanent:true,direction:'right',"
-        "offset:[8,0],className:tipCls});\n"
+        "offset:[10,0],className:tipCls});\n"
         "  var cbRow=wx.cb_raw"
         "?'<tr><td style=\"color:#f87171\">⛈ CB</td><td style=\"color:#f87171\">'"
         "+wx.cb_raw.oktas+'/8 '+wx.cb_raw.base+\"'-\"+wx.cb_raw.top+\"'</td></tr>\":'';\n"
@@ -764,28 +845,210 @@ def _build_weather_map_page(router, color_scheme):  # pylint: disable=too-many-l
         "    +metarRow"
         "    +'</table></div>';\n"
         "  m.bindPopup(pop,{className:'dark-popup',maxWidth:320});\n"
-        "  L.polyline([[acLat,acLon],[z.lat,z.lon]],{color:c,weight:1.5,"
-        "dashArray:'5,5',opacity:0.5}).addTo(map);\n"
+        "  m.getTooltip().on('click',function(){m.openPopup();});\n"
+        "  L.polyline([[acLat,acLon],[z.lat,z.lon]],{color:c,weight:2.5,"
+        "dashArray:'6,4',opacity:0.75}).addTo(map);\n"
         "});\n"
-        "if(zones.length>0)map.fitBounds(bounds.pad(0.4));\n"
+        "if(zones.length>0&&!_sv)map.fitBounds(bounds.pad(0.4));\n"
+        "if(turbInfo){\n"
+        "  var brng=Math.atan2((turbInfo.src_lon-acLon)*Math.cos(acLat*Math.PI/180),"
+        "turbInfo.src_lat-acLat)*180/Math.PI;\n"
+        "  var fanPts=[[acLat,acLon]];\n"
+        "  for(var a=-30;a<=30;a+=5)fanPts.push(destPoint(acLat,acLon,(brng+a+360)%360,80));\n"
+        "  fanPts.push([acLat,acLon]);\n"
+        "  L.polygon(fanPts,{color:'#f97316',weight:2.5,fillOpacity:0.25,"
+        "opacity:0.9,fillColor:'#f97316'}).addTo(map);\n"
+        "  var mtSvg='<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"36\" height=\"30\""
+        " viewBox=\"0 0 36 30\" style=\"filter:drop-shadow(0 1px 2px rgba(0,0,0,0.7))\">"
+        "<polygon points=\"18,2 34,28 2,28\" fill=\"#7c3aed\" stroke=\"#fff\""
+        " stroke-width=\"1.5\"/>"
+        "<polygon points=\"26,14 34,28 18,28\" fill=\"#a78bfa\" stroke=\"none\"/>"
+        "<polygon points=\"10,20 16,20 13,14\" fill=\"#fff\" opacity=\"0.5\"/>"
+        "</svg>';\n"
+        "  L.marker([turbInfo.src_lat,turbInfo.src_lon],"
+        "{icon:L.divIcon({html:mtSvg,className:'',iconAnchor:[18,28]})}).bindTooltip("
+        "'<b>Terrain peak</b><br>'+turbInfo.kind+'<br>'+turbInfo.reason,"
+        "{direction:'right',offset:[10,0]}).addTo(map);\n"
+        "}\n"
+        "setTimeout(function(){"
+        "var c=map.getCenter(),z=map.getZoom();"
+        "location.hash=c.lat.toFixed(5)+','+c.lng.toFixed(5)+','+z.toFixed(2);"
+        "location.reload();},30000);\n"
+        "function openFeedback(){\n"
+        "  document.getElementById('fb-overlay').style.display='flex';\n"
+        "  document.getElementById('fb-desc').value='';\n"
+        "  document.getElementById('fb-step1').style.display='';\n"
+        "  document.getElementById('fb-step2').style.display='none';\n"
+        "  document.getElementById('fb-copy-btn').textContent='Copy to clipboard';\n"
+        "}\n"
+        "function closeFeedback(){"
+        "document.getElementById('fb-overlay').style.display='none';}\n"
+        "function generateReport(){\n"
+        "  var desc=document.getElementById('fb-desc').value.trim();\n"
+        "  if(!desc){alert('Please describe your experience first.');return;}\n"
+        "  document.getElementById('fb-report').value=buildReport(desc);\n"
+        "  document.getElementById('fb-step1').style.display='none';\n"
+        "  document.getElementById('fb-step2').style.display='';\n"
+        "}\n"
+        "function buildReport(desc){\n"
+        "  var d=new Date();\n"
+        "  var L=['=== FrankenWeather Feedback Report ===',\n"
+        "    'Generated: '+d.toISOString(),'',\n"
+        "    'POSITION',\n"
+        "    '  Lat '+acLat.toFixed(3)+'° Lon '+acLon.toFixed(3)+'°"
+        " | Alt '+acAlt+' ft | Hdg '+acHdg+'°','',\n"
+        "    'FW MODE: '+fwMode+' | NAV MODE: '+navMode,'',\n"
+        "    'WEATHER ZONES'];\n"
+        "  zones.forEach(function(z){\n"
+        "    var zDist=Math.round(gcdNm(acLat,acLon,z.lat,z.lon));\n"
+        "    L.push('  WX'+z.zone+' '+z.icao+' ['+z.source_label+']'"
+        "+'  ('+zDist+' nm)');\n"
+        "    L.push('    Location: '+z.lat.toFixed(3)+'° '+z.lon.toFixed(3)+'°');\n"
+        "    if(z.reason)L.push('    Reason: '+z.reason);\n"
+        "    var wx=z.wx,p=[];\n"
+        "    if(wx.wind)p.push('Wind: '+wx.wind);\n"
+        "    if(wx.lo_cloud)p.push('Lo cloud: '+wx.lo_cloud);\n"
+        "    if(wx.hi_cloud)p.push('Hi cloud: '+wx.hi_cloud);\n"
+        "    if(wx.cb_raw)p.push('CB: '+wx.cb_raw.oktas+\"/8 \""
+        "+wx.cb_raw.base+\"'-\"+wx.cb_raw.top+\"'\");\n"
+        "    if(wx.vis)p.push('Vis: '+wx.vis);\n"
+        "    if(wx.temp)p.push('Temp/QNH: '+wx.temp+'/'+wx.qnh);\n"
+        "    if(p.length)L.push('    '+p.join('  '));\n"
+        "    if(z.metar)L.push('    METAR: '+z.metar);\n"
+        "    if(z.wx_raw)L.push('    PSX Wx: '+z.wx_raw);\n"
+        "    L.push('');\n"
+        "  });\n"
+        "  L.push('TURBULENCE');\n"
+        "  if(turbSummary.pct>0){\n"
+        "    L.push('  '+turbSummary.label+' '+turbSummary.pct"
+        "+'% ('+turbSummary.intensity_label+')');\n"
+        "    if(turbSummary.reason)L.push('  Reason: '+turbSummary.reason);\n"
+        "    if(turbInfo)L.push('  Terrain peak: '+turbInfo.src_lat.toFixed(4)+'°"
+        " '+turbInfo.src_lon.toFixed(4)+'°');\n"
+        "  }else{L.push('  None active');}\n"
+        "  L.push('');\n"
+        "  L.push('ACTIVE SIGMETs');\n"
+        "  if(sigmets.length===0){L.push('  None');}else{\n"
+        "    var inside=[],nearby=[];\n"
+        "    sigmets.forEach(function(s,i){\n"
+        "      if(pointInPoly(acLat,acLon,s.polygon)){\n"
+        "        inside.push({idx:i+1,s:s});\n"
+        "      } else {\n"
+        "        var cx=0,cy=0,n=s.polygon.length;\n"
+        "        for(var k=0;k<n;k++){cx+=s.polygon[k][0];cy+=s.polygon[k][1];}\n"
+        "        var d=gcdNm(acLat,acLon,cx/n,cy/n);\n"
+        "        if(d<200)nearby.push({idx:i+1,s:s,dist:Math.round(d)});\n"
+        "      }\n"
+        "    });\n"
+        "    L.push('  Total in region: '+sigmets.length);\n"
+        "    if(inside.length===0&&nearby.length===0){\n"
+        "      L.push('  None within 200 nm of aircraft');\n"
+        "    }\n"
+        "    if(inside.length>0){\n"
+        "      L.push('  AIRCRAFT INSIDE '+inside.length+' SIGMET(S):');\n"
+        "      inside.forEach(function(x){\n"
+        "        L.push('    SIGMET '+x.idx+': Top FL'+Math.round(x.s.top_ft/100)"
+        "+'  ('+x.s.polygon.length+' pts)');\n"
+        "      });\n"
+        "    }\n"
+        "    if(nearby.length>0){\n"
+        "      nearby.sort(function(a,b){return a.dist-b.dist;});\n"
+        "      L.push('  Nearby (<200 nm):');\n"
+        "      nearby.forEach(function(x){\n"
+        "        L.push('    SIGMET '+x.idx+': Top FL'+Math.round(x.s.top_ft/100)"
+        "+'  '+x.dist+' nm  ('+x.s.polygon.length+' pts)');\n"
+        "      });\n"
+        "    }\n"
+        "  }\n"
+        "  L.push('');\n"
+        "  L.push('PILOT DESCRIPTION');\n"
+        "  L.push('  '+desc.split('\\n').join('\\n  '));\n"
+        "  return L.join('\\n');\n"
+        "}\n"
+        "function copyReport(){\n"
+        "  var el=document.getElementById('fb-report');\n"
+        "  navigator.clipboard.writeText(el.value).catch(function(){"
+        "el.select();document.execCommand('copy');});\n"
+        "  document.getElementById('fb-copy-btn').textContent='Copied!';\n"
+        "  setTimeout(function(){"
+        "document.getElementById('fb-copy-btn').textContent='Copy to clipboard';},2000);\n"
+        "}\n"
         '</script>\n'
     )
 
     mode_color = '#f59e0b' if nav_mode == 'MANEUVERING' else '#22c55e'
     fw_color = '#f59e0b' if fw_mode != 'enabled' else '#22c55e'
     age_str = f'{int(age_s)}s ago'
+
+    side_panel = (
+        '<div class="card" style="font-size:0.85em">\n'
+        f'<div style="color:#94a3b8;font-size:0.8em">Data</div>'
+        f'<div style="margin-bottom:0.5em"><b style="color:#e2e8f0">{age_str}</b></div>'
+        f'<div style="color:#94a3b8;font-size:0.8em">Navigation</div>'
+        f'<div style="margin-bottom:0.5em">'
+        f'<b style="color:{mode_color}">{nav_mode}</b></div>'
+        f'<div style="color:#94a3b8;font-size:0.8em">FrankenWeather</div>'
+        f'<div><b style="color:{fw_color}">{fw_mode}</b></div>'
+        '</div>\n'
+        '<div class="card" style="font-size:0.85em">\n'
+        f'<div style="color:#94a3b8;font-size:0.8em">Turbulence</div>'
+        f'<div style="margin-bottom:0.25em"><b>{turb_label}</b></div>'
+        f'<div><b style="color:{turb_color}">{turb_pct}%</b></div>'
+        '</div>\n'
+        '<div style="display:flex;flex-direction:column;gap:0.5em">\n'
+        '<a href="/weather/settings" class="btn btn-gray btn-sm">Weather zone settings</a>\n'
+        '<a href="/weather/turbulence" class="btn btn-gray btn-sm">Turbulence</a>\n'
+        '<button class="btn btn-blue btn-sm" onclick="openFeedback()">Feedback</button>\n'
+        '</div>\n'
+    )
+
+    modal = (
+        '<div id="fb-overlay" style="display:none;position:fixed;top:0;left:0;'
+        'width:100%;height:100%;background:rgba(0,0,0,0.75);z-index:9999;'
+        'align-items:center;justify-content:center">\n'
+        '<div style="background:#1c2033;border:1px solid #2a2f45;border-radius:8px;'
+        'padding:1.5em;width:min(90vw,640px);max-height:90vh;overflow-y:auto">\n'
+        '<h2 style="margin:0 0 0.75em;color:#f1f5f9">FrankenWeather Feedback</h2>\n'
+        '<div id="fb-step1">\n'
+        '<p style="font-size:0.85em;color:#94a3b8;margin-top:0">'
+        'Submitting a snapshot of current position, weather zones, and turbulence state. '
+        'Please describe what you experienced.</p>\n'
+        '<label style="display:block;font-size:0.85em;color:#94a3b8;margin-bottom:0.4em">'
+        'Your experience</label>\n'
+        '<textarea id="fb-desc" rows="5" style="width:100%;box-sizing:border-box;'
+        'background:#0f1120;border:1px solid #2a2f45;border-radius:4px;'
+        'color:#f1f5f9;padding:0.5em;font-size:0.9em;resize:vertical" '
+        'placeholder="E.g.: Mountain wave turbulence was much stronger than expected '
+        'for 33kt winds, or: Perfect match with real-world weather radar"></textarea>\n'
+        '<div style="display:flex;gap:0.5em;justify-content:flex-end;margin-top:0.75em">\n'
+        '<button class="btn btn-gray" onclick="closeFeedback()">Cancel</button>\n'
+        '<button class="btn btn-blue" onclick="generateReport()">Generate report</button>\n'
+        '</div>\n</div>\n'
+        '<div id="fb-step2" style="display:none">\n'
+        '<p style="font-size:0.85em;color:#94a3b8;margin-top:0">'
+        'Copy this report and post it to the '
+        '<strong style="color:#f1f5f9">PSCC forum</strong> or '
+        '<strong style="color:#f1f5f9">Macroflight</strong>:</p>\n'
+        '<textarea id="fb-report" rows="18" readonly style="width:100%;box-sizing:border-box;'
+        'background:#0f1120;border:1px solid #2a2f45;border-radius:4px;'
+        'color:#94a3b8;padding:0.5em;font-family:monospace;font-size:0.8em;'
+        'resize:vertical"></textarea>\n'
+        '<div style="display:flex;gap:0.5em;justify-content:flex-end;margin-top:0.75em">\n'
+        '<button class="btn btn-gray" onclick="'
+        'document.getElementById(\'fb-step1\').style.display=\'\';'
+        'document.getElementById(\'fb-step2\').style.display=\'none\'">Back</button>\n'
+        '<button id="fb-copy-btn" class="btn btn-blue" '
+        'onclick="copyReport()">Copy to clipboard</button>\n'
+        '</div>\n</div>\n'
+        '</div>\n</div>\n'
+    )
     body = (
+        '<div class="wx-map-wrap">\n'
         '<div id="map"></div>\n' +
         script +
-        '<div style="display:flex;gap:1.5em;margin-top:0.5em;'
-        'font-size:0.85em;color:#94a3b8;flex-wrap:wrap;align-items:center">\n'
-        f'<span>Data: <b style="color:#e2e8f0">{age_str}</b></span>\n'
-        f'<span>Nav: <b style="color:{mode_color}">{nav_mode}</b></span>\n'
-        f'<span>FW: <b style="color:{fw_color}">{fw_mode}</b></span>\n'
-        '<span style="margin-left:auto">'
-        '<a href="/weather/settings" class="btn btn-gray btn-sm">Weather settings</a>'
-        '</span>\n'
-        '</div>\n'
+        '<div class="wx-map-side">\n' + side_panel + '</div>\n'
+        '</div>\n' +
+        modal
     )
     return _page(body)
 
@@ -1016,6 +1279,207 @@ def _fc_buttons_html(pilot_flying, own_sim):
             'My controls!</a>\n'
         )
     return f'<div class="btn-row">{inner}</div>\n'
+
+
+_TURB_TYPES_ORDER = ('wave', 'rotor', 'mechanical', 'shear', 'cb', 'pirep', 'cape', 'gairmet')
+_TURB_KIND_LABELS = {
+    'wave': 'Mountain wave', 'rotor': 'Lee rotor', 'mechanical': 'Mechanical',
+    'shear': 'Wind shear CAT', 'cb': 'CB proximity', 'pirep': 'PIREP',
+    'cape': 'CAPE convective', 'gairmet': 'G-AIRMET',
+}
+
+
+def _build_weather_turb_page(router, color_scheme):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+    """Render the /weather/turbulence control page."""
+    now = time.time()
+    tstate = router.frankenweather_turbstate or {}
+    received_at = router.frankenweather_turbstate_received_at
+    age_s = now - received_at if received_at else float('inf')
+
+    def _page(body):
+        return (
+            '<!DOCTYPE html>\n<html>\n<head>\n'
+            f'<meta name="color-scheme" content="{color_scheme}" />\n' +
+            _COMMON_CSS.format() +
+            '\n<style>body { max-width: 56em; }'
+            'table.turb-types { width:100%; border-collapse:collapse; }'
+            'table.turb-types td,table.turb-types th {'
+            ' padding:4px 8px; border-bottom:1px solid #334155; }'
+            'table.turb-types th { color:#94a3b8; font-size:0.8em; text-align:left; }'
+            '</style>\n</head>\n<body>\n'
+            '<div class="page-title">'
+            '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
+            '<h1>Turbulence</h1>'
+            '<div style="margin-left:auto;display:flex;gap:0.5em">'
+            '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
+            '<a href="/weather/settings" class="btn btn-gray btn-sm">Weather zone settings</a>'
+            '<a href="/weather/turbulence" class="btn btn-gray btn-sm">Refresh</a>'
+            '</div>'
+            '</div>\n' +
+            body +
+            '</body>\n</html>\n'
+        )
+
+    stale_banner = ''
+    if not tstate:
+        stale_banner = (
+            '<div class="card warn"><p style="margin:0">No turbulence data received. '
+            'Start frankenweather with turbulence enabled to use these controls.</p></div>\n'
+        )
+    elif age_s > 300.0:
+        stale_banner = (
+            f'<div class="card warn"><p style="margin:0">Stale data '
+            f'({int(age_s)}s old) — frankenweather may be disconnected.</p></div>\n'
+        )
+
+    enabled = tstate.get('enabled', True)
+    intensity_bias = tstate.get('intensity_bias', 100)
+    lat_bias = tstate.get('lateral_size_bias', 50)
+    wind_mode = tstate.get('wind_mode', 'live')
+    manual_dir = tstate.get('manual_wind_dir', 0)
+    manual_spd = tstate.get('manual_wind_spd', 0)
+    type_enabled = tstate.get('type_enabled', {k: True for k in _TURB_TYPES_ORDER})
+    type_biases = tstate.get('type_biases', {k: 100 for k in _TURB_TYPES_ORDER})
+    active_kind = tstate.get('active_kind', 'none')
+    active_intensity = tstate.get('active_intensity', 0.0)
+    active_reason = tstate.get('active_reason', '')
+    sources = tstate.get('sources', [])
+
+    age_str = f'{int(age_s)}s ago'
+
+    def _bias_input(field, current):
+        return (
+            f'<form method="post" action="/api/weather/turbulence" style="display:inline-flex;'
+            f'gap:0.4em;align-items:center">'
+            f'<input type="number" name="{field}" value="{current}" min="0" max="999"'
+            f' style="width:4.5em">'
+            f'<button class="btn btn-gray btn-sm">Set</button></form>'
+        )
+
+    def _toggle_btn(field, toggle_val, label, color):
+        return (
+            f'<form method="post" action="/api/weather/turbulence" style="display:inline">'
+            f'<input type="hidden" name="{field}" value="{toggle_val}">'
+            f'<button class="btn btn-{color} btn-sm">{label}</button></form>'
+        )
+
+    # Status section
+    intensity_pct = int(active_intensity * 100)
+    intensity_color = '#22c55e' if active_intensity < 0.25 else (
+        '#f59e0b' if active_intensity < 0.5 else '#ef4444')
+    on_off_label = 'ON' if enabled else 'OFF'
+
+    status_html = (
+        '<div class="card">'
+        f'<div style="display:flex;align-items:center;gap:1em;flex-wrap:wrap">'
+        f'<div><span style="color:#94a3b8;font-size:0.85em">Status</span><br>'
+        f'<b style="color:#{"22c55e" if enabled else "ef4444"}">{on_off_label}</b></div>'
+        f'<div><span style="color:#94a3b8;font-size:0.85em">Active type</span><br>'
+        f'<b>{_TURB_KIND_LABELS.get(active_kind, active_kind)}</b></div>'
+        f'<div><span style="color:#94a3b8;font-size:0.85em">Intensity</span><br>'
+        f'<b style="color:{intensity_color}">{intensity_pct}%</b></div>'
+        f'<div style="flex:1"><span style="color:#94a3b8;font-size:0.85em">Reason</span><br>'
+        f'<span style="font-size:0.85em">{active_reason or "—"}</span></div>'
+        f'<div style="margin-left:auto">'
+    ) + _toggle_btn('enabled', 'false' if enabled else 'true',
+                    'Disable' if enabled else 'Enable',
+                    'red' if enabled else 'green') + (
+        '</div></div>'
+    )
+
+    if sources:
+        status_html += '<div style="margin-top:0.5em;font-size:0.85em;color:#94a3b8">Sources:</div>'
+        for src in sources:
+            src_pct = int(src['intensity'] * 100)
+            is_active = src['kind'] == active_kind
+            marker = '▶ ' if is_active else '   '
+            status_html += (
+                f'<div style="font-size:0.8em;margin-left:1em">'
+                f'{marker}<b>{_TURB_KIND_LABELS.get(src["kind"], src["kind"])}</b>'
+                f' {src_pct}% — {src["reason"]}</div>'
+            )
+    status_html += (
+        f'<div style="font-size:0.75em;color:#64748b;margin-top:0.5em">Data: {age_str}</div>'
+    )
+    status_html += '</div>\n'
+
+    # Global controls section
+    global_html = (
+        '<div class="card">'
+        '<h3 style="margin:0 0 0.75em">Global controls</h3>'
+        '<table style="border-collapse:collapse;width:auto">'
+        '<tr><td style="padding:4px 8px;color:#94a3b8">Intensity bias (%)</td>'
+        f'<td style="padding:4px 8px">{_bias_input("intensity_bias", intensity_bias)}</td></tr>'
+        '<tr><td style="padding:4px 8px;color:#94a3b8">CB lateral size bias (%)</td>'
+        f'<td style="padding:4px 8px">{_bias_input("lateral_size_bias", lat_bias)}</td></tr>'
+        '</table>'
+        '</div>\n'
+    )
+
+    # Wind mode section
+    wind_mode_btns = ''
+    for mode in ('live', 'psx', 'manual'):
+        active = wind_mode == mode
+        color = 'blue' if active else 'gray'
+        wind_mode_btns += (
+            f'<form method="post" action="/api/weather/turbulence" style="display:inline">'
+            f'<input type="hidden" name="wind_mode" value="{mode}">'
+            f'<button class="btn btn-{color} btn-sm">{mode.title()}</button></form> '
+        )
+    manual_row = ''
+    if wind_mode == 'manual':
+        manual_row = (
+            '<form method="post" action="/api/weather/turbulence" '
+            'style="margin-top:0.5em;display:flex;gap:0.5em;align-items:center">'
+            f'<label>Dir (°): <input type="number" name="manual_wind_dir" '
+            f'value="{manual_dir}" min="0" max="359" style="width:4em"></label>'
+            f'<label>Speed (kt): <input type="number" name="manual_wind_spd" '
+            f'value="{manual_spd}" min="0" max="300" style="width:4em"></label>'
+            '<button class="btn btn-gray btn-sm">Set</button>'
+            '</form>'
+        )
+    wind_html = (
+        '<div class="card">'
+        '<h3 style="margin:0 0 0.75em">Wind source</h3>'
+    ) + wind_mode_btns + manual_row + '</div>\n'
+
+    # Per-type table section
+    type_rows = ''
+    for kind in _TURB_TYPES_ORDER:
+        is_on = type_enabled.get(kind, True)
+        bias = type_biases.get(kind, 100)
+        toggle_label = 'ON' if is_on else 'OFF'
+        toggle_color = 'green' if is_on else 'red'
+        type_rows += (
+            f'<tr>'
+            f'<td>{_TURB_KIND_LABELS.get(kind, kind)}</td>'
+            f'<td>'
+            f'<form method="post" action="/api/weather/turbulence" style="display:inline">'
+            f'<input type="hidden" name="type_toggle" value="{kind}">'
+            f'<button class="btn btn-{toggle_color} btn-sm">{toggle_label}</button></form>'
+            f'</td>'
+            f'<td>'
+            f'<form method="post" action="/api/weather/turbulence"'
+            f' style="display:inline-flex;gap:0.4em;align-items:center">'
+            f'<input type="number" name="type_bias_value" value="{bias}"'
+            f' min="0" max="999" style="width:4.5em">'
+            f'<input type="hidden" name="type_bias_kind" value="{kind}">'
+            f'<button class="btn btn-gray btn-sm">Set</button></form>'
+            f'</td>'
+            f'</tr>'
+        )
+    types_html = (
+        '<div class="card">'
+        '<h3 style="margin:0 0 0.75em">Turbulence types</h3>'
+        '<table class="turb-types">'
+        '<thead><tr><th>Type</th><th>Enable</th><th>Bias</th></tr></thead>'
+        '<tbody>' + type_rows + '</tbody>'
+        '</table>'
+        '</div>\n'
+    )
+
+    body = stale_banner + status_html + global_html + wind_html + types_html
+    return _page(body)
 
 
 class RouterWebAPI:  # pylint: disable=too-few-public-methods
@@ -1807,6 +2271,45 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 html = _build_weather_settings_page(
                     router, router.config.listen.rest_api_color_scheme)
                 return web.json_response(text=html, content_type='text/html')
+
+            @routes.get('/weather/turbulence')
+            async def handle_weather_turb_get(_):
+                html = _build_weather_turb_page(
+                    router, router.config.listen.rest_api_color_scheme)
+                return web.json_response(text=html, content_type='text/html')
+
+            @routes.post('/api/weather/turbulence')
+            async def handle_weather_turb_post(request):
+                data = await request.post()
+                cmd = {}
+                if 'enabled' in data:
+                    cmd['enabled'] = data['enabled'].lower() == 'true'
+                if 'intensity_bias' in data:
+                    cmd['intensity_bias'] = int(data['intensity_bias'])
+                if 'lateral_size_bias' in data:
+                    cmd['lateral_size_bias'] = int(data['lateral_size_bias'])
+                if 'wind_mode' in data:
+                    cmd['wind_mode'] = str(data['wind_mode'])
+                if 'manual_wind_dir' in data:
+                    cmd['manual_wind_dir'] = int(data['manual_wind_dir'])
+                if 'manual_wind_spd' in data:
+                    cmd['manual_wind_spd'] = int(data['manual_wind_spd'])
+                if 'type_toggle' in data:
+                    kind = str(data['type_toggle'])
+                    tstate = router.frankenweather_turbstate or {}
+                    current = tstate.get('type_enabled', {}).get(kind, True)
+                    cmd['type_enabled'] = {kind: not current}
+                if 'type_bias_kind' in data and 'type_bias_value' in data:
+                    cmd['type_bias'] = {
+                        'kind': str(data['type_bias_kind']),
+                        'value': int(data['type_bias_value']),
+                    }
+                if cmd:
+                    line = f"addon=FRANKENWEATHER:TURBCOMMAND:{json.dumps(cmd)}"
+                    await router.send_to_upstream(line)
+                    await router.client_broadcast(line)
+                    await asyncio.sleep(1)
+                raise web.HTTPFound('/weather/turbulence')
 
             @routes.post('/api/weather/mode')
             async def handle_weather_mode(request):

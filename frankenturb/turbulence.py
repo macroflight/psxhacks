@@ -101,11 +101,12 @@ SURFACE_SAMPLE_AGL_M = 300.0
 # ---------------------------------------------------------------------------
 
 @dataclass
-class TurbulenceState:  # pylint: disable=too-few-public-methods
+class TurbulenceState:  # pylint: disable=too-few-public-methods,too-many-instance-attributes
     """Turbulence estimate for one simulation tick.
 
     Directional components are in [-1, 1].  NaN means "unknown/random" —
     the caller should substitute random noise scaled by intensity.
+    source_lat/source_lon: lat/lon of terrain peak driving turbulence (NaN if not terrain).
     """
 
     intensity: float = 0.0
@@ -114,6 +115,8 @@ class TurbulenceState:  # pylint: disable=too-few-public-methods
     gust: float = field(default_factory=lambda: float("nan"))
     kind: str = "none"
     reason: str = ""
+    source_lat: float = field(default_factory=lambda: float("nan"))
+    source_lon: float = field(default_factory=lambda: float("nan"))
 
     def is_random(self) -> bool:
         """Return True when all directional components are NaN (pure random noise)."""
@@ -125,6 +128,23 @@ class TurbulenceState:  # pylint: disable=too-few-public-methods
 
 
 _CALM = TurbulenceState()
+
+
+def _dest_point(lat_deg: float, lon_deg: float, bearing_deg: float, dist_km: float):
+    """Return (lat, lon) of a point at given bearing and distance from origin."""
+    r_earth = 6371.0
+    lat = math.radians(lat_deg)
+    lon = math.radians(lon_deg)
+    brng = math.radians(bearing_deg)
+    d = dist_km / r_earth
+    lat2 = math.asin(
+        math.sin(lat) * math.cos(d) + math.cos(lat) * math.sin(d) * math.cos(brng)
+    )
+    lon2 = lon + math.atan2(
+        math.sin(brng) * math.sin(d) * math.cos(lat),
+        math.cos(d) - math.sin(lat) * math.sin(lat2),
+    )
+    return math.degrees(lat2), math.degrees(lon2)
 
 
 # ---------------------------------------------------------------------------
@@ -206,6 +226,7 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
             return _CALM
 
         max_upwind_m, ridge_dist_km, ridge_bearing_deg = barrier_result
+        peak_lat, peak_lon = _dest_point(lat, lon, ridge_bearing_deg, ridge_dist_km)
         raw_barrier_m = max(0.0, max_upwind_m - terrain_m)
         # Reduce effective barrier for terrain that is off-axis relative to the
         # wind: a peak 30° to the side generates weaker waves than one directly
@@ -236,6 +257,8 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
                 f"hitting {ridge_top_m_ft:.0f}ft terrain bearing "
                 f"{ridge_bearing_deg:.0f}° distance {ridge_dist_km:.0f}km"
             )
+            state.source_lat = peak_lat
+            state.source_lon = peak_lon
         elif wave["active"]:
             state = self._wave_state(
                 wave, ridge_top_spd_kt * KT_TO_MS,
@@ -246,12 +269,16 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
                 f"hitting {ridge_top_m_ft:.0f}ft terrain bearing "
                 f"{ridge_bearing_deg:.0f}° distance {ridge_dist_km:.0f}km"
             )
+            state.source_lat = peak_lat
+            state.source_lon = peak_lon
         else:
             state = self._mechanical_state(roughness_m, surface_wind_ms, agl_m)
             state.reason = (
                 f"Mechanical: wind {surface_dir_deg:.0f}° {surface_spd_kt:.0f}kt "
                 f"over rough terrain (roughness {roughness_m:.0f}m)"
             )
+            state.source_lat = peak_lat
+            state.source_lon = peak_lon
 
         # ---- 5. Blend in wind-shear CAT ------------------------------------
         if shear_factor > 0.05 and state.intensity < shear_factor * 0.5:

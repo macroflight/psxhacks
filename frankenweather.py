@@ -22,6 +22,16 @@ from pyproj import Geod
 
 import psx
 import wind_corridor
+from frankenturb import (
+    TurbulenceEngine, TurbulenceState, parse_pibahealtas,
+    compute_cb_turbulence,
+    PirepFetcher, compute_pirep_turbulence,
+    CapeFetcher, compute_cape_turbulence,
+    GairmetFetcher, compute_gairmet_turbulence,
+)
+from frankenturb.cb import (
+    find_nearest_cb, parse_wx_zone_basic, parse_wx_zone_position, parse_wx_clust,
+)
 
 
 __MYNAME__ = 'frankenweather'
@@ -305,7 +315,7 @@ def _gen_metar(icao: str, om: dict, now: datetime) -> str:
 
 
 _METAR_WIND_RE = re.compile(r'(VRB|\d{3})(\d{2,3})(?:G(\d{2,3}))?KT')
-_METAR_SKY_RE = re.compile(r'^(FEW|SCT|BKN|OVC)(\d{3})')
+_METAR_SKY_RE = re.compile(r'^(FEW|SCT|BKN|OVC)(\d{3})(CB|TCU)?')
 _METAR_TEMP_RE = re.compile(r'^(M?\d{1,2})/(M?\d{1,2})$')
 _METAR_QNH_RE = re.compile(r'^Q(\d{4})$')
 _METAR_ALT_RE = re.compile(r'^A(\d{4})$')
@@ -395,12 +405,53 @@ def _parse_ts_sigmets(raw: str) -> list:
     return result
 
 
+_METAR_GR_RE = re.compile(r'^[+-]?(SH|TS|VC|FZ|BL|DR|MI|PR)?(GR|GS)$')
+_METAR_SH_RE = re.compile(r'^[+-]?SH[A-Z]{2,4}$')
+_METAR_FC_RE = re.compile(r'^[+-]?FC$')
+_METAR_VIS4_RE = re.compile(r'^\d{4}$')
+_METAR_VISSM_RE = re.compile(r'^(\d+(?:/\d+)?)SM$')
+
+
+def _metar_vis(token: str) -> 'int | None':
+    """Parse a METAR visibility token; return metres or None if not a vis token."""
+    if _METAR_VIS4_RE.match(token):
+        return int(token)
+    m = _METAR_VISSM_RE.match(token)
+    if m:
+        p = m.group(1).split('/')
+        sm = float(p[0]) / float(p[1]) if len(p) == 2 else float(p[0])
+        return int(sm * 1609.34)
+    return None
+
+
+def _metar_parse_temp(s: str) -> int:
+    """Parse a METAR temperature field (possibly M-prefixed negative)."""
+    return -int(s[1:]) if s.startswith('M') else int(s)
+
+
+def _metar_wx_token(token: str, out: dict) -> None:
+    """Update convective flags in parsed METAR dict from a present-weather token."""
+    if 'TS' in token:
+        if token.startswith('+'):
+            out['ts_oktas'] = max(out['ts_oktas'], 8)
+        elif token.startswith('-') or 'VC' in token:
+            out['ts_oktas'] = max(out['ts_oktas'], 2)
+        else:
+            out['ts_oktas'] = max(out['ts_oktas'], 4)
+    elif _METAR_GR_RE.match(token):
+        out['ts_oktas'] = max(out['ts_oktas'], 4)
+    elif _METAR_FC_RE.match(token):
+        out['ts_oktas'] = max(out['ts_oktas'], 8)
+    elif _METAR_SH_RE.match(token):
+        out['showers'] = True
+
+
 def _parse_metar(raw: str) -> dict:  # pylint: disable=too-many-branches
     """Parse a raw METAR string into a dict of weather fields."""
     out: dict = {
         'wind_dir': 0, 'wind_var': False, 'wind_spd': 0, 'wind_gust': 0,
         'vis_m': 10000, 'sky': [], 'temp_c': 15, 'dp_c': 10, 'qnh_hpa': 1013.0,
-        'ts_oktas': 0,
+        'ts_oktas': 0, 'showers': False,
     }
     for token in raw.split():
         m = _METAR_WIND_RE.match(token)
@@ -410,14 +461,9 @@ def _parse_metar(raw: str) -> dict:  # pylint: disable=too-many-branches
             out['wind_spd'] = int(m.group(2))
             out['wind_gust'] = int(m.group(3)) if m.group(3) else 0
             continue
-        if re.match(r'^\d{4}$', token):
-            out['vis_m'] = int(token)
-            continue
-        vsm = re.match(r'^(\d+(?:/\d+)?)SM$', token)
-        if vsm:
-            p = vsm.group(1).split('/')
-            sm = float(p[0]) / float(p[1]) if len(p) == 2 else float(p[0])
-            out['vis_m'] = int(sm * 1609.34)
+        vis = _metar_vis(token)
+        if vis is not None:
+            out['vis_m'] = vis
             continue
         if token in ('SKC', 'CLR', 'NSC'):
             out['sky'] = []
@@ -428,15 +474,18 @@ def _parse_metar(raw: str) -> dict:  # pylint: disable=too-many-branches
             continue
         m = _METAR_SKY_RE.match(token)
         if m:
-            out['sky'].append(({'FEW': 2, 'SCT': 4, 'BKN': 6, 'OVC': 8}[m.group(1)],
-                               int(m.group(2)) * 100))
+            oktas = {'FEW': 2, 'SCT': 4, 'BKN': 6, 'OVC': 8}[m.group(1)]
+            out['sky'].append((oktas, int(m.group(2)) * 100))
+            cloud_type = m.group(3)
+            if cloud_type == 'CB':
+                out['ts_oktas'] = max(out['ts_oktas'], oktas)
+            elif cloud_type == 'TCU':
+                out['showers'] = True
             continue
         m = _METAR_TEMP_RE.match(token)
         if m:
-            def _t(s: str) -> int:
-                return -int(s[1:]) if s.startswith('M') else int(s)
-            out['temp_c'] = _t(m.group(1))
-            out['dp_c'] = _t(m.group(2))
+            out['temp_c'] = _metar_parse_temp(m.group(1))
+            out['dp_c'] = _metar_parse_temp(m.group(2))
             continue
         m = _METAR_QNH_RE.match(token)
         if m:
@@ -446,13 +495,13 @@ def _parse_metar(raw: str) -> dict:  # pylint: disable=too-many-branches
         if m:
             out['qnh_hpa'] = round(int(m.group(1)) / 2.953)
             continue
-        if 'TS' in token:
-            if token.startswith('+'):
-                out['ts_oktas'] = max(out['ts_oktas'], 8)
-            elif token.startswith('-') or 'VC' in token:
-                out['ts_oktas'] = max(out['ts_oktas'], 2)
-            else:
-                out['ts_oktas'] = max(out['ts_oktas'], 4)
+        _metar_wx_token(token, out)
+    # LTG (lightning) in remarks; DSNT = distant (~VCTS), otherwise overhead
+    if 'LTG' in raw:
+        if 'LTG DSNT' in raw:
+            out['ts_oktas'] = max(out['ts_oktas'], 2)
+        else:
+            out['ts_oktas'] = max(out['ts_oktas'], 4)
     return out
 
 
@@ -545,43 +594,62 @@ def _apply_fake_cb(wx_str: str, oktas: int, base_ft: int, top_ft: int) -> str:
     return ';'.join(fields)
 
 
-def _om_cb_fields(om: dict) -> tuple:
+def _om_cb_fields(om: dict, metar_showers: bool = False, metar_ts: bool = False) -> tuple:
     """Return (cb_oktas, cb_tops_ft, cb_base_ft) derived from Open-Meteo data.
 
     Returns (0, default_tops, default_base) when no convective activity is detected.
+    metar_showers: METAR observed SH-type precip (SHRA, TCU…) — confirms showers.
+    metar_ts: METAR observed thunderstorm (TS, GR, LTG overhead…) — bypasses precip gate.
     """
-    cur = om.get("current", {})
-    wmo_code = int(cur.get("weather_code", 0))
-    temp_c = float(cur.get("temperature_2m", 15))
     hourly = om.get("hourly", {})
     hour_idx = datetime.now(timezone.utc).hour
-    cape = float((hourly.get("cape") or [0])[hour_idx])
-    cin = float((hourly.get("convective_inhibition") or [0])[hour_idx])
-    h_temp = float((hourly.get("temperature_2m") or [temp_c])[hour_idx])
-    h_dp = float((hourly.get("dewpoint_2m") or [h_temp - 5.0])[hour_idx])
-    showers_mm = float((hourly.get("showers") or [0])[hour_idx])
+
+    def _h(key, default):
+        lst = hourly.get(key) or []
+        return float(lst[hour_idx]) if hour_idx < len(lst) else float(default)
+
+    wmo_code = int((om.get("current") or {}).get("weather_code", 0))
+    temp_c = float((om.get("current") or {}).get("temperature_2m", 15))
+    cape = _h("cape", 0)
+    cin = _h("convective_inhibition", 0)
+    h_temp = _h("temperature_2m", temp_c)
+    h_dp = _h("dewpoint_2m", h_temp - 5.0)
+    showers_mm = _h("showers", 0)
+    # Frontal systems report as "precipitation" not "showers" in OM; use total precip
+    # as fallback for the showers gate when WMO explicitly codes a thunderstorm.
+    if wmo_code in (95, 96, 99) and showers_mm < 0.5:
+        showers_mm = _h("precipitation", 0)
+    is_ts = wmo_code in (95, 96, 99) or metar_ts
+
     cb_oktas = _cape_to_cb_oktas(cape, cin)
-    # WMO thunderstorm codes guarantee minimum coverage only when precipitation backs it up
-    if wmo_code in (95, 96, 99) and showers_mm >= 0.5 and cb_oktas == 0:
-        cb_oktas = 4
-    # Suppress CBs when no measurable shower precipitation — WMO code alone is unreliable
-    if showers_mm < 0.5:
+
+    if is_ts:
+        # Thunderstorm directly observed (WMO 95/96/99 or METAR TS/GR/LTG/FC) —
+        # no precipitation gate; WMO/METAR are station observations, not forecasts.
+        # Give minimum 4 oktas when CAPE is negligible but CIN allows convection.
+        if cb_oktas == 0 and cin > -200.0:
+            cb_oktas = 4
+    elif showers_mm >= 0.5 or metar_showers:
+        # Showers confirmed by OM data or METAR (SHRA/TCU); cap coverage by intensity
+        if showers_mm < 2.0:
+            cb_oktas = min(cb_oktas, 2)
+        elif showers_mm < 5.0:
+            cb_oktas = min(cb_oktas, 4)
+        elif showers_mm < 15.0:
+            cb_oktas = min(cb_oktas, 6)
+    else:
         cb_oktas = 0
-    # Cap CB coverage by precipitation intensity — CAPE is potential, showers are reality
-    elif showers_mm < 2.0:
-        cb_oktas = min(cb_oktas, 2)
-    elif showers_mm < 5.0:
-        cb_oktas = min(cb_oktas, 4)
-    elif showers_mm < 15.0:
-        cb_oktas = min(cb_oktas, 6)
+
     if cb_oktas == 0:
         return 0, int(_WX_DEFAULTS[10]), int(_WX_DEFAULTS[11])
     return cb_oktas, _cb_tops_ft(cape), _cb_base_ft(h_temp, h_dp)
 
 
-def _apply_om_cb(wx_str: str, om: dict) -> str:
+def _apply_om_cb(wx_str: str, om: dict,
+                 metar_showers: bool = False, metar_ts: bool = False) -> str:
     """Replace CB fields in a PSX Wx string with Open-Meteo derived values."""
-    cb_oktas, cb_tops, cb_base = _om_cb_fields(om)
+    cb_oktas, cb_tops, cb_base = _om_cb_fields(
+        om, metar_showers=metar_showers, metar_ts=metar_ts)
     fields = wx_str.split(';')
     fields[9] = str(cb_oktas)
     fields[10] = str(cb_tops)
@@ -637,6 +705,103 @@ def _parse_nm_range(s: str) -> tuple:
     return (lo, hi)
 
 
+def _isnan(v):
+    """Return True if v is float NaN."""
+    try:
+        return v != v  # pylint: disable=comparison-with-itself
+    except TypeError:
+        return False
+
+
+def _parse_psx_wind(wx_str):
+    """Parse surface wind direction and speed from a PSX Wx* weather string.
+
+    The 19th field encodes VVVDDSS (VVV=variability, DD=direction/10, SS=speed kt).
+    Returns (direction_deg, speed_kt) or None.
+    """
+    parts = wx_str.strip().split(';')
+    if len(parts) < 19:
+        return None
+    wind_field = parts[18]
+    if len(wind_field) < 7:
+        return None
+    try:
+        dir_deg = (int(wind_field[3:5]) * 10) % 360
+        speed_kt = int(wind_field[5:7])
+        return dir_deg, speed_kt
+    except (ValueError, IndexError):
+        return None
+
+
+def _intensity_label(intensity):
+    """Map 0–1 intensity to a human-readable severity label."""
+    if intensity < 0.10:
+        return "none"
+    if intensity < 0.25:
+        return "light"
+    if intensity < 0.50:
+        return "moderate"
+    if intensity < 0.75:
+        return "severe"
+    return "extreme"
+
+
+# WxBurst channel offsets
+_BURST_SINK = 0
+_BURST_BANK = 100
+_BURST_YAW = 200
+_BURST_SPD = 300
+_BURST_GUST = 400
+
+_TURB_TYPES = ('wave', 'rotor', 'mechanical', 'shear', 'cb', 'pirep', 'cape', 'gairmet')
+
+
+def _sign(v):
+    """Return +1 or -1 from a float."""
+    return 1 if v >= 0.0 else -1
+
+
+def _pick_burst(state, intensity):
+    """Choose (base_offset, direction, label) for one WxBurst event."""
+    r = random.choice
+    if state.kind == 'wave':
+        vert_dir = _sign(state.vertical) if not _isnan(state.vertical) else r([-1, 1])
+        roll_dir = _sign(state.roll) if not _isnan(state.roll) else r([-1, 1])
+        spd_dir = _sign(state.gust) if not _isnan(state.gust) else r([-1, 1])
+        if intensity < 0.25:
+            return r([(_BURST_SPD, spd_dir, 'spd'), (_BURST_GUST, spd_dir, 'gust')])
+        if intensity < 0.50:
+            return r([
+                (_BURST_SINK, vert_dir, 'sink'),
+                (_BURST_SPD, spd_dir, 'spd'),
+                (_BURST_GUST, spd_dir, 'gust'),
+            ])
+        return r([
+            (_BURST_SINK, vert_dir, 'sink'),
+            (_BURST_BANK, roll_dir, 'bank'),
+            (_BURST_SPD, spd_dir, 'spd'),
+        ])
+    if state.kind == 'rotor':
+        return r([
+            (_BURST_SINK, r([-1, 1]), 'sink'),
+            (_BURST_BANK, r([-1, 1]), 'bank'),
+            (_BURST_BANK, r([-1, 1]), 'bank'),
+            (_BURST_YAW, r([-1, 1]), 'yaw'),
+        ])
+    if state.kind == 'shear':
+        return r([
+            (_BURST_SINK, r([-1, 1]), 'sink'),
+            (_BURST_BANK, r([-1, 1]), 'bank'),
+        ])
+    # mechanical / cb / pirep / cape / gairmet — broad random mix
+    return r([
+        (_BURST_SINK, r([-1, 1]), 'sink'),
+        (_BURST_BANK, r([-1, 1]), 'bank'),
+        (_BURST_YAW, r([-1, 1]), 'yaw'),
+        (_BURST_SPD, r([-1, 1]), 'spd'),
+    ])
+
+
 # ---------------------------------------------------------------------------
 # Main script class
 # ---------------------------------------------------------------------------
@@ -644,7 +809,7 @@ def _parse_nm_range(s: str) -> tuple:
 class Script:  # pylint: disable=too-many-instance-attributes
     """FrankenWeather script."""
 
-    def __init__(self):
+    def __init__(self):  # pylint: disable=too-many-statements
         """Initialise script state."""
         self.args = None
         self.taskgroup = None
@@ -717,6 +882,28 @@ class Script:  # pylint: disable=too-many-instance-attributes
         # paused  = stop updating PSX weather; keep WxAutoSet=0 (existing zones remain)
         # disabled = stop updating; set WxAutoSet=1 (PSX resumes its own auto-weather)
         self._fw_mode: str = "enabled"
+
+        # -------------------------------------------------------------------
+        # Turbulence subsystem (merged from frankenturb)
+        # -------------------------------------------------------------------
+        self._turb_enabled: bool = True
+        self._turb_intensity_bias: int = 100   # 0-999 %
+        self._turb_wind_mode: str = "live"     # "live", "psx", or "manual"
+        self._turb_manual_wind_dir: int = 0
+        self._turb_manual_wind_spd: int = 0
+        self._turb_psx_wind = None             # (dir_deg, speed_kt) or None
+        self._turb_lateral_size_bias: int = 50
+        self._turb_rate: int = 100             # 0-100, injection rate scale
+        self._turb_type_enabled: dict = {k: True for k in _TURB_TYPES}
+        self._turb_type_biases: dict = {k: 100 for k in _TURB_TYPES}
+        self._turb_engine: Optional[TurbulenceEngine] = None
+        self._turb_state: Optional[TurbulenceState] = None
+        self._turb_sources: list = []
+        self._turb_print_count: int = 0
+        self._turb_state_changed_event: asyncio.Event = asyncio.Event()
+        self._turb_pirep_fetcher = None
+        self._turb_cape_fetcher = None
+        self._turb_gairmet_fetcher = None
 
     # ------------------------------------------------------------------
     # PSX helpers
@@ -853,10 +1040,13 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self._apply_wind_injection()
 
     def _handle_fw_addon(self, value: str) -> None:
-        """Dispatch FRANKENWEATHER addon messages: COMMAND or STATE broadcast."""
+        """Dispatch FRANKENWEATHER addon messages: COMMAND, TURBCOMMAND, or STATE broadcast."""
         rest = value[len("FRANKENWEATHER:"):]
         if rest.startswith("COMMAND:"):
             self._handle_fw_command(rest[len("COMMAND:"):])
+            return
+        if rest.startswith("TURBCOMMAND:"):
+            self._handle_turb_command(rest[len("TURBCOMMAND:"):])
             return
         if not rest.startswith("STATE:"):
             return
@@ -900,6 +1090,415 @@ class Script:  # pylint: disable=too-many-instance-attributes
             elif old_mode == "disabled":
                 self.psx_send_and_set("WxAutoSet", "0")
         self._state_changed_event.set()
+
+    # ------------------------------------------------------------------
+    # Turbulence subsystem
+    # ------------------------------------------------------------------
+
+    def _turb_type_effective_bias(self, kind: str) -> int:
+        """Return combined bias for a turbulence type: 0 when disabled."""
+        if not self._turb_type_enabled.get(kind, True):
+            return 0
+        return self._turb_type_biases.get(kind, 100)
+
+    def _turb_load_config(self, path: str) -> None:
+        """Load turbulence settings from JSON config file."""
+        import pathlib  # pylint: disable=import-outside-toplevel
+        try:
+            with open(path, encoding="utf-8") as fh:
+                cfg = json.load(fh)
+        except FileNotFoundError:
+            p = pathlib.Path(path)
+            if p.parent.exists():
+                p.write_text("{}\n", encoding="utf-8")
+            return
+        except Exception as exc:  # pylint: disable=broad-except
+            self.logger.warning("Turb config load failed: %s", exc)
+            return
+        if "turb_enabled" in cfg:
+            self._turb_enabled = bool(cfg["turb_enabled"])
+        if "intensity_bias" in cfg:
+            self._turb_intensity_bias = int(cfg["intensity_bias"])
+        if "lateral_size_bias" in cfg:
+            self._turb_lateral_size_bias = int(cfg["lateral_size_bias"])
+        if "wind_mode" in cfg:
+            self._turb_wind_mode = str(cfg["wind_mode"])
+        if "manual_wind_dir" in cfg:
+            self._turb_manual_wind_dir = int(cfg["manual_wind_dir"])
+        if "manual_wind_spd" in cfg:
+            self._turb_manual_wind_spd = int(cfg["manual_wind_spd"])
+        for kind in _TURB_TYPES:
+            if "type_biases" in cfg and kind in cfg["type_biases"]:
+                self._turb_type_biases[kind] = int(cfg["type_biases"][kind])
+            if "type_enabled" in cfg and kind in cfg["type_enabled"]:
+                self._turb_type_enabled[kind] = bool(cfg["type_enabled"][kind])
+        self.logger.info("Loaded turb config from %s", path)
+
+    def _turb_save_config(self, path: str) -> None:
+        """Save turbulence settings to JSON config file."""
+        cfg = {
+            "turb_enabled": self._turb_enabled,
+            "intensity_bias": self._turb_intensity_bias,
+            "lateral_size_bias": self._turb_lateral_size_bias,
+            "wind_mode": self._turb_wind_mode,
+            "manual_wind_dir": self._turb_manual_wind_dir,
+            "manual_wind_spd": self._turb_manual_wind_spd,
+            "type_biases": dict(self._turb_type_biases),
+            "type_enabled": dict(self._turb_type_enabled),
+        }
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(cfg, fh, indent=2)
+                fh.write("\n")
+        except Exception as exc:  # pylint: disable=broad-except
+            self.logger.warning("Turb config save failed: %s", exc)
+            return
+        self.logger.info("Saved turb config to %s", path)
+
+    def _turb_update_psx_wind(self) -> None:
+        """Read the focused PSX weather zone and update the fixed wind profile."""
+        if self._turb_engine is None:
+            return
+        zone_str = self.psx.get("FocussedWxZone")
+        zone = 0
+        if zone_str is not None:
+            try:
+                zone = int(zone_str)
+            except ValueError:
+                pass
+        wx_var = "WxBasic" if zone == 0 else f"Wx{zone}"
+        wx_str = self.psx.get(wx_var)
+        if not wx_str:
+            return
+        result = _parse_psx_wind(wx_str)
+        if result is None:
+            self.logger.warning("PSX wind: could not parse %s=%r", wx_var, wx_str)
+            return
+        dir_deg, speed_kt = result
+        self.logger.info("Turb PSX wind: zone=%d %s → %03d°/%dkt",
+                         zone, wx_var, dir_deg, speed_kt)
+        self._turb_psx_wind = (dir_deg, speed_kt)
+        self._turb_engine.set_fixed_wind(float(dir_deg), float(speed_kt))
+
+    def _handle_turb_command(self, json_str: str) -> None:  # pylint: disable=too-many-branches,too-many-statements
+        """Apply a FRANKENWEATHER:TURBCOMMAND message."""
+        try:
+            cmd = json.loads(json_str)
+        except ValueError:
+            self.logger.warning("Malformed TURBCOMMAND: %s", json_str[:80])
+            return
+        changed = False
+        if "enabled" in cmd:
+            self._turb_enabled = bool(cmd["enabled"])
+            changed = True
+        if "intensity_bias" in cmd:
+            v = int(cmd["intensity_bias"])
+            if 0 <= v <= 999:
+                self._turb_intensity_bias = v
+                changed = True
+        if "lateral_size_bias" in cmd:
+            v = int(cmd["lateral_size_bias"])
+            if 0 <= v <= 999:
+                self._turb_lateral_size_bias = v
+                changed = True
+        if "wind_mode" in cmd:
+            mode = str(cmd["wind_mode"])
+            if mode in ("live", "psx", "manual"):
+                self._turb_wind_mode = mode
+                if self._turb_engine is not None:
+                    if mode == "live":
+                        self._turb_engine.clear_fixed_wind()
+                    elif mode == "psx":
+                        self._turb_engine.clear_fixed_wind()
+                        if self.psx_connected:
+                            self._turb_update_psx_wind()
+                    elif mode == "manual":
+                        self._turb_engine.set_fixed_wind(
+                            float(self._turb_manual_wind_dir),
+                            float(self._turb_manual_wind_spd))
+                changed = True
+        if "manual_wind_dir" in cmd:
+            self._turb_manual_wind_dir = int(cmd["manual_wind_dir"]) % 360
+            if self._turb_wind_mode == "manual" and self._turb_engine is not None:
+                self._turb_engine.set_fixed_wind(
+                    float(self._turb_manual_wind_dir),
+                    float(self._turb_manual_wind_spd))
+            changed = True
+        if "manual_wind_spd" in cmd:
+            v = int(cmd["manual_wind_spd"])
+            if 0 <= v <= 300:
+                self._turb_manual_wind_spd = v
+                if self._turb_wind_mode == "manual" and self._turb_engine is not None:
+                    self._turb_engine.set_fixed_wind(
+                        float(self._turb_manual_wind_dir),
+                        float(self._turb_manual_wind_spd))
+                changed = True
+        if "type_enabled" in cmd:
+            for kind, val in cmd["type_enabled"].items():
+                if kind in _TURB_TYPES:
+                    self._turb_type_enabled[kind] = bool(val)
+            changed = True
+        if "type_bias" in cmd:
+            kind = cmd["type_bias"].get("kind")
+            val = cmd["type_bias"].get("value")
+            if kind in _TURB_TYPES and val is not None:
+                v = int(val)
+                if 0 <= v <= 999:
+                    self._turb_type_biases[kind] = v
+                    changed = True
+        if changed:
+            if self.args.turb_config_file:
+                self._turb_save_config(self.args.turb_config_file)
+            self._turb_state_changed_event.set()
+
+    def _get_nearest_cb(self, lat: float, lon: float):
+        """Collect CB data from PSX cache and return the nearest active storm cell."""
+        raw_time = self.psx.get("TimeEarth")
+        try:
+            time_earth_ms = int(raw_time) if raw_time else int(time.time() * 1000)
+        except ValueError:
+            time_earth_ms = int(time.time() * 1000)
+
+        zone_positions = {}
+        for zone_i in range(1, 8):
+            raw = self.psx.get(f"WxMode{zone_i}")
+            if raw:
+                pos = parse_wx_zone_position(raw)
+                if pos is not None:
+                    zone_positions[zone_i] = pos
+
+        zone_cb_data = {}
+        planet_raw = self.psx.get("WxBasic")
+        if planet_raw:
+            planet_cb = parse_wx_zone_basic(planet_raw)
+            if planet_cb is not None:
+                zone_cb_data[0] = planet_cb
+        for zone_i in range(1, 8):
+            raw = self.psx.get(f"Wx{zone_i}")
+            if raw:
+                cb_data = parse_wx_zone_basic(raw)
+                if cb_data is not None:
+                    zone_cb_data[zone_i] = cb_data
+
+        clust_raw = self.psx.get("WxClust")
+        clust_positions = parse_wx_clust(clust_raw) if clust_raw else []
+
+        return find_nearest_cb(lat, lon, zone_positions, zone_cb_data,
+                               clust_positions, time_earth_ms,
+                               lat_scale=self._turb_lateral_size_bias / 100.0)
+
+    async def psx_wind_coro(self) -> None:
+        """Refresh PSX weather-zone wind every 30 s when PSX wind mode is active."""
+        myname = inspect.currentframe().f_code.co_name
+        try:
+            self.logger.debug("Starting %s", myname)
+            while True:
+                await asyncio.sleep(30.0)
+                if self._turb_wind_mode == "psx" and self.psx_connected:
+                    self._turb_update_psx_wind()
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in %s", exc, myname)
+            self.logger.critical(traceback.format_exc())
+
+    async def turb_state_broadcast_coro(self) -> None:  # pylint: disable=too-many-locals
+        """Broadcast TURBSTATE to the PSX network when turbulence state changes."""
+        myname = inspect.currentframe().f_code.co_name
+        try:
+            self.logger.debug("Starting %s", myname)
+            while True:
+                await self._turb_state_changed_event.wait()
+                self._turb_state_changed_event.clear()
+                state = self._turb_state
+                sources = self._turb_sources
+                if not math.isnan(getattr(state, 'source_lat', float('nan'))):
+                    src_lat = state.source_lat
+                    src_lon = state.source_lon
+                else:
+                    src_lat = None
+                    src_lon = None
+                payload = {
+                    "enabled": self._turb_enabled,
+                    "intensity_bias": self._turb_intensity_bias,
+                    "lateral_size_bias": self._turb_lateral_size_bias,
+                    "wind_mode": self._turb_wind_mode,
+                    "manual_wind_dir": self._turb_manual_wind_dir,
+                    "manual_wind_spd": self._turb_manual_wind_spd,
+                    "type_enabled": dict(self._turb_type_enabled),
+                    "type_biases": dict(self._turb_type_biases),
+                    "active_kind": state.kind if state else "none",
+                    "active_intensity": round(state.intensity, 3) if state else 0.0,
+                    "active_reason": state.reason if state else "",
+                    "source_lat": src_lat,
+                    "source_lon": src_lon,
+                    "sources": [
+                        {"kind": s.kind, "intensity": round(e, 3), "reason": s.reason}
+                        for e, s in sources
+                    ],
+                }
+                msg = (f"addon=FRANKENWEATHER:TURBSTATE:{self._instance_uuid}:"
+                       f"{json.dumps(payload)}")
+                if self.psx_connected:
+                    self.psx.send("addon", msg[len("addon="):])
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in %s", exc, myname)
+            self.logger.critical(traceback.format_exc())
+
+    async def turbulence_coro(self) -> None:  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+        """Compute turbulence, inject WxBurst into PSX, broadcast state changes."""
+        myname = inspect.currentframe().f_code.co_name
+        last_print = 0.0
+        last_quiet_print = 0.0
+        try:
+            self.logger.debug("Starting %s", myname)
+            loop = asyncio.get_running_loop()
+            while True:
+                await asyncio.sleep(0.2)
+
+                if not self.psx_connected or self.psx_paused:
+                    continue
+
+                raw = self.psx.get("PiBaHeAlTas")
+                if not raw:
+                    continue
+                try:
+                    _, _, _, alt_ft, tas_kt, lat, lon = parse_pibahealtas(raw)
+                except ValueError as exc:
+                    self.logger.warning("Bad PiBaHeAlTas: %s", exc)
+                    continue
+
+                if tas_kt < 30.0:
+                    continue
+
+                if self._turb_engine is None:
+                    continue
+
+                state, pirep_rec, cape_sample, gairmet_region = await asyncio.gather(
+                    loop.run_in_executor(None, self._turb_engine.compute, lat, lon, alt_ft),
+                    loop.run_in_executor(
+                        None, self._turb_pirep_fetcher.find_relevant, lat, lon, alt_ft),
+                    loop.run_in_executor(None, self._turb_cape_fetcher.get, lat, lon),
+                    loop.run_in_executor(
+                        None, self._turb_gairmet_fetcher.get_active, lat, lon, alt_ft),
+                )
+
+                terrain_state = state
+
+                def _eff(s):
+                    return s.intensity * self._turb_type_effective_bias(s.kind)
+
+                cb = self._get_nearest_cb(lat, lon)
+                cb_state = None
+                if cb is not None:
+                    cb_state = compute_cb_turbulence(alt_ft, cb)
+                    if _eff(cb_state) > _eff(state):
+                        state = cb_state
+
+                pirep_state = None
+                if pirep_rec is not None:
+                    pirep_state = compute_pirep_turbulence(alt_ft, pirep_rec)
+                    if _eff(pirep_state) > _eff(state):
+                        state = pirep_state
+
+                cape_state = None
+                if cape_sample is not None:
+                    cape_state = compute_cape_turbulence(alt_ft, cape_sample)
+                    if _eff(cape_state) > _eff(state):
+                        state = cape_state
+
+                gairmet_state = None
+                if gairmet_region is not None:
+                    gairmet_state = compute_gairmet_turbulence(alt_ft, gairmet_region)
+                    if _eff(gairmet_state) > _eff(state):
+                        state = gairmet_state
+
+                effective_intensity = min(
+                    1.0,
+                    state.intensity * self._turb_intensity_bias *
+                    self._turb_type_effective_bias(state.kind) / 10000.0,
+                )
+                if self._turb_enabled and effective_intensity >= 0.01:
+                    inject_prob = (effective_intensity ** 1.5) * (self._turb_rate / 100.0)
+                    if random.random() < inject_prob:
+                        base, direction, label = _pick_burst(state, effective_intensity)
+                        magnitude = min(99, random.randint(1, max(1,
+                                        int(effective_intensity * 99))))
+                        psx_value = direction * (base + magnitude)
+                        self.psx_send_and_set("WxBurst", str(psx_value))
+                        self.logger.debug("Injected WxBurst=%d (%s%s%02d)",
+                                          psx_value, label,
+                                          '+' if direction > 0 else '-', magnitude)
+
+                all_sources = []
+                for src_s in [terrain_state, cb_state, pirep_state, cape_state, gairmet_state]:
+                    if src_s is None or src_s.intensity < 0.01:
+                        continue
+                    src_eff = min(1.0, src_s.intensity * self._turb_intensity_bias *
+                                  self._turb_type_effective_bias(src_s.kind) / 10000.0)
+                    if src_eff < 0.01:
+                        continue
+                    all_sources.append((src_eff, src_s))
+                all_sources.sort(key=lambda t: t[0], reverse=True)
+
+                state_changed = (
+                    self._turb_state is None or
+                    self._turb_state.kind != state.kind or
+                    abs((self._turb_state.intensity or 0.0) - (state.intensity or 0.0)) > 0.05
+                )
+                self._turb_state = state
+                self._turb_sources = all_sources
+                if state_changed:
+                    self._turb_state_changed_event.set()
+
+                now = time.monotonic()
+                if effective_intensity < 0.01:
+                    last_print = 0.0
+                    if now - last_quiet_print >= 60.0:
+                        last_quiet_print = now
+                        self.logger.info(
+                            "Turbulence [%s] lat=%.3f lon=%.3f alt=%.0fft | none",
+                            "ON " if self._turb_enabled else "OFF", lat, lon, alt_ft,
+                        )
+                    continue
+                if now - last_print < 10.0:
+                    continue
+                last_print = now
+
+                intensity_label = _intensity_label(effective_intensity)
+                enabled_str = "ON " if self._turb_enabled else "OFF"
+                kind_str = state.kind
+                vert_str = f"{state.vertical:+.2f}" if not _isnan(state.vertical) else "rand"
+                roll_str = f"{state.roll:+.2f}" if not _isnan(state.roll) else "rand"
+                gust_str = f"{state.gust:+.2f}" if not _isnan(state.gust) else "rand"
+
+                if self._turb_print_count % 20 == 0:
+                    self.logger.info("--- Turbulence %s", "-" * 73)
+                    self.logger.info(
+                        "     [   ] lat(°)   lon(°)   alt(ft)  kind        "
+                        "label      (0-1)  vert  roll  gust")
+                    self.logger.info("--- Turbulence %s", "-" * 73)
+                self._turb_print_count += 1
+
+                self.logger.info(
+                    "Turbulence [%s] lat=%.3f lon=%.3f alt=%.0fft | "
+                    "%-10s | %-8s (%.2f) | vert=%s roll=%s gust=%s",
+                    enabled_str, lat, lon, alt_ft,
+                    kind_str, intensity_label, effective_intensity,
+                    vert_str, roll_str, gust_str,
+                )
+                for src_eff, src in all_sources:
+                    marker = ">" if (src is state) else " "
+                    self.logger.info("           [%s%-10s] %.2f %s",
+                                     marker, src.kind, src_eff, src.reason or "")
+                    if src.kind == 'cb' and cb is not None:
+                        self.logger.info(
+                            "           [  cb-geo   ] %s brg=%03.0f° rng=%.0fnm "
+                            "base=%.0fft top=%.0fft cov=%d",
+                            cb.source, cb.bearing_deg, cb.range_center_nm,
+                            cb.cloud_base_ft_msl, cb.cloud_top_ft_msl, cb.coverage)
+
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in %s", exc, myname)
+            self.logger.critical(traceback.format_exc())
 
     def _handle_corridor(self, _key: str, value: str) -> None:
         """Cache the current PSX wind corridor text for wind injection."""
@@ -1487,8 +2086,19 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 parsed = _parse_metar(raw_metars[i])
                 new_modes.append(build_wxmode_string(lat, lon, 0.0, month, icao))
                 wx = metar_to_wx_string(parsed)
-                if om and parsed.get('ts_oktas', 0) > 0:
-                    wx = _apply_om_cb(wx, om)
+                ts_oktas = parsed.get('ts_oktas', 0)
+                has_showers = parsed.get('showers', False)
+                if om and (ts_oktas > 0 or has_showers):
+                    refined = _apply_om_cb(
+                        wx, om,
+                        metar_showers=has_showers,
+                        metar_ts=ts_oktas > 0)
+                    if refined.split(';')[9] != '0':
+                        wx = refined
+                    elif ts_oktas > 0:
+                        # OM suppressed CBs but METAR directly observes TS/GR — keep
+                        # METAR-derived coverage; OM is lagging the actual observation.
+                        pass
                 new_metars.append(raw_metars[i])
             else:
                 elev = float(om.get("elevation", 0)) if om else 0.0
@@ -1510,9 +2120,14 @@ class Script:  # pylint: disable=too-many-instance-attributes
             cb_oktas = int(parts[9]) if len(parts) > 11 and parts[9] != '0' else 0
             om = om_by_zone.get(i, {})
             hourly = om.get("hourly", {})
-            cape = float((hourly.get("cape") or [0])[now.hour])
-            cin = float((hourly.get("convective_inhibition") or [0])[now.hour])
-            showers_mm = float((hourly.get("showers") or [0])[now.hour])
+
+            def _hval(key, default, _h=now.hour, _hr=hourly):
+                lst = _hr.get(key) or []
+                return float(lst[_h]) if _h < len(lst) else float(default)
+
+            cape = _hval("cape", 0)
+            cin = _hval("convective_inhibition", 0)
+            showers_mm = _hval("showers", 0)
             wmo_code = int((om.get("current") or {}).get("weather_code", 0))
             if cb_oktas > 0:
                 cb_part = (f"  CB {cb_oktas} oktas"
@@ -1614,6 +2229,11 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 "source": "VATSIM" if self.zone_is_metar.get(zone_num) else "OM",
                 "reason": self.zone_reason.get(zone_num, ""),
             })
+        sigmets = [
+            {"polygon": [[round(la, 4), round(lo, 4)] for la, lo in s["polygon"]],
+             "top_ft": s["top_ft"]}
+            for s in self.ts_sigmets
+        ]
         state = {
             "fw_mode": self._fw_mode,
             "mode": "MANEUVERING" if self._maneuvering else "CRUISE",
@@ -1623,6 +2243,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
             "ac_alt_ft": round(self.ac_alt_ft) if self.ac_alt_ft is not None else None,
             "zones": zones,
             "config": config,
+            "sigmets": sigmets,
         }
         payload = json.dumps(state, separators=(',', ':'))
         return f"FRANKENWEATHER:STATE:{self._instance_uuid}:{payload}"
@@ -1726,6 +2347,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 self.psx_connected = True
                 self.psx.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
                 self._state_changed_event.set()
+                if not self.args.no_turbulence:
+                    self._turb_state_changed_event.set()
                 if self._fw_mode == "disabled":
                     self.psx_send_and_set("WxAutoSet", "1")
 
@@ -1737,6 +2360,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 self.logger.info("PSX RESUMED")
                 self.psx_connected = True
                 self.psx_paused = False
+                if not self.args.no_turbulence:
+                    self._turb_state_changed_event.set()
 
             self.psx = psx.Client()
             self.psx.onPause = lambda: setattr(self, 'psx_paused', True)
@@ -1759,6 +2384,12 @@ class Script:  # pylint: disable=too-many-instance-attributes
             for i in range(1, 8):
                 self.psx.subscribe(f"Wx{i}", self.handle_wx_change)
                 self.psx.subscribe(f"WxMode{i}")
+
+            # Turbulence subsystem subscriptions
+            if not self.args.no_turbulence:
+                self.psx.subscribe("TimeEarth")
+                self.psx.subscribe("WxClust")
+                self.psx.subscribe("AcftHeight")
 
             await self.psx.connect(self.args.psx_host, self.args.psx_port)
             self.logger.warning("psx.connect() returned — this should not happen")
@@ -1793,6 +2424,12 @@ class Script:  # pylint: disable=too-many-instance-attributes
                     ("WeatherUpdate", self.weather_update_coro),
                     ("StateBroadcast", self.state_broadcast_coro),
                 ]
+                if not self.args.no_turbulence:
+                    coros += [
+                        ("TurbulenceTask", self.turbulence_coro),
+                        ("PSXWind", self.psx_wind_coro),
+                        ("TurbBroadcast", self.turb_state_broadcast_coro),
+                    ]
                 for name, coro_fn in coros:
                     if name not in running:
                         self.logger.info("Starting %s...", name)
@@ -1881,6 +2518,18 @@ class Script:  # pylint: disable=too-many-instance-attributes
         parser.add_argument(
             '--debug', action='store_true',
             help="Log PSX weather changes, every value sent to PSX, and all PSX traffic.")
+        parser.add_argument(
+            '--no-turbulence', action='store_true',
+            help="Disable the turbulence subsystem entirely.")
+        parser.add_argument(
+            '--turb-rate', type=int, default=100, metavar='0-100',
+            help="Scale turbulence injection frequency (100=normal up to 5 Hz).")
+        parser.add_argument(
+            '--turb-intensity-bias', type=int, default=100, metavar='0-999',
+            help="Global turbulence intensity bias percentage (100=normal).")
+        parser.add_argument(
+            '--turb-config-file', type=str, default=None, metavar='PATH',
+            help="JSON file for persisting turbulence settings.")
         self.args = parser.parse_args()
 
     async def run(self) -> None:
@@ -1903,6 +2552,19 @@ class Script:  # pylint: disable=too-many-instance-attributes
         else:
             self.airports, source = get_airports(_UCAR_STATIONS_URL, _STATIONS_CACHE)
             self.logger.info("Loaded %d airports from %s", len(self.airports), source)
+
+        if not self.args.no_turbulence:
+            self._turb_rate = max(0, min(100, self.args.turb_rate))
+            self._turb_intensity_bias = max(0, min(999, self.args.turb_intensity_bias))
+            if self.args.turb_config_file:
+                self._turb_load_config(self.args.turb_config_file)
+            self._turb_engine = TurbulenceEngine()
+            self._turb_pirep_fetcher = PirepFetcher()
+            self._turb_cape_fetcher = CapeFetcher()
+            self._turb_gairmet_fetcher = GairmetFetcher()
+            self.logger.info("Turbulence engine initialized")
+            # Trigger initial TURBSTATE broadcast so the router has config data immediately.
+            self._turb_state_changed_event.set()
 
         async with asyncio.TaskGroup() as self.taskgroup:
             task = self.taskgroup.create_task(self.monitor_coro(), name="Monitor")

@@ -20,7 +20,6 @@ Write-Host ""
 KillPythonScript "frankenutil.py"
 KillPythonScript "psx-acars.py"
 KillPythonScript "frankentanker.py"
-KillPythonScript "frankenturb.py"
 KillPythonScript "frankenweather.py"
 
 KillProcess "PSX.Bacars.UI"
