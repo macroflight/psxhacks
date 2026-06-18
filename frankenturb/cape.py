@@ -48,6 +48,7 @@ class CapeSample:
     lon: float
     cape_j_kg: float
     lifted_index_c: float
+    showers_mm_h: float
     valid_at: datetime
 
 
@@ -108,7 +109,7 @@ class CapeFetcher:
         params = {
             "latitude": round(lat, 4),
             "longitude": round(lon, 4),
-            "hourly": "cape,lifted_index",
+            "hourly": "cape,lifted_index,showers",
             "timeformat": "unixtime",
             "forecast_days": 2,
             "models": self._models,
@@ -148,17 +149,32 @@ class CapeFetcher:
 
         cape = _scalar(hourly.get("cape", []), hour_idx)
         li = _scalar(hourly.get("lifted_index", []), hour_idx)
+        showers = _scalar(hourly.get("showers", []), hour_idx)
         valid_at = datetime.fromtimestamp(int(times[hour_idx]), tz=timezone.utc)
 
-        log.info("CAPE: %.0f J/kg LI=%+.1f°C at (%.2f, %.2f)",
-                 cape, li, lat, lon)
+        log.info("CAPE: %.0f J/kg LI=%+.1f°C showers=%.2fmm/h at (%.2f, %.2f)",
+                 cape, li, showers, lat, lon)
         return CapeSample(
             lat=float(data.get("latitude", lat)),
             lon=float(data.get("longitude", lon)),
             cape_j_kg=cape,
             lifted_index_c=li,
+            showers_mm_h=showers,
             valid_at=valid_at,
         )
+
+
+def _precip_scale(showers_mm_h: float) -> float:
+    """Scale factor from precipitation rate — CAPE is potential, showers are reality."""
+    if math.isnan(showers_mm_h):
+        return 1.0
+    if showers_mm_h < 0.5:
+        return 0.10
+    if showers_mm_h < 2.0:
+        return 0.40
+    if showers_mm_h < 5.0:
+        return 0.70
+    return 1.0
 
 
 def compute_cape_turbulence(alt_ft: float, sample: CapeSample) -> TurbulenceState:
@@ -194,6 +210,9 @@ def compute_cape_turbulence(alt_ft: float, sample: CapeSample) -> TurbulenceStat
         elif li < -4.0:
             intensity = min(1.0, intensity * 1.10)
 
+    intensity *= _precip_scale(sample.showers_mm_h)
+    showers = sample.showers_mm_h
+
     # Decay above FL150 — convective turbulence from surface instability
     # diminishes rapidly through the mid-troposphere.
     if alt_ft > _CAPE_ALT_DECAY_FT:
@@ -203,8 +222,9 @@ def compute_cape_turbulence(alt_ft: float, sample: CapeSample) -> TurbulenceStat
         return TurbulenceState()
 
     li_str = f"{li:+.1f}°C" if not math.isnan(li) else "N/A"
+    showers_str = f"{showers:.2f}mm/h" if not math.isnan(showers) else "N/A"
     return TurbulenceState(
         intensity=min(1.0, intensity),
         kind="cape",
-        reason=f"CAPE {cape:.0f} J/kg LI {li_str}",
+        reason=f"CAPE {cape:.0f} J/kg LI {li_str} showers {showers_str}",
     )
