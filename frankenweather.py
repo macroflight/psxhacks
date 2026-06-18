@@ -45,6 +45,10 @@ _PUSH_COOLDOWN_S = 5.0                # ignore Wx echo-backs for this long after
 _MSFS_BRIDGE_TIMEOUT_S = 300.0        # stop using bridge data after this silence period
 _NM_TO_M = 1852.0
 
+_HDG_WINDOW_S = 300.0                 # heading-change detection window (5 min)
+_MANEUVER_ENTER_DEG = 180.0           # total hdg change to enter maneuvering mode
+_MANEUVER_EXIT_DEG = 60.0             # total hdg change to exit maneuvering mode
+
 # Default Wx field values — we override [0-5], [18-20], [22-23] from Open-Meteo.
 # Indices match the PSX forum field order for WxBasic/Wx1-Wx7.
 _WX_DEFAULTS = [
@@ -562,6 +566,13 @@ def _om_cb_fields(om: dict) -> tuple:
     # Suppress CBs when no measurable shower precipitation — WMO code alone is unreliable
     if showers_mm < 0.5:
         cb_oktas = 0
+    # Cap CB coverage by precipitation intensity — CAPE is potential, showers are reality
+    elif showers_mm < 2.0:
+        cb_oktas = min(cb_oktas, 2)
+    elif showers_mm < 5.0:
+        cb_oktas = min(cb_oktas, 4)
+    elif showers_mm < 15.0:
+        cb_oktas = min(cb_oktas, 6)
     if cb_oktas == 0:
         return 0, int(_WX_DEFAULTS[10]), int(_WX_DEFAULTS[11])
     return cb_oktas, _cb_tops_ft(cape), _cb_base_ft(h_temp, h_dp)
@@ -679,6 +690,10 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self._msfs_bridge_last_seen: Optional[float] = None
         self.focused_zone: int = 0          # 0 = WxBasic, 1-7 = Wx1-Wx7
         self.cloud_sync_last_alt_ft: float = 0.0
+
+        # Maneuvering mode detection
+        self._hdg_history: list = []   # [(monotonic_time, heading_deg)]
+        self._maneuvering: bool = False
 
         # MSFS wind state (--msfs-wind-sync via frankenmsfsbridge)
         self.msfs_wind_dir: Optional[float] = None
@@ -990,6 +1005,38 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self.zone_wx[self.focused_zone] = new_wx
 
     # ------------------------------------------------------------------
+    # Maneuvering mode detection
+    # ------------------------------------------------------------------
+
+    def _update_maneuvering_mode(self) -> bool:
+        """Update self._maneuvering from recent heading history. Returns True if mode changed."""
+        if self.ac_hdg is None:
+            return False
+        now = time.monotonic()
+        self._hdg_history.append((now, self.ac_hdg))
+        cutoff = now - _HDG_WINDOW_S
+        self._hdg_history = [(t, h) for t, h in self._hdg_history if t >= cutoff]
+        if len(self._hdg_history) < 2:
+            return False
+        total_change = sum(
+            abs(((b - a + 180.0) % 360.0) - 180.0)
+            for (_, a), (_, b) in zip(self._hdg_history, self._hdg_history[1:])
+        )
+        if not self._maneuvering and total_change > _MANEUVER_ENTER_DEG:
+            self._maneuvering = True
+            self.logger.info(
+                "MANEUVERING mode: heading changed %.0f° in %.0fs — zones redistributed",
+                total_change, now - self._hdg_history[0][0])
+            return True
+        if self._maneuvering and total_change < _MANEUVER_EXIT_DEG:
+            self._maneuvering = False
+            self.logger.info(
+                "CRUISE mode: heading change %.0f° in %.0fs — resuming forward placement",
+                total_change, now - self._hdg_history[0][0])
+            return True
+        return False
+
+    # ------------------------------------------------------------------
     # Zone geometry
     # ------------------------------------------------------------------
 
@@ -1062,7 +1109,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
 
         last: tuple = None
         for _ in range(11):
-            if initial:
+            if initial or self._maneuvering:
                 bearing = random.uniform(0.0, 360.0)
                 dist_m = random.uniform(0.0, fwd_max) * _NM_TO_M
             else:
@@ -1136,7 +1183,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 continue  # dep/dst airport — never relocate
             az_to_zone, _, dist_nm = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
             dist_nm /= _NM_TO_M
-            if in_cruise:
+            if in_cruise and not self._maneuvering:
                 is_behind = abs((az_to_zone - self.ac_hdg + 180) % 360 - 180) > 90.0
                 if not (is_behind and dist_nm > self.args.cruise_behind_dist):
                     continue
@@ -1303,8 +1350,9 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self, session: aiohttp.ClientSession) -> None:
         """Recalculate and push all 7 weather zones to PSX."""
         positions = list(self.zone_positions[i] for i in range(1, 8))
-        self.logger.info("Updating zone weather — ac=%.2f/%.2f hdg=%.0f°",
-                         self.ac_lat, self.ac_lon, self.ac_hdg)
+        self.logger.info("Updating zone weather — ac=%.2f/%.2f hdg=%.0f° [%s]",
+                         self.ac_lat, self.ac_lon, self.ac_hdg,
+                         "MANEUVERING" if self._maneuvering else "CRUISE")
 
         # Refresh VATSIM METAR cache if stale
         if time.time() - self.vatsim_cache_time > _VATSIM_CACHE_MAX_S:
@@ -1340,9 +1388,10 @@ class Script:  # pylint: disable=too-many-instance-attributes
                     raw_metars.append(None)
                     om_zone_idx.append(i)
                     used_icaos.add(best_ap[0])
+                    ac_dist = self._dist_nm(self.ac_lat, self.ac_lon, best_ap[1], best_ap[2])
                     self.logger.warning(
-                        "Zone %d: no METAR for %s (%.1fnm) — using Open-Meteo",
-                        i + 1, best_ap[0], best_ap[3])
+                        "Zone %d: no METAR for %s (%.0fnm from ac) — using Open-Meteo",
+                        i + 1, best_ap[0], ac_dist)
                 else:
                     snap_positions.append((lat, lon))
                     snap_icaos.append(stored_icao)
@@ -1469,6 +1518,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
                         continue
                     if self.ac_lat is None:
                         continue
+                    entered_maneuvering = self._update_maneuvering_mode()
                     if not self.zone_positions:
                         self._place_all_zones()
                         any_relocated = True
@@ -1476,6 +1526,9 @@ class Script:  # pylint: disable=too-many-instance-attributes
                              _REPOSITION_DIST_NM
                              for _, (lat, lon, _) in self.zone_positions.items()):
                         self.logger.info("Aircraft repositioned — reinitializing weather zones")
+                        self._place_all_zones()
+                        any_relocated = True
+                    elif entered_maneuvering:
                         self._place_all_zones()
                         any_relocated = True
                     else:
