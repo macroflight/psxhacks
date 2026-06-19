@@ -1554,7 +1554,6 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
 
     async def run(self, name):  # pylint: disable=too-many-statements,too-many-locals
         """Start the HTTP server and serve until cancelled."""
-        from frankenrouter import routercache  # pylint: disable=import-outside-toplevel
         router = self.router
 
         try:
@@ -1704,40 +1703,6 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 }
                 return web.json_response(
                     text=_INDEX_PAGE.format(**data), content_type='text/html')
-
-            @routes.get('/api/flightinfo')
-            async def handle_clightinfo_get(_):
-                router.logger.info("GOT /flightinfo API call")
-                try:
-                    acft_state = router.cache.get_value('Qs121')
-                    route = router.cache.get_value('Qs376')
-                    fltno = router.cache.get_value('Qs401')
-                except routercache.RouterCacheException:
-                    return web.json_response({'ok_data': False})
-                if acft_state is None:
-                    return web.json_response({'ok_data': False})
-
-                PiBaHeAlTas = acft_state.split(';')
-                pitch = math.degrees(float(PiBaHeAlTas[0]) / 1000000)
-                bank = math.degrees(float(PiBaHeAlTas[1]) / 1000000)
-                heading_true = math.degrees(float(PiBaHeAlTas[2]))
-                alt_true_ft = float(PiBaHeAlTas[3]) / 1000
-                tas = float(PiBaHeAlTas[4]) / 1000
-                lat = math.degrees(float(PiBaHeAlTas[5]))
-                lon = math.degrees(float(PiBaHeAlTas[6]))
-                router.logger.info("Returned OK info for /flightinfo API call")
-                return web.json_response({
-                    'ok_data': True,
-                    'latitude_degrees': lat,
-                    'longitude_degrees': lon,
-                    'altitude_feet': alt_true_ft,
-                    'heading_degrees': heading_true,
-                    'speed_knots': tas,
-                    'pitch_degrees': pitch,
-                    'bank_degrees': bank,
-                    'route': route,
-                    'flight': fltno,
-                })
 
             @routes.get('/api/stats')
             async def handle_stats_get(request):
