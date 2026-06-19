@@ -645,8 +645,9 @@ def _build_weather_map_page(router, color_scheme):  # pylint: disable=too-many-l
             '<div class="page-title">'
             '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
             '<h1>Weather</h1>'
-            '<div style="margin-left:auto">'
+            '<div style="margin-left:auto;display:flex;gap:0.5em">'
             '<a href="/weather" class="btn btn-gray btn-sm">Refresh</a>'
+            '<a href="/" class="btn btn-gray btn-sm">Back</a>'
             '</div>'
             '</div>\n' + body + '</body>\n</html>\n'
         )
@@ -1407,7 +1408,7 @@ def _build_weather_turb_page(router, color_scheme):  # pylint: disable=too-many-
     active_reason = tstate.get('active_reason', '')
     sources = tstate.get('sources', [])
 
-    age_str = f'{int(age_s)}s ago'
+    age_str = 'never' if math.isinf(age_s) else f'{int(age_s)}s ago'
 
     def _bias_input(field, current):
         return (
