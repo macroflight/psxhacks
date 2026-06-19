@@ -13,13 +13,14 @@ Ground-truth evidence sources (used together as consensus):
 A point is flagged when the consensus from these sources disagrees with what
 FrankenWeather would predict from the same OM data.
 
-Requires: aiohttp, Pillow  (pip install aiohttp pillow)
+Requires: aiohttp, Pillow, requests  (pip install aiohttp pillow "requests[socks]")
 Usage:    python3 fw_scanner.py --help
 """
 # pylint: disable=too-many-locals,broad-exception-caught
 import argparse
 import asyncio
 import csv
+import json
 import math
 import sys
 from dataclasses import dataclass, field
@@ -45,14 +46,14 @@ _OM_API = "https://api.open-meteo.com/v1/forecast"
 _RV_API = "https://api.rainviewer.com/public/weather-maps.json"
 _RV_TILE = "https://tilecache.rainviewer.com"
 _AWC_SIGMET = "https://aviationweather.gov/api/data/isigmet?format=geojson"
-_AWC_METAR = (
-    "https://aviationweather.gov/api/data/metar"
-    "?format=json&hoursBeforeNow=1&mostRecent=true"
-    "&bbox=-90,-180,90,180"
-)
+_AWC_STATION = "https://aviationweather.gov/api/data/stationinfo"
+_VATSIM_METAR = "https://metar.vatsim.net/metar.php?id=all"
+_TS_MARKERS = ('TS', 'GR', 'LTG', 'FC')
 _TIMEOUT = aiohttp.ClientTimeout(total=30)
-_OM_CONCURRENCY = 3     # max parallel Open-Meteo requests
-_OM_DELAY = 0.15        # seconds to hold semaphore slot after each request (~20 req/s)
+_OM_CONCURRENCY = 1     # serial batches — avoids stampede when retrying after 429
+_OM_DELAY = 0.15        # seconds between batch requests
+_OM_BATCH_SIZE = 50     # grid points per HTTP request (OM supports multi-location batching)
+_OM_RETRY_WAIT = 62     # seconds to pause on 429 before retrying (quota resets per minute)
 
 # Radar tile parameters
 _ZOOM = 6               # zoom 6 → ~22 km/pixel at equator
@@ -217,28 +218,67 @@ async def _get(session: aiohttp.ClientSession, url: str) -> Optional[bytes]:
         return None
 
 
-async def _fetch_om_one(session: aiohttp.ClientSession,
-                        sem: asyncio.Semaphore,
-                        point: GridPoint) -> Optional[dict]:
-    """Fetch Open-Meteo data for a single grid point."""
+def _om_get_sync(url: str, proxy: Optional[str]) -> tuple:
+    """Run a blocking GET for an Open-Meteo URL, optionally via a SOCKS5/HTTP proxy.
+
+    Returns (status_code, content) where status_code is None on connection error.
+    """
+    import requests  # pylint: disable=import-error,import-outside-toplevel
+    try:
+        proxies = {'http': proxy, 'https': proxy} if proxy else None
+        r = requests.get(url, timeout=30, proxies=proxies)
+        return r.status_code, r.content
+    except Exception as exc:  # noqa: broad-except
+        return None, str(exc).encode()
+
+
+class _OmHourlyLimitError(Exception):
+    """Raised when the Open-Meteo hourly request quota is exhausted."""
+
+
+async def _fetch_om_batch(sem: asyncio.Semaphore,
+                          points: List[GridPoint],
+                          proxy: Optional[str],
+                          debug: bool = False) -> List[Optional[dict]]:
+    """Fetch Open-Meteo data for a batch of grid points in one HTTP request."""
+    lats = ','.join(str(p.lat) for p in points)
+    lons = ','.join(str(p.lon) for p in points)
     url = (
-        f"{_OM_API}?latitude={point.lat}&longitude={point.lon}"
-        "&hourly=cape,convective_inhibition,showers,precipitation,"
-        "temperature_2m,dewpoint_2m"
+        f"{_OM_API}?latitude={lats}&longitude={lons}"
+        "&hourly=cape,convective_inhibition,showers,temperature_2m,dewpoint_2m"
         "&current=weather_code,temperature_2m"
         "&timezone=UTC&forecast_days=1"
     )
+    loop = asyncio.get_running_loop()
     async with sem:
-        data = await _get(session, url)
-        await asyncio.sleep(_OM_DELAY)  # pace requests to stay within free-tier rate limit
-    if data is None:
-        return None
+        status, data = await loop.run_in_executor(None, _om_get_sync, url, proxy)
+        if status == 429:
+            body = data.decode(errors='replace') if data else ''
+            if 'ourly' in body:
+                raise _OmHourlyLimitError(body)
+            print(f"  OM 429: minutely limit hit, pausing {_OM_RETRY_WAIT}s …", flush=True)
+            await asyncio.sleep(_OM_RETRY_WAIT)
+            status, data = await loop.run_in_executor(None, _om_get_sync, url, proxy)
+        await asyncio.sleep(_OM_DELAY)
+    if status != 200:
+        if debug:
+            snippet = data[:200].decode(errors='replace') if data else '(no body)'
+            print(f"  OM FAIL  status={status}  body={snippet!r}", flush=True)
+        return [None] * len(points)
     try:
-        import json  # pylint: disable=import-outside-toplevel
         parsed = json.loads(data)
-        return parsed if isinstance(parsed, dict) and not parsed.get('error') else None
-    except Exception:  # noqa: broad-except
-        return None
+        if isinstance(parsed, dict):
+            parsed = [parsed]
+        if len(parsed) != len(points):
+            if debug:
+                print(f"  OM FAIL  got {len(parsed)} results for {len(points)} points",
+                      flush=True)
+            return [None] * len(points)
+        return [p if not p.get('error') else None for p in parsed]
+    except Exception as exc:  # noqa: broad-except
+        if debug:
+            print(f"  OM FAIL  parse error: {exc}", flush=True)
+        return [None] * len(points)
 
 
 def _parse_om(raw: dict) -> Optional[OmPoint]:
@@ -271,7 +311,6 @@ async def fetch_radar_path(session: aiohttp.ClientSession) -> Optional[str]:
     if not data:
         return None
     try:
-        import json  # pylint: disable=import-outside-toplevel
         frames = json.loads(data).get('radar', {}).get('past', [])
         return frames[-1]['path'] if frames else None
     except Exception:  # noqa: broad-except
@@ -300,7 +339,6 @@ async def fetch_ts_sigmets(session: aiohttp.ClientSession) -> List[list]:
         return []
     polygons = []
     try:
-        import json  # pylint: disable=import-outside-toplevel
         for feat in json.loads(data).get('features', []):
             props = feat.get('properties', {})
             hazard = (props.get('hazard') or '').upper()
@@ -316,20 +354,33 @@ async def fetch_ts_sigmets(session: aiohttp.ClientSession) -> List[list]:
 
 
 async def fetch_ts_metars(session: aiohttp.ClientSession) -> List[Tuple[float, float]]:
-    """Return (lat, lon) of METARs that contain TS/TSRA/GR/LTG weather."""
-    data = await _get(session, _AWC_METAR)
+    """Return (lat, lon) of stations reporting TS/GR/LTG/FC in their current METAR.
+
+    Uses the VATSIM global METAR feed (comprehensive worldwide coverage) and
+    resolves station coordinates via the AWC station info API.
+    """
+    data = await _get(session, _VATSIM_METAR)
     if not data:
         return []
+    ts_icao: set = set()
+    for line in data.decode(errors='replace').splitlines():
+        tokens = line.split()
+        if not tokens or not any(m in line for m in _TS_MARKERS):
+            continue
+        icao = tokens[0]
+        if len(icao) == 4 and icao.isalnum():
+            ts_icao.add(icao)
+    if not ts_icao:
+        return []
+    ids = ','.join(sorted(ts_icao))
+    sdata = await _get(session, f"{_AWC_STATION}?ids={ids}&format=json")
+    if not sdata:
+        return []
     positions = []
-    ts_markers = ('TS', 'GR', 'LTG', 'FC')
     try:
-        import json  # pylint: disable=import-outside-toplevel
-        for m in json.loads(data):
-            raw_text = m.get('rawOb', '') or ''
-            if not any(t in raw_text for t in ts_markers):
-                continue
-            lat = m.get('lat')
-            lon = m.get('lon')
+        for st in json.loads(sdata):
+            lat = st.get('lat')
+            lon = st.get('lon')
             if lat is not None and lon is not None:
                 positions.append((float(lat), float(lon)))
     except Exception:  # noqa: broad-except
@@ -412,6 +463,25 @@ def _evidence_str(ev: Evidence) -> str:
     return ','.join(parts) if parts else 'none'
 
 
+async def _fetch_all_om(points: List[GridPoint], proxy: Optional[str],
+                        debug: bool = False) -> dict:
+    """Fetch and parse OM data for all grid points, returning {(lat, lon): OmPoint}."""
+    batches = [points[i:i + _OM_BATCH_SIZE]
+               for i in range(0, len(points), _OM_BATCH_SIZE)]
+    eta_s = int(len(batches) * _OM_DELAY / _OM_CONCURRENCY + 1)
+    print(
+        f"  Fetching OM : {len(points)} points in {len(batches)} batches"
+        f" (~{eta_s}s + any 429 pauses) …",
+        flush=True)
+    sem = asyncio.Semaphore(_OM_CONCURRENCY)
+    batch_raws = await asyncio.gather(
+        *[_fetch_om_batch(sem, batch, proxy, debug=debug) for batch in batches]
+    )
+    all_raws = [raw for batch in batch_raws for raw in batch]
+    return {(pt.lat, pt.lon): _parse_om(raw)
+            for pt, raw in zip(points, all_raws) if raw}
+
+
 async def run_scan(args: argparse.Namespace) -> None:
     """Execute the full scan and write results."""
     points = _generate_grid(args.lat_min, args.lat_max,
@@ -438,14 +508,13 @@ async def run_scan(args: argparse.Namespace) -> None:
         print(f"  TS SIGMETs  : {len(sigmet_polys)}", flush=True)
         print(f"  TS METARs   : {len(ts_metars)}  ({ts})", flush=True)
 
-        # Fetch OM data concurrently (one request per point, limited concurrency)
-        eta_s = int(len(points) * _OM_DELAY / _OM_CONCURRENCY)
-        print(f"  Fetching OM : {len(points)} points (~{eta_s}s) …", flush=True)
-        sem = asyncio.Semaphore(_OM_CONCURRENCY)
-        raws = await asyncio.gather(
-            *[_fetch_om_one(session, sem, pt) for pt in points]
-        )
-        om_map = {(pt.lat, pt.lon): _parse_om(raw) for pt, raw in zip(points, raws) if raw}
+        # Fetch OM data in batches (multi-location per request), limited concurrency
+        try:
+            om_map = await _fetch_all_om(points, args.om_proxy, debug=args.debug)
+        except _OmHourlyLimitError:
+            print("  OM ERROR    : hourly API limit exceeded — try again next hour",
+                  file=sys.stderr, flush=True)
+            return
         om_ok = sum(v is not None for v in om_map.values())
         print(f"  OM data     : {om_ok}/{len(points)} points OK", flush=True)
         if om_ok == 0:
@@ -547,6 +616,11 @@ def _build_args() -> argparse.Namespace:
                     help='Skip points with CAPE below this J/kg (default 200)')
     ap.add_argument('--output', default='fw_scan.csv',
                     help='CSV output file (default fw_scan.csv)')
+    ap.add_argument('--om-proxy', default=None, dest='om_proxy',
+                    metavar='URL',
+                    help='Proxy for Open-Meteo requests, e.g. socks5h://host:1080')
+    ap.add_argument('--debug', action='store_true',
+                    help='Print OM failure details (status code, response snippet)')
     return ap.parse_args()
 
 
