@@ -276,7 +276,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         trigger a SHAREDINFO broadcast so all routers update their filters.
         Otherwise forward upstream toward the master.
         """
-        if self.router.config.identity.type == 'master':
+        if self.router.is_sharedinfo_authority():
             self.router.sharedinfo['elevation_source_simulator'] = payload
             self.logger.info("SET elevation_source_simulator to %s",
                              self.router.sharedinfo['elevation_source_simulator'])
@@ -294,7 +294,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         trigger a SHAREDINFO broadcast so all routers update their filters.
         Otherwise forward upstream toward the master.
         """
-        if self.router.config.identity.type == 'master':
+        if self.router.is_sharedinfo_authority():
             self.router.sharedinfo['traffic_source_simulator'] = payload
             self.router.frdp_sharedinfo_requested = True
             return self.myreturn(RulesAction.DROP, RulesCode.FRDP_TRAFFIC_SOURCE)
@@ -464,8 +464,8 @@ class Rules():  # pylint: disable=too-many-public-methods
 
         # Update local filter state based on source assignments in SHAREDINFO.
         # Do NOT trigger frdp_sharedinfo_requested to avoid a broadcast loop.
-        # The master router never updates its own filters from SHAREDINFO.
-        if self.router.config.identity.type != 'master':
+        # The master/standalone router never updates its own filters from SHAREDINFO.
+        if not self.router.is_sharedinfo_authority():
             own_sim = self.router.config.identity.simulator
             filter_changed = False
             if 'elevation_source_simulator' in sharedinfo:

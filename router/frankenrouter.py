@@ -407,6 +407,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             return "slave"
         return "master"
 
+    def is_sharedinfo_authority(self):
+        """Return True if this router owns the SHAREDINFO state (master or standalone)."""
+        return self.config.identity.type in ('master', 'standalone')
+
     def is_client_connected(self, client_addr):
         """Return True if this client is connected."""
         if client_addr in self.clients:
