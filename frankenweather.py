@@ -776,6 +776,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self.ac_lon: Optional[float] = None
         self.ac_hdg: Optional[float] = None
         self.ac_alt_ft: Optional[float] = None
+        self.ac_tas_kt: Optional[float] = None
 
         # VATSIM METAR cache: ICAO → raw METAR string
         self.vatsim_cache: dict = {}
@@ -886,6 +887,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 return
             self.ac_hdg = math.degrees(float(parts[2])) % 360
             self.ac_alt_ft = float(parts[3]) / 1000.0
+            self.ac_tas_kt = float(parts[4])
             self.ac_lat = math.degrees(float(parts[5]))
             self.ac_lon = math.degrees(float(parts[6]))
         except (ValueError, IndexError):
@@ -1639,10 +1641,22 @@ class Script:  # pylint: disable=too-many-instance-attributes
     # Maneuvering mode detection
     # ------------------------------------------------------------------
 
-    def _update_maneuvering_mode(self) -> bool:
-        """Update self._maneuvering from recent heading history. Returns True if mode changed."""
+    def _update_maneuvering_mode(self) -> bool:  # pylint: disable=too-many-return-statements
+        """Update self._maneuvering from speed and heading history. Returns True if changed."""
         if self.ac_hdg is None:
             return False
+
+        # Below 200 kt (taxi, takeoff roll, approach, landing) always maneuver.
+        # Clear heading history so ground turns don't re-trigger after takeoff.
+        if self.ac_tas_kt is not None and self.ac_tas_kt < 200.0:
+            self._hdg_history.clear()
+            if not self._maneuvering:
+                self._maneuvering = True
+                self.logger.info(
+                    "MANEUVERING mode: speed %.0f kt — zones redistributed", self.ac_tas_kt)
+                return True
+            return False
+
         now = time.monotonic()
         self._hdg_history.append((now, self.ac_hdg))
         cutoff = now - _HDG_WINDOW_S
