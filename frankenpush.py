@@ -19,7 +19,6 @@ Setup:
 import argparse
 import asyncio
 import inspect
-import json
 import logging
 import math
 import sys
@@ -38,10 +37,11 @@ __MY_DESCRIPTION__ = 'PSCC Flight Centre push connector'
 _SEND_INTERVAL = 2.0
 
 
-class Script():
+class Script():  # pylint: disable=too-many-instance-attributes
     """FrankenPush script."""
 
     def __init__(self):
+        """Initialize script state."""
         self.args = None
         self.taskgroup = None
         self.tasks = set()
