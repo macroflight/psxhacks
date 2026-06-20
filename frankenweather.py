@@ -1265,7 +1265,10 @@ class Script:  # pylint: disable=too-many-instance-attributes
         try:
             self.logger.debug("Starting %s", myname)
             while True:
-                await self._turb_state_changed_event.wait()
+                try:
+                    await asyncio.wait_for(self._turb_state_changed_event.wait(), timeout=60.0)
+                except asyncio.TimeoutError:
+                    pass
                 self._turb_state_changed_event.clear()
                 state = self._turb_state
                 sources = self._turb_sources
