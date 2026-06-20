@@ -15,6 +15,7 @@ import time
 
 from aiohttp import web  # pylint: disable=import-error
 
+
 _STATIC_DIR = pathlib.Path(__file__).parent / 'static'
 
 # Dark EFB-style theme shared by all HTML pages.
@@ -149,6 +150,7 @@ _INDEX_PAGE = (
     '{change_upstream_button}'
     '<a href="/flightinfo" class="btn btn-gray">Flight Info</a>\n'
     '<a href="/weather" class="btn btn-gray">Weather</a>\n'
+    '<a href="/utils" class="btn btn-gray">Utils</a>\n'
     '{sessionpwd_button}'
     '</div>\n'
     '<div>\n'
@@ -159,6 +161,89 @@ _INDEX_PAGE = (
     '</div>\n'
     '</div>\n'
     '</body>\n</html>\n'
+)
+
+_UTILS_PAGE = (
+    '<!DOCTYPE html>\n<html>\n<head>\n'
+    '<meta name="color-scheme" content="{rest_api_color_scheme}" />\n' +
+    _COMMON_CSS +
+    '\n</head>\n<body>\n'
+    '<div class="page-title">'
+    '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
+    '<h1>Utils</h1>'
+    '<div style="margin-left:auto">'
+    '<a href="/" class="btn btn-gray btn-sm">Back</a>'
+    '</div>'
+    '</div>\n'
+    '<a href="/utils/windimport" class="btn btn-blue">DLH wind import</a>\n'
+    '</body>\n</html>\n'
+)
+
+_WINDIMPORT_PAGE = (
+    '<!DOCTYPE html>\n<html>\n<head>\n'
+    '<meta name="color-scheme" content="{rest_api_color_scheme}" />\n' +
+    _COMMON_CSS +
+    '\n<style>textarea.mono {{ font-family: monospace; font-size: 0.82em; }}</style>\n'
+    '</head>\n<body>\n'
+    '<div class="page-title">'
+    '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
+    '<h1>DLH wind import</h1>'
+    '<div style="margin-left:auto">'
+    '<a href="/utils" class="btn btn-gray btn-sm">Back</a>'
+    '</div>'
+    '</div>\n'
+    '<div class="card">\n'
+    '<ol style="margin:0;padding-left:1.3em">\n'
+    '<li>Open your flight plan in SimBrief</li>\n'
+    '<li>Under <b>Briefing Preview</b>, click <b>Show Details</b></li>\n'
+    '<li>Click <b>Copy</b></li>\n'
+    '<li>Paste the data into this page</li>\n'
+    '<li>Click <b>Import</b></li>\n'
+    '<li>Click <b>Send to PSX</b> to send the wind data to PSX</li>\n'
+    '</ol>\n'
+    '</div>\n'
+    '{error_html}'
+    '{ofp_section}'
+    '{result_section}'
+    '</body>\n</html>\n'
+)
+
+_WINDIMPORT_OFP_SECTION = (
+    '<form method="post" action="/api/utils/windimport">\n'
+    '<label for="ofp">Flight plan (OFP) text</label>\n'
+    '<textarea id="ofp" name="ofp" class="mono" rows="20"'
+    ' style="min-height:12em">{ofp_value}</textarea>\n'
+    '<div class="btn-row">\n'
+    '<button type="submit" class="btn btn-blue">Import</button>\n'
+    '<button type="button" class="btn btn-gray"'
+    ' onclick="document.getElementById(\'ofp\').value=\'\'">Clear</button>\n'
+    '</div>\n'
+    '</form>\n'
+)
+
+_WINDIMPORT_RESULT_SECTION = (
+    '<div class="card ok">\n'
+    '<p style="margin:0">Wind corridor data parsed successfully.</p>\n'
+    '</div>\n'
+    '<label for="corridor">Wind corridor data</label>\n'
+    '<textarea id="corridor" class="mono" rows="20" readonly'
+    ' style="min-height:12em">{corridor_display}</textarea>\n'
+    '<form method="post" action="/api/utils/windimport/send">\n'
+    '<input type="hidden" name="corridor" value="{corridor_value}">\n'
+    '<div class="btn-row">\n'
+    '<button type="submit" class="btn btn-green">Send to PSX</button>\n'
+    '<a href="/utils/windimport" class="btn btn-gray">Start over</a>\n'
+    '</div>\n'
+    '</form>\n'
+)
+
+_WINDIMPORT_SENT_SECTION = (
+    '<div class="card ok">\n'
+    '<p style="margin:0">Wind corridor sent to PSX.</p>\n'
+    '</div>\n'
+    '<div class="btn-row">\n'
+    '<a href="/utils/windimport" class="btn btn-gray">Import another flight plan</a>\n'
+    '</div>\n'
 )
 
 _SHUTDOWN_PAGE = (
@@ -2351,6 +2436,84 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 await router.client_broadcast(line)
                 await asyncio.sleep(3)
                 raise web.HTTPFound('/weather/settings')
+
+            @routes.get('/utils')
+            async def handle_utils_get(_):
+                cs = router.config.listen.rest_api_color_scheme
+                return web.Response(
+                    text=_UTILS_PAGE.format(rest_api_color_scheme=cs),
+                    content_type='text/html')
+
+            @routes.get('/utils/windimport')
+            async def handle_windimport_get(_):
+                cs = router.config.listen.rest_api_color_scheme
+                ofp_section = _WINDIMPORT_OFP_SECTION.format(ofp_value='')
+                return web.Response(
+                    text=_WINDIMPORT_PAGE.format(
+                        rest_api_color_scheme=cs,
+                        error_html='',
+                        ofp_section=ofp_section,
+                        result_section='',
+                    ),
+                    content_type='text/html')
+
+            @routes.post('/api/utils/windimport')
+            async def handle_windimport_post(request):
+                from frankenrouter import windimporter  # pylint: disable=import-outside-toplevel,no-name-in-module
+                cs = router.config.listen.rest_api_color_scheme
+                post = await request.post()
+                ofp_text = str(post.get('ofp', ''))
+                try:
+                    wind_data = windimporter.parse_ofp(ofp_text)
+                except windimporter.WindImporterException as exc:
+                    error_html = (
+                        f'<div class="card warn">'
+                        f'<p style="margin:0"><b>Import failed:</b> {exc}</p>'
+                        f'</div>\n')
+                    ofp_section = _WINDIMPORT_OFP_SECTION.format(
+                        ofp_value=ofp_text.replace('<', '&lt;').replace('&', '&amp;'))
+                    return web.Response(
+                        text=_WINDIMPORT_PAGE.format(
+                            rest_api_color_scheme=cs,
+                            error_html=error_html,
+                            ofp_section=ofp_section,
+                            result_section='',
+                        ),
+                        content_type='text/html')
+                result_section = _WINDIMPORT_RESULT_SECTION.format(
+                    corridor_display=wind_data,
+                    corridor_value=wind_data.replace('"', '&quot;'),
+                )
+                return web.Response(
+                    text=_WINDIMPORT_PAGE.format(
+                        rest_api_color_scheme=cs,
+                        error_html='',
+                        ofp_section='',
+                        result_section=result_section,
+                    ),
+                    content_type='text/html')
+
+            @routes.post('/api/utils/windimport/send')
+            async def handle_windimport_send(request):
+                from frankenrouter import windimporter  # pylint: disable=import-outside-toplevel,no-name-in-module
+                cs = router.config.listen.rest_api_color_scheme
+                post = await request.post()
+                wind_data = str(post.get('corridor', ''))
+                corridor_psx = windimporter.to_psx_corridor(wind_data)
+                router.logger.info("API: sending wind corridor to PSX (%d chars)",
+                                   len(corridor_psx))
+                await router.send_to_upstream(f"Qs498={corridor_psx}")
+                await router.send_to_upstream("Qs497=200")
+                router.cache.update("Qs498", corridor_psx)
+                await router.client_broadcast(f"Qs498={corridor_psx}")
+                return web.Response(
+                    text=_WINDIMPORT_PAGE.format(
+                        rest_api_color_scheme=cs,
+                        error_html='',
+                        ofp_section='',
+                        result_section=_WINDIMPORT_SENT_SECTION,
+                    ),
+                    content_type='text/html')
 
             @routes.get('/shutdown')
             async def handle_shutdown_get(_):
