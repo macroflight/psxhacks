@@ -37,7 +37,7 @@ $FlavorDefinitions = @(
         Options     = @("on", "off")
         Default     = "off"
         Type        = "bool"
-    },
+    }
 )
 
 # Inject codemap pickers after AirlineIata for any multi-option named sets.
