@@ -88,6 +88,9 @@ _RV_ZOOM = 6           # zoom 6 → ~22 km/pixel at equator, ~5°×5° per tile
 _RV_TILE_PX = 256
 _RV_ECHO_RADIUS = 3    # pixel radius to sample around target point
 _RV_TIMEOUT = aiohttp.ClientTimeout(total=15)
+_RV_DENSITY_SCAN_NM = 150.0   # radius of local echo scan around aircraft
+_RV_DENSITY_GRID = 5          # NxN sample grid (5×5 = 25 points)
+_RV_DENSITY_THRESHOLD = 0.25  # echo≥2 fraction triggering full CB squeeze
 
 _BZ_URL = "https://data.blitzortung.org/Data_1/strikes"
 _BZ_LOOKBACK_MIN = 20  # fetch this many recent minute-files of strike data
@@ -1701,29 +1704,69 @@ class Script:  # pylint: disable=too-many-instance-attributes
         results.sort(key=lambda x: x[3])
         return results
 
-    def _effective_fwd_max(self) -> float:
-        """Return fwd_max, linearly squeezed toward the cape-squeeze minimum.
+    def _rv_local_sample_points(self) -> list:
+        """Return a grid of (lat, lon) points within _RV_DENSITY_SCAN_NM of the aircraft.
 
-        Average CB oktas across active zones are mapped to approximate CAPE.
-        At avg CAPE >= cape_threshold the returned value equals min_fwd_nm;
-        below zero CAPE it equals the configured fwd_max; between, it
-        interpolates linearly.
+        Used to pre-fetch RainViewer tiles covering the local area and to compute
+        the local CB echo density for the CB squeeze.
+        """
+        if self.ac_lat is None or self.ac_lon is None:
+            return []
+        n = _RV_DENSITY_GRID
+        radius = _RV_DENSITY_SCAN_NM
+        lat_per_nm = 1.0 / 60.0
+        lon_per_nm = lat_per_nm / max(0.01, math.cos(math.radians(self.ac_lat)))
+        pts = []
+        for i in range(n):
+            for j in range(n):
+                dlat = (i / (n - 1) * 2 - 1) * radius * lat_per_nm
+                dlon = (j / (n - 1) * 2 - 1) * radius * lon_per_nm
+                lat_c = self.ac_lat + dlat
+                lon_c = ((self.ac_lon + dlon + 180.0) % 360.0) - 180.0
+                pts.append((lat_c, lon_c))
+        return pts
+
+    def _rv_local_density(self) -> float:
+        """Fraction of local sample grid points (within _RV_DENSITY_SCAN_NM) with echo >= 2."""
+        pts = self._rv_local_sample_points()
+        if not pts:
+            return 0.0
+        hits = sum(1 for lat, lon in pts if self._rv_echo_at(lat, lon) >= 2)
+        return hits / len(pts)
+
+    def _effective_fwd_max(self) -> float:
+        """Return fwd_max, squeezed toward the cape-squeeze minimum.
+
+        Two independent signals can trigger the squeeze and are combined via max():
+        - CAPE signal: average CB oktas across active zones mapped to approximate CAPE
+        - Radar signal: fraction of local grid points (within _RV_DENSITY_SCAN_NM)
+          with echo >= 2; full squeeze at _RV_DENSITY_THRESHOLD
+        Both are linear [0..1]; the larger factor is used.
         """
         _, fwd_max = self.args.new_zone_infront_range
-        if not self.args.cape_squeeze or not self.zone_wx:
+        if not self.args.cape_squeeze:
             return fwd_max
         cape_threshold, min_fwd = self.args.cape_squeeze
-        estimates = []
-        for zone_num in range(1, 8):
-            wx = self.zone_wx.get(zone_num)
-            if wx:
-                parts = wx.split(';')
-                if len(parts) > 9:
-                    estimates.append(_OKTAS_TO_CAPE.get(int(parts[9]), 0.0))
-        if not estimates:
+
+        cape_factor = 0.0
+        if self.zone_wx:
+            estimates = []
+            for zone_num in range(1, 8):
+                wx = self.zone_wx.get(zone_num)
+                if wx:
+                    parts = wx.split(';')
+                    if len(parts) > 9:
+                        estimates.append(_OKTAS_TO_CAPE.get(int(parts[9]), 0.0))
+            if estimates:
+                avg_cape = sum(estimates) / len(estimates)
+                cape_factor = max(0.0, min(1.0, avg_cape / cape_threshold))
+
+        density = self._rv_local_density()
+        radar_factor = max(0.0, min(1.0, density / _RV_DENSITY_THRESHOLD))
+
+        factor = max(cape_factor, radar_factor)
+        if factor == 0.0:
             return fwd_max
-        avg_cape = sum(estimates) / len(estimates)
-        factor = max(0.0, min(1.0, avg_cape / cape_threshold))
         return fwd_max - factor * (fwd_max - min_fwd)
 
     def _pick_position(  # pylint: disable=too-many-locals
@@ -1741,7 +1784,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
         fwd_max = self._effective_fwd_max()
         fwd_min = fwd_min * fwd_max / configured_fwd_max if configured_fwd_max > 0 else 0.0
         if not initial and self.args.cape_squeeze and fwd_max < configured_fwd_max:
-            self.logger.info("CAPE squeeze active: fwd_max %.0f→%.0fnm",
+            self.logger.info("CB squeeze active: fwd_max %.0f→%.0fnm",
                              configured_fwd_max, fwd_max)
         lat_min, lat_max = self.args.new_zone_leftright_range
         min_sep = self.args.new_zone_notnear
@@ -2194,7 +2237,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
 
         # Refresh radar and lightning sources; failures degrade to echo=0 / no lightning
         await self._fetch_rv_frame(session)
-        await self._fetch_rv_tiles(session, snap_positions)
+        await self._fetch_rv_tiles(session, snap_positions + self._rv_local_sample_points())
         await self._fetch_bz_strikes(session)
 
         now = datetime.now(timezone.utc)
