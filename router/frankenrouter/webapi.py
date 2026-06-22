@@ -822,12 +822,20 @@ def _build_weather_map_page(router, color_scheme):  # pylint: disable=too-many-l
         'severe' if turb_intensity < 0.75 else
         'extreme'
     )
+    turb_sources = turbstate.get('sources', [])
     turb_summary_js = json.dumps({
         'kind': turb_kind,
         'pct': turb_pct,
         'label': turb_label,
         'intensity_label': turb_intensity_label,
         'reason': turbstate.get('active_reason', ''),
+        'sources': [
+            {'kind': _TURB_KIND_LABELS.get(s['kind'], s['kind']),
+             'pct': int(s['intensity'] * 100),
+             'reason': s['reason'],
+             'active': s['kind'] == turb_kind}
+            for s in turb_sources
+        ],
     })
     turb_js = 'null'
     if turb_src_lat is not None and turb_src_lon is not None:
@@ -1073,6 +1081,13 @@ def _build_weather_map_page(router, color_scheme):  # pylint: disable=too-many-l
         "    if(turbSummary.reason)L.push('  Reason: '+turbSummary.reason);\n"
         "    if(turbInfo)L.push('  Terrain peak: '+turbInfo.src_lat.toFixed(4)+'°"
         " '+turbInfo.src_lon.toFixed(4)+'°');\n"
+        "    if(turbSummary.sources&&turbSummary.sources.length>1){\n"
+        "      L.push('  Sources:');\n"
+        "      turbSummary.sources.forEach(function(s){\n"
+        "        var marker=s.active?'  ▶ ':'     ';\n"
+        "        L.push(marker+s.kind+' '+s.pct+'%'+(s.reason?' — '+s.reason:''));\n"
+        "      });\n"
+        "    }\n"
         "  }else{L.push('  None active');}\n"
         "  L.push('');\n"
         "  L.push('ACTIVE SIGMETs');\n"
@@ -1454,14 +1469,15 @@ def _build_weather_turb_page(router, color_scheme):  # pylint: disable=too-many-
             'table.turb-types td,table.turb-types th {'
             ' padding:4px 8px; border-bottom:1px solid #334155; }'
             'table.turb-types th { color:#94a3b8; font-size:0.8em; text-align:left; }'
-            '</style>\n</head>\n<body>\n'
+            '</style>\n'
+            '<script>setTimeout(function(){location.reload();},30000);</script>\n'
+            '</head>\n<body>\n'
             '<div class="page-title">'
             '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
             '<h1>Turbulence</h1>'
             '<div style="margin-left:auto;display:flex;gap:0.5em">'
             '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
             '<a href="/weather/settings" class="btn btn-gray btn-sm">Weather zone settings</a>'
-            '<a href="/weather/turbulence" class="btn btn-gray btn-sm">Refresh</a>'
             '</div>'
             '</div>\n' +
             body +
