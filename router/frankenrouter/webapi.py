@@ -176,6 +176,10 @@ _UTILS_PAGE = (
     '</div>'
     '</div>\n'
     '<a href="/utils/windimport" class="btn btn-blue">DLH wind import</a>\n'
+    '<form method="post" action="/api/utils/towing/direction" style="display:inline">'
+    '<button class="btn btn-gray">Toggle towing direction{towing_direction}</button></form>\n'
+    '<form method="post" action="/api/utils/printer/reset" style="display:inline">'
+    '<button class="btn btn-gray">Reset printer</button></form>\n'
     '</body>\n</html>\n'
 )
 
@@ -2456,8 +2460,20 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
             @routes.get('/utils')
             async def handle_utils_get(_):
                 cs = router.config.listen.rest_api_color_scheme
+                tow_key = router.variables.get_keyword_for_name('Towing') or 'Towing'
+                try:
+                    from frankenrouter import routercache as _rc  # pylint: disable=import-outside-toplevel,no-name-in-module
+                    tow_val = str(router.cache.get_value(tow_key))
+                    tow_dir = (
+                        ' (currently: pushback)' if tow_val[:1] == '1'
+                        else ' (currently: pull forward)'
+                    )
+                except Exception:  # pylint: disable=broad-exception-caught
+                    tow_dir = ''
                 return web.Response(
-                    text=_UTILS_PAGE.format(rest_api_color_scheme=cs),
+                    text=_UTILS_PAGE.format(
+                        rest_api_color_scheme=cs,
+                        towing_direction=tow_dir),
                     content_type='text/html')
 
             @routes.get('/utils/windimport')
@@ -2530,6 +2546,32 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                         result_section=_WINDIMPORT_SENT_SECTION,
                     ),
                     content_type='text/html')
+
+            @routes.post('/api/utils/towing/direction')
+            async def handle_towing_direction(_):
+                from frankenrouter import routercache as _rc  # pylint: disable=import-outside-toplevel,no-name-in-module
+                key = router.variables.get_keyword_for_name('Towing') or 'Towing'
+                try:
+                    current = router.cache.get_value(key)
+                except _rc.RouterCacheException:
+                    current = None
+                current = str(current) if current is not None else None
+                if current and len(current) >= 1:
+                    new_dir = '1' if current[0] != '1' else '2'
+                    new_towing = new_dir + current[1:]
+                    router.logger.info("API: towing direction %s -> %s", current, new_towing)
+                    await router.send_to_upstream(f"{key}={new_towing}")
+                    router.cache.update(key, new_towing)
+                    await router.client_broadcast(f"{key}={new_towing}")
+                else:
+                    router.logger.warning("API: Towing variable not available")
+                raise web.HTTPFound('/utils')
+
+            @routes.post('/api/utils/printer/reset')
+            async def handle_printer_reset(_):
+                router.logger.info("API: resetting printer (Qi115=1)")
+                await router.send_to_upstream("Qi115=1")
+                raise web.HTTPFound('/utils')
 
             @routes.get('/shutdown')
             async def handle_shutdown_get(_):

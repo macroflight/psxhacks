@@ -132,7 +132,6 @@ $FrankenusbOptions  = @()
 $FrankenwindOptions  = @()
 $FrankenidentOptions = @()
 $FrankenidentMasterOptions = @("--psx-port=10748")
-$FrankenutilOptions = @()
 $FrankencduproxyOptions = @()
 $FrankenmsfsbridgeOptions = @()
 $FrankenprintOptions = @()
@@ -167,8 +166,6 @@ $StartFrankentanker  = $false
 $StartFrankenusb    = $false
 $StartFrankenident  = $false
 $StartFrankenidentMaster = $false
-$StartFrankenutil   = $false
-
 $StartPsxSounds     = $false
 $StartVpilot        = $false
 $StartPsxNetVatsim  = $false
@@ -226,7 +223,6 @@ $SimAddonNames = [ordered]@{
     "frankentanker"        = "FrankenTanker"
     "frankenident"         = "FrankenIDENT"
     "frankenident_master"  = "FrankenIDENT Master"
-    "frankenutil"          = "FrankenUtil"
     "frankencduproxy"      = "FrankenCDU Proxy"
     "frankenmsfsbridge"    = "FrankenMSFSBridge"
     "frankenprint"         = "FrankenPrinter"

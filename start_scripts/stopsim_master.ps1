@@ -17,7 +17,6 @@ if ($answer -notmatch '^[Yy]') {
 
 Write-Host ""
 
-KillPythonScript "frankenutil.py"
 KillPythonScript "psx-acars.py"
 KillPythonScript "frankentanker.py"
 KillPythonScript "frankenweather.py"

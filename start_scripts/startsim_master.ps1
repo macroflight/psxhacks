@@ -38,12 +38,6 @@ if ($StartPsxNet ) {
     Invoke-WindowPosition "PSX.NET"
 }
 
-if ($StartFrankenutil ) {
-    Write-Output "Starting FrankenUtil..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenutil.ps1"
-    Invoke-WindowPosition "frankenutil"
-}
-
 if ($StartCpdlc ) {
     Delay 5
     Write-Output "Starting HAFAP (CPDLC)..."
