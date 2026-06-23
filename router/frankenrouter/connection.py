@@ -263,6 +263,10 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
             self.logger.warning("Stripping away NULL byte from %s", data)
             data = data.replace(b'\x00', b'')
 
+        if data.startswith(b'\xef\xbb\xbf'):
+            self.logger.warning("Stripping UTF-8 BOM from message (addon bug)")
+            data = data[3:]
+
         # Remove any newline components from the end of the string
         data_no_newline = data.replace(b'\n', b'').replace(b'\r', b'')
         self.logger.debug("with newlines removed: %s", data_no_newline)
