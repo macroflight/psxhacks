@@ -6,8 +6,14 @@ data, and streams it to a PSCC Flight Centre portal over an authenticated
 WebSocket connection.  No inbound port forwarding is needed — the connection
 is always initiated outward from your machine to the portal.
 
+Also connects as an FRDP peer to receive FLIGHTINFO (crew codes, airline,
+VATSIM callsign, etc.) and ROUTERINFO (connected simulator names) from
+frankenrouter, and includes them in each push update to the portal.
+The FRDP peer connection requires no extra configuration.
+
 Setup:
   1. Register a "My sim" on the portal (your portal URL)/mysim
+     (choose type "Shared cockpit master sim" if this is a master sim)
   2. Copy the logon key shown on the sim's detail page
   3. Run this addon:
        python frankenpush.py --portal-url https://your-portal/path --logon-key <key>
@@ -18,11 +24,15 @@ Setup:
 
 import argparse
 import asyncio
+import datetime
 import inspect
+import json
 import logging
 import math
+import pathlib
 import sys
 import traceback
+import uuid
 
 import aiohttp
 
@@ -33,8 +43,19 @@ __MY_CLIENT_ID__ = 'PUSH'
 __MY_DISPLAY_NAME__ = 'FrankenPush'
 __MY_DESCRIPTION__ = 'PSCC Flight Centre push connector'
 
+_FRDP_VERSION = '1'
+_FRDP_CLIENT_ID = 'FrankenPush'
+_FRDP_ROUTER_ID = 'frankenpush'
+# The literal substring frankenrouter's rules.py matches to mark a connecting
+# peer as is_frankenrouter=True (required to receive FLIGHTINFO/ROUTERINFO).
+_FRDP_MARKER = 'FRANKEN.PY frankenrouter'
+
 # Matches the portal's WS broadcast rate (web/ws.py _BROADCAST_INTERVAL).
 _SEND_INTERVAL = 2.0
+
+# How often to send a full snapshot regardless of what changed.
+# Between full sends only changed fields are sent to reduce bandwidth.
+_FULL_SEND_INTERVAL = 300.0
 
 
 class Script():  # pylint: disable=too-many-instance-attributes
@@ -64,6 +85,17 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self._route1 = None
         self._route2 = None
         self._eta = None
+
+        # FRDP peer connection state
+        self._flightinfo = None             # latest FLIGHTINFO dict
+        self._routerinfos: dict = {}        # {uuid: routerinfo_dict}
+
+        # Autosave situ monitoring — set when a file changes, consumed by _build_update
+        self._pending_autosave_situ = None
+
+        # Delta tracking: records the last-sent value of each slow-changing field.
+        # Reset to {} on each portal (re)connection to force a full first send.
+        self._sent_state: dict = {}
 
     # --- PSX callbacks ---
 
@@ -105,22 +137,74 @@ class Script():  # pylint: disable=too-many-instance-attributes
 
     # --- helpers ---
 
-    def _build_update(self):
-        return {
-            "tail_number": self._tail_number,
-            "lat": self._lat,
-            "lon": self._lon,
-            "alt_ft": self._alt_ft,
-            "heading_deg": self._heading_deg,
-            "tas_kt": self._tas_kt,
-            "pitch_deg": self._pitch_deg,
-            "bank_deg": self._bank_deg,
-            "flight_number": self._flight_number,
-            "route_mode": self._route_mode,
-            "route1": self._route1,
-            "route2": self._route2,
-            "eta": self._eta,
-        }
+    @property
+    def _connected_sim_names(self):
+        return sorted({r['simulator_name'] for r in self._routerinfos.values()
+                       if 'simulator_name' in r})
+
+    def _build_update(self, full):
+        """Build the JSON payload to send to Flight Centre.
+
+        If full=True every field is included. Otherwise only fields whose
+        values have changed since the last send are included — the server
+        (push_manager.py) ignores absent keys rather than resetting them.
+        Position fields are always included: they change on virtually every
+        tick, so checking them for change adds cost without saving bandwidth.
+        """
+        update = {}
+
+        # Position — always include when we have a fix.
+        if self._lat is not None:
+            update.update({
+                "lat": self._lat, "lon": self._lon,
+                "alt_ft": self._alt_ft, "heading_deg": self._heading_deg,
+                "tas_kt": self._tas_kt, "pitch_deg": self._pitch_deg,
+                "bank_deg": self._bank_deg,
+            })
+
+        # Scalar fields — only when changed or full.
+        for key in ("tail_number", "flight_number", "eta"):
+            val = getattr(self, f"_{key}")
+            if full or self._sent_state.get(key) != val:
+                update[key] = val
+
+        # Route fields are sent as a group: the server calls pick_active_route
+        # with all three, so partial sends would give wrong results.
+        route_now = (self._route_mode, self._route1, self._route2)
+        if full or self._sent_state.get("route") != route_now:
+            update["route_mode"] = self._route_mode
+            update["route1"] = self._route1
+            update["route2"] = self._route2
+
+        # flightinfo and connected_sim_names: the server only updates these
+        # when the key is present, so omitting them on delta sends is safe.
+        fi = self._flightinfo
+        if full or self._sent_state.get("flightinfo") != fi:
+            update["flightinfo"] = fi
+
+        names = self._connected_sim_names
+        if full or self._sent_state.get("names") != names:
+            update["connected_sim_names"] = names
+
+        # Autosave situ — always include when pending (one-shot delivery).
+        if self._pending_autosave_situ is not None:
+            update["autosave_situ"] = self._pending_autosave_situ
+            self._pending_autosave_situ = None
+
+        return update
+
+    def _record_sent_state(self, update):
+        """Record what was just sent so the next delta can skip unchanged fields."""
+        for key in ("tail_number", "flight_number", "eta"):
+            if key in update:
+                self._sent_state[key] = update[key]
+        if "route_mode" in update:
+            self._sent_state["route"] = (
+                update["route_mode"], update["route1"], update["route2"])
+        if "flightinfo" in update:
+            self._sent_state["flightinfo"] = update["flightinfo"]
+        if "connected_sim_names" in update:
+            self._sent_state["names"] = update["connected_sim_names"]
 
     # --- coroutines ---
 
@@ -145,10 +229,11 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.psx.onResume = lambda: None
 
             # PSX lexicon names (confirmed from session captures):
-            #   Qs0 = CfgRego
+            #   Qs0 = CfgRego (confirmed) a.k.a. AcTailNo,
             #   PiBaHeAlTas = Qs121, FmcFltNo = Qs401,
             #   FmcRteViAcMo = Qs373, FmcRte1 = Qs376, FmcRte2 = Qs377,
             #   ActDestEta = Qi247
+            self.psx.subscribe("AcTailNo", self._on_tail_number)
             self.psx.subscribe("CfgRego", self._on_tail_number)
             self.psx.subscribe("PiBaHeAlTas", self._on_position)
             self.psx.subscribe("FmcFltNo", self._on_flight_number)
@@ -168,6 +253,111 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 exc, inspect.currentframe().f_code.co_name)
             self.logger.critical(traceback.format_exc())
 
+    def _handle_frdp_line(self, line, writer):
+        """Process one line received on the FRDP peer connection."""
+        rest = line[len('addon=FRANKENROUTER:'):]
+        parts = rest.split(':', 2)
+        if len(parts) < 2:
+            return
+        msg_type = parts[1]
+        payload = parts[2] if len(parts) > 2 else ''
+        if msg_type == 'PING':
+            writer.write(
+                f"addon=FRANKENROUTER:{_FRDP_VERSION}:PONG:{payload}\r\n".encode())
+        elif msg_type == 'FLIGHTINFO':
+            try:
+                self._flightinfo = json.loads(payload)
+                self.logger.debug("FRDP: received FLIGHTINFO")
+            except json.JSONDecodeError:
+                pass
+        elif msg_type == 'ROUTERINFO':
+            try:
+                ri = json.loads(payload)
+                ri_uuid = ri.get('uuid')
+                if ri_uuid:
+                    self._routerinfos[ri_uuid] = ri
+                    self.logger.debug("FRDP: ROUTERINFO from %s (%s)",
+                                      ri_uuid, ri.get('simulator_name', '?'))
+            except json.JSONDecodeError:
+                pass
+
+    async def _run_frdp_session(self, reader, writer):
+        """Read loop for a single FRDP peer session."""
+        while True:
+            raw = await reader.readline()
+            if not raw:
+                self.logger.info("FRDP: EOF from peer")
+                break
+            line = raw.decode(errors='replace').rstrip('\r\n')
+            if line.startswith('addon=FRANKENROUTER:'):
+                self._handle_frdp_line(line, writer)
+
+    async def get_frdp_connection_coro(self):
+        """Connect as an FRDP peer to receive FLIGHTINFO and ROUTERINFO.
+
+        Connects to the same host:port as the PSX connection but identifies
+        as a frankenrouter peer, which causes the frankenrouter to send
+        FLIGHTINFO (crew codes, airline, etc.) and ROUTERINFO (connected
+        simulator names) broadcasts.
+        """
+        frdp_uuid = str(uuid.uuid4())
+        handshake = (
+            f"name={_FRDP_CLIENT_ID}:{_FRDP_MARKER} PSX router {_FRDP_ROUTER_ID}\r\n"
+            f"addon=FRANKENROUTER:{_FRDP_VERSION}:IDENT:"
+            f"{_FRDP_CLIENT_ID}:{_FRDP_ROUTER_ID}:{frdp_uuid}\r\n"
+        ).encode()
+        backoff = 2.0
+        try:
+            self.logger.debug("Starting %s", inspect.currentframe().f_code.co_name)
+            while True:
+                try:
+                    reader, writer = await asyncio.open_connection(
+                        self.args.psx_host, self.args.psx_port)
+                    try:
+                        writer.write(handshake)
+                        backoff = 2.0
+                        self.logger.info("FRDP: peer connection established")
+                        await self._run_frdp_session(reader, writer)
+                    finally:
+                        self._flightinfo = None
+                        self._routerinfos.clear()
+                        writer.close()
+                        self.logger.info("FRDP: peer connection closed")
+                except (OSError, asyncio.IncompleteReadError) as exc:
+                    self.logger.warning("FRDP: connection failed: %s", exc)
+                self.logger.info("FRDP: retrying in %.0f s ...", backoff)
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 60.0)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical(
+                "Unhandled exception %s in %s, shutting down",
+                exc, inspect.currentframe().f_code.co_name)
+            self.logger.critical(traceback.format_exc())
+
+    async def _portal_send_loop(self, ws):
+        """Send updates to the portal at the broadcast interval.
+
+        Sends a full snapshot immediately after (re)connecting and every
+        _FULL_SEND_INTERVAL seconds thereafter. In between, only fields
+        that have changed since the last send are included in the message.
+        """
+        self._sent_state = {}   # clear so the first send is always a full snapshot
+        last_full_at = 0.0
+        while True:
+            if self.psx_connected and self._lat is not None:
+                now = asyncio.get_running_loop().time()
+                full = not self._sent_state or (now - last_full_at >= _FULL_SEND_INTERVAL)
+                update = self._build_update(full)
+                await ws.send_json(update)
+                self._record_sent_state(update)
+                if full:
+                    last_full_at = now
+                if self.args.show_sent_to_fc:
+                    self.logger.info("Sent to FC: %s", json.dumps(update, indent=2))
+                else:
+                    self.logger.debug("Sent %s update", "full" if full else "delta")
+            await asyncio.sleep(_SEND_INTERVAL)
+
     async def push_loop_coro(self):
         """Maintain a WebSocket connection to the portal and send position updates."""
         ws_url = self.args.portal_url.rstrip('/') + '/ws/push'
@@ -184,23 +374,10 @@ class Script():  # pylint: disable=too-many-instance-attributes
                                 ws_url, headers=headers, heartbeat=30) as ws:
                             self.logger.info("Connected to portal")
                             backoff = 2.0  # reset on successful connection
-
-                            async def _send():
-                                while True:
-                                    if self.psx_connected and self._lat is not None:
-                                        await ws.send_json(self._build_update())
-                                        self.logger.debug("Sent position update")
-                                    await asyncio.sleep(_SEND_INTERVAL)
-
-                            async def _drain():
-                                # Discard server messages; exits when server
-                                # sends CLOSE (e.g. on auth rejection) or the
-                                # connection drops.
-                                async for _ in ws:
-                                    pass
-
-                            send_task = asyncio.ensure_future(_send())
-                            drain_task = asyncio.ensure_future(_drain())
+                            send_task = asyncio.ensure_future(
+                                self._portal_send_loop(ws))
+                            drain_task = asyncio.ensure_future(
+                                self._drain_ws(ws))
                             try:
                                 await asyncio.wait(
                                     [send_task, drain_task],
@@ -239,6 +416,51 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 exc, inspect.currentframe().f_code.co_name)
             self.logger.critical(traceback.format_exc())
 
+    @staticmethod
+    async def _drain_ws(ws):
+        """Discard server messages; exits when server closes the connection."""
+        async for _ in ws:
+            pass
+
+    async def _monitor_autosave_coro(self):
+        """Poll PSX autosave situ files and queue changed ones for upload.
+
+        Checks -Autosaved[A].situ and -Autosaved[B].situ every 30 seconds.
+        When a file's mtime changes, its content and timestamp are stored as
+        _pending_autosave_situ and included in the next push update to the
+        portal.
+        """
+        situ_dir = pathlib.Path(self.args.upload_autosave_from)
+        mtimes = {
+            situ_dir / "-Autosaved[A].situ": None,
+            situ_dir / "-Autosaved[B].situ": None,
+        }
+        self.logger.info("Autosave monitor: watching %s", situ_dir)
+        while True:
+            for path, last_mtime in list(mtimes.items()):
+                try:
+                    mtime = path.stat().st_mtime
+                except OSError:
+                    continue
+                if last_mtime is not None and mtime == last_mtime:
+                    continue
+                mtimes[path] = mtime
+                try:
+                    age = datetime.datetime.now(
+                        datetime.timezone.utc).timestamp() - mtime
+                    if age > 7 * 60:
+                        self.logger.debug(
+                            "Autosave %s is %.0f s old, skipping", path.name, age)
+                        continue
+                    content = path.read_text(encoding='utf-8', errors='replace')
+                    ts = datetime.datetime.fromtimestamp(
+                        mtime, tz=datetime.timezone.utc).isoformat()
+                    self._pending_autosave_situ = {"content": content, "timestamp": ts}
+                    self.logger.info("Autosave queued for upload: %s", path.name)
+                except OSError as exc:
+                    self.logger.warning("Failed to read autosave file: %s", exc)
+            await asyncio.sleep(30.0)
+
     async def monitor_coro(self):
         """Monitor the coroutines and start/restart as needed."""
         try:
@@ -260,10 +482,15 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 for task in tasks_ended:
                     self.tasks.discard(task)
 
-                for name, coro_fn in [
+                all_coros = [
                     ("PSXConnection", self.get_psx_connection_coro),
                     ("PushLoop", self.push_loop_coro),
-                ]:
+                    ("FRDPConnection", self.get_frdp_connection_coro),
+                ]
+                if self.args.upload_autosave_from:
+                    all_coros.append(
+                        ("AutosaveMonitor", self._monitor_autosave_coro))
+                for name, coro_fn in all_coros:
                     if name not in running:
                         self.logger.info("Starting %s ...", name)
                         task = self.taskgroup.create_task(coro_fn(), name=name)
@@ -306,6 +533,18 @@ class Script():  # pylint: disable=too-many-instance-attributes
             help="Logon key from the 'My sim' page on the portal.",
         )
         parser.add_argument(
+            '--upload-autosave-from',
+            type=str, action='store', default=None, metavar='PATH',
+            help="Path to the PSX Situations directory. Monitors -Autosaved[A].situ "
+                 "and -Autosaved[B].situ and uploads them to Flight Centre when they "
+                 "change (PSX saves every ~3.5 minutes).",
+        )
+        parser.add_argument(
+            '--show-sent-to-fc',
+            action='store_true',
+            help="Print each update sent to Flight Centre (useful for troubleshooting).",
+        )
+        parser.add_argument(
             '--debug',
             action='store_true',
             help="Print more debug info.",
@@ -334,6 +573,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
 
         print(f"Connecting to PSX at {self.args.psx_host}:{self.args.psx_port}")
         print(f"Pushing to portal at {self.args.portal_url.rstrip('/')}/ws/push")
+        print(f"FRDP peer: {self.args.psx_host}:{self.args.psx_port}")
         print("Press Ctrl+C to stop.")
 
         async with asyncio.TaskGroup() as self.taskgroup:
@@ -350,4 +590,4 @@ if __name__ == '__main__':
         input("An error occurred, press Enter to continue...")
     except SystemExit as exc:
         if exc.code not in (None, 0):
-            input("An error occurred, press Enter to continue...")
+            input("Press Enter to continue...")
