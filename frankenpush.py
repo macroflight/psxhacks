@@ -58,6 +58,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self._tas_kt = None
         self._pitch_deg = None
         self._bank_deg = None
+        self._tail_number = None
         self._flight_number = None
         self._route_mode = None
         self._route1 = None
@@ -84,6 +85,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
         except (ValueError, IndexError):
             pass
 
+    def _on_tail_number(self, _key, value):
+        self._tail_number = value.strip().upper() or None
+
     def _on_flight_number(self, _key, value):
         self._flight_number = value or None
 
@@ -103,6 +107,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
 
     def _build_update(self):
         return {
+            "tail_number": self._tail_number,
             "lat": self._lat,
             "lon": self._lon,
             "alt_ft": self._alt_ft,
@@ -140,8 +145,11 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.psx.onResume = lambda: None
 
             # PSX lexicon names (confirmed from session captures):
-            #   PiBaHeAlTas = Qs121, FmcFltNo = Qs401, FmcRteViAcMo = Qs373,
-            #   FmcRte1 = Qs376, FmcRte2 = Qs377, ActDestEta = Qi247
+            #   Qs0 = CfgRego
+            #   PiBaHeAlTas = Qs121, FmcFltNo = Qs401,
+            #   FmcRteViAcMo = Qs373, FmcRte1 = Qs376, FmcRte2 = Qs377,
+            #   ActDestEta = Qi247
+            self.psx.subscribe("CfgRego", self._on_tail_number)
             self.psx.subscribe("PiBaHeAlTas", self._on_position)
             self.psx.subscribe("FmcFltNo", self._on_flight_number)
             self.psx.subscribe("FmcRteViAcMo", self._on_route_mode)
