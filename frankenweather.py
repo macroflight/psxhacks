@@ -879,10 +879,11 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self.psx._set(key, value)  # pylint: disable=protected-access
 
     def _sync_psx_clock(self) -> None:
-        """Sync PSX clock (Qs123/TimeEarth) to current real-world time."""
+        """Sync PSX clocks (TimeEarth, TimeClockL, TimeClockR) to current real-world time."""
         ms = int(time.time() * 1000)
-        self.logger.info("Syncing PSX clock to real time: Qs123=%d", ms)
-        self.psx_send_and_set("Qs123", str(ms))
+        self.logger.info("Syncing PSX clocks to real time: %d ms", ms)
+        for key in ("Qs123", "Qs124", "Qs125"):
+            self.psx_send_and_set(key, str(ms))
 
     # ------------------------------------------------------------------
     # PSX event handlers
