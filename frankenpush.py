@@ -31,6 +31,7 @@ import logging
 import math
 import pathlib
 import sys
+import time
 import traceback
 import uuid
 
@@ -49,6 +50,9 @@ _FRDP_ROUTER_ID = 'frankenpush'
 # The literal substring frankenrouter's rules.py matches to mark a connecting
 # peer as is_frankenrouter=True (required to receive FLIGHTINFO/ROUTERINFO).
 _FRDP_MARKER = 'FRANKEN.PY frankenrouter'
+
+# ROUTERINFO is sent every 10 s by frankenrouter; expire entries unseen for 2× that.
+_ROUTERINFO_MAX_AGE = 20.0
 
 # Matches the portal's WS broadcast rate (web/ws.py _BROADCAST_INTERVAL).
 _SEND_INTERVAL = 2.0
@@ -139,8 +143,36 @@ class Script():  # pylint: disable=too-many-instance-attributes
 
     @property
     def _connected_sim_names(self):
-        return sorted({r['simulator_name'] for r in self._routerinfos.values()
-                       if 'simulator_name' in r})
+        now = time.time()
+
+        # Expire entries not seen within 2× the ROUTERINFO broadcast interval.
+        stale = [uid for uid, ri in self._routerinfos.items()
+                 if now - ri.get('received', 0) > _ROUTERINFO_MAX_AGE]
+        for uid in stale:
+            self.logger.debug("ROUTERINFO: expiring stale entry %s (%s)",
+                              uid, self._routerinfos[uid].get('simulator_name', '?'))
+            del self._routerinfos[uid]
+
+        # The master sim is the router whose upstream connection is not a
+        # frankenrouter (i.e. it connects directly to PSX).  Its simulator
+        # name represents the master crew and must be excluded from the list
+        # of *client* sim names shown as crew on the flight board.
+        master_sim_name = None
+        for ri in self._routerinfos.values():
+            for conn in ri.get('connections', []):
+                if conn.get('upstream') and not conn.get('is_frankenrouter'):
+                    master_sim_name = ri.get('simulator_name')
+                    break
+            if master_sim_name is not None:
+                break
+
+        names = sorted({
+            ri['simulator_name']
+            for ri in self._routerinfos.values()
+            if 'simulator_name' in ri and ri['simulator_name'] != master_sim_name
+        })
+        self.logger.debug("ROUTERINFO: master=%r  clients=%r", master_sim_name, names)
+        return names
 
     def _build_update(self, full):
         """Build the JSON payload to send to Flight Centre.
@@ -275,6 +307,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 ri = json.loads(payload)
                 ri_uuid = ri.get('uuid')
                 if ri_uuid:
+                    ri['received'] = time.time()
                     self._routerinfos[ri_uuid] = ri
                     self.logger.debug("FRDP: ROUTERINFO from %s (%s)",
                                       ri_uuid, ri.get('simulator_name', '?'))
