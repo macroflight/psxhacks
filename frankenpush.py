@@ -60,7 +60,7 @@ PUSH_PROTOCOL_VERSION = 1
 
 # Logon code cache — written next to this script so the user doesn't have to
 # re-enter the code on every run.
-_CACHE_FILE = pathlib.Path(__file__).with_name('frankenpush_cache.json')
+_CACHE_FILE = pathlib.Path.home() / '.frankenpush_cache.json'
 
 
 def _load_cached_logon_code():
