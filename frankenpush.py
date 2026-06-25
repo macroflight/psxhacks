@@ -61,6 +61,68 @@ _SEND_INTERVAL = 2.0
 # Between full sends only changed fields are sent to reduce bandwidth.
 _FULL_SEND_INTERVAL = 300.0
 
+# PSX FMC route parsing — mirrors psccfc/connector/frdp.py (kept in sync by hand).
+_WAYPOINT_PREFIX_LEN = 10
+_WAYPOINT_SENTINEL_LATLON = "9.0/9.0"
+
+
+def _pick_active_route(mode_value, route1, route2):
+    """Select route1 or route2 per FmcRteViAcMo's 3rd character (index 2).
+
+    '1' = route 1 active, '2' = route 2 active.  Returns None if neither.
+    """
+    if not mode_value or len(mode_value) < 3:
+        return None
+    indicator = mode_value[2]
+    if indicator == "1":
+        return route1
+    if indicator == "2":
+        return route2
+    return None
+
+
+def _parse_route_airports(route):
+    """Extract (dep_icao, arr_icao) from a PSX FmcRte string.
+
+    Returns (None, None) when missing/malformed or 'bbbb' placeholder is used.
+    """
+    if not route:
+        return None, None
+    fields = route.split(";")
+    dep_raw = fields[0].strip() if fields else ""
+    arr_raw = fields[1].strip() if len(fields) > 1 else ""
+    if dep_raw.upper() == "BBBB" or arr_raw.upper() == "BBBB":
+        return None, None
+    dep = dep_raw if len(dep_raw) == 4 and dep_raw.isalnum() else None
+    arr = arr_raw if len(arr_raw) == 4 and arr_raw.isalnum() else None
+    return dep, arr
+
+
+def _parse_route_waypoints(route):
+    """Extract [[name, lat_deg, lon_deg], ...] entries from a PSX FmcRte string."""
+    if not route or "#" not in route:
+        return []
+    _header, _sep, body = route.partition("#")
+    waypoints = []
+    for entry in body.split(";"):
+        if not entry:
+            continue
+        fields = entry.split("'")
+        if len(fields) < 4:
+            continue
+        name = fields[0][_WAYPOINT_PREFIX_LEN:]
+        latlon = fields[3]
+        if latlon == _WAYPOINT_SENTINEL_LATLON:
+            continue
+        lat_str, _sep2, lon_str = latlon.partition("/")
+        try:
+            lat_deg = math.degrees(float(lat_str))
+            lon_deg = math.degrees(float(lon_str))
+        except ValueError:
+            continue
+        waypoints.append([name, lat_deg, lon_deg])
+    return waypoints
+
 
 class Script():  # pylint: disable=too-many-instance-attributes
     """FrankenPush script."""
@@ -200,13 +262,15 @@ class Script():  # pylint: disable=too-many-instance-attributes
             if full or self._sent_state.get(key) != val:
                 update[key] = val
 
-        # Route fields are sent as a group: the server calls pick_active_route
-        # with all three, so partial sends would give wrong results.
-        route_now = (self._route_mode, self._route1, self._route2)
+        # Route: extract the fields FC needs rather than sending raw PSX strings.
+        active_route = _pick_active_route(self._route_mode, self._route1, self._route2)
+        dep_airport, arr_airport = _parse_route_airports(active_route)
+        waypoints = _parse_route_waypoints(active_route)
+        route_now = (dep_airport, arr_airport, tuple(tuple(w) for w in waypoints))
         if full or self._sent_state.get("route") != route_now:
-            update["route_mode"] = self._route_mode
-            update["route1"] = self._route1
-            update["route2"] = self._route2
+            update["dep_airport"] = dep_airport
+            update["arr_airport"] = arr_airport
+            update["waypoints"] = waypoints
 
         # flightinfo and connected_sim_names: the server only updates these
         # when the key is present, so omitting them on delta sends is safe.
@@ -230,9 +294,10 @@ class Script():  # pylint: disable=too-many-instance-attributes
         for key in ("tail_number", "flight_number", "eta"):
             if key in update:
                 self._sent_state[key] = update[key]
-        if "route_mode" in update:
+        if "dep_airport" in update:
             self._sent_state["route"] = (
-                update["route_mode"], update["route1"], update["route2"])
+                update["dep_airport"], update["arr_airport"],
+                tuple(tuple(w) for w in update["waypoints"]))
         if "flightinfo" in update:
             self._sent_state["flightinfo"] = update["flightinfo"]
         if "connected_sim_names" in update:
