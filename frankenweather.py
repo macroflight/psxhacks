@@ -878,6 +878,12 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self.psx.send(key, value)
         self.psx._set(key, value)  # pylint: disable=protected-access
 
+    def _sync_psx_clock(self) -> None:
+        """Sync PSX clock (Qs123/TimeEarth) to current real-world time."""
+        ms = int(time.time() * 1000)
+        self.logger.info("Syncing PSX clock to real time: Qs123=%d", ms)
+        self.psx_send_and_set("Qs123", str(ms))
+
     # ------------------------------------------------------------------
     # PSX event handlers
     # ------------------------------------------------------------------
@@ -1053,6 +1059,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 self.psx_send_and_set("WxAutoSet", "1")
             elif old_mode == "disabled":
                 self.psx_send_and_set("WxAutoSet", "0")
+                self._sync_psx_clock()
         self._state_changed_event.set()
 
     # ------------------------------------------------------------------
@@ -2544,6 +2551,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
                     self._turb_state_changed_event.set()
                 if self._fw_mode == "disabled":
                     self.psx_send_and_set("WxAutoSet", "1")
+                else:
+                    self._sync_psx_clock()
 
             def disconnected():
                 self.logger.info("PSX DISCONNECTED")
