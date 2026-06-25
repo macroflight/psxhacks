@@ -74,8 +74,11 @@ PSX_RESUME_ELEVATION_AFTER = 60
 # How often to sent master caution if filter status is bad
 FILTER_WARNING_INTERVAL = 60
 
-# How long to hold a Qs369=XgbP before releasing it regardless of Qs355 (IRS alignment fix)
-IRS_ALIGN_FIX_TIMEOUT = 120.0
+# Seconds to wait after all IRSes reach ≥60000 before broadcasting the alignment fix
+IRS_ALIGN_FIX_DELAY = 5.0
+
+# Value broadcast to upstream and all clients once IRSes are confirmed aligned
+IRS_ALIGN_FIX_VALUE = 'Qs355=102000;102000;102000'
 
 # Addon client patterns checked on the master router.
 # More than one match is always a critical error.
@@ -210,9 +213,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.observer_session_password = None
         self.observer_mode = False
 
-        # IRS alignment fix: Qs369=XgbP messages held back from upstream,
-        # keyed by client peername, until all Qs355 values reach 60000
-        self.irs_align_xgbp_pending = {}
+        # IRS alignment fix: timestamp when all three IRSes first reached ≥60000,
+        # and whether we have already sent the fix for this alignment cycle.
+        self._irs_all_aligned_since = None
+        self._irs_fix_sent = False
 
         # Keep track of when we last sent a filter state warning to EICAS
         self.filter_warning_sent = 0
@@ -2127,47 +2131,38 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.status_display_requested = True
                 await self.close_client_connection(client, clean=False)
 
-    def _irs_should_hold(self):
-        """Return True if any IRS is still aligning (Qs355 between 1 and 59999)."""
-        if not self.cache.has_keyword('Qs355'):
-            return False
-        try:
-            parts = [int(p) for p in self.cache.get_value('Qs355').split(';')]
-            return any(0 < p < 60000 for p in parts)
-        except (ValueError, AttributeError):
-            return False
-
     async def _housekeeping_irs_align_fix(self):
-        """Release held Qs369=XgbP messages once all IRSes have completed alignment."""
-        if not self.irs_align_xgbp_pending:
+        """Broadcast IRS_ALIGN_FIX_VALUE when any IRS hits 60000 and all are above 59000."""
+        if not self.config.psx.irs_align_fix:
             return
         now = time.perf_counter()
-        qs355_str = 'unknown'
-        all_aligned = False
+        any_just_aligned = False
         if self.cache.has_keyword('Qs355'):
             try:
-                qs355_str = self.cache.get_value('Qs355')
-                parts = [int(p) for p in qs355_str.split(';')]
-                all_aligned = all(p >= 60000 for p in parts)
+                parts = [int(p) for p in self.cache.get_value('Qs355').split(';')]
+                any_just_aligned = (
+                    any(p == 60000 for p in parts) and
+                    all(p > 59000 for p in parts)
+                )
             except (ValueError, AttributeError):
                 pass
-        for peername in list(self.irs_align_xgbp_pending.keys()):
-            pending = self.irs_align_xgbp_pending[peername]
-            age = now - pending['held_at']
-            timeout = age > IRS_ALIGN_FIX_TIMEOUT
-            if all_aligned or timeout:
-                if timeout:
-                    self.logger.warning(
-                        "IRS alignment fix: timeout (%.0f s), releasing held"
-                        " Qs369=XgbP for %s (Qs355=%s)",
-                        age, peername, qs355_str)
-                else:
-                    self.logger.info(
-                        "IRS alignment fix: all IRSes aligned (Qs355=%s),"
-                        " releasing held Qs369=XgbP for %s",
-                        qs355_str, peername)
-                await self.send_to_upstream(pending['line'])
-                del self.irs_align_xgbp_pending[peername]
+        if not any_just_aligned:
+            self._irs_all_aligned_since = None
+            self._irs_fix_sent = False
+            return
+        if self._irs_all_aligned_since is None:
+            self._irs_all_aligned_since = now
+        if self._irs_fix_sent:
+            return
+        if now - self._irs_all_aligned_since >= IRS_ALIGN_FIX_DELAY:
+            self.logger.info(
+                "IRS alignment fix: IRS alignment detected (Qs355=%s),"
+                " broadcasting %s",
+                self.cache.get_value('Qs355'), IRS_ALIGN_FIX_VALUE)
+            await self.send_to_upstream(IRS_ALIGN_FIX_VALUE)
+            await self.client_broadcast(IRS_ALIGN_FIX_VALUE)
+            self.cache.update('Qs355', '102000;102000;102000')
+            self._irs_fix_sent = True
 
     async def housekeeping_task(self, name):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
         """Miscellaneous housekeeping Task."""
@@ -2456,28 +2451,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         elif code == RulesCode.OBSERVER_MODE:
             self.logger.debug(
                 "Observer mode: dropped key-value from %s: %s", sender_hr, line)
-
-        # IRS alignment fix: hold Qs369=XgbP from clients upstream until all IRSes
-        # have completed alignment, to prevent PSX from resetting a nearly-aligned IRS.
-        if (
-            not sender.upstream and
-            self.config.psx.irs_align_fix and
-            action == RulesAction.NORMAL and
-            line.startswith('Qs369=') and
-            line.endswith('XgbP')
-        ):
-            if self._irs_should_hold():
-                self.logger.info(
-                    "IRS alignment fix: holding Qs369=XgbP from client %d upstream"
-                    " (Qs355=%s, waiting for all IRSes to complete)",
-                    sender.client_id,
-                    self.cache.get_value('Qs355') if self.cache.has_keyword('Qs355') else 'unknown')
-                self.irs_align_xgbp_pending[sender.peername] = {
-                    'line': line,
-                    'held_at': time.perf_counter(),
-                }
-                await self.client_broadcast(line, exclude=[sender.peername])
-                return
 
         # Take action
         if action == RulesAction.DROP:
