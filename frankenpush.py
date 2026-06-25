@@ -14,12 +14,11 @@ The FRDP peer connection requires no extra configuration.
 Setup:
   1. Register a "My sim" on the portal (your portal URL)/mysim
      (choose type "Shared cockpit master sim" if this is a master sim)
-  2. Copy the logon key shown on the sim's detail page
+  2. Copy the logon code shown on the sim's detail page
   3. Run this addon:
-       python frankenpush.py --portal-url https://your-portal/path --logon-key <key>
-     or just:
-       python frankenpush.py
-     and enter the values when prompted.
+       python frankenpush.py --logon-code <code>
+     The logon code is saved to frankenpush_cache.json after first use, so
+     subsequent runs can omit --logon-code and will use the cached value.
 """
 
 import argparse
@@ -58,6 +57,27 @@ _ROUTERINFO_MAX_AGE = 20.0
 # backward-compatible with the version of push_manager.py on the portal.
 # The portal will reject connections whose version does not match.
 PUSH_PROTOCOL_VERSION = 1
+
+# Logon code cache — written next to this script so the user doesn't have to
+# re-enter the code on every run.
+_CACHE_FILE = pathlib.Path(__file__).with_name('frankenpush_cache.json')
+
+
+def _load_cached_logon_code():
+    """Return the cached logon code, or None if no cache exists."""
+    try:
+        return json.loads(_CACHE_FILE.read_text()).get('logon_code') or None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _save_cached_logon_code(code):
+    """Persist the logon code to the cache file for future runs."""
+    try:
+        _CACHE_FILE.write_text(json.dumps({'logon_code': code}))
+    except OSError:
+        pass  # not fatal — just means the next run will prompt again
+
 
 # Matches the portal's WS broadcast rate (web/ws.py _BROADCAST_INTERVAL).
 _SEND_INTERVAL = 2.0
@@ -479,7 +499,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
     async def push_loop_coro(self):
         """Maintain a WebSocket connection to the portal and send position updates."""
         ws_url = self.args.portal_url.rstrip('/') + '/ws/push'
-        headers = {"Authorization": f"Bearer {self.args.logon_key}"}
+        headers = {"Authorization": f"Bearer {self.args.logon_code}"}
         backoff = 2.0
 
         try:
@@ -503,8 +523,8 @@ class Script():  # pylint: disable=too-many-instance-attributes
                                 close_code = ws.close_code
                                 if close_code == 4001:
                                     self.logger.error(
-                                        "Portal rejected logon key — "
-                                        "check the key shown on your My sim page")
+                                        "Portal rejected logon code — "
+                                        "check the code shown on your My sim page")
                                     backoff = 30.0  # long pause on auth failure
                                 elif close_code == 4002:
                                     _print_version_mismatch_warning()
@@ -649,9 +669,16 @@ class Script():  # pylint: disable=too-many-instance-attributes
             help="PSCC Flight Centre portal URL.",
         )
         parser.add_argument(
+            '--logon-code',
+            type=str, action='store', default=None, dest='logon_code',
+            help="Logon code from the 'My sim' page on the portal. "
+                 "Saved to frankenpush_cache.json after first use; "
+                 "omit this option on subsequent runs to use the cached value.",
+        )
+        parser.add_argument(
             '--logon-key',
-            type=str, action='store', default=None,
-            help="Logon key from the 'My sim' page on the portal.",
+            type=str, action='store', default=None, dest='logon_code',
+            help="Deprecated alias for --logon-code.",
         )
         parser.add_argument(
             '--upload-autosave-from',
@@ -672,9 +699,18 @@ class Script():  # pylint: disable=too-many-instance-attributes
         )
         self.args = parser.parse_args()
 
-        if not self.args.logon_key:
-            print("Enter the logon key shown on the 'My sim' page of the portal.")
-            self.args.logon_key = input("Logon key: ").strip()
+        if self.args.logon_code:
+            # Explicitly provided — persist for future runs.
+            _save_cached_logon_code(self.args.logon_code)
+        else:
+            cached = _load_cached_logon_code()
+            if cached:
+                print(f"Using cached logon code from {_CACHE_FILE.name}.")
+                self.args.logon_code = cached
+            else:
+                print("Enter the logon code shown on the 'My sim' page of the portal.")
+                self.args.logon_code = input("Logon code: ").strip()
+                _save_cached_logon_code(self.args.logon_code)
 
     async def run(self):
         """Start everything."""
