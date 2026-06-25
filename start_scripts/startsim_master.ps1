@@ -57,6 +57,12 @@ if ($StartFrankenweather ) {
     Invoke-WindowPosition "frankenweather"
 }
 
+if ($StartFrankenpush ) {
+    Write-Output "Starting FrankenPush..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenpush.ps1"
+    Invoke-WindowPosition "frankenpush"
+}
+
 if ($StartSrslPsxMaster ) {
     Write-Output "Starting SRSL-PSX..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_srsl_psx_master.ps1"
