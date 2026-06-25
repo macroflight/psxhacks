@@ -54,6 +54,11 @@ _FRDP_MARKER = 'FRANKEN.PY frankenrouter'
 # ROUTERINFO is sent every 10 s by frankenrouter; expire entries unseen for 2× that.
 _ROUTERINFO_MAX_AGE = 20.0
 
+# Increment this whenever the push protocol changes in a way that is not
+# backward-compatible with the version of push_manager.py on the portal.
+# The portal will reject connections whose version does not match.
+PUSH_PROTOCOL_VERSION = 1
+
 # Matches the portal's WS broadcast rate (web/ws.py _BROADCAST_INTERVAL).
 _SEND_INTERVAL = 2.0
 
@@ -122,6 +127,21 @@ def _parse_route_waypoints(route):
             continue
         waypoints.append([name, lat_deg, lon_deg])
     return waypoints
+
+
+def _print_version_mismatch_warning():
+    """Print a prominent console warning that frankenpush is out of date."""
+    print()
+    print("=" * 68)
+    print("  *** FRANKENPUSH IS OUT OF DATE ***")
+    print()
+    print("  This copy of frankenpush (protocol version"
+          f" {PUSH_PROTOCOL_VERSION}) is not")
+    print("  compatible with the Flight Centre portal.")
+    print()
+    print("  Please update frankenpush to the latest version.")
+    print("=" * 68)
+    print()
 
 
 class Script():  # pylint: disable=too-many-instance-attributes
@@ -245,7 +265,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         Position fields are always included: they change on virtually every
         tick, so checking them for change adds cost without saving bandwidth.
         """
-        update = {}
+        update = {"protocol_version": PUSH_PROTOCOL_VERSION}
 
         # Position — always include when we have a fix.
         if self._lat is not None:
@@ -486,6 +506,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
                                         "Portal rejected logon key — "
                                         "check the key shown on your My sim page")
                                     backoff = 30.0  # long pause on auth failure
+                                elif close_code == 4002:
+                                    _print_version_mismatch_warning()
+                                    raise SystemExit(1)
                                 elif close_code is not None:
                                     self.logger.info(
                                         "Portal closed connection (code %s)", close_code)
