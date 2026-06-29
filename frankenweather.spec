@@ -1,13 +1,32 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-
 a = Analysis(
     ['frankenweather.py'],
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=[],
-    hookspath=[],
+    hiddenimports=[
+        # rasterio is imported lazily inside frankenturb — invisible to Analysis
+        'rasterio',
+        # frankenturb/ package: name collision with frankenturb.py may prevent recursive scan
+        'frankenturb',
+        'frankenturb.boost',
+        'frankenturb.cape',
+        'frankenturb.cb',
+        'frankenturb.cb_turbulence',
+        'frankenturb.gairmet',
+        'frankenturb.pirep',
+        'frankenturb.terrain',
+        'frankenturb.terrain.elevation',
+        'frankenturb.terrain.tiles',
+        'frankenturb.turbulence',
+        'frankenturb.wind',
+        'frankenturb.wind.fetcher',
+        'frankenturb.wind.profile',
+        # charset_normalizer: requests dependency with an optional compiled extension
+        'charset_normalizer',
+    ],
+    hookspath=['pyinstaller_hooks'],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],

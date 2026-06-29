@@ -1,14 +1,26 @@
 # -*- mode: python ; coding: utf-8 -*-
+import os
 
+# The Python SimConnect package does not bundle SimConnect.dll — it loads it
+# by absolute path from its own package directory at runtime. We find it from
+# the MSFS SDK at build time and place it there ('SimConnect' destination).
+_sc_candidates = [
+    os.path.join(os.environ.get('MSFS_SDK', ''), 'SimConnect SDK', 'lib', 'SimConnect.dll'),
+    r'C:\MSFS 2024 SDK\SimConnect SDK\lib\SimConnect.dll',
+]
+_sc_dll = next((p for p in _sc_candidates if p and os.path.isfile(p)), None)
+if _sc_dll:
+    print(f'frankenmsfsbridge: found SimConnect.dll at {_sc_dll}')
+else:
+    print('frankenmsfsbridge: WARNING — SimConnect.dll not found; MSFS connection will fail at runtime.')
 
 a = Analysis(
     ['frankenmsfsbridge.py'],
     pathex=[],
     binaries=[],
-	datas=[('SimConnect.dll', '.'),
-		('SimConnect.dll', '.')],
+    datas=[(_sc_dll, 'SimConnect')] if _sc_dll else [],
     hiddenimports=[],
-    hookspath=[],
+    hookspath=['pyinstaller_hooks'],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],

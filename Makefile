@@ -7,11 +7,11 @@ LINTVENVDIR = $${HOME}/.venv-lint-psxhacks/$(osname)
 
 # Run pylint on all *_.py files except psx.py (which is not included
 # in the repo but frequenly there anyway for testing.
-LINTFILES = $(shell find . -name '*.py' | egrep -v '(psx.py|test_latency)')
+LINTFILES = $(shell find . -name '*.py' | egrep -v '(psx.py|test_latency|pyinstaller_hooks)')
 
-PYCODESTYLEFILES = $(shell find . -name '*.py' | egrep -v '(psx.py|test_latency)')
+PYCODESTYLEFILES = $(shell find . -name '*.py' | egrep -v '(psx.py|test_latency|pyinstaller_hooks)')
 
-PYDOCSTYLEFILES = $(shell find . -name '*.py' | egrep -v '(psx.py|test_latency|frankentow)')
+PYDOCSTYLEFILES = $(shell find . -name '*.py' | egrep -v '(psx.py|test_latency|frankentow|pyinstaller_hooks)')
 
 
 CONFIGFILES = config_examples/*

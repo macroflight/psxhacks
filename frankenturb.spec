@@ -1,38 +1,32 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_all, collect_data_files
-
-# rasterio ships with bundled GDAL/PROJ DLLs and data files on Windows.
-# collect_all pulls in the shared libraries, data directories, and the hook's
-# hidden-import list (GDAL drivers, PROJ transforms, etc.).
-datas_rasterio, binaries_rasterio, hiddenimports_rasterio = collect_all('rasterio')
-
-# CA certificate bundle used by requests for HTTPS (tile downloads, Open-Meteo).
-datas_certifi = collect_data_files('certifi')
 
 a = Analysis(
     ['frankenturb.py'],
     pathex=[],
-    binaries=binaries_rasterio,
-    datas=datas_rasterio + datas_certifi,
-    hiddenimports=(
-        hiddenimports_rasterio +
-        [
-            # rasterio is imported lazily inside _read_geotiff — invisible to Analysis
-            'rasterio',
-            # frankenturb/ package: name collision with frankenturb.py may prevent recursive scan
-            'frankenturb',
-            'frankenturb.terrain',
-            'frankenturb.terrain.tiles',
-            'frankenturb.terrain.elevation',
-            'frankenturb.wind',
-            'frankenturb.wind.fetcher',
-            'frankenturb.wind.profile',
-            'frankenturb.turbulence',
-            # charset_normalizer: requests dependency with an optional compiled extension
-            'charset_normalizer',
-        ]
-    ),
-    hookspath=[],
+    binaries=[],
+    datas=[],
+    hiddenimports=[
+        # rasterio is imported lazily inside _read_geotiff — invisible to Analysis
+        'rasterio',
+        # frankenturb/ package: name collision with frankenturb.py may prevent recursive scan
+        'frankenturb',
+        'frankenturb.boost',
+        'frankenturb.cape',
+        'frankenturb.cb',
+        'frankenturb.cb_turbulence',
+        'frankenturb.gairmet',
+        'frankenturb.pirep',
+        'frankenturb.terrain',
+        'frankenturb.terrain.elevation',
+        'frankenturb.terrain.tiles',
+        'frankenturb.turbulence',
+        'frankenturb.wind',
+        'frankenturb.wind.fetcher',
+        'frankenturb.wind.profile',
+        # charset_normalizer: requests dependency with an optional compiled extension
+        'charset_normalizer',
+    ],
+    hookspath=['pyinstaller_hooks'],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],
