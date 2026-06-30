@@ -43,6 +43,11 @@ class _RouterConfigUpstream:  # pylint: disable=missing-class-docstring,too-few-
         if not isinstance(self.port, int):
             raise RouterConfigError("The upstream port must be an integer")
         self.password = data.get('password', None)
+        if self.password is not None:
+            if not re.match(r'^[\x21-\x7e]+$', self.password):
+                raise RouterConfigError(
+                    "Upstream password contains invalid characters "
+                    "(only printable ASCII characters allowed, no spaces)")
         self.use_session_password = data.get('use_session_password', False)
         self.default = data.get('default', False)
 
@@ -237,6 +242,10 @@ class _RouterConfigAccess:  # pylint: disable=missing-class-docstring,too-few-pu
             if self.match_password == "":
                 raise RouterConfigError(
                     "Empty password in config, remove line for no password access")
+            if not re.match(r'^[\x21-\x7e]+$', self.match_password):
+                raise RouterConfigError(
+                    "Password in access rule contains invalid characters "
+                    "(only printable ASCII characters allowed, no spaces)")
         if self.level is None:
             raise RouterConfigError(
                 "There must be an access_level in the access config")

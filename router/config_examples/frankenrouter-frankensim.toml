@@ -20,11 +20,23 @@ host = "127.0.0.1"
 name = "My PSX main server"
 default = true
 port = 20747
+# password = "SecretPassword123"   # optional; omit if no password required
+# Passwords must use only printable ASCII characters (! through ~).
+# No spaces, tabs, or other whitespace are allowed.
 
 [[access]]
 display_name = "Any local client"
 match_ip = [ "127.0.0.1/32", "192.168.86.34/32" ]
 level = "full"
+
+# Example: password-protected access rule.
+# match_password must use only printable ASCII characters (! through ~).
+# No spaces, tabs, or other whitespace are allowed.
+# [[access]]
+# display_name = "RemoteWithPassword"
+# match_ip = [ "192.168.1.0/24" ]
+# match_password = "SecretPassword123"
+# level = "full"
 
 [[access]]
 display_name = "Ventus"

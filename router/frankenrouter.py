@@ -1224,6 +1224,33 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         self.logger.critical("%s\nRouter is go-minded so trying to continue", msg)
                     if data is None:
                         continue
+                    # Intercept AUTH_FAILED before queuing: by the time
+                    # forwarder_task processes the queue the upstream
+                    # connection is already closed (self.upstream is None),
+                    # so the message would be silently dropped.
+                    line_text = data.rstrip(b'\r\n').decode(errors='replace')
+                    auth_fail_prefix = (
+                        f"addon=FRANKENROUTER:{self.frdp_version}:AUTH_FAILED:")
+                    if line_text.startswith(auth_fail_prefix):
+                        reason = line_text[len(auth_fail_prefix):]
+                        _sep = "!" * 60
+                        self.logger.error(_sep)
+                        self.logger.error(
+                            "FAILED TO CONNECT TO %s:%s DUE TO %s",
+                            self.config.upstream.host,
+                            self.config.upstream.port,
+                            reason)
+                        self.logger.error(_sep)
+                        await self.close_upstream_connection()
+                        # Let the logging queue drain before printing the prompt
+                        await asyncio.sleep(0.5)
+                        print("\nPress any key to exit...")
+                        try:
+                            import msvcrt  # pylint: disable=import-outside-toplevel
+                            msvcrt.getch()
+                        except ImportError:
+                            input()
+                        os._exit(1)  # pylint: disable=protected-access
                     t_read_data = time.perf_counter()
                     await self.messagequeue_from_upstream.put({
                         'payload': data,
@@ -2399,8 +2426,16 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         elif code == RulesCode.FRDP_FLIGHTINFO:
             self.logger.debug("Got FRDP FLIGHTINFO")
         elif code == RulesCode.FRDP_AUTH_FAIL:
-            self.logger.warning("Client failed FRDP authentication: %s: %s", sender_hr, line)
-            # Disconnect clients that fail authentication
+            reason = message or "invalid password"
+            _sep = "!" * 60
+            self.logger.warning(_sep)
+            self.logger.warning(
+                "LOGIN FAILED FROM %s (%s) DUE TO %s",
+                sender.ip, sender.display_name, reason)
+            self.logger.warning(_sep)
+            await sender.to_stream(
+                f"addon=FRANKENROUTER:{self.frdp_version}:AUTH_FAILED:{reason}",
+                drain=True)
             await self.close_client_connection(sender, clean=False)
         elif code == RulesCode.FRDP_AUTH_OK:
             self.logger.info("Client %s successfully authenticated: %s", sender_hr, line)
@@ -2813,6 +2848,10 @@ shared cockpit master sim.
             if port != "":
                 self.config.upstream.port = int(port)
             if password != "":
+                if not re.match(r'^[\x21-\x7e]+$', password):
+                    raise SystemExit(
+                        "\nPassword contains invalid characters. "
+                        "Only printable ASCII characters (no spaces) are allowed.")
                 self.config.upstream.password = password
 
         else:
@@ -2836,6 +2875,10 @@ shared cockpit master sim.
             if port != "":
                 self.config.upstream.port = int(port)
             if password != "":
+                if not re.match(r'^[\x21-\x7e]+$', password):
+                    raise SystemExit(
+                        "\nPassword contains invalid characters. "
+                        "Only printable ASCII characters (no spaces) are allowed.")
                 self.config.upstream.password = password
 
         # Override with command line options

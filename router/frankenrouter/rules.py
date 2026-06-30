@@ -521,12 +521,13 @@ class Rules():  # pylint: disable=too-many-public-methods
         if self.sender.has_access():
             return self.myreturn(RulesAction.DROP, RulesCode.FRDP_AUTH_ALREADY_HAS_ACCESS)
         if payload == "":
-            # We don't allow empty passwords
-            return self.myreturn(RulesAction.DROP, RulesCode.FRDP_AUTH_FAIL)
+            return self.myreturn(RulesAction.DROP, RulesCode.FRDP_AUTH_FAIL,
+                                 message="empty password")
         # Try to authenticate
         self.sender.update_access_level(payload)
         if not self.sender.has_access():
-            return self.myreturn(RulesAction.DROP, RulesCode.FRDP_AUTH_FAIL)
+            return self.myreturn(RulesAction.DROP, RulesCode.FRDP_AUTH_FAIL,
+                                 message="invalid password")
         self.router.connection_state_changed()
         return self.myreturn(RulesAction.DROP, RulesCode.FRDP_AUTH_OK)
 
