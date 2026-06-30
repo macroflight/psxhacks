@@ -32,6 +32,14 @@ class _RouterConfigListen:  # pylint: disable=missing-class-docstring,too-few-pu
             raise RouterConfigError("The API port must be an integer")
         self.rest_api_color_scheme = data.get('rest_api_color_scheme', 'dark')
 
+        # When true (default), the router will not accept client connections
+        # until the upstream has sent its welcome message (load3), guaranteeing
+        # that clients always receive a full set of variables on connect.
+        # Set to false to allow clients to connect immediately on router start.
+        self.wait_for_upstream_welcome = data.get('wait_for_upstream_welcome', True)
+        if not isinstance(self.wait_for_upstream_welcome, bool):
+            raise RouterConfigError("wait_for_upstream_welcome must be true or false")
+
 
 class _RouterConfigUpstream:  # pylint: disable=missing-class-docstring,too-few-public-methods
     def __init__(self, data):

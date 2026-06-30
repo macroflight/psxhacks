@@ -42,11 +42,7 @@ __VERSION__ = '1.3.5'
 
 # If we have no upstream connection and no cached data, assume this
 # version.
-PSX_DEFAULT_VERSION = '10.188 NG'
-
-# How long we wait for the upstream connection before accepting clients
-# and serving them cached data.
-UPSTREAM_WAITFOR = 5.0
+PSX_DEFAULT_VERSION = '10.187 NG'
 
 # Status display static config
 HEADER_LINE_LENGTH = 126
@@ -267,6 +263,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # Keep track of our Qs121 keepalive
         self.qs121_keepalive_last_warning = 0.0
         self.qs121_keepalive_flip = False
+
+        # Set to True the first time the upstream sends load3 (welcome complete).
+        # Never reset after that; used by listener_task to gate client connections.
+        self.upstream_ever_welcomed = False
 
     def reset_after_upstream_connect(self):
         """Re-initialize certain variables after upstream connection."""
@@ -1293,16 +1293,19 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
     async def listener_task(self, name):
         """Run the client listener."""
         try:
-            # Wait a while for the upstream connection. We prefer to give
-            # the clients the real data, not old cached variables.
-            started_waiting = time.perf_counter()
-            while not self.is_upstream_connected():
-                if time.perf_counter() - started_waiting > UPSTREAM_WAITFOR:
-                    self.logger.info(
-                        "Gave up waiting for upstream connection, will serve cached data")
-                    break
-                self.logger.info("Upstream not connected, not listening yet...")
-                await asyncio.sleep(1.0)
+            # If configured to do so (default), wait until the upstream has
+            # sent its welcome (load3) before accepting client connections.
+            # This guarantees every client gets a full, fresh variable set.
+            # The wait is skipped when:
+            #  - no upstream is configured (standalone / master mode), or
+            #  - wait_for_upstream_welcome is false in [listen] config.
+            # Once the upstream has welcomed us once, the gate stays open even
+            # if the upstream later disconnects and reconnects.
+            if self.config.upstream is not None and self.config.listen.wait_for_upstream_welcome:
+                self.logger.info(
+                    "Waiting for upstream welcome before accepting client connections...")
+                while not self.upstream_ever_welcomed:
+                    await asyncio.sleep(1.0)
 
             try:
                 self.proxy_server = await asyncio.start_server(
@@ -2232,6 +2235,16 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 if time.perf_counter() - last_run > self.args.housekeeping_interval:
                     last_run = time.perf_counter()
                     self.logger.debug("Performing housekeeping")
+                    if (self.config.upstream is not None and
+                            self.config.listen.wait_for_upstream_welcome and
+                            not self.upstream_ever_welcomed):
+                        _sep = "*" * 60
+                        self.logger.warning(_sep)
+                        self.logger.warning(
+                            "NOT ACCEPTING CLIENT CONNECTIONS YET — waiting for "
+                            "upstream welcome from %s:%s",
+                            self.config.upstream.host, self.config.upstream.port)
+                        self.logger.warning(_sep)
                     if self.args.use_state_cache:
                         self.cache.write_to_file()
 
@@ -2420,6 +2433,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.info("Got load2 message from %s", sender_hr)
         elif code == RulesCode.LOAD3:
             self.logger.info("Got load3 message from %s", sender_hr)
+            if sender.upstream and not self.upstream_ever_welcomed:
+                self.upstream_ever_welcomed = True
+                self.logger.info("Upstream welcome complete; client listener may start")
         elif code == RulesCode.START:
             self.logger.info("Got start message from %s", sender_hr)
         elif code == RulesCode.PBSKAQ:
