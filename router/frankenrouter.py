@@ -42,7 +42,7 @@ __VERSION__ = '1.3.5'
 
 # If we have no upstream connection and no cached data, assume this
 # version.
-PSX_DEFAULT_VERSION = '10.187 NG'
+PSX_DEFAULT_VERSION = '10.188 NG'
 
 # How long we wait for the upstream connection before accepting clients
 # and serving them cached data.
