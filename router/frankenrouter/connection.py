@@ -353,6 +353,9 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
         # List of variables this client has send demand= for
         self.demands = set()
 
+        # Nonce sent to this client in AUTH_CHALLENGE; used to verify HMAC AUTH
+        self.auth_nonce = None
+
         # Increase the write buffer a bit to fit a PSX welcome message
         self.writer.transport.set_write_buffer_limits(high=1048576, low=524288)
 
@@ -488,3 +491,10 @@ class UpstreamConnection(Connection):  # pylint: disable=too-few-public-methods
 
         # True if we have sent an FRDP AUTH upstream
         self.frdp_auth_sent = False
+
+        # Nonce received from upstream in AUTH_CHALLENGE; None until received
+        self.auth_nonce = None
+
+        # Number of frdp_send_task cycles we have waited for a nonce before
+        # falling back to cleartext (for old upstreams that never challenge)
+        self.auth_wait_cycles = 0

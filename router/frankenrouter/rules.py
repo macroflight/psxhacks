@@ -15,6 +15,8 @@ pyunittest.
 """
 
 import enum
+import hashlib
+import hmac
 import json
 import logging
 import re
@@ -116,6 +118,7 @@ class RulesCode(enum.Enum):
     FRDP_ROUTERINFO = enum.auto()
     FRDP_SHAREDINFO = enum.auto()
     FRDP_FLIGHTINFO = enum.auto()
+    FRDP_AUTH_CHALLENGE = enum.auto()
     FRDP_AUTH_FAIL = enum.auto()
     FRDP_AUTH_OK = enum.auto()
     FRDP_AUTH_ALREADY_HAS_ACCESS = enum.auto()
@@ -507,11 +510,31 @@ class Rules():  # pylint: disable=too-many-public-methods
             RulesCode.FRDP_FLIGHTINFO,
             extra_data={'exclude_non_frankenrouter': True})
 
+    def handle_addon_frankenrouter_auth_challenge(self, nonce):
+        """Handle FRDP AUTH_CHALLENGE message received from upstream.
+
+        Format (received by downstream from upstream):
+        addon=FRANKENROUTER:<protocol version>:AUTH_CHALLENGE:<nonce>
+
+        Stores the nonce so frdp_send_task can use it to send a hashed AUTH.
+        """
+        if not self.sender.upstream:
+            return self.myreturn(
+                RulesAction.DROP, RulesCode.MESSAGE_INVALID,
+                message=f"Got FRDP AUTH_CHALLENGE from non-upstream: {self.line}"
+            )
+        return self.myreturn(
+            RulesAction.DROP, RulesCode.FRDP_AUTH_CHALLENGE,
+            extra_data={'nonce': nonce})
+
     def handle_addon_frankenrouter_auth(self, payload):
         """Handle FRDP AUTH message.
 
-        Format:
-        addon=FRANKENROUTER:<protocol version>:AUTH:<password>
+        Supports two formats:
+        - Cleartext (old): addon=FRANKENROUTER:<ver>:AUTH:<password>
+        - HMAC (new):      addon=FRANKENROUTER:<ver>:AUTH:hmac-sha256:<hmac_hex>
+          where hmac_hex = HMAC-SHA256(key=password, msg=nonce).hexdigest()
+          and nonce was sent by this router in an AUTH_CHALLENGE message.
         """
         if self.sender.upstream:
             return self.myreturn(
@@ -523,8 +546,35 @@ class Rules():  # pylint: disable=too-many-public-methods
         if payload == "":
             return self.myreturn(RulesAction.DROP, RulesCode.FRDP_AUTH_FAIL,
                                  message="empty password")
-        # Try to authenticate
-        self.sender.update_access_level(payload)
+        if payload.startswith("hmac-sha256:"):
+            received_hmac = payload[len("hmac-sha256:"):]
+            nonce = self.sender.auth_nonce
+            matched_password = None
+            if nonce:
+                candidates = [
+                    a.match_password
+                    for a in self.router.config.access
+                    if a.match_password is not None
+                ]
+                for session_pwd in (self.router.session_password,
+                                    self.router.observer_session_password):
+                    if session_pwd:
+                        candidates.append(session_pwd)
+                for pwd in candidates:
+                    expected = hmac.new(
+                        pwd.encode(), nonce.encode(), hashlib.sha256
+                    ).hexdigest()
+                    if hmac.compare_digest(received_hmac, expected):
+                        matched_password = pwd
+                        break
+            if matched_password is None:
+                fail_reason = "no challenge was issued" if not nonce else "invalid password"
+                return self.myreturn(RulesAction.DROP, RulesCode.FRDP_AUTH_FAIL,
+                                     message=fail_reason)
+            self.sender.update_access_level(matched_password)
+        else:
+            # Cleartext (backward compat for old downstream routers)
+            self.sender.update_access_level(payload)
         if not self.sender.has_access():
             return self.myreturn(RulesAction.DROP, RulesCode.FRDP_AUTH_FAIL,
                                  message="invalid password")
@@ -589,6 +639,8 @@ class Rules():  # pylint: disable=too-many-public-methods
             return self.handle_addon_frankenrouter_clientinfo(payload)
         if message_type == 'AUTH':
             return self.handle_addon_frankenrouter_auth(payload)
+        if message_type == 'AUTH_CHALLENGE':
+            return self.handle_addon_frankenrouter_auth_challenge(payload)
         if message_type == 'ACCESS_LEVEL':
             return self.handle_addon_frankenrouter_access_level(payload)
         # Drop unknown FRDP messages

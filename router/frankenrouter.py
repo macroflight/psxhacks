@@ -4,6 +4,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import collections
+import hashlib
+import hmac
 import itertools
 import json
 import logging
@@ -14,6 +16,7 @@ import os
 import pathlib
 import random
 import re
+import secrets
 import signal
 import statistics
 import string
@@ -955,6 +958,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             # has access (i.e authenticated based on IP or password)
             if this_client.has_access():
                 await self.client_add_to_network(this_client)
+            else:
+                # Send a challenge so frankenrouter clients can authenticate
+                # with a hashed password instead of cleartext.
+                nonce = secrets.token_hex(16)
+                this_client.auth_nonce = nonce
+                await this_client.to_stream(
+                    f"addon=FRANKENROUTER:{self.frdp_version}:AUTH_CHALLENGE:{nonce}")
 
             # Wait for data from client
             while self.is_client_connected(this_client.peername):
@@ -1622,8 +1632,27 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 # another frankenrouter.
                 if self.get_router_type() == 'slave':
                     if self.config.upstream.password and not self.upstream.frdp_auth_sent:
-                        await self.send_to_upstream(f"addon=FRANKENROUTER:{self.frdp_version}:AUTH:{self.config.upstream.password}")  # pylint: disable=line-too-long
-                        self.upstream.frdp_auth_sent = True
+                        if self.upstream.auth_nonce is not None:
+                            # New upstream: authenticate with HMAC-SHA256
+                            auth_hmac = hmac.new(
+                                self.config.upstream.password.encode(),
+                                self.upstream.auth_nonce.encode(),
+                                hashlib.sha256
+                            ).hexdigest()
+                            ver = self.frdp_version
+                            await self.send_to_upstream(
+                                f"addon=FRANKENROUTER:{ver}:AUTH:hmac-sha256:{auth_hmac}")
+                            self.upstream.frdp_auth_sent = True
+                        elif self.upstream.frdp_ident_sent and self.upstream.auth_wait_cycles >= 1:
+                            # Old upstream (never sent AUTH_CHALLENGE): fall back to cleartext
+                            ver = self.frdp_version
+                            pwd = self.config.upstream.password
+                            await self.send_to_upstream(
+                                f"addon=FRANKENROUTER:{ver}:AUTH:{pwd}")
+                            self.upstream.frdp_auth_sent = True
+                        elif self.upstream.frdp_ident_sent:
+                            # Give upstream one more cycle to send AUTH_CHALLENGE
+                            self.upstream.auth_wait_cycles += 1
                 #
                 # FRDP ROUTERINFO
                 #
@@ -2425,6 +2454,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.debug("Got FRDP ROUTERINFO: %s", line)
         elif code == RulesCode.FRDP_FLIGHTINFO:
             self.logger.debug("Got FRDP FLIGHTINFO")
+        elif code == RulesCode.FRDP_AUTH_CHALLENGE:
+            nonce = (extra_data or {}).get('nonce')
+            sender.auth_nonce = nonce
+            self.logger.info("Received AUTH_CHALLENGE from upstream, stored nonce")
         elif code == RulesCode.FRDP_AUTH_FAIL:
             reason = message or "invalid password"
             _sep = "!" * 60
