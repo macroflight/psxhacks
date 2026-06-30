@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026-06-30: version 1.3.6
+
+- **Hold client connections until upstream is ready (default on).** The
+  router now waits for the upstream PSX main server or master router to
+  complete its welcome sequence (i.e. send `load3`) before it opens its
+  listening port to clients. This guarantees that every connecting client
+  receives a full and current set of PSX variables, rather than an empty
+  or stale cache. Once the upstream has welcomed the router at least once,
+  the port stays open even if the upstream later disconnects and
+  reconnects. Opt out by setting `wait_for_upstream_welcome = false` in
+  the `[listen]` section of the config file.
+- **FRDP password hashing.** Passwords are no longer sent in cleartext
+  over the network. When connecting to an updated upstream router, the
+  downstream now authenticates with an HMAC-SHA256 challenge-response
+  (the upstream sends a one-time nonce; the downstream replies with
+  `AUTH:hmac-sha256:<HMAC-SHA256(password, nonce)>`). Old routers that
+  do not issue a challenge still receive the cleartext password, so
+  mixed-version networks continue to work during the transition.
+- **Bad-password handling.** When authentication fails, the upstream
+  router now sends an explicit `AUTH_FAILED:<reason>` message before
+  closing the connection. The downstream router intercepts this, logs a
+  prominent error (with `!` separator lines), stops the reconnect loop,
+  and prompts the user to press a key before exiting. Previously the
+  router would silently retry the bad password in an endless loop.
+- **Password character validation.** Passwords in the config file
+  (`match_password` and `[[upstream]] password`) are now validated on
+  startup; only printable ASCII characters (`!` through `~`, no spaces)
+  are accepted. The same check applies to passwords entered interactively
+  in dumb-client mode or with `--upstream-interactive`.
+
 ## 2026-06-06: version 1.3.5
 
 - Document how to configure the flight info page
