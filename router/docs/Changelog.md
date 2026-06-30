@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-06-30: version 1.3.6
+## 2026-06-30: version 1.3.7
 
 - **Hold client connections until upstream is ready (default on).** The
   router now waits for the upstream PSX main server or master router to
@@ -29,6 +29,10 @@
   startup; only printable ASCII characters (`!` through `~`, no spaces)
   are accepted. The same check applies to passwords entered interactively
   in dumb-client mode or with `--upstream-interactive`.
+
+## 2026-06-18: version 1.3.6
+
+- Added weather control panel to the router web UI
 
 ## 2026-06-06: version 1.3.5
 
