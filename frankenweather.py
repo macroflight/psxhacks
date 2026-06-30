@@ -454,7 +454,9 @@ def _metar_parse_temp(s: str) -> int:
 
 def _metar_wx_token(token: str, out: dict) -> None:
     """Update convective flags in parsed METAR dict from a present-weather token."""
-    if 'TS' in token:
+    if token == 'TSNO':
+        pass  # "Thunderstorm information not available" — sensor broken, not a CB indicator
+    elif 'TS' in token:
         if token.startswith('+'):
             out['ts_oktas'] = max(out['ts_oktas'], 8)
         elif token.startswith('-') or 'VC' in token:
