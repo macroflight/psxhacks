@@ -1,4 +1,4 @@
-"""FrankenPrint — forward PSX virtual printer output to an Epson TM-T20iii.
+"""FrankenPrint — forward PSX virtual printer output to a printer or Pushover.
 
 PSX printer variable used:
 
@@ -21,12 +21,20 @@ Printer connection options:
 
   TCP address           e.g. 192.168.1.10:9100 — for Ethernet-connected
                         printers with raw-socket printing enabled.
+
+  Pushover              Pass --pushover together with --pushover-token and
+                        --pushover-user to send each print job as a Pushover
+                        push notification instead of printing it.
 """
 import argparse
 import asyncio
+import json
 import logging
 import socket
 import sys
+import time
+import urllib.request
+import urllib.parse
 from typing import Callable, Optional
 
 import psx
@@ -160,13 +168,80 @@ class FrankenPrint:
         self._send(_ESC_INIT + encoded + _ESC_FEED + _GS_CUT)
 
     # ------------------------------------------------------------------
+    # Pushover notification
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _pushover_pages(text: str) -> list:
+        """Split text into pages of at most 1024 characters, breaking on newlines."""
+        limit = 1024
+        if len(text) <= limit:
+            return [text]
+        pages = []
+        remaining = text
+        while remaining:
+            if len(remaining) <= limit:
+                pages.append(remaining)
+                break
+            chunk = remaining[:limit]
+            cut = chunk.rfind('\n')
+            if cut > 0:
+                pages.append(remaining[:cut])
+                remaining = remaining[cut + 1:]
+            else:
+                pages.append(chunk)
+                remaining = remaining[limit:]
+        return pages
+
+    def _send_pushover_page(self, message: str, title: str) -> None:
+        """POST one page to the Pushover API."""
+        payload = {
+            'token': self.args.pushover_token,
+            'user': self.args.pushover_user,
+            'title': title,
+            'message': message,
+        }
+        if self.args.pushover_device:
+            payload['device'] = self.args.pushover_device
+        data = urllib.parse.urlencode(payload).encode()
+        req = urllib.request.Request(
+            'https://api.pushover.net/1/messages.json',
+            data=data,
+            method='POST')
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                body = json.loads(resp.read())
+                if body.get('status') != 1:
+                    self.logger.error("Pushover rejected message: %s", body)
+                else:
+                    self.logger.info("Pushover delivery queued: %s", title)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.error("Pushover send error: %s", exc)
+
+    def _send_pushover(self, text: str) -> None:
+        """Send text to Pushover, paginating into multiple notifications if needed."""
+        message = text.replace('^', '\n').strip()
+        self.logger.info("Sending to Pushover:\n%s", message)
+        pages = self._pushover_pages(message)
+        total = len(pages)
+        for i, page in enumerate(pages, 1):
+            if i > 1:
+                time.sleep(3)
+            title = (self.args.pushover_title if total == 1
+                     else f"{self.args.pushover_title} page {i}/{total}")
+            self._send_pushover_page(page, title)
+
+    # ------------------------------------------------------------------
     # PSX variable callback
     # ------------------------------------------------------------------
 
     def _on_printer_text(self, _key: str, value: str) -> None:
         """Print the text received in Qs119; ignore the empty-string reset from PSX."""
         if value:
-            self._print_job(value)
+            if self.args.pushover:
+                self._send_pushover(value)
+            else:
+                self._print_job(value)
 
     # ------------------------------------------------------------------
     # PSX connection
@@ -218,19 +293,49 @@ class FrankenPrint:
         parser.add_argument(
             '--test-print', action='store_true',
             help="Print a short test message on each PSX connection.")
+
+        pushover = parser.add_argument_group(
+            'Pushover', 'Send print jobs as Pushover push notifications '
+                        'instead of printing them.')
+        pushover.add_argument(
+            '--pushover', action='store_true',
+            help="Enable Pushover mode (requires --pushover-token and --pushover-user).")
+        pushover.add_argument(
+            '--pushover-token', default=None, metavar='TOKEN',
+            help="Pushover application API token.")
+        pushover.add_argument(
+            '--pushover-user', default=None, metavar='KEY',
+            help="Pushover user key.")
+        pushover.add_argument(
+            '--pushover-title', default='PSX Printer', metavar='TITLE',
+            help="Notification title.")
+        pushover.add_argument(
+            '--pushover-device', default=None, metavar='DEVICE',
+            help="Target a specific device name. If omitted, all devices receive the notification.")
+
         parser.add_argument(
             '--debug', action='store_true',
             help="Enable debug logging.")
         self.args = parser.parse_args()
 
     async def run(self) -> None:
-        """Parse args, open the printer, then run the PSX connection loop."""
+        """Parse args, open the printer or validate Pushover args, then run PSX loop."""
         self.handle_args()
         logging.basicConfig(
             level=logging.DEBUG if self.args.debug else logging.INFO,
             format="%(asctime)s: %(message)s",
             datefmt="%H:%M:%S")
-        if not self._open_printer():
+        if self.args.pushover:
+            missing = [f'--{f}' for f in ('pushover-token', 'pushover-user')
+                       if not getattr(self.args, f.replace('-', '_'))]
+            if missing:
+                self.logger.error(
+                    "--pushover requires: %s", ', '.join(missing))
+                sys.exit(1)
+            self.logger.info(
+                "Pushover mode: notifications will be sent to user key %s",
+                self.args.pushover_user)
+        elif not self._open_printer():
             sys.exit(1)
         await self._psx_coro()
 
