@@ -1512,6 +1512,13 @@ def _build_weather_turb_page(router, color_scheme):  # pylint: disable=too-many-
     active_intensity = tstate.get('active_intensity', 0.0)
     active_reason = tstate.get('active_reason', '')
     sources = tstate.get('sources', [])
+    msfs_active = tstate.get('msfs_active', False)
+    msfs_in_cloud = tstate.get('msfs_in_cloud')
+    msfs_cloud_density = tstate.get('msfs_cloud_density')
+    msfs_wind_vert = tstate.get('msfs_wind_vert')
+    msfs_precip_state = tstate.get('msfs_precip_state')
+    msfs_turb_factor = tstate.get('msfs_turb_factor', 1.0)
+    msfs_turb_magnitude = tstate.get('msfs_turb_magnitude', 100)
 
     age_str = 'never' if math.isinf(age_s) else f'{int(age_s)}s ago'
 
@@ -1580,7 +1587,51 @@ def _build_weather_turb_page(router, color_scheme):  # pylint: disable=too-many-
         f'<td style="padding:4px 8px">{_bias_input("intensity_bias", intensity_bias)}</td></tr>'
         '<tr><td style="padding:4px 8px;color:#94a3b8">CB lateral size bias (%)</td>'
         f'<td style="padding:4px 8px">{_bias_input("lateral_size_bias", lat_bias)}</td></tr>'
+        '<tr><td style="padding:4px 8px;color:#94a3b8">MSFS influence magnitude (%)</td>'
+        f'<td style="padding:4px 8px">'
+        f'<form method="post" action="/api/weather/turbulence" style="display:inline-flex;'
+        f'gap:0.4em;align-items:center">'
+        f'<input type="number" name="msfs_turb_magnitude" value="{msfs_turb_magnitude}"'
+        f' min="0" max="200" style="width:4.5em">'
+        f'<button class="btn btn-gray btn-sm">Set</button></form>'
+        f'</td></tr>'
         '</table>'
+        '</div>\n'
+    )
+
+    # MSFS bridge card
+    def _fmt_opt(v, fmt='{:.1f}'):
+        return fmt.format(v) if v is not None else '—'
+
+    def _precip_label(state):
+        if state is None:
+            return '—'
+        if state & 4:
+            return 'Rain'
+        if state & 8:
+            return 'Snow'
+        return 'None'
+
+    msfs_status_color = '#22c55e' if msfs_active else '#64748b'
+    msfs_status_label = 'Active' if msfs_active else 'No data'
+    in_cloud_label = ('Yes' if msfs_in_cloud else 'No') if msfs_in_cloud is not None else '—'
+    factor_color = '#f59e0b' if abs(msfs_turb_factor - 1.0) > 0.05 else '#94a3b8'
+    msfs_html = (
+        '<div class="card">'
+        '<h3 style="margin:0 0 0.75em">MSFS bridge</h3>'
+        '<div style="display:flex;gap:1.5em;flex-wrap:wrap;font-size:0.9em">'
+        f'<div><span style="color:#94a3b8">Status</span><br>'
+        f'<b style="color:{msfs_status_color}">{msfs_status_label}</b></div>'
+        f'<div><span style="color:#94a3b8">In cloud</span><br><b>{in_cloud_label}</b></div>'
+        f'<div><span style="color:#94a3b8">Cloud density</span><br>'
+        f'<b>{_fmt_opt(msfs_cloud_density)}</b></div>'
+        f'<div><span style="color:#94a3b8">Vert wind</span><br>'
+        f'<b>{_fmt_opt(msfs_wind_vert)} kt</b></div>'
+        f'<div><span style="color:#94a3b8">Precip type</span><br>'
+        f'<b>{_precip_label(msfs_precip_state)}</b></div>'
+        f'<div><span style="color:#94a3b8">Turb factor</span><br>'
+        f'<b style="color:{factor_color}">×{msfs_turb_factor:.2f}</b></div>'
+        '</div>'
         '</div>\n'
     )
 
@@ -1646,7 +1697,7 @@ def _build_weather_turb_page(router, color_scheme):  # pylint: disable=too-many-
         '</div>\n'
     )
 
-    body = stale_banner + status_html + global_html + wind_html + types_html
+    body = stale_banner + status_html + global_html + msfs_html + wind_html + types_html
     return _page(body)
 
 
@@ -2437,6 +2488,8 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                         'kind': str(data['type_bias_kind']),
                         'value': int(data['type_bias_value']),
                     }
+                if 'msfs_turb_magnitude' in data:
+                    cmd['msfs_turb_magnitude'] = int(data['msfs_turb_magnitude'])
                 if cmd:
                     line = f"addon=FRANKENWEATHER:TURBCOMMAND:{json.dumps(cmd)}"
                     await router.send_to_upstream(line)

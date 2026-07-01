@@ -808,6 +808,9 @@ class Script:  # pylint: disable=too-many-instance-attributes
         # MSFS bridge state (--msfs-in-cloud-sync / --msfs-qnh-check via frankenmsfsbridge)
         self.msfs_in_cloud: Optional[bool] = None
         self.msfs_qnh_hpa: Optional[float] = None
+        self.msfs_cloud_density: Optional[float] = None   # 0–9
+        self.msfs_wind_vert: Optional[float] = None       # kt, positive = up
+        self.msfs_precip_state: Optional[int] = None      # 2=none, 4=rain, 8=snow
         self._msfs_bridge_last_seen: Optional[float] = None
         self.focused_zone: int = 0          # 0 = WxBasic, 1-7 = Wx1-Wx7
         self.cloud_sync_last_alt_ft: float = 0.0
@@ -861,6 +864,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self._turb_rate: int = 100             # 0-100, injection rate scale
         self._turb_type_enabled: dict = {k: True for k in _TURB_TYPES}
         self._turb_type_biases: dict = {k: 100 for k in _TURB_TYPES}
+        self._turb_msfs_magnitude: int = 100  # 0-200%; scales MSFS turbulence influence
+        self._turb_msfs_factor: float = 1.0   # last computed raw factor (for display)
         self._turb_engine: Optional[TurbulenceEngine] = None
         self._turb_state: Optional[TurbulenceState] = None
         self._turb_sources: list = []
@@ -1000,12 +1005,16 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self.msfs_qnh_hpa = new_qnh
             if prev is None or abs(new_qnh - prev) > 0.5:
                 changed = True
-        if "oat_c" in data:
-            self.msfs_oat_c = float(data["oat_c"])
-        if "wind_dir" in data:
-            self.msfs_wind_dir = float(data["wind_dir"])
-        if "wind_spd" in data:
-            self.msfs_wind_spd = float(data["wind_spd"])
+        for _key, _attr, _cast in (
+                ("oat_c", "msfs_oat_c", float),
+                ("wind_dir", "msfs_wind_dir", float),
+                ("wind_spd", "msfs_wind_spd", float),
+                ("cloud_density", "msfs_cloud_density", float),
+                ("wind_vert", "msfs_wind_vert", float),
+                ("precip_state", "msfs_precip_state", int),
+        ):
+            if _key in data:
+                setattr(self, _attr, _cast(data[_key]))
         self._msfs_bridge_last_seen = time.monotonic()
         if changed:
             self._apply_msfs_sync()
@@ -1075,6 +1084,47 @@ class Script:  # pylint: disable=too-many-instance-attributes
             return 0
         return self._turb_type_biases.get(kind, 100)
 
+    def _compute_msfs_turb_factor(self, cb_active: bool) -> float:
+        """Compute turbulence multiplier from MSFS bridge data.
+
+        Returns 1.0 if bridge data is absent or magnitude is zero.
+        cb_active should be True when a PSX CB is the dominant turbulence source,
+        because PSX CB clouds do not appear in MSFS so in-cloud will read False.
+        """
+        if self._turb_msfs_magnitude == 0:
+            return 1.0
+        if (self._msfs_bridge_last_seen is None or
+                time.monotonic() - self._msfs_bridge_last_seen > _MSFS_BRIDGE_TIMEOUT_S):
+            return 1.0
+        if self.msfs_in_cloud is None:
+            return 1.0
+
+        in_cloud = self.msfs_in_cloud or cb_active
+
+        if not in_cloud:
+            raw = 0.8
+        else:
+            raw = 1.3
+            # Cloud density 0–9: up to +30 %
+            if self.msfs_cloud_density is not None:
+                d = max(0.0, min(9.0, self.msfs_cloud_density))
+                raw *= 1.0 + d / 9.0 * 0.3
+            # Vertical wind: up to +40 % for 10 kt; ignore noise below 3 kt
+            if self.msfs_wind_vert is not None:
+                v = abs(self.msfs_wind_vert)
+                if v > 3.0:
+                    raw *= 1.0 + min((v - 3.0) / 7.0, 1.0) * 0.4
+            # Precipitation type (character indicator: rain=convective, snow=stratiform)
+            if self.msfs_precip_state is not None:
+                if self.msfs_precip_state & 4:    # rain → convective
+                    raw *= 1.2
+                elif self.msfs_precip_state & 8:  # snow → stratiform
+                    raw *= 1.1
+            raw = min(3.0, raw)
+
+        # Scale by magnitude: 0 % = no influence, 100 % = full, 200 % = amplified
+        return 1.0 + (raw - 1.0) * self._turb_msfs_magnitude / 100.0
+
     def _turb_load_config(self, path: str) -> None:
         """Load turbulence settings from JSON config file."""
         import pathlib  # pylint: disable=import-outside-toplevel
@@ -1089,18 +1139,17 @@ class Script:  # pylint: disable=too-many-instance-attributes
         except Exception as exc:  # pylint: disable=broad-except
             self.logger.warning("Turb config load failed: %s", exc)
             return
-        if "turb_enabled" in cfg:
-            self._turb_enabled = bool(cfg["turb_enabled"])
-        if "intensity_bias" in cfg:
-            self._turb_intensity_bias = int(cfg["intensity_bias"])
-        if "lateral_size_bias" in cfg:
-            self._turb_lateral_size_bias = int(cfg["lateral_size_bias"])
-        if "wind_mode" in cfg:
-            self._turb_wind_mode = str(cfg["wind_mode"])
-        if "manual_wind_dir" in cfg:
-            self._turb_manual_wind_dir = int(cfg["manual_wind_dir"])
-        if "manual_wind_spd" in cfg:
-            self._turb_manual_wind_spd = int(cfg["manual_wind_spd"])
+        for _key, _attr, _cast in (
+                ("turb_enabled", "_turb_enabled", bool),
+                ("intensity_bias", "_turb_intensity_bias", int),
+                ("lateral_size_bias", "_turb_lateral_size_bias", int),
+                ("wind_mode", "_turb_wind_mode", str),
+                ("manual_wind_dir", "_turb_manual_wind_dir", int),
+                ("manual_wind_spd", "_turb_manual_wind_spd", int),
+                ("msfs_turb_magnitude", "_turb_msfs_magnitude", int),
+        ):
+            if _key in cfg:
+                setattr(self, _attr, _cast(cfg[_key]))
         for kind in _TURB_TYPES:
             if "type_biases" in cfg and kind in cfg["type_biases"]:
                 self._turb_type_biases[kind] = int(cfg["type_biases"][kind])
@@ -1119,6 +1168,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
             "manual_wind_spd": self._turb_manual_wind_spd,
             "type_biases": dict(self._turb_type_biases),
             "type_enabled": dict(self._turb_type_enabled),
+            "msfs_turb_magnitude": self._turb_msfs_magnitude,
         }
         try:
             with open(path, "w", encoding="utf-8") as fh:
@@ -1220,6 +1270,11 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 if 0 <= v <= 999:
                     self._turb_type_biases[kind] = v
                     changed = True
+        if "msfs_turb_magnitude" in cmd:
+            v = int(cmd["msfs_turb_magnitude"])
+            if 0 <= v <= 200:
+                self._turb_msfs_magnitude = v
+                changed = True
         if changed:
             if self.args.turb_config_file:
                 self._turb_save_config(self.args.turb_config_file)
@@ -1311,6 +1366,16 @@ class Script:  # pylint: disable=too-many-instance-attributes
                         {"kind": s.kind, "intensity": round(e, 3), "reason": s.reason}
                         for e, s in sources
                     ],
+                    "msfs_active": (
+                        self._msfs_bridge_last_seen is not None and
+                        time.monotonic() - self._msfs_bridge_last_seen <= _MSFS_BRIDGE_TIMEOUT_S
+                    ),
+                    "msfs_in_cloud": self.msfs_in_cloud,
+                    "msfs_cloud_density": self.msfs_cloud_density,
+                    "msfs_wind_vert": self.msfs_wind_vert,
+                    "msfs_precip_state": self.msfs_precip_state,
+                    "msfs_turb_factor": round(self._turb_msfs_factor, 3),
+                    "msfs_turb_magnitude": self._turb_msfs_magnitude,
                 }
                 msg = (f"addon=FRANKENWEATHER:TURBSTATE:{self._instance_uuid}:"
                        f"{json.dumps(payload)}")
@@ -1391,10 +1456,13 @@ class Script:  # pylint: disable=too-many-instance-attributes
                     if _eff(gairmet_state) > _eff(state):
                         state = gairmet_state
 
+                cb_active = state.kind == 'cb'
+                msfs_factor = self._compute_msfs_turb_factor(cb_active)
+                self._turb_msfs_factor = msfs_factor
                 effective_intensity = min(
                     1.0,
                     state.intensity * self._turb_intensity_bias *
-                    self._turb_type_effective_bias(state.kind) / 10000.0,
+                    self._turb_type_effective_bias(state.kind) / 10000.0 * msfs_factor,
                 )
                 if self._turb_enabled and effective_intensity >= 0.01:
                     inject_prob = (effective_intensity ** 1.5) * (self._turb_rate / 100.0)
