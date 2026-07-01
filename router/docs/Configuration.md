@@ -128,14 +128,14 @@ port = 10748
   be written (default: the current working directory of the router
   process)
 - `traffic_max_size`: if set, the traffic log file will be rotated
-  before reaching this size (bytes). The default is to not rotate the
-  log.
+  before reaching this size. The value is in **bytes**. The default is
+  to not rotate the log.
 - `traffic_keep_versions`: controls how many versions of the traffic
   log file will be kept after being rotated.
-- `output_max_size`: as traffic_max, size, but for the router status
-  output log.
-- `output_keep_versions`: as traffic_keep_versjons, but for the router
-  status output log.
+- `output_max_size`: as `traffic_max_size`, but for the router status
+  output log. The value is in **bytes**.
+- `output_keep_versions`: as `traffic_keep_versions`, but for the
+  router status output log.
 
 Example:
 
