@@ -1,0 +1,448 @@
+"""Terrain-induced turbulence model for PSX.
+
+Call compute() once per simulation tick with current PSX state.
+The returned TurbulenceState tells you:
+  - intensity   (0–1 scale: 0=calm, 0.25=light, 0.5=moderate, 0.75=severe, 1=extreme)
+  - vertical    (-1=strong sink, 0=neutral, +1=strong updraft) — NaN if not deterministic
+  - roll        (-1=roll left,  0=neutral, +1=roll right)      — NaN if not deterministic
+  - gust        (-1=headwind gust, 0=neutral, +1=tailwind gust)— NaN if not deterministic
+  - kind        human-readable label for the dominant mechanism
+
+When a component is NaN the caller should apply random perturbations scaled by intensity.
+
+Physical model summary
+----------------------
+Three mechanisms are modelled:
+
+1. Mechanical (orographic) turbulence
+   Low-level chaotic turbulence caused by airflow over rough terrain.
+   - Wind used: profile interpolated to the lowest 500 m above terrain
+     (captures the actual surface flow, not the aircraft's cruise level wind).
+   - Intensity ∝ terrain roughness × surface wind speed × AGL proximity factor.
+   - No deterministic direction: all components are NaN (pure random noise).
+
+2. Mountain wave turbulence
+   Atmospheric gravity waves downstream of a ridge aligned roughly
+   perpendicular to the wind.
+   - Wind used: profile at ridge-top altitude (the layer that actually drives waves).
+   - Vertical wind shear across the profile amplifies wave intensity.
+   - Detected when: significant upwind barrier + wind speed threshold met.
+   - Vertical component follows a sinusoidal wave pattern whose half-wavelength
+     is estimated from ridge-top wind speed (λ ≈ U × T_WAVE_S).
+   - Roll: small ±0.2 × wave phase.  Gust: small antiphase ±0.15.
+
+3. Lee rotor
+   Violent recirculation immediately downwind and below ridge top.
+   - Detected when aircraft is within ROTOR_DISTANCE_KM of the ridge and
+     below ridge top + margin.
+   - All components are NaN (chaotic), intensity boosted by low-level jet if present.
+
+Wind shear CAT contribution
+   Vertical wind shear across the layer containing the aircraft adds a
+   background CAT component that is blended with the dominant mechanism.
+"""
+
+import math
+from dataclasses import dataclass, field, replace
+
+from .terrain.elevation import ElevationGrid
+from .wind.profile import WindProfile
+
+# ---------------------------------------------------------------------------
+# Constants / tunables
+# ---------------------------------------------------------------------------
+
+FT_TO_M = 0.3048
+KT_TO_MS = 0.514444
+
+# Minimum surface wind speed (m/s) before terrain turbulence is negligible.
+MIN_WIND_MS = 3.0
+
+# Scale heights for AGL intensity decay (metres).
+MECHANICAL_SCALE_M = 1_500.0
+WAVE_SCALE_M = 12_000.0
+
+# Terrain roughness (std-dev of elevation, m) that saturates mechanical turb.
+ROUGHNESS_SATURATION_M = 800.0
+
+# Upwind barrier height above current terrain (m) to count as a significant ridge.
+BARRIER_THRESHOLD_M = 500.0
+
+# Mountain-wave half-wavelength: T_wave × ridge-top wind speed / 2.
+T_WAVE_S = 600.0  # ~10 min, empirical for typical mid-latitude stability
+
+# Rotor zone parameters.
+ROTOR_HEIGHT_FRACTION = 1.2   # rotor ceiling = terrain + barrier * this
+ROTOR_DISTANCE_KM = 15.0      # max distance downwind for active rotor
+
+# Vertical wind shear thresholds (kt / 1000 ft).
+# 7 kt/1000ft (just above FAA "significant" threshold) produced VSI swings of
+# ~700 fpm in testing — too strong for what should be light chop.  Raising the
+# onset to 8 kt/1000ft and severe to 14 kt/1000ft calibrates 10 kt → light and
+# 14 kt → moderate, matching real-world reports.
+SHEAR_MODERATE = 8.0
+SHEAR_SEVERE = 14.0
+
+# Maximum wind speed (m/s) used for normalisation.
+# Rotor uses surface wind; wave uses ridge-top wind with a lower norm so that
+# strong-wind / moderate-barrier scenarios (e.g. Greenland ice cap: BGTL
+# chart calls for severe turbulence at 30kt from 125-225°T) reach the
+# moderate-to-severe range rather than staying in the light range.
+WIND_NORM_MS = 30.0        # rotor: normalise at 58 kt (high threshold OK for rotors)
+WAVE_WIND_NORM_MS = 20.0   # wave: normalise at 39 kt; 30 kt → factor 0.77
+WAVE_BARRIER_NORM_M = 2000.0  # consistent with rotor; 1500 m barrier → factor 0.75
+
+# Height above terrain used to sample "surface" wind from the profile.
+SURFACE_SAMPLE_AGL_M = 300.0
+
+
+# ---------------------------------------------------------------------------
+# Output type
+# ---------------------------------------------------------------------------
+
+@dataclass
+class TurbulenceState:  # pylint: disable=too-few-public-methods,too-many-instance-attributes
+    """Turbulence estimate for one simulation tick.
+
+    Directional components are in [-1, 1].  NaN means "unknown/random" —
+    the caller should substitute random noise scaled by intensity.
+    source_lat/source_lon: lat/lon of terrain peak driving turbulence (NaN if not terrain).
+    """
+
+    intensity: float = 0.0
+    vertical: float = field(default_factory=lambda: float("nan"))
+    roll: float = field(default_factory=lambda: float("nan"))
+    gust: float = field(default_factory=lambda: float("nan"))
+    kind: str = "none"
+    reason: str = ""
+    source_lat: float = field(default_factory=lambda: float("nan"))
+    source_lon: float = field(default_factory=lambda: float("nan"))
+
+    def is_random(self) -> bool:
+        """Return True when all directional components are NaN (pure random noise)."""
+        return (
+            math.isnan(self.vertical) and
+            math.isnan(self.roll) and
+            math.isnan(self.gust)
+        )
+
+
+_CALM = TurbulenceState()
+
+
+def _dest_point(lat_deg: float, lon_deg: float, bearing_deg: float, dist_km: float):
+    """Return (lat, lon) of a point at given bearing and distance from origin."""
+    r_earth = 6371.0
+    lat = math.radians(lat_deg)
+    lon = math.radians(lon_deg)
+    brng = math.radians(bearing_deg)
+    d = dist_km / r_earth
+    lat2 = math.asin(
+        math.sin(lat) * math.cos(d) + math.cos(lat) * math.sin(d) * math.cos(brng)
+    )
+    lon2 = lon + math.atan2(
+        math.sin(brng) * math.sin(d) * math.cos(lat),
+        math.cos(d) - math.sin(lat) * math.sin(lat2),
+    )
+    return math.degrees(lat2), math.degrees(lon2)
+
+
+# ---------------------------------------------------------------------------
+# Main model
+# ---------------------------------------------------------------------------
+
+class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
+    """Terrain-induced turbulence model driven by a multi-level wind profile.
+
+    Parameters
+    ----------
+    grid:
+        ElevationGrid used for all terrain queries.
+    upwind_km:
+        How far upwind to scan for barriers (km).
+    roughness_radius_km:
+        Radius of window used to measure terrain roughness (km).
+
+    """
+
+    def __init__(
+        self,
+        grid: ElevationGrid,
+        upwind_km: float = 80.0,
+        roughness_radius_km: float = 20.0,
+    ):
+        """Initialize the turbulence model with a terrain grid and scan parameters."""
+        self._grid = grid
+        self._upwind_km = upwind_km
+        self._roughness_km = roughness_radius_km
+
+    # ------------------------------------------------------------------
+    # Public entry point
+    # ------------------------------------------------------------------
+
+    def compute(  # pylint: disable=too-many-locals
+        self,
+        lat: float,
+        lon: float,
+        alt_ft: float,
+        wind_profile: WindProfile,
+    ) -> TurbulenceState:
+        """Compute terrain-induced turbulence for the current PSX state.
+
+        Parameters
+        ----------
+        lat, lon:
+            Aircraft position (decimal degrees).
+        alt_ft:
+            Aircraft pressure altitude (feet).
+        wind_profile:
+            Multi-level wind profile at this position from WindFetcher.
+
+        Returns
+        -------
+        TurbulenceState
+
+        """
+        alt_m = alt_ft * FT_TO_M
+
+        # Terrain elevation at current position.
+        terrain_m = self._grid.elevation_at(lat, lon) or 0.0
+        agl_m = max(0.0, alt_m - terrain_m)
+
+        # Wind at ridge-top level drives mountain waves; surface wind drives
+        # mechanical turbulence.  We resolve both from the profile.
+        surface_alt_m = terrain_m + SURFACE_SAMPLE_AGL_M
+        surface_spd_kt, surface_dir_deg = wind_profile.wind_at(surface_alt_m)
+        surface_wind_ms = surface_spd_kt * KT_TO_MS
+
+        if surface_wind_ms < MIN_WIND_MS:
+            return _CALM
+
+        # ---- 1. Upwind terrain scan (fan ±30° to catch off-bearing peaks) ---
+        barrier_result = self._grid.max_upwind_barrier(
+            lat, lon, surface_dir_deg, self._upwind_km
+        )
+        if barrier_result is None:
+            return _CALM
+
+        max_upwind_m, ridge_dist_km, ridge_bearing_deg = barrier_result
+        peak_lat, peak_lon = _dest_point(lat, lon, ridge_bearing_deg, ridge_dist_km)
+        raw_barrier_m = max(0.0, max_upwind_m - terrain_m)
+        # Reduce effective barrier for terrain that is off-axis relative to the
+        # wind: a peak 30° to the side generates weaker waves than one directly
+        # upwind.  cos(offset) provides a smooth, physically-motivated reduction.
+        angle_offset = abs((ridge_bearing_deg - surface_dir_deg + 180.0) % 360.0 - 180.0)
+        barrier_height_m = raw_barrier_m * math.cos(math.radians(angle_offset))
+
+        # ---- 2. Terrain roughness ------------------------------------------
+        roughness_m = self._grid.terrain_roughness(lat, lon, self._roughness_km)
+
+        # ---- 3. Vertical wind shear (CAT contribution) ---------------------
+        shear = wind_profile.vertical_wind_shear(alt_m)
+        shear_factor = _normalise(shear, SHEAR_MODERATE, SHEAR_SEVERE)
+
+        # ---- 4. Dominant mechanism -----------------------------------------
+        rotor = self._rotor_conditions(agl_m, terrain_m, max_upwind_m, ridge_dist_km)
+        ridge_top_spd_kt, ridge_top_dir_deg = wind_profile.wind_at_ridge_top(max_upwind_m)
+        wave = self._wave_conditions(
+            barrier_height_m, ridge_top_spd_kt * KT_TO_MS, agl_m
+        )
+
+        ridge_top_m_ft = max_upwind_m * 3.28084
+
+        if rotor["active"]:
+            state = self._rotor_state(rotor, surface_wind_ms, wind_profile, terrain_m)
+            state.reason = (
+                f"Lee rotor: wind {surface_dir_deg:.0f}° {surface_spd_kt:.0f}kt "
+                f"hitting {ridge_top_m_ft:.0f}ft terrain bearing "
+                f"{ridge_bearing_deg:.0f}° distance {ridge_dist_km:.0f}km"
+            )
+            state.source_lat = peak_lat
+            state.source_lon = peak_lon
+        elif wave["active"]:
+            state = self._wave_state(
+                wave, ridge_top_spd_kt * KT_TO_MS,
+                lat, lon, ridge_top_dir_deg, agl_m
+            )
+            state.reason = (
+                f"Mountain wave: wind {ridge_top_dir_deg:.0f}° {ridge_top_spd_kt:.0f}kt "
+                f"hitting {ridge_top_m_ft:.0f}ft terrain bearing "
+                f"{ridge_bearing_deg:.0f}° distance {ridge_dist_km:.0f}km"
+            )
+            state.source_lat = peak_lat
+            state.source_lon = peak_lon
+        else:
+            state = self._mechanical_state(roughness_m, surface_wind_ms, agl_m)
+            state.reason = (
+                f"Mechanical: wind {surface_dir_deg:.0f}° {surface_spd_kt:.0f}kt "
+                f"over rough terrain (roughness {roughness_m:.0f}m)"
+            )
+            state.source_lat = peak_lat
+            state.source_lon = peak_lon
+
+        # ---- 5. Blend in wind-shear CAT ------------------------------------
+        if shear_factor > 0.05 and state.intensity < shear_factor * 0.5:
+            # Shear CAT dominates — pure random
+            return TurbulenceState(
+                intensity=max(state.intensity, shear_factor * 0.5),
+                kind=f"{state.kind}+shear" if state.kind != "none" else "shear",
+                reason=f"Wind shear CAT: {shear:.1f}kt/1000ft vertical shear",
+            )
+        # Otherwise just boost existing intensity slightly
+        return replace(state, intensity=min(1.0, state.intensity + shear_factor * 0.15))
+
+    # ------------------------------------------------------------------
+    # Mechanism evaluators
+    # ------------------------------------------------------------------
+
+    def _rotor_conditions(
+        self,
+        agl_m: float,
+        terrain_m: float,
+        max_upwind_m: float,
+        ridge_dist_km: float,
+    ) -> dict:
+        barrier_height_m = max(0.0, max_upwind_m - terrain_m)
+        if barrier_height_m < BARRIER_THRESHOLD_M:
+            return {"active": False}
+
+        if ridge_dist_km > ROTOR_DISTANCE_KM:
+            return {"active": False}
+
+        rotor_ceiling_agl_m = barrier_height_m * ROTOR_HEIGHT_FRACTION
+        if agl_m > rotor_ceiling_agl_m:
+            return {"active": False}
+
+        return {
+            "active": True,
+            "barrier_height_m": barrier_height_m,
+            "ridge_dist_km": ridge_dist_km,
+        }
+
+    def _wave_conditions(
+        self,
+        barrier_height_m: float,
+        ridge_top_wind_ms: float,
+        agl_m: float,
+    ) -> dict:
+        if barrier_height_m < BARRIER_THRESHOLD_M:
+            return {"active": False}
+        if ridge_top_wind_ms < 8.0:
+            return {"active": False}
+
+        half_lambda_m = ridge_top_wind_ms * T_WAVE_S / 2.0
+        # Waves are strongest near ridge height and weaker below it (aircraft is under
+        # the wave, not in it).  Scale linearly from zero at ground to 1.0 at the
+        # barrier summit, then let the exponential handle high-altitude decay above.
+        below_factor = min(1.0, agl_m / barrier_height_m)
+        alt_factor = below_factor * math.exp(-agl_m / WAVE_SCALE_M)
+
+        if alt_factor < 0.02:
+            return {"active": False}
+
+        return {
+            "active": True,
+            "barrier_height_m": barrier_height_m,
+            "half_lambda_m": half_lambda_m,
+            "alt_factor": alt_factor,
+        }
+
+    # ------------------------------------------------------------------
+    # State constructors
+    # ------------------------------------------------------------------
+
+    def _rotor_state(
+        self,
+        rotor: dict,
+        surface_wind_ms: float,
+        wind_profile: WindProfile,
+        terrain_m: float,
+    ) -> TurbulenceState:
+        wind_factor = min(1.0, surface_wind_ms / WIND_NORM_MS)
+        barrier_factor = min(1.0, rotor["barrier_height_m"] / 2000.0)
+        intensity = 0.6 * wind_factor * barrier_factor
+
+        # Low-level jet amplifies rotor violence.
+        jet = wind_profile.low_level_jet(search_top_m=terrain_m + 3000.0)
+        if jet is not None:
+            _, jet_spd_kt, _ = jet
+            intensity = min(1.0, intensity * (1.0 + jet_spd_kt / 60.0))
+
+        return TurbulenceState(
+            intensity=min(1.0, intensity),
+            kind="rotor",
+        )
+
+    def _wave_state(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self,
+        wave: dict,
+        ridge_top_wind_ms: float,
+        lat: float,
+        lon: float,
+        wind_dir_deg: float,
+        _agl_m: float,
+    ) -> TurbulenceState:
+        wind_factor = min(1.0, ridge_top_wind_ms / WAVE_WIND_NORM_MS)
+        barrier_factor = min(1.0, wave["barrier_height_m"] / WAVE_BARRIER_NORM_M)
+        intensity = 0.7 * wind_factor * barrier_factor * wave["alt_factor"]
+
+        phase = self._wave_phase(lat, lon, wind_dir_deg, wave["half_lambda_m"])
+        vertical = math.sin(phase)
+        roll = 0.2 * math.cos(phase)
+        gust = -0.15 * math.sin(phase)
+
+        return TurbulenceState(
+            intensity=min(1.0, intensity),
+            vertical=vertical,
+            roll=roll,
+            gust=gust,
+            kind="wave",
+        )
+
+    def _mechanical_state(
+        self, roughness_m: float, surface_wind_ms: float, agl_m: float
+    ) -> TurbulenceState:
+        roughness_factor = min(1.0, roughness_m / ROUGHNESS_SATURATION_M)
+        wind_factor = min(1.0, surface_wind_ms / WIND_NORM_MS)
+        agl_factor = math.exp(-agl_m / MECHANICAL_SCALE_M)
+        intensity = roughness_factor * wind_factor * agl_factor
+
+        if intensity < 0.01:
+            return TurbulenceState()
+
+        return TurbulenceState(
+            intensity=min(1.0, intensity),
+            kind="mechanical",
+        )
+
+    # ------------------------------------------------------------------
+    # Wave phase helper
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _wave_phase(
+        lat: float, lon: float, wind_dir_deg: float, half_lambda_m: float
+    ) -> float:
+        """Return spatially consistent wave phase projected onto the downwind axis.
+
+        Phase is based on position projected onto the downwind axis, modulo wavelength.
+        """
+        downwind_rad = math.radians((wind_dir_deg + 180.0) % 360.0)
+        x_m = lon * 111_320.0 * math.cos(math.radians(lat))
+        y_m = lat * 111_320.0
+        proj = x_m * math.sin(downwind_rad) + y_m * math.cos(downwind_rad)
+        wavelength_m = 2.0 * half_lambda_m
+        return (proj % wavelength_m) / wavelength_m * 2.0 * math.pi
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _normalise(value: float, low: float, high: float) -> float:
+    """Map value linearly from [low, high] → [0, 1], clamped."""
+    if value <= low:
+        return 0.0
+    if value >= high:
+        return 1.0
+    return (value - low) / (high - low)

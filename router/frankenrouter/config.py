@@ -14,6 +14,11 @@ class _RouterConfigIdentity:  # pylint: disable=missing-class-docstring,too-few-
         self.simulator = data.get('simulator', "Unknown Sim")
         self.router = data.get('router', "Unknown Router")
         self.stop_minded = data.get('stop_minded', False)
+        self.type = data.get('type', 'unknown')
+        if self.type not in ('master', 'slave', 'standalone', 'unknown'):
+            raise RouterConfigError(
+                f"identity.type must be 'master', 'slave', 'standalone', or 'unknown'; "
+                f"got '{self.type}'")
 
 
 class _RouterConfigListen:  # pylint: disable=missing-class-docstring,too-few-public-methods
@@ -27,6 +32,14 @@ class _RouterConfigListen:  # pylint: disable=missing-class-docstring,too-few-pu
             raise RouterConfigError("The API port must be an integer")
         self.rest_api_color_scheme = data.get('rest_api_color_scheme', 'dark')
 
+        # When true (default), the router will not accept client connections
+        # until the upstream has sent its welcome message (load3), guaranteeing
+        # that clients always receive a full set of variables on connect.
+        # Set to false to allow clients to connect immediately on router start.
+        self.wait_for_upstream_welcome = data.get('wait_for_upstream_welcome', True)
+        if not isinstance(self.wait_for_upstream_welcome, bool):
+            raise RouterConfigError("wait_for_upstream_welcome must be true or false")
+
 
 class _RouterConfigUpstream:  # pylint: disable=missing-class-docstring,too-few-public-methods
     def __init__(self, data):
@@ -38,6 +51,12 @@ class _RouterConfigUpstream:  # pylint: disable=missing-class-docstring,too-few-
         if not isinstance(self.port, int):
             raise RouterConfigError("The upstream port must be an integer")
         self.password = data.get('password', None)
+        if self.password is not None:
+            if not re.match(r'^[\x21-\x7e]+$', self.password):
+                raise RouterConfigError(
+                    "Upstream password contains invalid characters "
+                    "(only printable ASCII characters allowed, no spaces)")
+        self.use_session_password = data.get('use_session_password', False)
         self.default = data.get('default', False)
 
 
@@ -59,7 +78,7 @@ class _RouterConfigLog:  # pylint: disable=missing-class-docstring,too-few-publi
 
 
 class _RouterConfigPsx:  # pylint: disable=missing-class-docstring,too-few-public-methods
-    def __init__(self, data):
+    def __init__(self, data):  # pylint: disable=too-many-branches
         self.variables = data.get('variables', 'Variables.txt')
         if not isinstance(self.variables, str):
             raise RouterConfigError("PSX Variables path must be a string")
@@ -78,6 +97,15 @@ class _RouterConfigPsx:  # pylint: disable=missing-class-docstring,too-few-publi
         #   Qh6  LtStorm, Qh7  LtOvhd,  Qh8  LtDome,
         #   Qh9  LtGlrshPanel, Qh10 LtGlrshFlood,
         #   Qh11 LtAislePanel, Qh12 LtAisleFlood
+        self.qs121_keepalive = data.get('qs121_keepalive', True)
+        if not isinstance(self.qs121_keepalive, bool):
+            raise RouterConfigError("psx qs121_keepalive must be true or false")
+        self.irs_align_fix = data.get('irs_align_fix', True)
+        if not isinstance(self.irs_align_fix, bool):
+            raise RouterConfigError("psx irs_align_fix must be true or false")
+        self.parking_brake_fix = data.get('parking_brake_fix', False)
+        if not isinstance(self.parking_brake_fix, bool):
+            raise RouterConfigError("psx parking_brake_fix must be true or false")
         self.filter_from_other_sim = data.get('filter_from_other_sim', [])
         if not isinstance(self.filter_from_other_sim, list):
             raise RouterConfigError("psx filter_from_other_sim must be a list")
@@ -90,32 +118,79 @@ class _RouterConfigPsx:  # pylint: disable=missing-class-docstring,too-few-publi
             raise RouterConfigError("psx filter_to_other_sim entries must be strings")
 
 
+class _RouterConfigCrewMember:  # pylint: disable=missing-class-docstring,too-few-public-methods
+    def __init__(self, data):
+        self.portal_name = data.get('portal_name')
+        if not isinstance(self.portal_name, str):
+            raise RouterConfigError("sharedinfo crew portal_name must be a string")
+        self.callsign_suffix = data.get('callsign_suffix')
+        if not isinstance(self.callsign_suffix, str):
+            raise RouterConfigError("sharedinfo crew callsign_suffix must be a string")
+
+
 class _RouterConfigSharedinfo:  # pylint: disable=missing-class-docstring,too-few-public-methods
     def __init__(self, data):
         self.master = data.get('master', False)
+        crew_data = data.get('crew', [{"portal_name": "MACRO", "callsign_suffix": "M"}])
+        if not isinstance(crew_data, list):
+            raise RouterConfigError("sharedinfo crew must be a list")
+        self.crew = [_RouterConfigCrewMember(m) for m in crew_data]
+        self.airframes = data.get('airframes', ["G-CIVB BAW B744"])
+        if not isinstance(self.airframes, list):
+            raise RouterConfigError("sharedinfo airframes must be a list")
+        if not all(isinstance(a, str) for a in self.airframes):
+            raise RouterConfigError("sharedinfo airframes entries must be strings")
+        self.portal_accounts = data.get('portal_account', ["someemail@somedomain.com"])
+        if not isinstance(self.portal_accounts, list):
+            raise RouterConfigError("sharedinfo portal_account must be a list")
+        if not all(isinstance(a, str) for a in self.portal_accounts):
+            raise RouterConfigError("sharedinfo portal_account entries must be strings")
+        self.airline_icao = data.get(
+            'airline_icao', ["BAW", "BAN", "GST", "DLH", "GTI", "ACX", "CLX"])
+        if not isinstance(self.airline_icao, list):
+            raise RouterConfigError("sharedinfo airline_icao must be a list")
+        if not all(isinstance(a, str) for a in self.airline_icao):
+            raise RouterConfigError("sharedinfo airline_icao entries must be strings")
+        self.checklist = data.get('checklist', [
+            "fuel ordered",
+            "VATPRI is elevation master",
+            "VATSIM flight plan filed with correct callsign",
+            "Correct Simbrief account used for plan",
+        ])
+        if not isinstance(self.checklist, list):
+            raise RouterConfigError("sharedinfo checklist must be a list")
+        if not all(isinstance(a, str) for a in self.checklist):
+            raise RouterConfigError("sharedinfo checklist entries must be strings")
 
 
 class _RouterConfigFiltering:  # pylint: disable=missing-class-docstring,too-few-public-methods
     def __init__(self, data):
-        self.tiller = data.get('tiller', False)
-        self.tiller_smallest_movement = data.get('tiller_smallest_movement', 10)
-        self.tiller_center = data.get('tiller_center', 25)
-        if self.tiller_center < 2 * self.tiller_smallest_movement:
-            raise RouterConfigError(
-                "tiller_center too small in relation to tiller_smallest_movemeent")
+        pass
 
 
-class _RouterConfigPerformance:  # pylint: disable=missing-class-docstring,too-few-public-methods
+class _RouterConfigPerformance:  # pylint: disable=missing-class-docstring,too-few-public-methods,too-many-instance-attributes
     def __init__(self, data):
         self.write_buffer_critical_limit = data.get('write_buffer_critical_limit', 100000)
         if not isinstance(self.write_buffer_critical_limit, int):
             raise RouterConfigError("performance write_buffer_critical_limit must be an integer")
+
+        self.received_messages_per_second_warning_limit = data.get(
+            'received_messages_per_second_warning_limit', 80)
+        if not isinstance(self.received_messages_per_second_warning_limit, int):
+            raise RouterConfigError(
+                "performance received_messages_per_second_warning_limit must be an integer")
 
         self.received_messages_per_second_critical_limit = data.get(
             'received_messages_per_second_critical_limit', 120)
         if not isinstance(self.received_messages_per_second_critical_limit, int):
             raise RouterConfigError(
                 "performance received_messages_per_second_critical_limit must be an integer")
+
+        self.sent_messages_per_second_warning_limit = data.get(
+            'sent_messages_per_second_warning_limit', 80)
+        if not isinstance(self.sent_messages_per_second_warning_limit, int):
+            raise RouterConfigError(
+                "performance sent_messages_per_second_warning_limit must be an integer")
 
         self.sent_messages_per_second_critical_limit = data.get(
             'sent_messages_per_second_critical_limit', 120)
@@ -147,28 +222,38 @@ class _RouterConfigAccess:  # pylint: disable=missing-class-docstring,too-few-pu
         if self.display_name is None:
             raise RouterConfigError(f"An access rule must have a display_name: {data}")
 
-        self.match_ipv4 = data.get('match_ipv4', None)
+        # Accept match_ip (preferred) or match_ipv4 (backward-compatible alias)
+        if 'match_ipv4' in data and 'match_ip' not in data:
+            logging.getLogger(__name__).warning(
+                "Config key 'match_ipv4' is deprecated; rename it to 'match_ip' "
+                "(IPv6 addresses are also supported now)"
+            )
+        self.match_ip = data.get('match_ip', data.get('match_ipv4', None))
         self.is_frankenrouter = data.get('is_frankenrouter', None)
         self.match_password = data.get('match_password', None)
         self.level = data.get('level', None)
 
         # Sanity checks
-        if self.match_ipv4 is None and self.match_password is None:
-            raise RouterConfigError("An access rule must use password or match_ipv4")
+        if self.match_ip is None and self.match_password is None:
+            raise RouterConfigError("An access rule must use match_password or match_ip")
 
-        if self.match_ipv4 is not None:
-            for network in self.match_ipv4:
+        if self.match_ip is not None:
+            for network in self.match_ip:
                 if network == 'ANY':
                     continue
                 try:
                     ipaddress.ip_network(network)
                 except ValueError as exc:
                     raise RouterConfigError(
-                        f"Invalid IPv4 network in config file: {network}: {exc}") from exc
+                        f"Invalid network address in config file: {network}: {exc}") from exc
         if self.match_password is not None:
             if self.match_password == "":
                 raise RouterConfigError(
                     "Empty password in config, remove line for no password access")
+            if not re.match(r'^[\x21-\x7e]+$', self.match_password):
+                raise RouterConfigError(
+                    "Password in access rule contains invalid characters "
+                    "(only printable ASCII characters allowed, no spaces)")
         if self.level is None:
             raise RouterConfigError(
                 "There must be an access_level in the access config")
@@ -229,6 +314,15 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
         self.psx = _RouterConfigPsx(config.get('psx', {}))
         self.performance = _RouterConfigPerformance(config.get('performance', {}))
         self.sharedinfo = _RouterConfigSharedinfo(config.get('sharedinfo', {}))
+        if self.sharedinfo.master:
+            if self.identity.type == 'master':
+                raise RouterConfigError(
+                    "Both [sharedinfo] master and [identity] type='master' are set; "
+                    "remove the deprecated [sharedinfo] master setting")
+            self.logger.warning(
+                "Config: [sharedinfo] master is deprecated; use type = 'master' "
+                "in [identity] instead")
+            self.identity.type = 'master'
         self.filtering = _RouterConfigFiltering(config.get('filtering', {}))
 
         # To handle the old upstream format, we check if we get a list
@@ -251,6 +345,8 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
         else:
             # Store all defined upstreams in self.upstreams, but also
             # store the default one in self.upstream.
+            if len(config['upstream']) == 1:
+                config['upstream'][0]['default'] = True
             default_upstream = None
             self.upstreams = []
             for elem in config['upstream']:
@@ -263,6 +359,12 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
                 self.upstreams.append(this_upstream)
             self.upstream = default_upstream
 
+        if self.identity.type == 'master':
+            if len(self.upstreams) != 1 or self.upstreams[0].password is not None:
+                raise RouterConfigError(
+                    "Your router is configured to be a master router and then only a single "
+                    "non-password upstream is permitted")
+
         self.access = []
         if 'access' in config:
             for elem in config['access']:
@@ -272,7 +374,7 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
             self.logger.info("No [[access]] section in config, allowing all clients to connect.")
             self.access.append(_RouterConfigAccess({
                 'display_name': 'all clients allowed',
-                'match_ipv4': ['ANY'],
+                'match_ip': ['ANY'],
                 'level': 'full'
             }))
         self.check = []
@@ -382,6 +484,30 @@ I'm not TOML
         """A few tests with valid input data."""
         with self.assertRaises(RouterConfigError):
             RouterConfig(config_data=self.bad_data_1)
+
+    def test_crew_defaults(self):
+        """Default crew is MACRO/M and default airframe is set when no [sharedinfo] present."""
+        conf = RouterConfig(config_data="")
+        self.assertEqual(len(conf.sharedinfo.crew), 1)
+        self.assertEqual(conf.sharedinfo.crew[0].portal_name, "MACRO")
+        self.assertEqual(conf.sharedinfo.crew[0].callsign_suffix, "M")
+        self.assertEqual(conf.sharedinfo.airframes, ["G-CIVB BAW B744"])
+
+    def test_crew_custom(self):
+        """Custom crew list is parsed correctly."""
+        data = """
+[[sharedinfo.crew]]
+portal_name = "ALPHA"
+callsign_suffix = "A"
+
+[[sharedinfo.crew]]
+portal_name = "BRAVO"
+callsign_suffix = "B"
+"""
+        conf = RouterConfig(config_data=data)
+        self.assertEqual(len(conf.sharedinfo.crew), 2)
+        self.assertEqual(conf.sharedinfo.crew[1].portal_name, "BRAVO")
+        self.assertEqual(conf.sharedinfo.crew[1].callsign_suffix, "B")
 
 
 if __name__ == '__main__':

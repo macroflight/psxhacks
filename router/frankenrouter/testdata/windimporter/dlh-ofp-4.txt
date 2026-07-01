@@ -1,0 +1,3701 @@
+OFP
+--------------------------------------------------------------------
+OFP      LH1001/24    24MAY KLAX/ LAX   EDDM/ MUC  DEST ELEV    1487
+1/0/1    ATC DLH1001        1955/2015   0658/0645  COST INDEX     53
+                        EST ..../....   ..../....  ROUTE      DEFRTE
+GCIVB  PERF 100.0       CTOT     ....   TAXI IN 08 SPEED        ECON
+B747-400-RB211-524G/H                              AVGE FF      9167
+                        ACT ..../....   ..../....  AVGE WC      P028
+
+       LOAD     ZFW   TANKF           LW     TOW   
+EST   33800  212556      0L   MAL 285763  396894
+PLN   33800  212556      0L   PLN 221687  320065   REM FUEL ........
+
+ACT  ......  ......               ......  ......   TKOF ALTN .......
+-----------------------------CLEARANCES-----------------------------
+
+
+
+--------------------------------------------------------------------
+N0488F330 OSHNN1 BEALE DCT BAWER DCT KD57Q DCT KD72U/N0484F350 DCT
+KD78W DCT KP90A DCT KP06C DCT KP18G DCT TADIS DCT
+5430N08000W/N0480F370 57N070W DCT LAKES/M083F370 DCT URTAK DCT
+59N050W 59N040W 59N030W 58N020W DCT GOMUP/N0478F370 DCT
+GINGA/N0477F390 DCT BRUCE DCT CLYDE DCT HAVEN DCT GODOS DCT
+DODEN/N0455F330 DCT TABUM DCT BOMBI T104 HAREM/N0423F270 T104 ROKIL
+ROKIL1B
+--------------------------------------------------------------------
+TIME  AWY         TRK   DIS       MORA           TAS  G/S  PRC  REFU
+TTL   POSITION         RDIS             TP  T    W/V             PLN
+PTO   ETO  ATO               LVL                                 ACT
+--------------------------------------------------------------------
+....  KLAX/24L         5336             39 P05   242/007   .... ....
+--------------------------------------------------------------------
+  18  OSHNN1            116       80             487       340
+0018  T O C            5220             44 -48   173/008   840  95.2
+....  .... ....              330                           .... ....
+--------------------------------------------------------------------
+  19  OSHNN1      048   152       78             487  493  833
+0037  BEALE            5068             41 -48   172/010        92.0
+....  .... ....                                            .... ....
+--------------------------------------------------------------------
+  18  DCT         053   150       123            488  499  832
+0055  BAWER            4918             41 -47   198/013        88.9
+....  .... ....                                            .... ....
+--------------------------------------------------------------------
+  18  DCT         042   155       141            487  508  831
+0113  KD57Q            4763             43 -47   228/021        85.8
+....  .... ....                                            .... ....
+--------------------------------------------------------------------
+  28  DCT         049   236       137            485  511  829
+0141  KD72U            4527  CLB        43 -48   259/030        81.1
+....  .... ....              350                           .... ....
+--------------------------------------------------------------------
+  12  DCT         055   107       125            484  521  837
+0153  KD78W            4420             43 -53   275/049        78.9
+....  .... ....                                            .... ....
+--------------------------------------------------------------------
+  25  DCT         053   210       66             483  516     
+0218  KP90A            4210             40 -54   283/054        74.9
+....  .... ....                                            .... ....
+--------------------------------------------------------------------
+  12  DCT         053   103       44             482  517  835
+0230  KP06C            4107             37 -54   285/060        73.0
+....  .... ....                                            .... ....
+--------------------------------------------------------------------
+  24  DCT         052   203       42             481  507  834
+0254  KP18G            3904             35 -54   292/056        69.2
+....  .... ....                                            .... ....
+--------------------------------------------------------------------
+  23  DCT         051   198       38             482  501  832
+0317  TADIS            3706             33 -52   286/034        65.4
+....  .... ....                                            .... ....
+--------------------------------------------------------------------
+  52  DCT         049   456       38             482  527  830
+0409  N5430W08000      3250  CLB        34 -51   221/045        57.4
+....  .... ....              370                           .... ....
+--------------------------------------------------------------------
+  42  DCT         061   369       36             480  532  839
+0451  N57W070          2881             38 -58   244/052        51.0
+....  .... ....                                            .... ....
+--------------------------------------------------------------------
+  26  DCT         071   225       52             478  515  836
+0517  LAKES            2656             37 -58   301/062        47.1
+....  .... ....                                            .... ....
+--------------------------------------------------------------------
+  20  DCT         078   169       49             483  503  835
+0537  URTAK            2487             33 -53   325/058        44.2
+....  .... ....                                            .... ....
+--------------------------------------------------------------------
+  31  DCT         079   251       20             485  491  830
+0608  N59W050          2236             30 -48   335/028        39.7
+....  .... ....                                            .... ....
+--------------------------------------------------------------------
+  37  DCT         085   309       20             487  493  831
+0645  N59W040          1927             31 -47   292/007        34.3
+....  .... ....                                            .... ....
+--------------------------------------------------------------------
+  37  DCT         085   309       20             491  508  830
+0722  N59W030          1618             29 -43   243/018        29.0
+....  .... ....                                            .... ....
+--------------------------------------------------------------------
+  36  DCT         096   319       20             492  528     
+0758  N58W020          1299             28 -42   228/057        23.9
+....  .... ....                                            .... ....
+--------------------------------------------------------------------
+  36  DCT         096   328       20             481  553     
+0834  GOMUP             971             37 -52   236/100        19.0
+....  .... ....                                            .... ....
+--------------------------------------------------------------------
+   2  DCT         105    17       20             478  539     
+0836  GINGA             954  CLB        41 -55   243/087        18.8
+....  .... ....              390                           .... ....
+--------------------------------------------------------------------
+  14  DCT         107   128       31             477  528  837
+0850  BRUCE             826             42 -59   244/074        16.8
+....  .... ....                                            .... ....
+--------------------------------------------------------------------
+   5  DCT         114    39       37             477  511     
+0855  CLYDE             787             43 -59   245/054        16.2
+....  .... ....                                            .... ....
+--------------------------------------------------------------------
+   8  DCT         115    68       49             478  501     
+0903  HAVEN             719             44 -58   248/035        15.2
+....  .... ....                                            .... ....
+--------------------------------------------------------------------
+  31  DCT         117   261       38             477  494  836
+0934  GODOS             458             44 -59   248/027        11.1
+....  .... ....                                            .... ....
+--------------------------------------------------------------------
+  30  DCT         130   235       43             475  482  835
+1004  DODEN             223  DES        44 -60   294/007         7.5
+....  .... ....              330                           .... ....
+--------------------------------------------------------------------
+   2  DCT         147    22       48             455  464  778
+1006  TABUM             201             41 -48   016/014         7.3
+....  .... ....                                            .... ....
+--------------------------------------------------------------------
+   3  DCT         132    21       48             455  459     
+1009  BOMBI             180             42 -48   025/016         7.0
+....  .... ....                                            .... ....
+--------------------------------------------------------------------
+   5  T104        137    35       37             455  461  777
+1014  HAREM             145  DES        42 -48   025/016         6.4
+....  .... ....              270                           .... ....
+--------------------------------------------------------------------
+   7  T104        133    55       38             422  417  280
+1021  T O D              90             42 -33   055/020         5.6
+....  .... ....                                            .... ....
+--------------------------------------------------------------------
+   1  T104                5  DES  38                       840
+1022  ANORA              85             42 P07   063/017   340   5.5
+....  .... ....                                            .... ....
+--------------------------------------------------------------------
+   8  T104               37  DES  38                          
+1030  ROKIL              48             42 P12   036/009         5.2
+....  .... ....                                            .... ....
+--------------------------------------------------------------------
+  13  ROKIL1B            48  DES  38                          
+1043  EDDM/26L            0                                      4.2
+--------------------------------------------------------------------
+ARRIVAL ATIS
+
+
+
+--------------------------------------------------------------------
+DESTINATION ALTERNATE INFORMATION
+--------------------------------------------------------------------
+
+           ALTN      DIST  LVL   WC TIME   FUEL VIA
+           NO ALTERNATE
+--------------------------------------------------------------------
+REMARKS 
+--------------------------------------------------------------------
+
+TRIP       98378  10.43
+
+CONT 5%     4919  00.32  
+
+ALTN           0  00.00  
+
+FINAL RES   4212  00.30
+
+PLNTOF    107509  11.45                            ONE ZERO SEVEN
+
+DIFF       .....  .....
+
+PLNTOF     .....  .....  (CORRECTED)
+
+TAXI        ....           907/00.20
+
+MINBLOCK  ......         TCAP 173693  .....  REM FUEL ...... AT ....
+
+FUEL OB   ......  .....
+
+DISCF     ......  .....  POSS  64076L
+
+BLOCK     ......         TCAP 173693  .....  REM FUEL ...... AT ....
+--------- --------- --------- --------- --------- --------- --------
+ZFW CORR PS 1000 PLNTOF PS 284  / MS 1000 PLNTOF MS 243
+2000 FT BELOW                   TRIP PS 638  / TIME PS 0.06
+4000 FT BELOW                   TRIP PS 1113 / TIME PS 0.14
+2000 FT ABOVE                   TRIP PS 524  / TIME MS 0.07
+ECON CI0                        TRIP MS 29   / TIME PS 0.08
+ECON CI500                      TRIP PS 3121 / TIME MS 0.22
+--------- --------- --------- --------- --------- --------- --------
+DELTA FUEL BURN SUMMARY
+NO DATA AVAILABLE
+--------- --------- --------- --------- --------- --------- --------
+
+NO TANKERING RECOMMENDED (P)
+
+LOSS FOR DISCRETIONARY FUEL:  276 US$/TO
+
+--------------------------------------------------------------------
+LIDO TAKE-OFF DISPATCH PLANNED COND FOR PERF LIM TOW CALCULATION:
+DEP A/D   : LAX/KLAX
+DEP RWY   : 24L      RWY COND: DRY                  THRUST: FULL
+RWY IDENT : 
+TEMP      : P18      PACKS   : ON                   WIND  : H009
+QNH       : 1017     ANTI-ICE: OFF                  FLAPS : OPTIMUM
+
+RESULTS: PERF LIM TOW: 378567                       FLAPS : 20
+--------- --------- --------- --------- --------- --------- --------
+LIDO LANDING DISPATCH PLANNED COND FOR PERF LIM LW CALCULATION:
+DEST A/D  : MUC/EDDM
+DEST RWY  : 26L      RWY COND: WET                  
+RWY IDENT :
+TEMP      : P20      PACKS   : ON                   WIND   : T004
+QNH       : 1029     ANTI-ICE: OFF                  FLAPS  : 25/30
+
+RESULTS: PERF LIM LW: 285763   ACT G/A CLB: -.--%   FLAPS  : 25/30
+--------- --------- --------- --------- --------- --------- --------
+PREP BY  T.HANSEN             COMMANDER ............    ............
+(TEL.NR. 1 800 555 0199)                    NAME         SIGNATURE
+SITA: FRASBLH
+                              S.F.O.    ............     .....-.....
+                                            NAME         FROM  UNTIL
+
+                              F.O.      ............
+                                            NAME
+
+
+
+ATC Flight Plan
+--------------------------------------------------------------------
+FF KZLAZQZX KZLCZQZX KZDVZQZX KZMPZQZX CZWGZQZX CZULZQZX CZQXZQZX
+BGGLZQZX EGGXZQZX EGPXZQZX EGTTZQZX EHAAZQZX EDVVZQZX EDUUZQZX
+EDMMZQZX
+       EDDFSBLH
+(FPL-DLH1001-IS
+-B744/H-SDE3FGHIM1M2RWXY/LB1
+-KLAX1955
+-N0488F330 OSHNN1 BEALE DCT BAWER DCT KD57Q DCT KD72U/N0484F350 DCT
+ KD78W DCT KP90A DCT KP06C DCT KP18G DCT TADIS DCT
+ 5430N08000W/N0480F370 57N070W DCT LAKES/M083F370 DCT URTAK DCT
+ 59N050W 59N040W 59N030W 58N020W DCT GOMUP/N0478F370 DCT
+ GINGA/N0477F390 DCT BRUCE DCT CLYDE DCT HAVEN DCT GODOS DCT
+ DODEN/N0455F330 DCT TABUM DCT BOMBI T104 HAREM/N0423F270 T104 ROKIL
+ ROKIL1B
+-EDDM1043 
+-PBN/A1B1D1O1S2 DOF/260524 REG/GCIVB EET/KZLC0052 KZDV0111 KZMP0209
+ CZWG0300 CZUL0409 CZQX0528 BGGL0605 59N050W0608 CZQX0621 59N040W0645
+ EGGX0722 58N020W0758 EGPX0834 EGTT0909 EHAA0934 EDVV0950 EDUU1001
+ EDMM1026 SEL/AKQS CODE/400551 OPR/DLH PER/D RVR/200 RMK/TCAS)
+
+
+
+Dispatch Information
+--------------------------------------------------------------------
+D I S P A T C H  B R I E F I N G  I N F O    LH1001    KLAX/EDDM
+
+
+WAYPOINT-LIST FOR OFP NO 1/0/1
+------------------------------
+
+CLIMB            T.O.C            ARCUS            YELAH            
+100 132/011 +05  N3429.9          N3432.5          N3451.3          
+150 186/003 -04  W11710.0         W11706.1         W11638.7         
+200 249/007 -17  430 253/030 -57  430 253/022 -58  430 253/022 -58  
+310 163/007 -44  410 248/027 -56  410 244/016 -58  410 244/016 -58  
+350 205/010 -51  390 242/025 -55  390 225/011 -57  390 225/011 -57  
+                 370 232/017 -53  370 196/006 -55  370 196/006 -55  
+                 350 207/010 -51  350 128/005 -52  350 127/005 -52  
+                 330 173/007 -48  330 120/006 -48  330 119/006 -48  
+                 310 160/007 -44  310 154/006 -43  310 153/006 -43  
+                 270 190/007 -34  270 191/008 -33  270 190/008 -33  
+                 240 206/008 -26  240 208/009 -26  240 208/009 -26  
+                 200 219/008 -17  200 203/006 -17  200 203/006 -17  
+                 150 194/005 -04  150 166/006 -04  150 167/006 -04  
+                 100 112/004 +06  100 216/003 +06  100 216/003 +06  
+
+WYZEE            BEALE            BAWER            KD57Q            
+N3541.8          N3610.9          N3738.1          N3930.0          
+W11530.2         W11449.6         W11216.8         W11000.0         
+430 245/018 -59  430 239/020 -59  430 231/021 -61  430 249/025 -62  
+410 231/013 -59  410 226/017 -59  410 222/019 -61  410 250/024 -61  
+390 205/010 -59  390 208/014 -58  390 212/017 -60  390 250/023 -60  
+370 185/008 -56  370 195/012 -56  370 211/017 -56  370 246/024 -56  
+350 165/008 -52  350 177/010 -52  350 213/017 -51  350 241/025 -52  
+330 161/008 -48  330 171/010 -48  330 213/018 -47  330 239/025 -47  
+310 172/009 -43  310 179/012 -43  310 214/018 -42  310 240/021 -42  
+270 180/009 -33  270 182/010 -33  270 216/009 -34  270 239/017 -34  
+240 175/009 -25  240 170/010 -25  240 203/009 -27  240 245/011 -27  
+200 180/012 -17  200 172/016 -17  200 192/014 -18  200 234/012 -17  
+150 151/012 -04  150 164/016 -04  150 207/013 -02  150 231/014 -03  
+100 152/014 +07  100 179/016 +07  100 235/005 +12  100 240/011 +11  
+
+KD72U            KD78W            KP90A            KP06C            
+N4200.0          N4300.0          N4500.0          N4600.0          
+W10600.0         W10400.0         W10000.0         W09800.0         
+430 267/040 -63  430 267/041 -60  430 277/036 -55  430 278/034 -53  
+410 266/042 -61  410 272/050 -59  410 280/046 -57  410 281/043 -54  
+390 266/044 -60  390 275/059 -59  390 282/055 -58  390 283/052 -55  
+370 270/044 -56  370 277/057 -56  370 283/057 -56  370 284/058 -55  
+350 274/044 -53  350 279/053 -53  350 285/058 -54  350 285/064 -54  
+330 276/041 -49  330 281/049 -49  330 284/057 -50  330 286/063 -51  
+310 274/037 -44  310 282/047 -44  310 282/054 -45  310 288/055 -47  
+270 273/030 -34  270 280/042 -35  270 277/045 -36  270 288/047 -37  
+240 275/031 -26  240 279/037 -27  240 278/041 -28  240 290/039 -30  
+200 272/024 -17  200 282/030 -18  200 276/033 -19  200 288/027 -20  
+150 253/019 -04  150 283/027 -05  150 271/025 -07  150 278/022 -08  
+100 270/022 +10  100 277/016 +09  100 237/009 +04  100 268/019 +02  
+
+KP18G            TADIS                             5770N            
+N4800.0          N5000.0          N5430.0          N5700.0          
+W09400.0         W09000.0         W08000.0         W07000.0         
+430 278/028 -50  430 258/024 -49  430 235/035 -53  430 288/039 -56  
+410 280/032 -50  410 260/026 -48  410 227/040 -54  410 286/050 -59  
+390 281/037 -50  390 262/027 -47  390 222/047 -56  390 284/062 -61  
+370 290/041 -51  370 264/028 -49  370 219/052 -55  370 283/061 -59  
+350 298/046 -53  350 268/029 -51  350 218/057 -54  350 280/058 -56  
+330 302/048 -52  330 272/030 -51  330 215/058 -51  330 281/052 -52  
+310 304/045 -49  310 279/031 -48  310 211/055 -46  310 284/043 -47  
+270 303/040 -40  270 292/035 -40  270 205/045 -36  270 285/032 -37  
+240 301/034 -33  240 289/031 -33  240 201/038 -29  240 282/030 -30  
+200 298/029 -23  200 284/030 -23  200 197/035 -20  200 278/025 -21  
+150 289/031 -11  150 285/033 -12  150 183/025 -10  150 282/026 -14  
+100 281/031 -01  100 286/033 -05  100 154/044 -05  100 259/008 -04  
+
+LAKES            URTAK            5950N            5940N            
+N5759.9          N5828.0          N5900.0          N5900.0          
+W06315.9         W05800.0         W05000.0         W04000.0         
+430 316/036 -52  430 328/028 -49  430 318/007 -45  430 219/009 -43  
+410 317/045 -53  410 330/033 -49  410 325/009 -45  410 233/009 -44  
+390 319/053 -55  390 332/039 -49  390 331/010 -45  390 247/009 -44  
+370 320/065 -55  370 333/050 -50  370 334/010 -46  370 266/010 -46  
+350 321/077 -56  350 334/061 -51  350 337/009 -48  350 281/012 -49  
+330 321/081 -55  330 335/067 -51  330 314/003 -50  330 287/014 -50  
+310 321/075 -50  310 335/070 -51  310 183/010 -51  310 287/018 -51  
+270 322/063 -41  270 340/066 -46  270 163/013 -45  270 289/016 -45  
+240 325/049 -35  240 344/059 -39  240 165/007 -39  240 293/013 -39  
+200 327/032 -27  200 344/055 -29  200 176/002 -31  200 298/013 -30  
+150 325/026 -16  150 344/049 -17  150 332/006 -20  150 298/015 -20  
+100 333/025 -07  100 344/036 -09  100 329/012 -11  100 305/015 -10  
+
+5930N            5820N            GOMUP            GINGA            
+N5900.0          N5800.0          N5700.0          N5655.5          
+W03000.0         W02000.0         W01000.0         W00930.0         
+430 224/026 -42  430 227/059 -46  430 240/069 -57  430 240/069 -57  
+410 225/028 -42  410 227/069 -46  410 242/077 -58  410 242/077 -58  
+390 225/030 -41  390 226/080 -46  390 243/086 -58  390 243/086 -58  
+370 233/030 -41  370 228/094 -45  370 243/087 -55  370 243/087 -55  
+350 242/031 -41  350 230/109 -45  350 243/085 -52  350 243/085 -52  
+330 252/030 -42  330 231/121 -44  330 241/083 -47  330 241/083 -47  
+310 265/028 -43  310 231/129 -42  310 239/081 -43  310 239/081 -43  
+270 283/034 -44  270 231/122 -37  270 234/082 -32  270 234/082 -32  
+240 289/032 -40  240 227/101 -33  240 235/079 -25  240 235/079 -25  
+200 298/032 -31  200 228/075 -27  200 235/080 -17  200 235/080 -17  
+150 296/025 -22  150 231/060 -18  150 236/078 -08  150 236/078 -08  
+100 279/018 -13  100 231/049 -09  100 235/059 -02  100 235/059 -02  
+
+BRUCE            CLYDE            HAVEN            GODOS            
+N5614.2          N5557.8          N5527.7          N5314.9          
+W00550.5         W00447.5         W00259.8         E00325.8         
+430 242/055 -61  430 245/055 -62  430 246/036 -62  430 254/010 -62  
+410 245/056 -60  410 245/054 -60  410 247/035 -60  410 252/012 -61  
+390 247/058 -59  390 245/054 -59  390 249/035 -58  390 250/015 -60  
+370 247/057 -55  370 244/052 -55  370 246/035 -55  370 246/017 -56  
+350 245/055 -51  350 243/050 -51  350 243/035 -51  350 242/021 -52  
+330 243/053 -46  330 241/048 -46  330 241/035 -46  330 244/024 -47  
+310 240/051 -41  310 240/046 -41  310 241/033 -42  310 248/027 -42  
+270 238/050 -32  270 239/045 -32  270 242/034 -33  270 255/027 -32  
+240 241/055 -25  240 241/051 -25  240 241/034 -26  240 263/024 -25  
+200 242/057 -17  200 244/054 -17  200 245/032 -16  200 273/023 -16  
+150 241/051 -06  150 244/049 -06  150 248/036 -04  150 282/017 -04  
+100 240/045 +02  100 243/047 +02  100 249/044 +03  100 304/021 +04  
+
+DODEN            TABUM            BOMBI            HAREM            
+N5036.1          N5017.5          N5003.4          N4937.1          
+E00805.6         E00824.3         E00848.0         E00924.9         
+430 002/010 -63  430 037/013 -63  430 025/013 -62  430 025/013 -62  
+410 004/008 -62  410 041/012 -62  410 035/011 -61  410 035/011 -61  
+390 006/006 -60  390 046/012 -61  390 048/010 -60  390 048/010 -60  
+370 002/008 -57  370 034/012 -57  370 040/011 -57  370 040/011 -57  
+350 359/010 -52  350 021/014 -53  350 031/014 -52  350 031/014 -52  
+330 356/011 -48  330 016/014 -48  330 025/016 -48  330 025/015 -48  
+310 351/011 -43  310 016/012 -43  310 020/016 -43  310 020/016 -43  
+270 354/009 -33  270 024/012 -32  270 028/017 -32  270 028/017 -32  
+240 349/010 -25  240 010/011 -25  240 027/012 -25  240 027/012 -25  
+200 342/008 -15  200 008/008 -15  200 020/008 -15  200 020/008 -15  
+150 333/003 -03  150 050/006 -03  150 043/007 -03  150 043/007 -03  
+100 017/002 +06  100 034/006 +06  100 050/008 +06  100 050/008 +06  
+
+ELMOX            PIGAB            DKB              LEVBU            
+N4923.0          N4911.9          N4908.6          N4900.4          
+E00949.5         E01008.6         E01014.3         E01027.4         
+430 048/018 -62  430 049/018 -62  430 049/018 -62  430 049/018 -62  
+410 055/018 -61  410 055/018 -61  410 055/018 -61  410 055/018 -61  
+390 061/018 -60  390 061/018 -60  390 061/018 -60  390 061/018 -60  
+370 063/018 -57  370 063/018 -57  370 063/018 -57  370 063/018 -57  
+350 063/017 -52  350 063/017 -52  350 063/017 -52  350 063/017 -52  
+330 062/018 -47  330 062/018 -47  330 062/018 -47  330 062/017 -47  
+310 060/019 -43  310 060/019 -43  310 060/019 -43  310 060/019 -43  
+270 054/020 -33  270 055/020 -33  270 055/020 -33  270 055/020 -33  
+240 031/013 -26  240 031/013 -26  240 031/013 -26  240 032/013 -26  
+200 027/012 -16  200 027/011 -16  200 027/011 -16  200 028/011 -16  
+150 052/008 -03  150 053/008 -03  150 053/008 -03  150 053/008 -03  
+100 019/007 +06  100 019/007 +06  100 019/007 +06  100 019/007 +06  
+
+T.O.D            DESCENT                                            
+N4900.3          350 063/017 -52                                    
+E01027.5         310 061/018 -43                                    
+430 049/018 -62  200 030/011 -16                                    
+410 055/018 -61  150 046/007 -03                                    
+390 061/018 -60  100 021/008 +06                                    
+370 063/018 -57                                                     
+350 063/017 -52                                                     
+330 062/017 -47                                                     
+310 060/019 -43                                                     
+270 055/020 -33                                                     
+240 032/013 -26                                                     
+200 028/011 -16                                                     
+150 053/008 -03                                                     
+100 019/007 +06
+
+
+
+Crew Information
+--------------------------------------------------------------------
+
+
+==========
+CREW ALERT
+==========
+
+SB007/14                               VALID: 12-OCT-14 0330 - UFN
+  SB007/14 COMPANY NOTAM
+  WHEN PLANNING A COST INDEX, 2 OPTIONS ARE AVAILABLE. PILOTS MAY
+  EITHER SELECT A SPECIFIC COST INDEX NUMBER FROM THE LIST, OR THEY
+  MAY SELECT "AUTO". WHEN PLANNING AN "AUTO" COST INDEX, THE SYSTEM
+  WILL REFERENCE THE SCHEDULED "TIME ENROUTE" OPTION AND ATTEMPT TO
+  CHOOSE A COST INDEX WHICH CLOSELY MATCHES THIS VALUE. NOTE THAT
+  THE "TIME ENROUTE" OPTION IS MEANT AS A GATE TO GATE TIME (AS
+  INDICATED ON AN AIRLINE'S FLIGHT SCHEDULE, FOR EXAMPLE). IF A
+  "TIME ENROUTE" OF 2:30 IS SELECTED, THE SYSTEM WILL SUBTRACT THE
+  TAXI TIMES FROM THIS VALUE TO DETERMINE THE SCHEDULED AIR TIME. IT
+  WILL THEN DETERMINE AND USE THE COST INDEX WHICH MATCHES THIS AIR
+  TIME.
+
+SB003/13                               VALID: 13-JUL-13 0320 - UFN
+  SB003/13 COMPANY NOTAM
+  ALL FLIGHT CREW: PLEASE PAY SPECIAL ATTENTION TO THE UNITS
+  SELECTION WHEN GENERATING A FLIGHT PLAN. FAILURE TO IDENTIFY THE
+  CORRECT UNITS WHEN REFUELING PRIOR TO FLIGHT CAN RESULT IN
+  DEPARTING WITH INSUFFICIENT FUEL AND/OR AN ERRONEOUS PAYLOAD.
+
+=============
+CREW BULLETIN
+=============
+
+NIL
+
+
+
+
+Weather
+--------------------------------------------------------------------
+KLAX --> EDDM    LH1001 / 24May2026
+LIDO/WEATHER SERVICE       DATE : 24May2026   TIME : 19:34 UTC
+
+AIRMETs:
+  NIL
+
+SIGMETs:
+KZLC  SALT LAKE CITY FIR/UIR
+  WS  SIGMET WSUS33 KKCI 241855 SIGW CONVECTIVE SIGMET 3W VALID
+             UNTIL 2055Z ID FROM 20NW DBS-40NNE PIH-40N TWF-60SSW
+             LKT-20NW DBS AREA TS MOV FROM 27025KT. TOPS TO FL320.
+  WS  SIGMET WSUS33 KKCI 241855 SIGW CONVECTIVE SIGMET 4W VALID
+             UNTIL 2055Z CO WY UT FROM 20NNW OCS-60ESE CHE-20N
+             HBU-40W JNC-40W MTU-20NNW OCS AREA TS MOV FROM
+             26025KT. TOPS TO FL360.
+  WS  SIGMET WSUS33 KKCI 241855 SIGW CONVECTIVE SIGMET 5W VALID
+             UNTIL 2055Z UT ID NV FROM 20SW TWF-20SW MLD-50NE
+             ELY-50NE BAM-20SW TWF AREA TS MOV FROM 26025KT. TOPS
+             TO FL360.
+KZDV  DENVER FIR/UIR
+  WS  SIGMET WSUS32 KKCI 241855 SIGC CONVECTIVE SIGMET 77C VALID
+             UNTIL 2055Z CO NM FROM 40E ALS-20W TBE-40S FTI-40NNE
+             ABQ-40E ALS AREA EMBD TS MOV LTL. TOPS TO FL350.
+  WS  SIGMET WSUS33 KKCI 241855 SIGW CONVECTIVE SIGMET 4W VALID
+             UNTIL 2055Z CO WY UT FROM 20NNW OCS-60ESE CHE-20N
+             HBU-40W JNC-40W MTU-20NNW OCS AREA TS MOV FROM
+             26025KT. TOPS TO FL360.
+
+Tropical Cyclone SIGMETs:
+  NIL
+
+Volcanic Ash SIGMETs:
+  NIL
+
+DEPARTURE AIRPORT:
+KLAX/LAX  LOS ANGELES INTL
+  SA  241853 25009KT 10SM SCT018 OVC022 18/12 A3004 RMK AO2 SLP170
+             T01780122 $
+  FT  241739 2418/2524 25007KT P6SM OVC020
+             FM242100 26014KT P6SM SCT025
+             FM250300 26010KT P6SM SCT020
+             FM250600 26005KT P6SM OVC025
+             FM252000 26013KT P6SM SCT025
+
+DESTINATION AIRPORT:
+EDDM/MUC  MUNICH
+  SA  241920 AUTO 33002KT CAVOK 20/14 Q1029 NOSIG
+  FT  241700 2418/2524 VRB02KT CAVOK
+             BECMG 2507/2509 04005KT
+             BECMG 2518/2520 VRB02KT
+
+
+
+  AIRPORTLIST ENDED
+
+
+
+NOTAM
+--------------------------------------------------------------------
+LIDO-NOTAM-BULLETIN INCLUDES NOTAM, COMP NOTAM AND AIP-REGULATION
+VALID: 2605241955 - 2605250938  STD(EOBT)+TRIP+ALTN+3HRS
+DLH1001/24MAY      OFP-NR: 1/0/1
+ROUTE:    KLAX - EDDM   ALTN: NONE
+N0488F330 OSHNN1 BEALE DCT BAWER DCT KD57Q DCT KD72U/N0484F350 DCT
+KD78W DCT KP90A DCT KP06C DCT KP18G DCT TADIS DCT
+5430N08000W/N0480F370 57N070W DCT LAKES/M083F370 DCT URTAK DCT
+59N050W 59N040W 59N030W 58N020W DCT GOMUP/N0478F370 DCT
+GINGA/N0477F390 DCT BRUCE DCT CLYDE DCT HAVEN DCT GODOS DCT
+DODEN/N0455F330 DCT TABUM DCT BOMBI T104 HAREM/N0423F270 T104 ROKIL
+ROKIL1B
+
+=================
+DEPARTURE AIRPORT
+=================
+
+KLAX /LAX   LOS ANGELES INTL - DETAILED INFO
+--------------------------------------------
+
++++++++++++++++++++++++++++++ AIRPORT ++++++++++++++++++++++++++++++
+
+A3048/26                    VALID: 23-MAY-26 0356 - 27-MAY-26 0630
+  TWY W HLDG PSN SIGN SOUTHEAST SIDE BTN RWY 06L/24R AND RWY 06R/24L
+  LGT U/S
+A2796/26                    VALID: 09-MAY-26 1840 - 01-JUN-26 2200
+  TWY B3 LOCATION SIGN EAST SIDE BTN RWY 07L/25R AND TWY B MISSING
+A2433/26                    VALID: 02-MAY-26 0500 - 05-JUN-26 2300
+  AD AP RWY STATUS LGT SYSTEM U/S
+A2522/26                    VALID: 01-MAY-26 1230 - 08-JUL-26 1230
+  TWY C BTN TWY C8 AND TWY C9 CLSD
+A2540/26                    VALID: 01-MAY-26 1230 - 08-JUL-26 1230
+  TWY C8 BTN TWY B AND TWY C CLSD TO ACFT WINGSPAN MORE THAN 118FT
+A1974/26                    VALID: 02-APR-26 1300 - 11-NOV-26 1400
+  LAX APRON TXL C9 NORTH OF GATE 46B CLSD
+A2010/26                    VALID: 01-APR-26 1644 - 10-JUN-26 2200
+  LAX TWY P BTN TWY C AND TWY N2 IRREGULAR SFC STEEL PLATES
+A1176/26                    VALID: 02-MAR-26 1430 - 23-JUN-26 0200
+  LAX TWY B BTN TWY F AND TWY B1 CLSD
+A1267/26                    VALID: 02-MAR-26 0830 - 22-JUN-26 2359
+  LAX APRON B1 RAMP CLSD
+A1272/26                    VALID: 02-MAR-26 0830 - 23-JUN-26 0200
+  LAX TWY B1 BTN APCH END RWY 25R AND TWY B CLSD
+A0155/26                    VALID: 06-JAN-26 1729 - 07-JUL-26 2300
+  LAX APRON TXL C7, C8, D9, D10 IRREGULAR SFC NUMEROUS RUTS
+A0151/26                    VALID: 06-JAN-26 1417 - 07-JUL-26 2300
+  LAX APRON TXL C6 IRREGULAR SFC STEEL PLATES
+A0395/25                               VALID: 27-JAN-25 1004 - UFN
+  /LAX/ NAV TACAN U/S
+
+++++++++++++++++++++++++++++++ RUNWAY ++++++++++++++++++++++++++++++
+
+A1217/26                    VALID: 02-MAR-26 1430 - 23-JUN-26 0200
+  LAX RWY 07L/25R DECLARED DIST: RWY 07L TORA 12091FT TODA 12091FT
+  ASDA 12091FT LDA 11134FT. RWY 25R TORA 11134FT TODA 11134FT ASDA
+  11134FT LDA 11134FT.
+
++++++++++++++++++++++++++++++++ SID ++++++++++++++++++++++++++++++++
+
+A2703/26                    VALID: 07-MAY-26 1521 - 08-MAY-28 1521
+  SID LOS ANGELES INTL, LOS ANGELES, CA. GORMAN SEVEN DEPARTURE...
+  AVENAL TRANSITION NA EXCEPT FOR ACFT EQUIPPED WITH SUITABLE RNAV
+  SYSTEM WITH GPS. GMN VOR R-310 RESTRICTED.
+A1865/26                               VALID: 25-MAR-26 1316 - UFN
+  LAX SID LOS ANGELES INTL, LOS ANGELES, CA.
+  GORMAN SEVEN DEPARTURE...
+  TAKEOFF RWY 06L, 06R NA EXCEPT FOR ACFT EQUIPPED WITH SUITABLE
+  RNAV SYSTEM WITH GPS,
+  LAX TACAN OUT OF SERVICE.
+A1812/26                               VALID: 23-MAR-26 1216 - UFN
+  LAX SID LOS ANGELES INTL, LOS ANGELES, CA.
+  CATALINA EIGHT DEPARTURE...
+  CHATY FIVE DEPARTURE...
+  GORMAN SEVEN DEPARTURE...
+  LAXX ONE DEPARTURE...
+  PERCH THREE DEPARTURE...
+  SEAL BEACH EIGHT DEPARTURE...
+  VENTURA EIGHT DEPARTURE...
+  TAKEOFF MINIMUMS:
+  RWY 6L, TEMPORARY CRANE (2025-AWP-4386-NRA) BEGINNING 1697FT FROM
+  DER, 912FT RIGHT OF CENTERLINE, UP TO 60 AGL/165 MSL
+  RWY 6R, 300-1 1/2 OR STANDARD WITH A MINIMUM CLIMB OF 311FT PER NM
+  TO 500. ADD TAKEOFF OBSTACLE NOTES: RWY 6R,
+  TEMPORARY CRANES (2025-AWP-4384 THRU 4386-NRA) BEGINNING 854FT
+  FROM DER, 212FT RIGHT OF CENTERLINE, UP TO 150 AGL/257 MSL
+  RW24L: TEMP CRANE (2021-AWP-2060-NRA). 337FT FROM DER, 445FT RIGHT
+  OF CENTERLINE, UP TO 25 AGL/134 MSL.
+  ALL OTHER DATA REMAINS AS PUBLISHED.
+A1811/26                               VALID: 23-MAR-26 1215 - UFN
+  LAX ODP LOS ANGELES INTL, LOS ANGELES, CA.
+  TAKEOFF MINIMUMS AND (OBSTACLE) DEPARTURE PROCEDURES AMDT 14...
+  TAKEOFF MINIMUMS:
+  RWY 6L, TEMPORARY CRANE (2025-AWP-4386-NRA) BEGINNING 1697FT FROM
+  DER, 912FT RIGHT OF CENTERLINE, UP TO 60 AGL/165 MSL
+  RWY 6R, 300-1 1/2 OR STANDARD WITH A MINIMUM CLIMB OF 311FT PER NM
+  TO 500. ADD TAKEOFF OBSTACLE NOTES: RWY 6R,
+  TEMPORARY CRANES (2025-AWP-4384 THRU 4386-NRA) BEGINNING 854FT
+  FROM DER, 212FT RIGHT OF CENTERLINE, UP TO 150 AGL/257 MSL
+  RW24L: TEMP CRANE (2021-AWP-2060-NRA). 337FT FROM DER, 445FT RIGHT
+  OF CENTERLINE, UP TO 25 AGL/134 MSL.
+  ALL OTHER DATA REMAINS AS PUBLISHED.
+
++++++++++++++++++++++++ APPROACH PROCEDURES ++++++++++++++++++++++++
+
+A3015/26                    VALID: 20-MAY-26 1558 - 30-DEC-26 1558
+  IAP LOS ANGELES INTL, LOS ANGELES, CA. RNAV (RNP) Z RWY 24R, AMDT
+  1D... RNP .15 DA 558/HAT 436, RVR 4000 ALL CATS. RNP .30 DA
+  625/HAT 503, RVR 5500 ALL CATS. TEMPORARY CRANE 331 MSL, 4253 FEET
+  SE OF RWY 24R (2025-AWP-10791-OE).
+6/1971                      VALID: 20-MAY-26 1557 - 31-JUL-26 1557
+  IAP LOS ANGELES INTL, LOS ANGELES, CA.
+  RNAV (RNP) Z RWY 25L, AMDT 2D...
+  RNP .15 DA 462/HAT 358, RVR 4000 ALL CATS.
+  TEMPORARY CRANE 331 MSL, 3705 FEET S OF RWY 25L
+  (2025-AWP-10791-OE).
+A3012/26                    VALID: 20-MAY-26 1557 - 31-JUL-26 1557
+  IAP LOS ANGELES INTL, LOS ANGELES, CA. RNAV (RNP) Z RWY 25L, AMDT
+  2D... RNP .15 DA 462/HAT 358, RVR 4000 ALL CATS. TEMPORARY CRANE
+  331 MSL, 3705 FEET S OF RWY 25L (2025-AWP-10791-OE).
+A3011/26                    VALID: 20-MAY-26 1556 - 28-AUG-26 1555
+  IAP LOS ANGELES INTL, LOS ANGELES, CA. RNAV (RNP) Z RWY 24L, AMDT
+  2B... RNP .15 DA 571/HAT 448, RVR 4500 ALL CATS. RNP .30 DA
+  625/HAT 502, RVR 5500 ALL CATS. TEMPORARY CRANE 331 MSL, 3645 FEET
+  SE OF RWY 24L (2025-AWP-10791-OE).
+A2928/26                    VALID: 15-MAY-26 1858 - 15-MAY-28 1858
+  IAP LOS ANGELES INTL, LOS ANGELES, CA. ILS OR LOC RWY 25L, AMDT
+  15B... ILS RWY 25L (CAT II-III), AMDT 15B... S-ILS 25L CAT II RVR
+  1200. CAT II NOTE: RVR 1000 AUTHORIZED WITH SPECIFIC OPSPEC,
+  MSPEC, OR LOA APPROVAL AND USE OF AUTOLAND OR HUD TO TOUCHDOWN.
+A2927/26                    VALID: 15-MAY-26 1847 - 15-MAY-28 1847
+  IAP LOS ANGELES INTL, LOS ANGELES, CA. ILS OR LOC RWY 24R, AMDT
+  26C... ILS RWY 24R (CAT II-III), AMDT 26C... S-ILS 24R CAT II RVR
+  1200. CAT II NOTE: RVR 1000 AUTHORIZED WITH SPECIFIC OPSPEC,
+  MSPEC, OR LOA APPROVAL AND USE OF AUTOLAND OR HUD TO TOUCHDOWN.
+A2497/26                    VALID: 28-APR-26 1125 - 28-AUG-26 1125
+  IAP LOS ANGELES INTL, LOS ANGELES, CA. RNAV (GPS) Y RWY 7R, AMDT
+  3A... LNAV/VNAV 474/HAT 346 ALL CATS. LNAV MDA 580/HAT 452 ALL
+  CATS, CATS C/D RVR 4500. TEMP CRANE 263 MSL, 4678FT NW OF RWY 7R
+  (2025-AWP-3533-NRA).
+A2492/26                    VALID: 28-APR-26 1125 - 28-AUG-26 1125
+  IAP LOS ANGELES INTL, LOS ANGELES, CA. RNAV (RNP) Z RWY 6L, AMDT
+  1... RNP 0.30 DA 494/HAT 375 ALL CATS. TEMP CRANE 263 MSL, 3038FT
+  S OF RWY 6L (2025-AWP-3533-NRA).
+A2494/26                    VALID: 28-APR-26 1125 - 28-AUG-26 1125
+  IAP LOS ANGELES INTL, LOS ANGELES, CA. RNAV (RNP) Z RWY 6R, AMDT
+  1... RNP 0.30 DA 501/HAT 385 ALL CATS. TEMP CRANE 263 MSL, 2430FT
+  S OF RWY 6R (2025-AWP-3533-NRA).
+A2495/26                    VALID: 28-APR-26 1125 - 28-AUG-26 1125
+  IAP LOS ANGELES INTL, LOS ANGELES, CA. RNAV (GPS) Y RWY 7L, AMDT
+  3A... LNAV/VNAV DA 474/HAT 346 ALL CATS. LNAV MDA 580/HAT 452 ALL
+  CATS, CATS C/D RVR 4500. TEMP CRANE 263 MSL, 3450FT NW OF RWY 7L
+  (2025-AWP-3533-NRA).
+A2496/26                    VALID: 28-APR-26 1125 - 28-AUG-26 1125
+  IAP LOS ANGELES INTL, LOS ANGELES, CA. RNAV (GPS) Y RWY 6R, AMDT
+  2A... LNAV/VNAV DA 474/HAT 358, RVR 3000 ALL CATS LNAV MDA 580/HAT
+  464 ALL CATS, CATS C/D RVR 5000. TEMP CRANE 263 MSL, 2430FT S OF
+  RWY 6R (2025-AWP-3533-NRA).
+A2484/26                    VALID: 28-APR-26 1125 - 28-AUG-26 1125
+  IAP LOS ANGELES INTL, LOS ANGELES, CA. RNAV (RNP) Z RWY 7L, AMDT
+  1... RNP 0.11 DA 526/HAT 398, RVR 3500 ALL CATS. RNP 0.30 DA
+  554/HAT 426 ALL CATS. TEMP CRANE 263 MSL, 3450FT NW OF RWY 7L
+  (2025-AWP-3533-NRA).
+A2499/26                    VALID: 28-APR-26 1125 - 28-AUG-26 1125
+  IAP LOS ANGELES INTL, LOS ANGELES, CA. RNAV (GPS) Y RWY 6L, AMDT
+  2... LNAV/VNAV DA 474/HAT 355, RVR 3000 ALL CATS. LNAV MDA 580/HAT
+  461 ALL CATS, CATS C/D RVR 5000. TEMP CRANE 263 MSL, 3038FT S OF
+  RWY 6L (2025-AWP-3533-NRA).
+A2498/26                    VALID: 28-APR-26 1125 - 28-AUG-26 1125
+  IAP LOS ANGELES INTL, LOS ANGELES, CA. RNAV (RNP) Z RWY 7R, AMDT 1
+  ... RNP 0.30 DA 594/HAT 466, RVR 5000 ALL CATS. TEMP CRANE 263
+  MSL, 4678FT NW OF RWY 7R (2025-AWP-3533-NRA)
+A1973/26                               VALID: 31-MAR-26 1935 - UFN
+  LAX IAP LOS ANGELES INTL, LOS ANGELES, CA.
+  RNAV (RNP) Z RWY 24L, AMDT 2B...
+  RNP 0.15 ALL CATS VISIBILITY RVR 4000. RNP 0.30 ALL CATS
+  VISIBILITY 5000. CHANGE PBN REQUIREMENTS NOTE TO READ: RNP AR APCH
+  ? GPS. THIS IS RNAV (RNP) Z RWY 24L, AMDT 2C.
+A1317/26                               VALID: 02-MAR-26 1600 - UFN
+  LAX IAP LOS ANGELES INTL, LOS ANGELES, CA.
+  RNAV (GPS) Y RWY 24L, AMDT 5C...
+  LPV DA 456/HAT 333, RVR 4000 ALL CATS.
+  TEMP CRANES FROM 165 MSL TO 257 MSL,  954FT E OF RWY 24L
+  (2025-AWP-4383 THRU 4386-NRA).
+A1318/26                               VALID: 02-MAR-26 1600 - UFN
+  LAX IAP LOS ANGELES INTL, LOS ANGELES, CA.
+  ILS OR LOC RWY 24L, AMDT 27D...
+  S-ILS 24L DA 469/HAT 346, RVR 3000 ALL CATS.
+  S-LOC 24L MDA 560/HAT 437 ALL CATS.
+  SIDESTEP 24R MDA 560/HAT 438 ALL CATS.
+  TEMP CRANES FROM 165 MSL TO 257 MSL, 954FT E OF RWY 24L
+  (2025-AWP-4383 THRU 4386-NRA).
+A1152/26                    VALID: 02-MAR-26 0800 - 22-JUN-26 0200
+  LAX NAV ILS RWY 25R U/S
+A1273/26                               VALID: 26-FEB-26 1750 - UFN
+  LAX IAP LOS ANGELES INTL, LOS ANGELES, CA.
+  ILS OR LOC  RWY 7R, AMDT 8A...
+  S-LOC 7R MDA 500/HAT 372 ALL CATS, VIS CAT C/D RVR 3500. VDP AT
+  I-MKZ 0.84 DME; VDP TO THLD 1.00NM. TEMPORARY CRANES 351 MSL
+  BEGINNING 4683FT NE OF RWY 7R (2024-AWP-7607 THRU 7610-NRA).
+A0752/26                    VALID: 06-FEB-26 1153 - 18-SEP-26 1153
+  LAX IAP LOS ANGELES INTL, LOS ANGELES, CA.
+  RNAV (RNP) Z RWY 25L, AMDT 2D...
+  RNP 0.15 DA 453/HAT 349, RVR 4000 ALL CATS.
+A6479/25                               VALID: 22-DEC-25 1637 - UFN
+  LAX IAP LOS ANGELES INTL, LOS ANGELES, CA.
+  RNAV (RNP) Z RWY 25R, ORIG-A...
+  RNP .11 DA 484/HAT 380 ALL CATS.
+A5868/25                               VALID: 18-NOV-25 2052 - UFN
+  LAX IAP LOS ANGELES INTL, LOS ANGELES, CA.
+  ILS OR LOC  RWY 7R, AMDT 8A...
+  AUTO-PILOT COUPLED APPROACH NA BELOW 800.
+
+===================
+DESTINATION AIRPORT
+===================
+
+EDDM /MUC   MUNICH - DETAILED INFO
+----------------------------------
+
++++++++++++++++++++++++++++++ AIRPORT ++++++++++++++++++++++++++++++
+
+A2608/26                    VALID: 22-MAY-26 1048 - 19-JUN-26 1600
+  ALL ACFT SHALL HOLD SHORT OF TWY M AFTER VACATING RWY 08L/26R AND
+  CTC GND CTL AUTOMATICALLY.
+A2605/26                    VALID: 22-MAY-26 1042 - 19-JUN-26 1600
+  TWY N CLSD BTN TWY A5 AND TWY A12 DUE WIP.
+A2502/26                               VALID: 19-MAY-26 0748 - UFN
+  LPV APCH REOP. OCA(H) VALUES RAISED AS FOLLOWS:
+  LPV RWY08L: A 1748 (317), B 1793 (326), C 1802 (335), D 1868
+  (401)FT. LPV RWY08R: A 1909 (423), B 1917 (431), C 1925 (439), D
+  1934 (448)FT. LPV RWY26L: A 1785 (315), B 1794 (324), C 1803
+  (333), D 1888 (418)FT. LPV RWY26R: A 1908 (459), B 1917 (468), C
+  1925 (476), D 1933 (484)FT. DUE TO INADEQUATE PROTECTION PROVIDED
+  IN THE MISSED APPROACH SEGMENT FOR SOME NAVIGATION SYSTEMS
+  AUTHORISED FOR LPV OPERATIONS.
+A2401/26                    VALID: 14-MAY-26 1245 - 30-JUN-26 1000
+  TWY D5 CLSD.
+A1201/26                    VALID: 12-MAR-26 2200 - 03-JUN-26 0300
+  TXL E2 CLSD BTN ACFT STAND 252A AND 254.
+A1202/26                    VALID: 12-MAR-26 2200 - 03-JUN-26 0300
+  TXL CENTER2 LTD TO ACFT ICAO CODE LETTER C BTN ACFT STAND
+  252A AND 254.
+A1182/26                    VALID: 09-MAR-26 0647 - 12-JUN-26 1100
+  TXL S6 AND TXL C5 CLSD.
+A1170/26                               VALID: 06-MAR-26 1429 - UFN
+  ALL ACFT SHALL HOLD SHORT OF TWY M AFTER VACATING RWY 08L/26R AND 
+  CTC GND CTL AUTOMATICALLY.
+A0927/26                               VALID: 23-FEB-26 0600 - UFN
+  TWY N CLSD BTN TWY A5 AND TWY A12 DUE WIP.
+
++++++++++++++++++++++++++++++++ SID ++++++++++++++++++++++++++++++++
+
+A6255/25                               VALID: 20-NOV-25 1127 - UFN
+  CHANGES TO SID DUE TO COVERAGE OF WLD DVOR/DME: RWY 26R: GIVMI 1N:
+  AMEND ON HEADING 299 DEG TO INTERCEPT R119 WLD, ON R119 WLD TO
+  READ ON TRACK 299 DEG. CLIMB WITH 4.9 PER CENT (300 FT/NM) UNTIL
+  PASSING 3700. AFTER PASSING 3700 BRNAV EQUIPMENT NECESSARY. REF
+  AIP AD 2 EDDM 5-7-37 EFF 23 MAY 2019, 5-7-41 DATED 02 OCT 2025.
+
++++++++++++++++++++++++ APPROACH PROCEDURES ++++++++++++++++++++++++
+
+A2512/26                    VALID: 19-MAY-26 0956 - 31-MAY-26 2000
+  DAILY 0430-2000
+  ILS RWY 26L MAY BE INOPERATIVE DUE TO VALIDATION OF INDEPENDENT
+  PARALLEL APCH IN COMPINATION OF ILS AND RNP. FOR THIS RWY RNP APCH
+  (LNAV/VNAV OR LPV) AVAILABLE ONLY. LNAV NOT AUTHORIZED. IF UNABLE
+  INFORM ATC ON INITIAL CONTACT.
+A2235/26                               VALID: 12-MAY-26 0000 - UFN
+  THE FLW CHANGES OCCUR TO ALL MISSED APCH PROC RWY 08R DUE TO
+  AIRSPACE STRUCTURE:
+  CLIMB WITH 3.8 PERCENT (231FT/NM) UNTIL PASSING 2800. IF UNABLE
+  ADVICE MUNICH RADAR DURING INTIAL CONTACT. CHANGES ARE PERMANENT.
+  REF AIP AD2 EDDM 4-2-2 AND 4-4-2 EFF BOTH 28 NOV 2024, 4-6-5 DATED
+  02 OCT 2025.
+A6227/25                               VALID: 19-NOV-25 0815 - UFN
+  MUENCHEN ILS DME (IMNE) CH32X/109.5MHZ ASSOCIATED WITH ILS RWY 
+  08L LOC COVERAGE UP TO 17NM IN SECTOR 33DEG (LEFT) TO 35DEG
+  (RIGHT) IN RELATION TO RCL AND DISTANCE TO LOC, MNM INTERCEPTION
+  ALT IN THIS AREA 3500FT AMSL.
+
+==============================
+EXTENDED AREA AROUND DEPARTURE
+==============================
+
+KZLA        LOS ANGELES FIR/UIR
+-------------------------------
+
+A2473/26                    VALID: 24-MAY-26 1800 - 25-MAY-26 0300
+  CA..AIRSPACE 32NM SW SANTA BARBARA, CA..TEMPORARY FLIGHT
+  RESTRICTIONS. PURSUANT TO 14 CFR SECTION 91.137(A)(2) TEMPORARY
+  FLIGHT RESTRICTIONS ARE IN EFFECT TO PROVIDE A SAFE ENVIRONMENT
+  FOR FIRE FIGHTING ACFT OPS. WI AN AREA DEFINED AS 7NM RADIUS OF
+  335600N1200230W (GVO160036.0) SFC-8000FT. UNITED STATES FOREST
+  SERVICE TEL 805-961-5727 OR FREQ 118.1750 SANTA ROSA ISLAND IS IN
+  CHARGE OF THE OPERATION. LOS ANGELES/ZLA/ARTCC TEL 661-265-8205 IS
+  THE FAA CDN FAC. F) SFC  G) 8000FT AMSL
+A2479/26                    VALID: 24-MAY-26 1700 - 24-MAY-26 2200
+  AIRSPACE PANAMINT MOA ACT F) 200FT  G) UP TO BUT NOT INCLUDING
+  FL180
+A2480/26                    VALID: 24-MAY-26 1700 - 24-MAY-26 2200
+  AIRSPACE ISABELLA MOA ACT F) 200FT  G) UP TO BUT NOT INCLUDING
+  FL180
+A2481/26                    VALID: 24-MAY-26 1700 - 24-MAY-26 2200
+  AIRSPACE OWENS MOA ACT F) 200FT  G) UP TO BUT NOT INCLUDING FL180
+A2482/26                    VALID: 24-MAY-26 1700 - 24-MAY-26 2200
+  AIRSPACE SALINE MOA ACT F) 200FT  G) UP TO BUT NOT INCLUDING FL180
+A2476/26                    VALID: 24-MAY-26 1300 - 25-MAY-26 1259
+  AIRSPACE R4807A ACT F) SFC  G) FL180
+A2468/26                    VALID: 23-MAY-26 2200 - 24-MAY-26 2200
+  AIRSPACE UAS WI AN AREA DEFINED AS 3NM RADIUS OF 360008N1161654W
+  (2NM N L61) F) SFC  G) 400FT AGL
+A2470/26                    VALID: 23-MAY-26 2035 - 26-MAY-26 1600
+  CA..AIRSPACE GARDEN GROVE, CA..TEMPORARY FLIGHT RESTRICTIONS.
+  PURSUANT TO 14 CFR SECTION 91.137(A)(1) TOXIC GAS LEAKS OR SPILLS.
+  WI AN AREA DEFINED AS 334800N1180100W (SLI047002.1) TO
+  334800N1175930W (SLI057003.3) TO 334700N1175930W (SLI075003.1) TO
+  334700N1180100W (SLI075001.9) TO POINT OF ORIGIN SFC-5000FT ONLY
+  RELIEF ACFT OPS UNDER DIRECTION OF ORANGE COUNTY FIRE AUTHORITY 
+  ARE AUTH IN THE AIRSPACE. ORANGE COUNTY FIRE AUTHORITY  TEL
+  714-573-6521 OR FREQ 123.7750 IS IN CHARGE OF ON SCENE EMERG
+  RESPONSE ACTIVITY. LOS ANGELES/ZLA/ARTCC TEL 661-265-8205 IS THE
+  FAA CDN FAC. F) SFC  G) 5000FT AMSL
+05/106                      VALID: 23-MAY-26 1700 - 26-MAY-26 1000
+  AIRSPACE UAS WI AN AREA DEFINED AS 1.3NM RADIUS OF
+  324619.10N1171504.50W (3.9NM WNW SAN) SFC-300FT AGL
+A2120/26                    VALID: 23-MAY-26 1400 - 25-MAY-26 0200
+  DLY 1400-0200
+  AIRSPACE UNMANNED ROCKET WI AN AREA DEFINED AS 5NM RADIUS OF
+  EDW339022 SFC-UNL
+A2312/26                    VALID: 22-MAY-26 1500 - 25-MAY-26 0500
+  AIRSPACE UNMANNED ROCKET WI AN AREA DEFINED AS 3NM RADIUS OF
+  371902N1145717W (12NM ESE L92) SFC-FL500
+A2178/26                    VALID: 22-MAY-26 0100 - 26-MAY-26 1300
+  DLY 0100-1300
+  AIRSPACE BAKERSFIELD, CA..LASER LGT DEMONSTRATION WI AN AREA
+  DEFINED AS 3NM RADIUS OF 351351N1191542W (EHF194017) SFC-3698FT.
+  LASER LGT BEAM MAY BE INJURIOUS TO PILOT/PAX EYES WI 575FT VER AND
+  3274FT LATERALLY OF THE LGT SOURCE. FLASH BLINDNESS OR COCKPIT
+  ILLUMINATION MAY OCCUR BEYOND THESE DIST. LOS ANGELES /ZLA/ ARTCC
+  TEL 661-265-8205 IS THE FAA CDN FAC. F) SFC  G) 3698FT AMSL
+A2420/26                    VALID: 21-MAY-26 1850 - 06-AUG-26 2359
+  AIRSPACE UAS WI AN AREA DEFINED AS 324000N1160621W (4.4NM NE L78)
+  TO 324236N1153203W (2NM NW CXL) TO 324103N1153201W (1.2NM NW CXL)
+  TO 324056N1153318W (1.6NM W CXL) TO 323947N1153431W (2.6NM W CXL)
+  TO 323710N1160623W (3.2NM E L78) TO POINT OF ORIGIN SFC-1200FT AGL
+A1920/26                    VALID: 18-MAY-26 0200 - 27-MAY-26 1300
+  WED 0200-1300, MON 0200-1300
+  CA..AIRSPACE LOS ANGELES, CA..LASER LIGHT DEMONSTRATION WI AN AREA
+  DEFINED AS A 0.002NM RADIUS OF 340525N1181912W OR (SMO040008),
+  SFC-61989FT. LASER LIGHT BEAM MAY BE INJURIOUS TO PILOTS/PAX EYES
+  WI 2931FT VER OF THE LGT SOURCE. FLASH BLINDNESS OR COCKPIT
+  ILLUMINATION MAY OCCUR BEYOND THESE DIST. SOUTHERN CALIFORNIA
+  TRACON /SCT/ TEL 858-537-5900 IS THE FAA CDN FAC. F) SFC  G)
+  61989FT AMSL
+A1934/26                    VALID: 15-MAY-26 0001 - 13-AUG-26 2359
+  AIRSPACE UAS WI AN AREA DEFINED AS 323725N1163645W (19.3NM E SDM)
+  TO 323810N1162831W (15.2NM WNW L78) TO 323521N1162803W (15.3NM W
+  L78) TO 323445N1163732W (18.3NM ESE SDM) TO POINT OF ORIGIN
+  SFC-1200FT AGL F) SFC  G) 1200FT AGL
+A1936/26                    VALID: 15-MAY-26 0001 - 13-AUG-26 2359
+  AIRSPACE UAS WI AN AREA DEFINED AS 323810N1162831W (15.3NM WSW
+  L78) TO 323900N1161721W (6.1NM W L78) TO 323618N1161640W (5.1NM SW
+  L78) TO 323521N1162803W (15.3NM SE L78) TO POINT OF ORIGIN
+  SFC-1200FT AGL F) SFC  G) 1200FT AGL
+A1945/26                    VALID: 12-MAY-26 2036 - 29-JUN-26 2200
+  AIRSPACE  ADS-B, AUTO DEPENDENT SURVEILLANCE REBROADCAST (ADS-R),
+  TFC INFO SERVICE BCST (TIS-B), FLT INFO SERVICE BCST (FIS-B)
+  SERVICES MAY NOT BE AVBL WI AN AREA DEFINED AS 198NM RADIUS OF
+  310014N1182324W. AP AIRSPACE AFFECTED MAY INCLUDE BUR, BWC, CMA,
+  IPL, LAX, PSP, SDM, SEE, SMO. F) SFC  G) UNL
+A1813/26                    VALID: 08-MAY-26 1928 - 06-AUG-26 2359
+  AIRSPACE UAS WI AN AREA DEFINED AS 324236N1153203W (2.4NM N CXL)
+  TO 324520N1145433W (19NM SE L04) TO 324229N1145435W (15NM W NYL)
+  TO 324008N1152735W (3.4NM E CXL) TO 324115N1152937W (1.9NM NE CXL)
+  TO 324103N1153201W (1.1NM NW CXL) TO POINT OF ORIGIN F) SFC  G)
+  400FT AGL
+A1812/26                    VALID: 08-MAY-26 1926 - 06-AUG-26 2359
+  AIRSPACE UAS WI AN AREA DEFINED AS 323900N1161721W (6.1NM WNW L78)
+  TO 324000N1160621W (4.4NM NE L78) TO 323710N1160623W (3.3NM E L78)
+  TO 323707N1160702W (2.6NM E L78) TO 323806N1160834W (1.8NM E L78)
+  TO 323749N1161231W (1.5NM W L78) TO 323629N1161404W (3.5NM W L78)
+  TO 323618N1161640W (5NM W L78) TO POINT OF ORIGIN F) SFC  G) 400FT
+  AGL
+A1781/26                    VALID: 07-MAY-26 1916 - 20-JUL-26 2200
+  AIRSPACE ADS-B, AUTO DEPENDENT SURVEILLANCE REBROADCAST (ADS-R),
+  TFC INFO SERVICE BCST (TIS-B), FLT INFO SERVICE BCST (FIS-B)
+  SERVICES MAY NOT BE AVBL WI AN AREA DEFINED AS 152NM RADIUS OF
+  362113N1155038W. AP AIRSPACE AFFECTED MAY INCLUDE LAS, ONT, CDC,
+  MMH, WJF, TNP, IGM. F) SFC  G) UNL
+A1771/26                    VALID: 07-MAY-26 1521 - 08-MAY-28 1521
+  CA..ROUTE ZLA. V165, V197 SHAFTER (EHF) VORTAC, CA R-123 TO KELEN
+  INT, CA DISREGARD ALL RADIALS FROM GMN VOR. DME REQUIRED EXCEPT
+  FOR ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS. GMN VOR
+  UNUSABLE R300-R015 BEYOND 5NM.
+A1774/26                    VALID: 07-MAY-26 1521 - 08-MAY-28 1521
+  CA..ROUTE ZLA. V165, V459 AMONT INT, CA TO LOPES INT, CA DISREGARD
+  RADIALS FROM GMN VOR. DME REQUIRED EXCEPT FOR ACFT EQUIPPED WITH
+  SUITABLE RNAV SYSTEM WITH GPS. GMN VOR UNUSABLE R300-R015 BEYOND
+  5NM.
+A1657/26                    VALID: 04-MAY-26 2046 - 31-DEC-26 2359
+  AIRSPACE UAS WI AN AREA DEFINED AS 343000N1181048W (7.2NM E L70)
+  TO 343748N1181048W (4.2NM WSW PMD) TO 344800N1180600W (6.8NM SW
+  WJF) TO 344800N1173503W (13.2NM SE EDW) TO 344830N1173203W (13.3NM
+  NW VCV) TO 345015N1173203W (14.9NM NW VCV) TO 345320N1171153W
+  (19NM NE VCV) TO 345306N1165349W (5.1NM WNW DAG) TO
+  341632N1165354W (1.7NM W L35) TO POINT OF ORIGIN AVOIDANCE ADZ F)
+  SFC  G) 13000FT
+A0860/26                               VALID: 02-APR-26 0500 - UFN
+  ZLA AIRSPACE ADS-B, AUTO DEPENDENT SURVEILLANCE
+  REBROADCAST (ADS-R), TFC INFO SER BCST (TIS-B), FLT INFO SER
+  BCST (FIS-B) SER MAY NOT BE AVBL WI AN AREA DEFINED AS 121NM
+  RADIUS OF 352024N1190648W. AP AIRSPACE AFFECTED MAY INCLUDE BFL,
+  BIH, DLO, MHV, OXR, PRB, SBA, VIS.
+  F) SFC  G) 15000FT
+03/135                      VALID: 25-MAR-26 0500 - 01-JUN-26 1400
+  AIRSPACE UAS WI AN AREA DEFINED AS 40NM RADIUS OF
+  322409N1180828W (51.6NM SW SAN) SFC-5500FT DLY 0500-1400
+03/084                      VALID: 13-MAR-26 1606 - 31-DEC-26 2359
+  AIRSPACE UAS WI AN AREA DEFINED AS 2.2NM RADIUS OF
+  334128N1151238W (26NM NNW BLH) SFC-225FT AGL
+A0663/26                               VALID: 10-MAR-26 1216 - UFN
+  ZLA CA..ROUTE ZLA.
+  J18, J2 MISSION BAY (MZB) VORTAC, CA TO IMPERIAL (IPL) VORTAC, CA
+  NA EXCEPT FOR ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS.
+  MZB VORTAC UNUSABLE BEYOND 40NM.
+A0634/26                               VALID: 07-MAR-26 1730 - UFN
+  ZLA AIRSPACE ADS-B, AUTO DEPENDENT SURVEILLANCE
+  REBROADCAST (ADS-R), TFC INFO SERVICE BCST (TIS-B), FLT INFO
+  SERVICE BCST (FIS-B) SERVICES MAY NOT BE AVBL WI AN AREA DEFINED
+  AS 36NM RADIUS OF 335031N1162102W. AP AIRSPACE AFFECTED MAY
+  INCLUDE PSP, TNP, TRM, UDD, L08, L35.
+  F) SFC  G) 7999FT
+03/044                      VALID: 06-MAR-26 2051 - 31-DEC-26 2359
+  OBST DEEP SPACE ANTENNA LGT (ASN UNKNOWN)
+  352533N1165322W (15.4NM NW BYS) UNKNOWN (270FT AGL) U/S
+03/005                      VALID: 02-MAR-26 2338 - 31-DEC-26 2359
+  OBST TRANSMISSION TOWER LGT (ASN 2025-AWP-6051-OE)
+  363226N1153500W (27NM NW VGT) 3395FT (138FT AGL) NOT LGTD
+A0552/26                               VALID: 28-FEB-26 1300 - UFN
+  ZLA AIRSPACE ADS-B, AUTO DEPENDENT SURVEILLANCE
+  REBROADCAST (ADS-R), TFC INFO SER BCST (TIS-B), FLT INFO SER
+  BCST (FIS-B) SER MAY NOT BE AVBL WI AN AREA DEFINED AS 218NM
+  RADIUS OF 364614N1141350W. AP AIRSPACE AFFECTED MAY INCLUDE LAS,
+  PHX, DTA, MMH, VCV, PSP, PAN, INW.
+  F) SFC  G) UNL
+01/172                      VALID: 29-JAN-26 2211 - 31-MAY-26 2359
+  OBST STRUCTURE LGT (ASN 2025-AWP-9960-OE)
+  362911N1152922W (10.6NM SE INS) 3606FT (137FT AGL) NOT LGTD
+01/154                      VALID: 27-JAN-26 2224 - 31-DEC-26 2359
+  AIRSPACE UAS WI AN AREA DEFINED AS .6NM RADIUS OF
+  350046N1181611W (6.7NM SW MHV) SFC-225FT AGL
+A0162/26                               VALID: 24-JAN-26 0100 - UFN
+  ZLA AIRSPACE ADS-B, AUTO DEPENDENT SURVEILLANCE
+  REBROADCAST (ADS-R), TFC INFO SER BCST (TIS-B), FLT INFO SER
+  BCST (FIS-B) SER MAY NOT BE AVBL WI AN AREA DEFINED AS 136NM
+  RADIUS OF 362156N1152434W. AP AIRSPACE AFFECTED INCLUDES LAS, HND,
+  IGM, EED, DAG, TNP, IYK, TPH, AZC.
+  F) SFC  G) 16000FT
+A0004/26                               VALID: 04-JAN-26 0230 - UFN
+  ZLA AIRSPACE ADS-B, AUTO DEPENDENT SURVEILLANCE
+  REBROADCAST (ADS-R), TFC INFO SER BCST (TIS-B), FLT INFO
+  SER BCST (FIS-B) SER MAY NOT BE AVBL WI AN AREA DEFINED AS
+  13NM RADIUS OF 333200N1165147W. AP AIRSPACE AFFECTED MAY
+  INCLUDE F70.
+  F) 3000FT  G) 4000FT
+A0005/26                               VALID: 04-JAN-26 0230 - UFN
+  ZLA AIRSPACE ADS-B, AUTO DEPENDENT SURVEILLANCE
+  REBROADCAST (ADS-R), TFC INFO SER BCST (TIS-B), FLT INFO
+  SER BCST (FIS-B) SER MAY NOT BE AVBL WI AN AREA DEFINED AS
+  124NM RADIUS OF 313328N1194124W. AP AIRSPACE AFFECTED MAY
+  INCLUDE NUC.
+  F) SFC  G) UNL
+12/078                      VALID: 09-DEC-25 2035 - 31-DEC-26 2359
+  AIRSPACE UAS WI AN AREA DEFINED AS IPL239009 TO
+  IPL203003 TO IPL187006 TO IPL219010 TO POINT OF ORIGIN SFC-225FT
+  AGL
+A3991/25                               VALID: 06-DEC-25 0330 - UFN
+  ZLA AIRSPACE ADS-B, AUTO DEPENDENT SURVEILLANCE
+  REBROADCAST (ADS-R), TFC INFO SER BCST (TIS-B), FLT INFO
+  SER BCST (FIS-B) SER MAY NOT BE AVBL WI AN AREA DEFINED AS
+  90NM RADIUS OF 324554N1220754W. F) SFC  G) UNL.
+A2568/25                               VALID: 06-AUG-25 1903 - UFN
+  ZLA CA..ROUTE ZLA.
+  V201 PALMDALE (PMD) VORTAC, CA R-189 TO COP NA EXCEPT FOR ACFT
+  EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS.
+  PMD VOR R-189 RESTRICTED.
+A2565/25                               VALID: 06-AUG-25 1903 - UFN
+  ZLA CA..ROUTE ZLA ZOA.
+  J126, J88 CEANO INT, CA DISREGARD PMD R-276.
+  PMD VORTAC UNUSABLE R-276 UNUSABLE.
+A1768/25                               VALID: 23-MAY-25 1730 - UFN
+  ZLA CA..ROUTE ZLA.
+  V460, V64 THERMAL (TRM) VORTAC, CA TO BLYTHE (BLH) VORTAC, CA
+  CHART COP AT 30NM FROM TRM AND 40NM FROM BLH.
+A1724/25                               VALID: 20-MAY-25 1542 - UFN
+  ZLA CA..ROUTE ZLA.
+  V459, V597 SEAL BEACH (SLI) VORTAC, CA TO DARTS, CA MEA 4100
+  SOUTHEASTBOUND.
+A1723/25                               VALID: 20-MAY-25 1542 - UFN
+  ZLA CA..ROUTE ZLA.
+  V459 DARTS, CA MCA 6100 NORTHWESTBOUND.
+A1725/25                               VALID: 20-MAY-25 1542 - UFN
+  ZLA CA..ROUTE ZLA.
+  V459 DARTS, CA TO SAUGS, CA MEA 7100.
+A1390/25                               VALID: 24-APR-25 2034 - UFN
+  ZLA UT..ROUTE ZLA ZLC.
+  V8 MATZO INT, UT TO JEZOB INT, UT MEA 12000 WESTBOUND EXCEPT FOR
+  ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS.
+  V8 JEZOB INT, UT TO JITKA INT, UT MEA 12000 WESTBOUND EXCEPT FOR
+  ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS.
+  MMM VOR MRA AT JITKA 12000.
+A0650/25                               VALID: 18-FEB-25 1914 - UFN
+  ZLA ROUTE ZLA ZDV.
+  V210 GRAND CANYON (GCN) VOR/DME, AZ TO TUBA CITY (TBC) VORTAC, AZ
+  MOCA 9700.
+A0426/25                               VALID: 04-FEB-25 1909 - UFN
+  ZLA ROUTE ZLA.
+  V235, V8 JITKA, UT TO MATZO, UT MEA 12000. MMM VOR R-043 UNUSABLE
+  BEYOND 40 NM BELOW 12000.
+A3865/24                               VALID: 12-DEC-24 1721 - UFN
+  ZLA ROUTE ZLA.
+  J10, J104, J4 LOS ANGELES (LAX) VORTAC, CA TO TWENTYNINE PALMS
+  (TNP) VORTAC, CA MEA GAP AT COP. LAX VOR R-068 UNUSABLE BEYOND 65
+  NM.
+A3677/24                               VALID: 26-NOV-24 1918 - UFN
+  ZLA ROUTE ZLA.
+  J50 YCDIL, CA TO BLYTHE (BLH) VORTAC, CA MEA 32000. MEA GAP AT
+  COP. J50 YCDIL, CA MCA 32000 EASTBOUND. BLH R-268 UNUSABLE BEYOND
+  40 NM.
+A3324/24                               VALID: 25-OCT-24 1635 - UFN
+  ZLA ROUTE ZLA.
+  J50 SHAFTER (EHF) VORTAC, CA TO PARADISE (PDZ) VORTAC, CA COP
+  LANDO, CA. EHF VOR R-126 UNUSABLE BEYOND 40 NM.
+
+================================
+EXTENDED AREA AROUND DESTINATION
+================================
+
+EDMM        MUNICH FIR
+----------------------
+
+M1536/26                    VALID: 25-MAY-26 0700 - 29-MAY-26 1200
+  UAS OPERATION 5NM RADIUS CENTERED ON 474816N 0110003E
+  NEAR PEISSENBERG (26.6NM E KEMPTEN DVOR/DME KPT)
+  F) GND  G) 394FT AGL
+M1614/26                    VALID: 25-MAY-26 0400 - 28-MAY-26 0400
+  25 0400-1600,,  26 0400-0700 2000-0700,,  27 2000-0400
+  GERMAN MIL COM CENTER LIMITED DUE TO LACK OF PERSONNEL.
+  GERMAN MIL NOTAM OFFICE PROVIDES NORMAL SERVICE.
+M1530/26                    VALID: 25-MAY-26 0330 - 05-JUN-26 1930
+  DAILY SR -SS
+  INCREASED FLYING ACTIVITIES 5NM AROUND ZWICKAU AIRFIELD, POSITION 
+  504215N0122740E(17NM S ABU NDB). MIL AIR TRAFFIC PROHIBITED EXCEPT
+  AIR DEFENCE, SAR, HOSP, HUM AND RESCUE.
+  F) GND  G) FL075
+F1457/26                    VALID: 14-MAY-26 0724 - 28-MAY-26 0723
+  TRIGGER NOTAM - AIP SUP IFR 27/26 WEF 14 MAY 2026 UNTIL FURTHER
+  NOTICE.
+  TEMPO OBST WHICH ARE NOT PUBLISHED IN THE AIP.
+B0341/26                               VALID: 14-MAY-26 0332 - UFN
+  FOR FLIGHTS OVER OR NEAR CONFLICT ZONES OUTSIDE GERMANY REFER TO
+  THE GERMAN AERONAUTICAL INFORMATION CIRCULAR (AIC).
+B0195/26                    VALID: 14-MAY-26 0000 - 27-MAY-26 2359
+  TRIGGER NOTAM - PERM AIRAC AIP IFR AMDT 05/26 WEF 14 MAY 2026.
+  CHANGES TO MULTIPLE AIRSPACES.
+B0198/26                    VALID: 14-MAY-26 0000 - 27-MAY-26 2359
+  TRIGGER NOTAM - PERM AIRAC AIP AMDT 05/26 WEF 14 MAY 2026. CHANGES
+  TO RNAV ROUTES.
+B0200/26                    VALID: 14-MAY-26 0000 - 27-MAY-26 2359
+  TRIGGER NOTAM - PERM AIRAC AIP AMDT 05/26 WEF 14 MAY 2026. CHANGES
+  TO EN-ROUTE RADIO NAVIGATION AIDS AND LIST OF RADIO NAVIGATION
+  AIDS BY IDENTIFICATION.
+B0202/26                    VALID: 14-MAY-26 0000 - 27-MAY-26 2359
+  TRIGGER NOTAM - PERM AIRAC AIP AMDT 05/26 WEF 14 MAY 2026. CHANGES
+  TO NAME-CODE DESIGNATORS FOR SIGNIFICANT POINTS.
+B0337/26                               VALID: 12-MAY-26 0851 - UFN
+  MILITARY INVASION OF UKRAINE BY RUSSIAN FEDERATION.
+  REROUTINGS, EXTENDED ROUTE PORTIONS BELOW FL245 AND DELAY MAY BE
+  EXPECTED WITHIN LOWER AND UPPER GERMAN AIRSPACE DUE TO AIRSPACE
+  RESTRICTIONS FOR THE EXECUTION OF MILITARY MISSIONS.
+  IT IS RECOMMENDED TO CONSIDER THE USE OF EXTRA-FUEL.
+U0026/26                    VALID: 22-APR-26 1454 - 21-JUL-26 2359
+  GEMIL FLIP MAP
+  ATS-ROUTES ACCORDING MILAIP. DUE TO TECHNICAL PROBLEMS ED-R TRA
+  CHARTS WITH ATS-ROUTES AND ED-R TRA 301 (TRA-FRIESLAND 2) ARE
+  CURRENTLY NOT DEPICTED.
+B0231/26                    VALID: 16-APR-26 0000 - 10-JUN-26 2359
+  DEL FRA RELEVANCE FOR WPT TATZI.
+  ADD FRA RELEVANCE FOR WPT MODSA:
+  (EI) EDUU EAST:
+  (E): 0500 (0400) - 2230 (2130),
+  (I): 2230 (2130) - 0500 (0400).
+  REF AIP ENR 4.4-19 AND ENR 4.4-28, BOTH EFF 19 FEB 2026.
+B0190/26                    VALID: 02-APR-26 0801 - 04-JUN-26 2359
+  SECURITY - HAZARDOUS SITUATION IN LEBANON
+  CIVIL GERMAN AIR OPERATORS ARE RECOMMENDED NOT TO ENTER FIR
+  BEIRUT. POTENTIAL RISK FROM ANTI-AVIATION WEAPONRY, MILITARY
+  OPERATIONS AND ARMED CONFLICTS.
+B0189/26                    VALID: 02-APR-26 0756 - 04-JUN-26 2359
+  SECURITY - HAZARDOUS SITUATION IN IRAN
+  CIVIL GERMAN AIR OPERATORS ARE RECOMMENDED NOT TO ENTER
+  FIR TEHRAN (OIIX). POTENTIAL RISK TO AVIATION FROM ESCALATING
+  CONFLICT AND ANTI-AVIATION WEAPONRY.
+  THIS NOTAM OVERRULES THE RECOMMENDATION PROVIDED IN THE CURRENTLY
+  APPLICABLE AIC.
+B0146/26                               VALID: 19-MAR-26 1456 - UFN
+  PUBLICATION OF CTA/UTA IN DELEGATED AIRSPACE OVER AUSTRIAN
+  TERRITORY:
+  IN GERMAN AIP CTA/UTA DATA ARE PUBLISHED IN ENR 2.1. EVEN THOUGH
+  CTA/UTA ARE DESCRIBED CONSISTING OF THE FLW SECTORS, MUENCHEN CTA
+  AND KARLSRUHE UTA END AT THE GERMAN-AUSTRIAN BORDER AND ARE NOT
+  VALID OVERHEAD WIEN FIR (LOVV).
+  PUBLISHED BOUNDARIES OF ATC SECTORS EDUUALP 14-44, EDUUAMM 14-44,
+  EDMMZUG, EDMMTEG, EDMMTRU AND EDMMSTA ARE NOT AFFECTED.
+  (AIP GERMANY PAGES ENR 2.1-89FF REFER).
+
+=====================================================
+EXTENDED AREA AROUND DESTINATION ALTERNATE AIRPORT(S)
+=====================================================
+
+EDMM        MUNICH FIR
+----------------------
+Please see section EXTENDED AREA AROUND DESTINATION
+
+====================================
+AREA ENROUTE DEPARTURE - DESTINATION
+====================================
+
+KZLC        SALT LAKE CITY FIR/UIR
+----------------------------------
+
+A1704/26                    VALID: 24-MAY-26 1400 - 30-MAY-26 0400
+  NV..AIRSPACE 30NM SW WINNEMUCCA, NV..TEMPORARY FLIGHT
+  RESTRICTIONS. PURSUANT TO 14 CFR SECTION 91.137(A)(2) TEMPORARY
+  FLIGHT RESTRICTIONS ARE IN EFFECT TO PROVIDE A SAFE ENVIRONMENT
+  FOR FIRE FIGHTING ACFT OPS. WI AN AREA DEFINED AS 7NM RADIUS OF
+  404357N1175640W (SDO156040.7) SFC-10000FT CENTRAL NEVADA FIRE
+  CENTER TEL 775-623-1555 OR FREQ 118.1750 QUARTZ IS IN CHARGE OF
+  THE OPERATION. SALT LAKE CITY/ZLC/ARTCC TEL 801-320-2560 IS THE
+  FAA CDN FAC. F) SFC  G) 10000FT AMSL
+A1705/26                    VALID: 24-MAY-26 1200 - 25-MAY-26 0001
+  AIRSPACE R6412C ACT F) SFC  G) 8900FT
+A1706/26                    VALID: 24-MAY-26 1200 - 25-MAY-26 0001
+  AIRSPACE R6412A ACT F) SFC  G) 8900FT
+05/238                      VALID: 23-MAY-26 1200 - 26-MAY-26 0559
+  AIRSPACE UAS WI AN AREA DEFINED AS 4NM RADIUS OF
+  435728.30N1170509.50W (4.9NM SSW ONO) SFC-200FT AGL
+05/239                      VALID: 23-MAY-26 1200 - 26-MAY-26 0559
+  AIRSPACE UAS WI AN AREA DEFINED AS 4NM RADIUS OF
+  434104.30N1170437W (8.0NM WNW S66) SFC-200FT AGL
+A1678/26                    VALID: 22-MAY-26 1400 - 05-JUN-26 0400
+  MT..AIRSPACE 17NM SW HELENA, MT..TEMPORARY FLIGHT RESTRICTIONS.
+  PURSUANT TO 14 CFR SECTION 91.137(A)(2) TEMPORARY FLIGHT
+  RESTRICTIONS ARE IN EFFECT TO PROVIDE A SAFE ENVIRONMENT FOR FIRE
+  FIGHTING ACFT OPS. WI AN AREA DEFINED AS 3NM RADIUS OF
+  462830N1122030W (HLN232017.9) SFC-9000FT HELENA INTERAGENCY
+  DISPATCH CENTER TEL 406-444-4242 OR FREQ 134.625 JERICHO CREEK
+  FIRE IS IN CHARGE OF THE OPERATION. SALT LAKE CITY/ZLC/ARTCC TEL
+  801-320-2560 IS THE FAA CDN FAC. F) SFC  G) 9000FT AMSL
+A1581/26                    VALID: 22-MAY-26 1300 - 25-MAY-26 0259
+  DLY 1300-0259
+  AIRSPACE UAS WI AN AREA DEFINED AS 10NM RADIUS OF 455636N1081454W
+  (15.1NM NE BIL) SFC-50FT AGL F) SFC  G) 50FT AGL
+05/221                      VALID: 22-MAY-26 1000 - 25-MAY-26 0559
+  AIRSPACE UAS WI AN AREA DEFINED AS 2NM RADIUS OF
+  434532.80N1170118.60W (3.8NM WSW 50S) SFC-200FT AGL
+A1094/26                    VALID: 10-MAY-26 1201 - 10-AUG-26 0243
+  DLY SR-SS
+  AIRSPACE PJE WI AN AREA DEFINED AS 20NM RADIUS OF 9S5 SFC-15000FT
+  F) SFC  G) 15000FT
+A1037/26                    VALID: 07-MAY-26 1917 - 20-JUL-26 2200
+  AIRSPACE ADS-B, AUTO DEPENDENT SURVEILLANCE REBROADCAST (ADS-R),
+  TFC INFO SERVICE BCST (TIS-B), FLT INFO SERVICE BCST (FIS-B)
+  SERVICES MAY NOT BE AVBL WI AN AREA DEFINED AS 152NM RADIUS OF
+  362113N1155038W. AP AIRSPACE AFFECTED MAY INCLUDE LAS, ONT, CDC,
+  MMH, WJF, TNP, IGM. F) SFC  G) UNL
+A0941/26                    VALID: 06-MAY-26 1400 - 31-JUL-26 2300
+  DLY 1400-2300
+  AIRSPACE PJE WI AN AREA DEFINED AS 15NM RADIUS OF WYS
+  F) SFC  G) 10600FT
+05/007                      VALID: 04-MAY-26 1300 - 30-MAY-26 0100
+  AIRSPACE UAS WI AN AREA DEFINED AS 8NM RADIUS OF
+  433557N1125414W (9.7NM NW U37) SFC-4600FT AGL MON-FRI 1300-0100
+A0387/26                    VALID: 24-APR-26 1015 - 25-JUL-26 0029
+  AIRSPACE NUMEROUS GLD WI AN AREA DEFINED AS 7NM RADIUS OF ONO
+  SFC-10000FT FRI-SUN SR-SS
+A0298/26                    VALID: 21-APR-26 1716 - 31-JUL-26 2359
+  AIRSPACE UAS WI AN AREA DEFINED AS 60NM RADIUS OF VEL SFC-100FT
+  AGL F) SFC  G) 100FT AGL
+04/127                      VALID: 16-APR-26 1324 - 16-JUL-26 0331
+  AIRSPACE UAS WI AN AREA DEFINED AS 413724N1183508W
+  (20.3NM S E85) TO 413715N1182425W (22.6NM SE E85) TO
+  412345N1180328W (40.3NM SW 26U) TO 405645N1180509W (12.9NM W WMC)
+  TO 403943N1182446W (31NM SW WMC) TO 404847N1191428W (51.8NM E O39)
+  TO 405803N1193923W (33.8NM E O39) TO 412242N1185857W (38.2NM SW
+  E85) TO 413306N1184004W (24.2NM S E85) TO POINT OF ORIGIN
+  SFC-7300FT THU FRI MON TUE WED SR-SS
+03/212                      VALID: 24-MAR-26 1200 - 01-DEC-26 2359
+  AIRSPACE UAS WI AN AREA DEFINED AS 0.5NM RADIUS OF
+  435720.60N1164519.20W (10.7NM SE S75) SFC-50FT AGL
+A0056/26                               VALID: 28-FEB-26 1300 - UFN
+  ZLC AIRSPACE ADS-B, AUTO DEPENDENT SURVEILLANCE
+  REBROADCAST (ADS-R), TFC INFO SER BCST (TIS-B), FLT INFO SER
+  BCST (FIS-B) SER MAY NOT BE AVBL WI AN AREA DEFINED AS 218NM
+  RADIUS OF 364614N1141350W. AP AIRSPACE AFFECTED MAY INCLUDE LAS,
+  PHX, DTA, MMH, VCV, PSP, PAN, INW.
+  F) SFC  G) UNL
+01/116                      VALID: 12-JAN-26 1600 - 22-AUG-26 0401
+  AIRSPACE UAS WI AN AREA DEFINED AS 413715N1182425W
+  (21.8NM SSE E85) TO 412345N1180328W (31.5NM NNW WMC) TO
+  405645N1180509W (12.8NM W WMC) TO 403943N1182446W (30.7NM SW WMC)
+  TO 404847N1191428W (51NM E O39) TO 405803N1193923W (34NM NE O39)
+  TO 412342N1185857W (37.5NM SW E85) TO 413306N1184004W (24NM S E85)
+  TO 413724N1183508W (20NM S E85) TO POINT OF ORIGIN SFC-2000FT AGL
+A0001/26                               VALID: 04-JAN-26 0115 - UFN
+  ZLC AIRSPACE ADS-B, AUTO DEPENDENT SURVEILLANCE
+  REBROADCAST (ADS-R), TFC INFO SER BCST (TIS-B), FLT INFO SER
+  BCST (FIS-B) SER MAY NOT BE AVBL WI AN AREA DEFINED AS 120NM
+  RADIUS OF 402314N1180927W. AP AIRSPACE AFFECTED MAY INCLUDE WMC,
+  BAM.
+  F) 12000FT  G) 15000FT
+A0421/25                               VALID: 02-SEP-25 2003 - UFN
+  ZLC ROUTE ZLC.
+  J523 BRYCE CANYON (BCE) VORTAC, UT TO ELY (ELY) VOR/DME, NV MEA
+  22000. MEA GAP AT COP. BCE VORTAC R-295 UNUSABLE BEYOND 119 NM AND
+  ELY VOR R-114 UNUSABLE BEYOND 16 NM.
+A0218/25                               VALID: 24-APR-25 2034 - UFN
+  ZLC UT..ROUTE ZLC ZLA.
+  V8 MATZO INT, UT TO JEZOB INT, UT MEA 12000 WESTBOUND EXCEPT FOR
+  ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS.
+  V8 JEZOB INT, UT TO JITKA INT, UT MEA 12000 WESTBOUND EXCEPT FOR
+  ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS.
+  MMM VOR MRA AT JITKA 12000.
+A0217/25                               VALID: 24-APR-25 2034 - UFN
+  ZLC UT..ROUTE ZLC ZDV.
+  J196 BRYCE CANYON (BCE) VORTAC, UT TO RIFMN, UT MEA 36000.
+  BCE VORTAC R-033 D160 36000-45000.
+A0202/25                               VALID: 18-APR-25 1713 - UFN
+  ZLC MT..ROUTE ZLC.
+  J539 GLASGOW (GGW) VOR/DME, MT R-328 TO U.S. BORDER NA.
+A0201/25                               VALID: 18-APR-25 1713 - UFN
+  ZLC MT..ROUTE ZLC.
+  J530, J7 GREAT FALLS (GTF) VORTAC, MT R-023 TO U.S. BORDER NA.
+A0643/24                               VALID: 30-OCT-24 1514 - UFN
+  ZLC ROUTE ZLC ZDV.
+  J12 FAIRFIELD (FFU) VORTAC, UT TO GRAND JUNCTION (JNC) VOR/DME, CO
+  MEA GAP. FFU VOR R-100 UNUSABLE BEYOND 77 NM.
+A0627/24                               VALID: 24-OCT-24 1412 - UFN
+  ZLC ROUTE ZLC ZOA.
+  J56 MINA (MVA) VORTAC, NV TO WASATCH (TCH) VORTAC, UT NA. MVA VOR
+  R-045 UNUSABLE BEYOND 40 NM.
+A0548/24                               VALID: 18-SEP-24 1733 - UFN
+  ZLC ROUTE ZLC ZMP.
+  J36 HILGR, MT TO DICKINSON (DIK) VORTAC, ND NA EXCEPT FOR AIRCRAFT
+  EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS. DIK VOR R-265
+  UNUSABLE.
+A0547/24                               VALID: 18-SEP-24 1733 - UFN
+  ZLC ROUTE ZLC ZMP.
+  J70 LEWISTOWN (LWT) VOR/DME, MT TO DICKINSON (DIK) VORTAC, ND NA
+  EXCEPT FOR AIRCRAFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS.
+  DIK VOR R-261 UNUSABLE AND LWT VOR R-O75 UNUSABLE BEYOND 123 NM.
+A0533/24                               VALID: 16-SEP-24 1753 - UFN
+  ZLC MT..ROUTE ZLC.
+  V120 LEWISTOWN (LWT) VOR/DME, MT R-089 TO COP NA FROM 72 NM TO COP
+  EXCEPT FOR ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS.
+  LWT VOR R-089 UNUSABLE BEYOND 72 NM.
+A0524/24                               VALID: 09-SEP-24 1213 - UFN
+  ZLC ROUTE ZLC ZDV.
+  J148 MYTON (MTU) VOR/DME, UT TO CHEYENNE (CYS) VORTAC, WY NA
+  EXCEPT FOR AIRCRAFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS.
+  CYS VOR R-244 UNUSABLE BEYOND 40 NM.
+A0421/24                               VALID: 12-JUL-24 1901 - UFN
+  ZLC UT..ROUTE ZLC.
+  V101 VERNAL (VEL) VOR/DME, UT R-270 TO COP NA.
+  VEL VOR/DME R-270 RESTRICTED.
+A0419/24                               VALID: 12-JUL-24 1901 - UFN
+  ZLC UT..ROUTE ZLC ZDV.
+  V208 VERNAL (VEL) VOR/DME, UT R-031 TO COP NA EXCEPT FOR ACFT
+  EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS.
+  VEL VOR/DME R-031 DME UNUSABLE BELOW 11700.
+A0420/24                               VALID: 12-JUL-24 1901 - UFN
+  ZLC UT..ROUTE ZLC ZDV.
+  V101 VERNAL (VEL) VOR/DME, UT R-101 TO HAYDEN (CHE) VOR/DME, CO
+  R-252 NA.
+  VEL VOR/DME R-101 RESTRICTED.
+A0417/24                               VALID: 11-JUL-24 2053 - UFN
+  ZLC NV..ROUTE ZLC.
+  V293 BULLION (BQU) VOR/DME, NV TO ELY (ELY) VOR/DME, NV MEA 16000.
+A0375/24                               VALID: 18-JUN-24 1737 - UFN
+  ZLC ROUTE ZLC ZDV.
+  J60 HANKSVILLE (HVE) VORTAC, UT TO RED TABLE (DBL) VOR/DME, CO NA
+  EXCEPT FOR ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS.
+
+KZDV        DENVER FIR/UIR
+--------------------------
+
+05/653                      VALID: 23-MAY-26 1300 - 25-MAY-26 0300
+  AIRSPACE UAS WI AN AREA DEFINED AS 12NM RADIUS OF
+  411727.10N0995531.50W (15.5NM SW BBW) SFC-150FT AGL
+05/654                      VALID: 23-MAY-26 1300 - 25-MAY-26 0300
+  AIRSPACE UAS WI AN AREA DEFINED AS 12NM RADIUS OF
+  402203.70N0992818.80W (8.0NM SW HDE) SFC-150FT AGL
+A0827/26                    VALID: 23-MAY-26 0601 - 25-MAY-26 1059
+  AIRSPACE R2601A ACT F) SFC  G) 12499FT
+A0693/26                    VALID: 22-MAY-26 1430 - 31-MAY-26 2300
+  AIRSPACE SURVEYING ACFT WI AN AREA DEFINED AS 374123N1042057W
+  (22NM E 4V1) TO 374058N1032112W (24.6NM S 7V9) TO 371719N1034213W
+  (30.8NM E TAD) TO 371736N1041953W (17NM SE 07V) TO POINT OF ORIGIN
+  13000FT-14500FT
+A0814/26                    VALID: 22-MAY-26 0237 - 30-MAY-26 0600
+  AIRSPACE ARTILLERY WI AN AREA DEFINED AS 5NM RADIUS OF
+  373730N1035840W (28NM NE TAD) SFC-FL999
+A0796/26                    VALID: 21-MAY-26 1000 - 28-MAY-26 0100
+  AIRSPACE UAS WI AN AREA DEFINED AS 1NM RADIUS OF 402441N0992553W
+  (4.9NM SW HDE) SFC-100FT AGL DLY 1000-0100
+A0739/26                    VALID: 20-MAY-26 0700 - 31-MAY-26 0700
+  AIRSPACE R2603 ACT F) SFC  G) 9999FT
+A0768/26                    VALID: 20-MAY-26 0700 - 31-MAY-26 0700
+  AIRSPACE PINON CANYON MOA ACT F) 100FT AGL  G) 10000FT
+A0697/26                    VALID: 17-MAY-26 0700 - 31-MAY-26 0700
+  AIRSPACE R2601C ACT FL225 UP TO BUT NOT INCLUDING FL350 F) FL225 
+  G) UP TO BUT NOT INCLUDING FL350
+A0703/26                    VALID: 17-MAY-26 0700 - 31-MAY-26 0700
+  AIRSPACE R2601B ACT 12500FT UP TO BUT NOT INCLUDING FL225 F)
+  12500FT  G) UP TO BUT NOT INCLUDING FL225
+05/037                      VALID: 04-MAY-26 1130 - 31-MAY-26 0200
+  AIRSPACE UAS WI AN AREA DEFINED AS 15NM RADIUS OF
+  410131.10N0985445.80W (16.0NM SSE 0F4) SFC-200FT AGL MON-SAT SR-SS
+A0429/26                    VALID: 02-MAY-26 0223 - 07-SEP-26 2200
+  AIRSPACE ADS-B, AUTO DEPENDENT SURVEILLANCE REBROADCAST (ADS-R),
+  TFC INFO SERVICE BCST (TIS-B), FLT INFO SERVICE BCST (FIS-B)
+  SERVICES MAY NOT BE AVBL WI AN AREA DEFINED AS 117NM RADIUS OF
+  365715N1080023W. AP AIRSPACE AFFECTED MAY INCLUDE AIB, AJZ, DRO,
+  FMN, GNT, GUC, MVI, PSO, TEX.  SFC-UNL. F) SFC  G) UNL
+A0217/26                    VALID: 21-APR-26 1717 - 31-JUL-26 2359
+  AIRSPACE UAS WI AN AREA DEFINED AS 60NM RADIUS OF VEL SFC-100FT
+  AGL F) SFC  G) 100FT AGL
+A0161/26                    VALID: 20-APR-26 0200 - 01-NOV-26 0300
+  DLY 0200-0300
+  ZDV SVC CASPER APP CLSD CTC DENVER ARTCC FOR CLR DELIVERY ON 135.6
+  OR 303-651-4257
+A0160/26                    VALID: 19-APR-26 1100 - 31-OCT-26 1300
+  DLY 1100-1300
+  ZDV SVC CASPER APP CLSD CTC DENVER ARTCC FOR CLR DELIVERY ON 135.6
+  OR 303-651-4257
+04/011                      VALID: 02-APR-26 1302 - 03-JUL-26 0241
+  AIRSPACE UAS WI AN AREA DEFINED AS 0.7NM RADIUS OF
+  370716.60N1092440.00W (13.3NM ESE 66V) SFC-200FT AGL DLY SR-SS
+A0090/26                               VALID: 17-MAR-26 2000 - UFN
+  ZDV AIRSPACE ADS-B, AUTO DEPENDENT SURVEILLANCE
+  REBROADCAST (ADS-R), TFC INFO SERVICE BCST (TIS-B), FLT INFO
+  SERVICE BCST (FIS-B) SERVICES MAY NOT BE AVBL WI AN AREA DEFINED
+  AS 113NM RADIUS OF440658N1002907W.
+  AP AIRSPACE AFFECTED MAY INCLUDE ANW, ICR, MKA, PHP, PIR, RBE,
+  SUO, VTN, 0D8.
+  F) 2000FT  G) 10000FT
+03/231                      VALID: 08-MAR-26 1500 - 31-OCT-26 2300
+  AIRSPACE AIRSPACE GLD WI AN AREA DEFINED AS 5NM
+  RADIUS OF CYS190026 (20.8NM N FNL) SFC-10000FT AVOIDANCE ADZ DLY
+  1500-2300
+A0062/26                               VALID: 28-FEB-26 1300 - UFN
+  ZDV AIRSPACE ADS-B, AUTO DEPENDENT SURVEILLANCE
+  REBROADCAST (ADS-R), TFC INFO SER BCST (TIS-B), FLT INFO SER
+  BCST (FIS-B) SER MAY NOT BE AVBL WI AN AREA DEFINED AS 218NM
+  RADIUS OF 364614N1141350W. AP AIRSPACE AFFECTED MAY INCLUDE LAS,
+  PHX, DTA, MMH, VCV, PSP, PAN, INW.
+  F) SFC  G) UNL
+01/792                      VALID: 30-JAN-26 1651 - 30-JUL-26 2359
+  AIRSPACE UAS WI AN AREA DEFINED AS 1NM RADIUS OF
+  403547N1050839W (9.7NM NW FNL) SFC-400FT AGL
+A0007/26                               VALID: 05-JAN-26 1628 - UFN
+  ZDV ROUTE ZDV ZMP.
+  V148, V80 NORTH PLATTE (LBF) VOR/DME, NE TO DOLTS, SD NA EXCEPT
+  FOR ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS.
+  ONL VORTAC UNUSABLE.
+A0003/26                               VALID: 04-JAN-26 0300 - UFN
+  ZDV AIRSPACE ADS-B, AUTO DEPENDENT SURVEILLANCE
+  REBROADCAST (ADS-R), TFC INFO SERVICE BCST (TIS-B), FLT INFO
+  SERVICE BCST (FIS-B) SERVICES MAY NOT BE AVBL WI AN AREA DEFINED
+  AS 85NM RADIUS OF 415446N0993913W. AP AIRSPACE AFFECTED MAY
+  INCLUDE BUB, BVN, GRI, LBF, LXN, MHN, ONL, VTN.
+  F) 3000FT  G) 10000FT.
+A0538/25                               VALID: 31-DEC-25 2101 - UFN
+  ZDV ROUTE ZDV ZMP.
+  V100 AINSWORTH (ANW) VOR/DME, NE TO O'NEILL (ONL) VORTAC, NE NA
+  EXCEPT FOR ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS.
+  ONL VORTAC UNUSABLE.
+A0525/25                               VALID: 18-DEC-25 2300 - UFN
+  ZDV COM CPDLC FULL SER ROUTE ADVISORY AND HOLD MSG AVBL ON KUSA
+A0480/25                               VALID: 19-NOV-25 2146 - UFN
+  ZDV ROUTE ZDV.
+  V132 AKRON (AKO) VOR/DME, CO R-110 TO GOODLAND (GLD) VORTAC, KS
+  MEA 7000 EXCEPT FOR ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH
+  GPS. AKO VOR R-110 UNUSABLE AT COP BLEOW 7000.
+A0412/25                               VALID: 29-SEP-25 1622 - UFN
+  ZDV NE..ROUTE ZDV ZMP.
+  T286 GORDON (GRN) NDB, NE TO THEDFORD (TDD) VOR/DME, NE NA.
+  T286 THEDFORD (TDD) VOR/DME, NE TO GRAND ISLAND (GRI) VOR/DME, NE
+  NA.
+  TDD VOR/DME UNUSABLE.
+A0411/25                               VALID: 29-SEP-25 1622 - UFN
+  ZDV NE..ROUTE ZDV.
+  T285 VALENTINE (VTN) NDB, NE TO THEDFORD (TDD) VOR/DME, NE NA.
+  T285 THEDFORD (TDD) VOR/DME, NE TO NORTH PLATTE (LBF) VOR/DME, NE
+  NA.
+  TDD VOR/DME UNUSABLE.
+A0334/25                               VALID: 22-AUG-25 1529 - UFN
+  ZDV WY..ROUTE ZDV.
+  V6 MOIST INT, WY TO LITER, WY MEA 11500.
+  MBW VOR/DME . LITER MCA 11500 WESTBOUND.
+A0212/25                               VALID: 12-MAY-25 1955 - UFN
+  ZDV CO..ROUTE ZDV.
+  V421, V95 DURANGO (DRO) VOR/DME, CO TO BLUE MESA (HBU) VOR/DME, CO
+  CHART COP AT 46NM FROM DRO AND 40NM FROM HBU.
+A0186/25                               VALID: 24-APR-25 2034 - UFN
+  ZDV UT..ROUTE ZDV ZLC.
+  J196 BRYCE CANYON (BCE) VORTAC, UT TO RIFMN, UT MEA 36000.
+  BCE VORTAC R-033 D160 36000-45000.
+A0182/25                               VALID: 24-APR-25 1503 - UFN
+  ZDV WY..ROUTE ZDV.
+  V118 LARAMIE (LAR) VOR/DME, WY TO SENSE, WY MEA 11100 MCA 9900
+  EASTBOUND.
+A0133/25                               VALID: 18-MAR-25 1305 - UFN
+  ZDV ROUTE ZDV.
+  V611 MOIST, WY TO DEALT, WY MEA 14700. MOIST, WY MCA 14700
+  NORTHWESTBOUND; MRA 9500. DEALT, WY MCA 14700 SOUTHEASTBOUND. COP
+  70 NM FROM CYS VOR AND 61 NM FROM DDY VOR. MEA GAP AT COP. DDY VOR
+  R-137 UNUSABLE BEYOND 40 NM BELOW 18000.
+A0079/25                               VALID: 18-FEB-25 1914 - UFN
+  ZDV ROUTE ZDV ZLA.
+  V210 GRAND CANYON (GCN) VOR/DME, AZ TO TUBA CITY (TBC) VORTAC, AZ
+  MOCA 9700.
+A0348/24                               VALID: 30-OCT-24 1514 - UFN
+  ZDV ROUTE ZDV ZLC.
+  J12 FAIRFIELD (FFU) VORTAC, UT TO GRAND JUNCTION (JNC) VOR/DME, CO
+  MEA GAP. FFU VOR R-100 UNUSABLE BEYOND 77 NM.
+A0307/24                               VALID: 24-SEP-24 1229 - UFN
+  ZDV ROUTE ZDV.
+  J110 RATTLESNAKE (RSK) VORTAC, NM TO ALAMOSA (ALS) VORTAC, CO MEA
+  21000 EXCEPT FOR AIRCRAFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH
+  GPS. COP 81 NM FROM RSK VOR AND 34 NM FROM ALS VOR. ALS VOR R-240
+  UNUSABLE BEYOND 40 NM.
+A0214/24                               VALID: 12-JUL-24 1901 - UFN
+  ZDV UT..ROUTE ZDV ZLC.
+  V208 VERNAL (VEL) VOR/DME, UT R-031 TO COP NA EXCEPT FOR ACFT
+  EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS.
+  VEL VOR/DME R-031 DME UNUSABLE BELOW 11700.
+A0215/24                               VALID: 12-JUL-24 1901 - UFN
+  ZDV UT..ROUTE ZDV ZLC.
+  V101 VERNAL (VEL) VOR/DME, UT R-101 TO HAYDEN (CHE) VOR/DME, CO
+  R-252 NA.
+  VEL VOR/DME R-101 RESTRICTED.
+A0193/24                               VALID: 18-JUN-24 1737 - UFN
+  ZDV ROUTE ZDV ZLC.
+  J60 HANKSVILLE (HVE) VORTAC, UT TO RED TABLE (DBL) VOR/DME, CO NA
+  EXCEPT FOR ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS.
+
+KZMP        MINNEAPOLIS FIR/UIR
+-------------------------------
+
+A2039/26                    VALID: 25-MAY-26 0501 - 25-MAY-26 1229
+  AIRSPACE R4301 ACT F) SFC  G) 10000FT
+A2042/26                    VALID: 24-MAY-26 1847 - 24-MAY-26 2200
+  AIRSPACE UAS WI AN AREA DEFINED AS 1NM RADIUS OF 464621N1011517W
+  (14.8NM W Y19) F) SFC  G) 40FT AGL
+05/342                      VALID: 24-MAY-26 1200 - 30-MAY-26 0200
+  AIRSPACE UAS WI AN AREA DEFINED AS 0.5NM RADIUS OF
+  401406.30N0974601.30W (9.8NM WNW HJH) SFC-400FT AGL
+A2036/26                    VALID: 24-MAY-26 1200 - 24-MAY-26 2200
+  AIRSPACE R5401 ACT F) SFC  G) 5000FT
+05/337                      VALID: 24-MAY-26 1109 - 27-MAY-26 0149
+  AIRSPACE UAS WI AN AREA DEFINED AS 7NM RADIUS OF
+  400013.80N0974608.40W (12.2NM NNW RPB) SFC-100FT AGL SUN-TUE SR-SS
+A2037/26                    VALID: 23-MAY-26 1845 - 24-MAY-26 2200
+  AIRSPACE UAS WI AN AREA DEFINED AS 1NM RADIUS OF 445034N0895711W
+  (12.6NM NNW CWA) F) SFC  G) 200FT AGL
+05/349                      VALID: 23-MAY-26 1023 - 26-MAY-26 0132
+  AIRSPACE UAS WI AN AREA DEFINED AS 1NM RADIUS OF
+  444709.90N0895317.50W (9.5NM W CWA) SFC-50FT AGL SAT-MON SR-SS
+A1943/26                    VALID: 22-MAY-26 1200 - 22-JUN-26 2359
+  AIRSPACE UAS WI AN AREA DEFINED AS .5NM RADIUS OF 463632N0910156W
+  (5.1NM NW ASX) SFC-800FT AGL DLY 1200-2359
+05/344                      VALID: 21-MAY-26 1852 - 26-MAY-26 0550
+  AIRSPACE UAS WI AN AREA DEFINED AS 420225N0982518W
+  (17.6NM WSW 4V9) TO 420222N0982520W (17.6NM WSW 4V9) TO
+  420221N0982526W (17.7NM WSW 4V9) TO 420222N0982554W (18.0NM WSW
+  4V9) TO 420223N0982557W (18.1NM WSW 4V9) TO 420225N0982559W
+  (18.1NM WSW 4V9) TO 420226N0982559W (18.1NM WSW 4V9) TO
+  420243N0982558W (18.0NM WSW 4V9) TO 420246N0982558W (18.0NM WSW
+  4V9) TO 420247N0982555W (18.0NM WSW 4V9) TO 420247N0982553W
+  (17.9NM WSW 4V9) TO 420245N0982519W (17.5NM WSW 4V9) TO
+  420245N0982516W (17.5NM WSW 4V9) TO 420243N0982515W (17.5NM WSW
+  4V9) TO 420242N0982514W (17.5NM WSW 4V9) TO POINT OF ORIGIN
+  SFC-100FT AGL
+A1937/26                    VALID: 21-MAY-26 1013 - 22-AUG-26 0046
+  AIRSPACE KITE WI AN AREA DEFINED AS 15NM RADIUS OF ESC198029.5
+  SFC-500FT AGL DLY SR-SS
+05/311                      VALID: 20-MAY-26 1200 - 29-MAY-26 2359
+  AIRSPACE UAS WI AN AREA DEFINED AS 450356N0933119W
+  (7.1NM W MIC) TO 450356N0932403W (2.0NM W MIC) TO 445843N0932402W
+  (5.4NM SSW MIC) TO 445841N0933122W (8.8NM SW MIC) TO POINT OF
+  ORIGIN SFC-201FT AGL WED THU FRI MON TUE 1200-2359
+05/312                      VALID: 20-MAY-26 1200 - 29-MAY-26 2359
+  AIRSPACE UAS WI AN AREA DEFINED AS 450356N0933120W
+  (7.2NM W MIC) TO 450910N0933118W (9.0NM NW MIC) TO 450909N0932406W
+  (5.8NM NNW MIC) TO 450357N0932401W (2.0NM W MIC) TO POINT OF
+  ORIGIN SFC-201FT AGL WED THU FRI MON TUE 1200-2359
+05/314                      VALID: 20-MAY-26 1200 - 29-MAY-26 2359
+  AIRSPACE UAS WI AN AREA DEFINED AS 451217N0932926W
+  (10.3NM NW MIC) TO 451211N0932539W (9.0NM NNW MIC) TO
+  451029N0932313W (6.9NM NNW MIC) TO 450759N0932420W (4.8NM NNW MIC)
+  TO 450746N0932751W (6.2NM NW MIC) TO 451058N0932939W (9.4NM NW
+  MIC) TO POINT OF ORIGIN SFC-200FT AGL WED THU FRI MON TUE
+  1200-2359
+A1879/26                    VALID: 20-MAY-26 0530 - 21-SEP-26 2200
+  AIRSPACE ADS-B, AUTO DEPENDENT SURVEILLANCE REBROADCAST (ADS-R),
+  TFC INFO SERVICE BCST (TIS-B), FLT INFO SERVICE BCST (FIS-B)
+  SERVICES MAY NOT BE AVBL WI AN AREA DEFINED AS 85NM RADIUS OF
+  411631N0930914W. AP AIRSPACE AFFECTED MAY INCLUDE ADU, AWG, CID,
+  CRZ, EBS, IKV, TRX, VTI. F) 1000FT AMSL  G) 2000FT AMSL
+05/305                      VALID: 19-MAY-26 1653 - 26-MAY-26 0550
+  AIRSPACE UAS WI AN AREA DEFINED AS 420324N0983838W
+  (24.8NM SSE ONL) TO 420240N0983837W (25.6NM SSE ONL) TO
+  420239N0983837W (25.6NM SSE ONL) TO 420237N0983839W (25.6NM SSE
+  ONL) TO 420236N0983841W (25.6NM SSE ONL) TO 420236N0983951W
+  (25.6NM SSE ONL) TO 420237N0983953W (25.6NM SSE ONL) TO
+  420238N0983955W (25.5NM SSE ONL) TO 420240N0983956W (25.5NM S ONL)
+  TO 420332N0983956W (24.6NM SSE ONL) TO 420334N0983955W (24.6NM SSE
+  ONL) TO 420335N0983954W (24.6NM SSE ONL) TO 420335N0983951W
+  (24.6NM SSE ONL) TO 420335N0983844W (24.6NM SSE ONL) TO
+  420335N0983842W (24.6NM SSE ONL) TO 420333N0983840W (24.7NM SSE
+  ONL) TO 420330N0983839W (24.7NM SSE ONL) TO POINT OF ORIGIN
+  SFC-100FT AGL
+05/292                      VALID: 19-MAY-26 1346 - 26-MAY-26 0550
+  AIRSPACE UAS WI AN AREA DEFINED AS 420058N0982818W
+  (20.1NM WSW 4V9) TO 420150N0982819W (19.9NM WSW 4V9) TO
+  420153N0982817W (19.9NM WSW 4V9) TO 420154N0982814W (19.8NM WSW
+  4V9) TO 420155N0982702W (19.0NM WSW 4V9) TO 420154N0982659W
+  (18.9NM WSW 4V9) TO 420151N0982657W (18.9NM WSW 4V9) TO
+  420123N0982657W (19.1NM WSW 4V9) TO 420121N0982658W (19.1NM WSW
+  4V9) TO 420120N0982701W (19.1NM WSW 4V9) TO 420120N0982715W
+  (19.3NM WSW 4V9) TO 420058N0982716W (19.4NM WSW 4V9) TO
+  420055N0982717W (19.4NM WSW 4V9) TO 420054N0982721W (19.5NM WSW
+  4V9) TO 420054N0982809W (20.1NM WSW 4V9) TO 420055N0982815W
+  (20.1NM WSW 4V9) TO 420056N0982817W (20.1NM WSW 4V9) TO POINT OF
+  ORIGIN SFC-100FT AGL
+05/238                      VALID: 18-MAY-26 1200 - 29-MAY-26 2300
+  AIRSPACE UAS WI AN AREA DEFINED AS 451747N0930110W
+  (3.1NM NNW 25D) TO 451745N0925350W (5.0NM NE 25D) TO
+  450727N0925351W (7.8NM NNW 21D) TO 450727N0930115W (4.8NM ESE 8Y4)
+  TO POINT OF ORIGIN SFC-200FT AGL MON-FRI 1200-2300
+05/237                      VALID: 18-MAY-26 1200 - 29-MAY-26 2300
+  AIRSPACE UAS WI AN AREA DEFINED AS 450728N0931339W
+  (1.4NM SSW ANE) TO 450209N0931337W (5.6NM ESE MIC) TO
+  450208N0925905W (6.0NM WNW 21D) TO 450725N0925905W (6.2NM ESE 8Y4)
+  TO POINT OF ORIGIN SFC-200FT AGL MON-FRI 1200-2300
+05/258                      VALID: 18-MAY-26 1102 - 02-JUN-26 0154
+  AIRSPACE UAS WI AN AREA DEFINED AS 0.2NM RADIUS OF
+  420223N0961258W (16.7NM N TQE) SFC-50FT AGL DLY SR-SS
+A1648/26                    VALID: 17-MAY-26 0803 - 19-OCT-26 2200
+  AIRSPACE ADS-B, AUTO DEPENDENT SURVEILLANCE REBROADCAST (ADS-R),
+  TFC INFO SER BCST (TIS-B), FLT INFO SER BCST (FIS-B) SER MAY NOT
+  BE AVBL WI AN AREA DEFINED AS 32NM RADIUS  OF 430341N0911547W. AP
+  AIRSPACE AFFECTED MAY INCLUDE DEH, OVS, PDC, 3Y2. SFC-UNL. F) SFC 
+  G) UNL
+A1448/26                    VALID: 12-MAY-26 1932 - 12-MAY-28 1932
+  MN..ROUTE ZMP. V171 SHELS, MN TO APRIW, MN MEA 4100. GFK VOR/DME
+  R-143 UNUSABLE BEYOND 60 NM SFC-4000. F) SFC  G) 4000
+A1449/26                    VALID: 12-MAY-26 1932 - 12-MAY-28 1932
+  MN..ROUTE ZMP. V561 GRAND FORKS (GFK) VOR/DME, ND R-216 TO COP MEA
+  6100. GFK VOR/DME R-216 UNUSABLE BEYOND 30 NM SFC-6000. F) SFC  G)
+  6000
+05/177                      VALID: 12-MAY-26 1501 - 06-JUN-26 0550
+  AIRSPACE UAS WI AN AREA DEFINED AS 421656N0960329W
+  (13.3NM WNW MEY) TO 421656N0960332W (13.4NM WNW MEY) TO
+  421702N0960337W (13.5NM WNW MEY) TO 421706N0960337W (13.5NM WNW
+  MEY) TO 421707N0960336W (13.5NM WNW MEY) TO 421708N0960335W
+  (13.5NM WNW MEY) TO 421708N0960328W (13.4NM WNW MEY) TO
+  421708N0960325W (13.4NM WNW MEY) TO 421708N0960324W (13.4NM WNW
+  MEY) TO 421707N0960323W (13.4NM WNW MEY) TO 421704N0960323W
+  (13.3NM WNW MEY) TO 421657N0960327W (13.3NM WNW MEY) TO
+  421656N0960328W (13.3NM WNW MEY) TO POINT OF ORIGIN SFC-199FT AGL
+A1029/26                               VALID: 10-MAY-26 1200 - UFN
+  COM CPDLC FULL SER ROUTE ADVISORY AND HOLD MSG AVBL ON KUSA
+05/095                      VALID: 06-MAY-26 1125 - 01-JUN-26 0153
+  AIRSPACE UAS WI AN AREA DEFINED AS 1NM RADIUS OF
+  400853N0974449.50W (7.5NM W HJH) SFC-399FT AGL DLY SR-SS
+05/060                      VALID: 04-MAY-26 1130 - 31-MAY-26 0200
+  AIRSPACE UAS WI AN AREA DEFINED AS 15NM RADIUS OF
+  410131.10N0985445.80W (16.0NM SSE 0F4) SFC-200FT AGL MON-SAT SR-SS
+A0543/26                    VALID: 24-APR-26 1200 - 01-JUL-26 0100
+  DLY 1200-0100
+  AIRSPACE UAS WI AN AREA DEFINED AS .5NM RADIUS OF 403952N0955603W
+  (3.9NM NW AFK) F) SFC  G) 100FT AGL
+04/149                      VALID: 21-APR-26 1230 - 22-JUL-26 0100
+  AIRSPACE UAS OPS WI AN AREA DEFINED AS 10NM RADIUS
+  OF FAR SFC-3900FT
+04/045                      VALID: 05-APR-26 1201 - 01-NOV-26 2319
+  AIRSPACE UAS WI AN AREA DEFINED AS 0.2NM RADIUS OF
+  415600N0960517W (11.0NM NNE TQE) SFC-100FT AGL DLY SR-SS
+04/046                      VALID: 05-APR-26 1201 - 01-NOV-26 2319
+  AIRSPACE UAS WI AN AREA DEFINED AS 0.4NM RADIUS OF
+  415517N0960539W (10.2NM NNE TQE) SFC-100FT AGL DLY SR-SS
+A0182/26                               VALID: 22-MAR-26 1255 - UFN
+  ZMP AIRSPACE ADS-B, AUTO DEPENDENT SURVEILLANCE
+  REBROADCAST (ADS-R), TFC INFO SERVICE BCST (TIS-B) SERVICES MAY
+  NOT BE AVBL WI AN AREA DEFINED AS 45NM RADIUS OF 431005N0902047W.
+  AP AIRSPACE AFFECTED MAY INCLUDE DLL, HBW, MRJ, MSN, OVS, PDC,
+  PVB. F) SFC  G) 3999FT
+A0167/26                               VALID: 17-MAR-26 2000 - UFN
+  ZMP AIRSPACE ADS-B, AUTO DEPENDENT SURVEILLANCE
+  REBROADCAST (ADS-R), TFC INFO SERVICE BCST (TIS-B), FLT INFO
+  SERVICE BCST (FIS-B) SERVICES MAY NOT BE AVBL WI AN AREA DEFINED
+  AS 113NM RADIUS OF440658N1002907W.
+  AP AIRSPACE AFFECTED MAY INCLUDE ANW, ICR, MKA, PHP, PIR, RBE,
+  SUO, VTN, 0D8.
+  F) 2000FT  G) 10000FT
+A0165/26                               VALID: 17-MAR-26 1330 - UFN
+  ZMP AIRSPACE ADS-B, AUTO DEPENDENT SURVEILLANCE
+  REBROADCAST (ADS-R), TFC INFO SERVICE BCST (TIS-B) SERVICES MAY
+  NOT BE AVBL WI AN AREA DEFINED AS 101NM RADIUS OF 490514N0974045W.
+  AP AIRSPACE AFFECTED MAY INCLUDE 2L1, DVL, GFK, RDR, RRT, TVF.
+  F) SFC  G) 15999FT
+A0143/26                               VALID: 10-MAR-26 2130 - UFN
+  ZMP AIRSPACE ADS-B, AUTO DEPENDENT SURVEILLANCE
+  REBROADCAST (ADS-R), TFC INFO SER BCST (TIS-B), FLT INFO SER
+  BCST (FIS-B) SER MAY NOT BE AVBL WI AN AREA DEFINED AS 107NM
+  RADIUS OF 392616N0941247W.
+  AP AIRSPACE AFFECTED MAY INCLUDE MCI, NVD, COU, IRK, ICL, MHK.
+  F) SFC  G) 4000FT
+A0065/26                               VALID: 27-JAN-26 2057 - UFN
+  ZMP SD..ROUTE ZMP.
+  V148, V80 O'NEILL (ONL) VORTAC, NE R-039 TO TYNDA INT, SD DME
+  REQUIRED AT TYNDA.
+  MHE VOR R-165 UNUSABLE AT TYNDA.
+01/140                      VALID: 26-JAN-26 1653 - 31-JUL-26 2359
+  AIRSPACE WIND TURBINE FARM WI AN AREA DEFINED AS
+  7NM RADIUS OF 424828N0955505W (12NM E LRJ) 1455FT (600FT AGL)  NOT
+  LGTD
+A0033/26                               VALID: 11-JAN-26 1230 - UFN
+  ZMP AIRSPACE ADS-B, AUTO DEPENDENT SURVEILLANCE
+  REBROADCAST (ADS-R), TFC INFO SER BCST (TIS-B), FLT INFO SER BCST
+  (FIS-B) SER MAY NOT BE AVBL WI AN AREA DEFINED AS 78NM RADIUS OF
+  414925N0943322W. AP AIRSPACE AFFECTED MAY INCLUDE SLB, FOD, AMW,
+  DSM, ICL, OMA, DNS, CIN. F) SFC  G) 6000FT.
+A0018/26                               VALID: 05-JAN-26 1633 - UFN
+  ZMP SD..ROUTE ZMP.
+  J82 SIOUX FALLS (FSD) VORTAC, SD R-267 TO COP MEA 20000.
+  FSD VORTAC R-267 RESTRICTED.
+A0014/26                               VALID: 05-JAN-26 1628 - UFN
+  ZMP ROUTE ZMP ZDV.
+  V148, V80 NORTH PLATTE (LBF) VOR/DME, NE TO DOLTS, SD NA EXCEPT
+  FOR ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS.
+  ONL VORTAC UNUSABLE.
+A0008/26                               VALID: 04-JAN-26 0330 - UFN
+  ZMP AIRSPACE ADS-B, AUTO DEPENDENT SURVEILLANCE
+  REBROADCAST (ADS-R), TFC INFO SER BCST (TIS-B), FLT INFO SER
+  BCST (FIS-B) SER MAY NOT BE AVBL WI AN AREA DEFINED AS 40NM RADIUS
+  OF 410723N0935543W. AP AIRSPACE AFFECTED MAY INCLUDE MOB, STJ,
+  IRK, MOB, GPH, MKC, FLV.
+  F) SFC  G) 6000FT
+A0007/26                               VALID: 04-JAN-26 0300 - UFN
+  ZMP AIRSPACE ADS-B, AUTO DEPENDENT SURVEILLANCE
+  REBROADCAST (ADS-R), TFC INFO SERVICE BCST (TIS-B), FLT INFO
+  SERVICE BCST (FIS-B) SERVICES MAY NOT BE AVBL WI AN AREA DEFINED
+  AS 85NM RADIUS OF 415446N0993913W. AP AIRSPACE AFFECTED MAY
+  INCLUDE BUB, BVN, GRI, LBF, LXN, MHN, ONL, VTN.
+  F) 3000FT  G) 10000FT.
+A0729/25                               VALID: 31-DEC-25 2101 - UFN
+  ZMP ROUTE ZMP ZDV.
+  V100 AINSWORTH (ANW) VOR/DME, NE TO O'NEILL (ONL) VORTAC, NE NA
+  EXCEPT FOR ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS.
+  ONL VORTAC UNUSABLE.
+A0730/25                               VALID: 31-DEC-25 2101 - UFN
+  ZMP ROUTE ZMP.
+  V71 COLUMBUS (OLU) VOR/DME, NE TO O'NEILL (ONL) VORTAC, NE NA
+  EXCEPT FOR ACFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS.
+  ONL VORTAC UNUSABLE.
+A0616/25                               VALID: 27-OCT-25 2114 - UFN
+  ZMP MI..ROUTE ZMP.
+  V430 YOBRI INT, MN TO BLUOX INT, MN NA NORTHWESTBOUND.
+  GPZ VOR R-286 UNUSABLE ALL ALTITUDES BEYOND 40 NM.
+A0552/25                               VALID: 29-SEP-25 1622 - UFN
+  ZMP NE..ROUTE ZMP ZDV.
+  T286 GORDON (GRN) NDB, NE TO THEDFORD (TDD) VOR/DME, NE NA.
+  T286 THEDFORD (TDD) VOR/DME, NE TO GRAND ISLAND (GRI) VOR/DME, NE
+  NA.
+  TDD VOR/DME UNUSABLE.
+A0542/25                               VALID: 26-SEP-25 1929 - UFN
+  ZMP MN..ROUTE ZMP.
+  V430 GRAND RAPIDS (GPZ) VOR/DME, MN R-106 TO COP MEA 6000.
+  GPZ VOR/DME R-106 RESTRICTED.
+A0543/25                               VALID: 26-SEP-25 1929 - UFN
+  ZMP MN..ROUTE ZMP.
+  V218 GRAND RAPIDS (GPZ) VOR/DME, MN R-172 TO COP MEA 12500.
+  GPZ VOR/DME R-172 RESTRICTED.
+A0399/25                               VALID: 06-AUG-25 2013 - UFN
+  ZMP ND..ROUTE ZMP.
+  V561 JAMESTOWN (JMS) VOR/DME, ND TO PIERRE (PIR) VORTAC, SD MOCA
+  3800.
+08/116                      VALID: 05-AUG-25 1349 - 30-OCT-26 2359
+  AIRSPACE UAS WI AN AREA DEFINED AS 485439N0971530W
+  (2NM S PMB) TO 484942N0964014W (10NM NE HCO) TO 483722N0961709W
+  (10NM NE 23D) TO 482554N0960458W (18.6NM NW 3G2) TO
+  480627N0955538W (10NM ENE TVF) TO 475746N0971617W (3.5NM W GFK) TO
+  POINT OF ORIGIN 11000FT-FL180
+08/115                      VALID: 05-AUG-25 1347 - 30-OCT-26 2359
+  AIRSPACE UAS WI AN AREA DEFINED AS 480829N0971609W
+  (9.6NM SE D06) TO 480836N0972327W (9.5NM S D06) TO 480736N0972917W
+  (10.3NM SSW D06) TO 480514N0973522W (14.4NM SW D06) TO
+  481610N0995042W (9.8NM SE RUG) TO 483200N0994600W (8.3NM SE 2H9)
+  TO 484600N0993600W (6.3NM S 06D) TO 485336N0992513W (7.4NM E 06D)
+  TO 485439N0971530W (1.7NM S PMB) TO POINT OF ORIGIN SFC-FL280
+A0373/25                               VALID: 21-JUL-25 1724 - UFN
+  ZMP ROUTE ZMP ZKC.
+  V532 SALINA (SLN) VORTAC, KS TO LINCOLN (LNK) VORTAC, NE MOCA
+  3300.
+A0187/25                               VALID: 17-APR-25 1400 - UFN
+  ZMP UT..ROUTE ZMP ZLC.
+  J549 WILLISTON (ISN) VOR/DME, ND R-047 TO U.S. BORDER NA.
+A0345/24                               VALID: 27-SEP-24 2059 - UFN
+  ZMP MI..ROUTE ZMP.
+  V609, V78 ZABLE, MI DISREGARD MBS 69 DME AT ZABLE.
+  MBS DME RESTRICTED.
+A0331/24                               VALID: 18-SEP-24 1733 - UFN
+  ZMP ROUTE ZMP ZLC.
+  J70 LEWISTOWN (LWT) VOR/DME, MT TO DICKINSON (DIK) VORTAC, ND NA
+  EXCEPT FOR AIRCRAFT EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS.
+  DIK VOR R-261 UNUSABLE AND LWT VOR R-O75 UNUSABLE BEYOND 123 NM.
+A0332/24                               VALID: 18-SEP-24 1733 - UFN
+  ZMP ROUTE ZMP ZLC.
+  J36 HILGR, MT TO DICKINSON (DIK) VORTAC, ND NA EXCEPT FOR AIRCRAFT
+  EQUIPPED WITH SUITABLE RNAV SYSTEM WITH GPS. DIK VOR R-265
+  UNUSABLE.
+A0293/24                               VALID: 27-AUG-24 2022 - UFN
+  ZMP ROUTE ZMP.
+  V2 ALEXANDRIA (AXN) VOR/DME, MN TO TLBAT, MN MEA 6000.
+A0184/24                               VALID: 25-JUN-24 1351 - UFN
+  ZMP MN..ROUTE ZMP.
+  V171 ROLAG, MN TO APRIW, MN NA EXCEPT FOR ACFT EQUIPPED WITH
+  SUITABLE RNAV SYSTEM WITH GPS.
+  AXN VOR/DME R-314 UNUSABLE BEYOND 48 NM.
+A0167/24                               VALID: 10-JUN-24 1910 - UFN
+  ZMP MI..ROUTE ZMP.
+  V413 IRONWOOD (IWD) VOR/DME, MI TO EAU CLAIRE (EAU) VORTAC, WI
+  CHANGE CHANGE-OVER POINT TO READ 45 NM FROM IWD AND 68 NM FROM
+  EAU.
+
+CZWG        WINNIPEG FIR
+------------------------
+
+G1493/26                    VALID: 21-MAY-26 1331 - 29-MAY-26 2359
+  LONDON RDO REMOTE COM OUTLET (RCO) FLT INFO SVC ENR (FISE)
+  126.7MHZ AT AMESON U/S
+G1247/26                    VALID: 14-MAY-26 0901 - 27-MAY-26 2359
+  TRIGGER NOTAM - PERM AIRAC AIP AMDT (AIRAC CANADA) ISSUES
+  10/2026 TO 15/2026 WEF 14 MAY 2026. AIP CANADA, CANADA FLT
+  SUPPLEMENT (CFS), CANADA AIR PILOT (CAP), RESTRICTED CANADA AIR
+  PILOT (RCAP), LOW AND HIGH ENR CHARTS AMENDED.
+G1363/26                               VALID: 12-MAY-26 1743 - UFN
+  AIRSPACE SECURITY WARNING ISSUED BY THE DEPARTMENT OF TRANSPORT
+  IN RESPONSE TO THE SECURITY SITUATION IN MALI. CANADIAN AIR
+  OPERATORS AND OWNERS OF AIRCRAFT REGISTERED IN CANADA ARE
+  RECOMMENDED TO MAINTAIN A FLIGHT LEVEL EQUAL TO OR ABOVE FL320 IN
+  THE PORTIONS OF FIR DAKAR (GOOO) AND FIR NIAMEY (DRRR) LOCATED IN
+  THE TERRITORY OF MALI DUE TO THE POTENTIAL RISK FROM MILITANT
+  ACTIVITY AND ANTI-AIRCRAFT WEAPONRY.
+G1362/26                               VALID: 12-MAY-26 1737 - UFN
+  AIRSPACE SECURITY WARNING ISSUED BY THE DEPARTMENT OF TRANSPORT
+  IN RESPONSE TO THE SECURITY SITUATION IN MYANMAR. CANADIAN AIR
+  OPERATORS AND OWNERS OF AIRCRAFT REGISTERED IN CANADA ARE
+  RECOMMENDED TO MAINTAIN A FLIGHT LEVEL AT OR ABOVE FL260 IN FIR
+  YANGON (VYYF) DUE TO THE RISK FROM ANTI-AIRCRAFT WEAPONRY.
+G1346/26                    VALID: 11-MAY-26 1546 - 31-MAY-26 2359
+  WINNIPEG CENTRE PERIPHERAL STATION (PAL) 225.2MHZ AT KENORA U/S
+M0708/26                               VALID: 05-MAY-26 1232 - UFN
+  MUTIPLE REMOTELY PILOTED ACFT (RPA), RCMP RPA BORDER PATROLS,
+  WITHIN AREA 1NM NORTH SIDE OF A LINE 4900N 11000W - 4900N 09500W
+  (CANADA/USA BORDER IN THE PROVINCE OF SASKATCHEWAN (SK) AND
+  MANITOBA (MB)).
+  ACFT WEIGHT: 150KG OR LESS. ALL ACFT REQUESTED TO REMAIN CLR.
+  NON ADS-B ACFT ARE REQUESTED TO CTC PRIOR
+  BEFORE 24HR CTC NWRRPAS-NWRSAT(AT)RCMP-GRC.GC.CA,
+  WITHIN 24HR CTC AB 1-833-476-4238,
+  SK 1-866-475-4238, MB 1-888-626-4238.
+  F) SFC  G) 500FT AGL
+G1239/26                    VALID: 02-MAY-26 1300 - 30-JUL-26 0330
+  DAILY 1300-0330
+  PARAJUMPS ACT WILL TAKE PLACE WITHIN RADIUS 2NM CENTRE
+  503741N 0970236W (GIMLI INDUSTRIAL PARK AIRPORT AD (CYGM)) LDG
+  AREA B BOWLS INFIELD E THR 15. AVOID JOINING MIDFIELD
+  F) SFC  G) 12500FT AMSL
+M0661/26                    VALID: 01-MAY-26 1300 - 31-MAY-26 2359
+  BLASTING ACT WILL TAKE PLACE WITHIN
+  RADIUS 1NM CENTRE 565355N 1005714W
+  (CENTRE APRX 4.5NM ENE LYNN LAKE AD (CYYL))
+  F) SFC  G) 1500FT AGL
+G1240/26                    VALID: 01-MAY-26 1139 - 30-JUL-26 1200
+  SR-SS
+  PARAJUMPS ACT WILL TAKE PLACE WITHIN
+  RADIUS 2NM CENTRE 502605N 1052316W
+  (AT MOOSE JAW MUNI AD (CJS4))
+  F) SFC  G) 12500FT AMSL
+G1192/26                    VALID: 28-APR-26 1528 - 27-JUL-26 1800
+  ALL ACFT, REGARDLESS OF THE STATE OF REGISTRY, DIRECTLY OR
+  INDIRECTLY OWNED, CHARTERED, LEASED, OPERATED OR OTHERWISE
+  CONTROLLED BY A PERSON CONNECTED WITH EITHER THE RUSSIAN
+  FEDERATION OR OF BELARUS OR BY A CORPORATION OR ENTITY THAT IS
+  INCORPORATED OR FORMED UNDER THE LAWS OF THE RUSSIAN FEDERATION
+  OR BELARUS, AND ALL OPERATORS HOLDING AN AIR OPERATOR CERTIFICATE
+  (AOC) ISSUED BY RUSSIAN FEDERATION AND/OR BELARUSIAN AUTHORITIES
+  ARE PROHIBITED TO ENTER, EXIT OR OVERFLY CANADA'S TERRITORIAL
+  AIRSPACE (INCLUDING FLT WITHIN 12NM OF CANADA'S COASTS).
+  EXCEPTIONS PERMITTED FOR ACFT EXPERIENCING INFLIGHT EMERG.
+  ALL AUTH OBTAINED PRIOR TO 27 FEB 2022 FOR ACFT AND OPS SUBJECT
+  TO THIS NOTAM ARE REVOKED.
+  HUMANITARIAN, SAR, MEDEVAC AND ANY OTHER FLT SEEKING AN EXCEPTION
+  TO THIS RESTRICTION MUST RECEIVE AUTH GRANTED AFTER 27 FEB 2022
+  FM THE MINISTER OF TRANSPORT TO OPERATE IN CANADA'S TERRITORIAL
+  AIRSPACE.  AFFECTED ACFT WISHING TO OBTAIN SUCH AN AUTH OR CLR
+  INTO CANADA'S TERRITORIAL AIRSPACE MAY APPLY TO THE MINISTER OF
+  TRANSPORT AT 1-877-992-6853 OR 1-613-992-6853 OR BY EMAIL AT
+  OPERATIONS.AVIATION(AT)TC.GC.CA.
+M0626/26                    VALID: 24-APR-26 2036 - 30-MAY-26 2359
+  DELTA NDB UDE 269KHZ U/S
+G0656/26                               VALID: 16-MAR-26 1841 - UFN
+  J540 BTN YVC AND YYL AND YEK: NOT AUTH
+G0657/26                               VALID: 16-MAR-26 1841 - UFN
+  Q916 BTN KENRU AND YYL: NOT AUTH
+G0655/26                               VALID: 16-MAR-26 1840 - UFN
+  J539 BTN POLLE AND YYL AND YYQ: NOT AUTH
+G0654/26                               VALID: 16-MAR-26 1840 - UFN
+  V303 BTN YVC AND YYL: NOT AUTH
+G0653/26                               VALID: 16-MAR-26 1839 - UFN
+  V333 BTN YYL AND YTH: NOT AUTH
+
+CZUL        MONTREAL FIR
+------------------------
+
+N1221/26                    VALID: 23-MAY-26 1400 - 31-MAY-26 2300
+  MAY 23 1400-0000, MAY 24 1330-2300, MAY 30 1400-0000,           , 
+  MAY 31 1330-2300
+  PURSUANT TO SECTION 5.1 OF THE AERONAUTICS ACT, THE AIRSPACE
+  WITHIN RADIUS 1.5NM CENTRE 454110N 0714023W (SAINT-CAMILLE,
+  CENTRE APRX 15NM NNE SHERBROOKE AD (CYSC)) IS RESTRICTED
+  DUE HIGH PWR ROCKET LAUNCHES. NO PERSON SHALL OPR AN ACFT,
+  INCLUDING A REMOTELY PILOTED ACFT (RPA) AS PER CANADIAN AVIATION
+  REGULATIONS (CAR) 901.41 AND 903.01, WITHIN THE AREA DESCRIBED
+  UNLESS AUTH BY CLUB QUEBECOIS DE FUSEONAUTIQUE AT 514-951-3574
+  OR 514-582-7863.
+  F) SFC  G) 7000FT AMSL
+N1302/26                    VALID: 23-MAY-26 1400 - 31-MAY-26 2300
+  MAY 23 1400-0000, MAY 24 1330-2300, MAY 30 1400-0000, MAY 31 , 
+  1330-2300
+  DUE HIGH PWR ROCKET LAUNCHES
+  .
+  T614: BTN MUTIB AND DAXUG: MEA/MOCA TO READ 8500
+  .
+  T662: BTN VIKBU AND ILERO: HOLD AT VIKBU TO READ AT OR ABV
+  8500
+N1298/26                    VALID: 23-MAY-26 1100 - 24-MAY-26 2300
+  DAILY 1100-2300
+  GLD ACT WILL TAKE PLACE WITHIN RADIUS 1.5NM CENTRE
+  443822N 0754501W (AT BROCKVILLE REGIONAL TACKABERRY
+  APRT AD (CNL3)). GLD USE RIGHT HAND CIRCUIT
+  F) SFC  G) 3000FT AMSL
+H2659/26                    VALID: 23-MAY-26 0000 - 26-MAY-26 2359
+  PURSUANT TO SECTION 5.1 OF THE AERONAUTICS ACT, THE AIRSPACE
+  WITHIN RADIUS 1NM CENTRE 464904N 0711156W (CENTRE APRX 8NM E
+  QUEBEC/JEAN LESAGE INTL AD (CYQB), APRX 5NM NW PINTENDRE AD
+  (CPT9)), IS RESTRICTED DUE NAVAL ACT. NO PERSON SHALL OPR
+  AN ACFT IN THE DESCRIBED AREA, INCLUDING REMOTELY PILOTED ACFT
+  (RPA) AS PER CAR 901.41 AND 903.01, EXC FOR POLICE OPS, IFR ACFT
+  OR WITH AUTH FM CANADIAN ARMED FORCES 514-717-6706.
+  F) SFC  G) 1900FT AMSL
+N1265/26                    VALID: 19-MAY-26 1530 - 19-JUL-26 2300
+  DAILY 1530-2300
+  BLASTING ACT WILL TAKE PLACE WITHIN RADIUS 1640FT
+  CENTRE 524858N 0760728W (CENTRE APRX 6NM N ELEONORE AD (CEL8))
+  F) SFC  G) 660FT AGL
+H2435/26                    VALID: 19-MAY-26 1100 - 25-MAY-26 0100
+  DAILY 1100-0100
+  PURSUANT TO SECTION 5.1 OF THE AERONAUTICS ACT, THE AIRSPACE
+  BOUNDED BY 453209N 0733226W - 453200N 0733122W -
+  453044N 0733014W - 452911N 0732952W - 452848N 0733145W -
+  452946N 0733311W - 453023N 0733310W - 453209N 0733226W
+  (CENTRE APRX 4.6NM W MONTREAL/MET (AEROPORT METROPOLITAIN DE
+  MONTREAL) AD (CYHU) AND APRX 9NM E MONTREAL/PIERRE ELLIOTT
+  TRUDEAU AD (CYUL), IS RESTRICTED (MONTREAL GRAND-PRIX).
+  NO PERSON SHALL OPR AN ACFT, INCLUDING REMOTELY PILOTED ACFT
+  (RPA) AS PER CAR 901.41 AND 903.01, IN THE AREA DESCRIBED,
+  EXC FOR PRE-AUTHORIZED ACFT, MEDEVAC AND IFR ACFT AT
+  CYUL AND CYHU AD. CTC FOR AUTH AT 514-910-2309.
+  F) SFC  G) 1400FT AMSL
+N1211/26                    VALID: 17-MAY-26 0000 - 30-MAY-26 2359
+  TRIGGER NOTAM - AIP SUP 039/2026 WEF 17 MAY 2026. FLIGHT
+  OPERATIONS: AERIAL FOREST SPRAYING ABITIBI, LAC SAINT-JEAN, NORTH
+  SHORE OF THE ST. LAWRENCE, BAS-SAINT-LAURENT REGION, AND GASPESIE
+  F) SFC  G) 3000FT AMSL
+H2205/26                    VALID: 14-MAY-26 0901 - 27-MAY-26 2359
+  TRIGGER NOTAM - PERM AIRAC AIP AMDT (AIRAC CANADA) ISSUES
+  10/2026 TO 15/2026 WEF 14 MAY 2026. AIP CANADA, CANADA FLT
+  SUPPLEMENT (CFS), CANADA AIR PILOT (CAP), RESTRICTED CANADA AIR
+  PILOT (RCAP), TERMINAL, LOW AND HIGH ENR CHARTS AMENDED.
+H2476/26                               VALID: 13-MAY-26 1843 - UFN
+  PURSUANT TO SECTION 5.1 OF THE AERONAUTICS ACT, THE AIRSPACE
+  WITHIN RADIUS 0.5NM CENTRE 452449N 0753656W (STARTOP CANADIAN
+  JOINT OPS COMMAND HEADQUARTERS, CENTRE APRX 1.65NM ENE OTTAWA
+  (CHILDREN'S HOSPITAL) (HELI) (CPK7)) IS RESTRICTED. NO PERSON
+  SHALL OPR A REMOTELY PILOTED ACFT (RPAS, DRONE OR MICRODRONE)
+  WITHIN THE AREA DESCRIBED, UNLESS AUTH BY DND DUTY OFFICER
+  613-904-5188 OR 613-904-5460, EXCEPT FOR MEDICAL, POLICE AND
+  MILITARY AGENCIES ON OFFICIAL DUTY FLTS.
+  F) SFC  G) 1200FT AMSL
+H2475/26                               VALID: 13-MAY-26 1840 - UFN
+  PURSUANT TO SECTION 5.1 OF THE AERONAUTICS ACT, THE AIRSPACE
+  WITHIN RADIUS 1.0NM CENTRE 452103N 0755103W (NATIONAL DEFENCE
+  HEADQUARTERS CARLING CAMPUS, CENTRE APRX 5NM SSE DUNROBIN/DJANGO
+  FIELD AD (CDJ8)) IS RESTRICTED. NO PERSON SHALL OPR A REMOTELY
+  PILOTED ACFT (RPAS, DRONE OR MICRODRONE) WITHIN THE AREA
+  DESCRIBED, UNLESS AUTH BY DND DUTY OFFICER 613-904-5188 OR
+  613-904-5460, EXCEPT FOR MEDICAL, POLICE AND MILITARY AGENCIES
+  ON OFFICIAL DUTY FLTS.
+  F) SFC  G) 1200FT AMSL
+H2474/26                               VALID: 13-MAY-26 1837 - UFN
+  PURSUANT TO SECTION 5.1 OF THE AERONAUTICS ACT, THE AIRSPACE
+  WITHIN RADIUS 0.5NM CENTRE 452527N 0754123W (MAJOR-GENERAL
+  GEORGE R. PEARKES BUILDING, CENTRE APRX 2.1NM SE OTTAWA/GATINEAU
+  (CASINO) (HELI) (CTA9)) IS RESTRICTED. NO PERSON SHALL OPR A
+  REMOTELY PILOTED ACFT (RPAS, DRONE OR MICRODRONE) WITHIN THE
+  AREA DESCRIBED, UNLESS AUTH BY DND DUTY OFFICER 613-904-5188 OR
+  613-904-5460, EXCEPT FOR MEDICAL, POLICE AND MILITARY AGENCIES
+  ON OFFICIAL DUTY FLTS.
+  F) SFC  G) 1200FT AMSL
+H2442/26                               VALID: 12-MAY-26 1744 - UFN
+  AIRSPACE SECURITY WARNING ISSUED BY THE DEPARTMENT OF TRANSPORT
+  IN RESPONSE TO THE SECURITY SITUATION IN MALI. CANADIAN AIR
+  OPERATORS AND OWNERS OF AIRCRAFT REGISTERED IN CANADA ARE
+  RECOMMENDED TO MAINTAIN A FLIGHT LEVEL EQUAL TO OR ABOVE FL320 IN
+  THE PORTIONS OF FIR DAKAR (GOOO) AND FIR NIAMEY (DRRR) LOCATED IN
+  THE TERRITORY OF MALI DUE TO THE POTENTIAL RISK FROM MILITANT
+  ACTIVITY AND ANTI-AIRCRAFT WEAPONRY.
+H2440/26                               VALID: 12-MAY-26 1740 - UFN
+  AIRSPACE SECURITY WARNING ISSUED BY THE DEPARTMENT OF TRANSPORT
+  IN RESPONSE TO THE SECURITY SITUATION IN MYANMAR. CANADIAN AIR
+  OPERATORS AND OWNERS OF AIRCRAFT REGISTERED IN CANADA ARE
+  RECOMMENDED TO MAINTAIN A FLIGHT LEVEL AT OR ABOVE FL260 IN FIR
+  YANGON (VYYF) DUE TO THE RISK FROM ANTI-AIRCRAFT WEAPONRY.
+H2312/26                               VALID: 08-MAY-26 1153 - UFN
+  AMEND PUBLICATIONS:
+  NORTH AMERICAN ROUTES (NAR) WESTBOUND ROUTES NON-COMMON PORTION:
+  ADD: QUBIS TIBOS ROCKT ARRIVAL MONTREAL/PIERRE E TRUDEAU
+  ADD: TAFFY TIBOS ROCKT ARRIVAL MONTREAL/PIERRE E TRUDEAU
+H2260/26                    VALID: 06-MAY-26 1200 - 01-AUG-26 0100
+  DAILY 1200-0100
+  PARADROPS ACT WILL TAKE PLACE WITHIN RADIUS 2NM
+  CENTRE 464527N 0710633W (PINTENDRE AD (CPT9))
+  F) SFC  G) 16000FT AMSL
+N1060/26                    VALID: 04-MAY-26 1200 - 03-AUG-26 2359
+  DAILY 1200-2359
+  BLASTING ACT WILL TAKE PLACE WITHIN RADIUS 2NM CENTER
+  533648N 0760610W  (CENTRE APRX 4.2NM ENE LA GRANDE-3 AD (CYAD))
+  SFC TO 6000FT AGL
+  F) SFC  G) 6893FT AMSL
+N1070/26                    VALID: 01-MAY-26 2247 - 31-JUL-26 1800
+  SR-SS
+  AEROBATICS ACT WILL TAKE PLACE WITHIN RADIUS 5NM
+  CENTRE 460241N 0733006W (JOLIETTE AD (CSG3))
+  F) SFC  G) 4000FT AMSL
+H2141/26                    VALID: 28-APR-26 1528 - 27-JUL-26 1800
+  ALL ACFT, REGARDLESS OF THE STATE OF REGISTRY, DIRECTLY OR
+  INDIRECTLY OWNED, CHARTERED, LEASED, OPERATED OR OTHERWISE
+  CONTROLLED BY A PERSON CONNECTED WITH EITHER THE RUSSIAN
+  FEDERATION OR OF BELARUS OR BY A CORPORATION OR ENTITY THAT IS
+  INCORPORATED OR FORMED UNDER THE LAWS OF THE RUSSIAN FEDERATION
+  OR BELARUS, AND ALL OPERATORS HOLDING AN AIR OPERATOR CERTIFICATE
+  (AOC) ISSUED BY RUSSIAN FEDERATION AND/OR BELARUSIAN AUTHORITIES
+  ARE PROHIBITED TO ENTER, EXIT OR OVERFLY CANADA'S TERRITORIAL
+  AIRSPACE (INCLUDING FLT WITHIN 12NM OF CANADA'S COASTS).
+  EXCEPTIONS PERMITTED FOR ACFT EXPERIENCING INFLIGHT EMERG.
+  ALL AUTH OBTAINED PRIOR TO 27 FEB 2022 FOR ACFT AND OPS SUBJECT
+  TO THIS NOTAM ARE REVOKED.
+  HUMANITARIAN, SAR, MEDEVAC AND ANY OTHER FLT SEEKING AN
+  EXCEPTION TO THIS RESTRICTION MUST RECEIVE AUTH GRANTED AFTER 27
+  FEB 2022 FM THE MINISTER OF TRANSPORT TO OPERATE IN CANADA'S
+  TERRITORIAL AIRSPACE. AFFECTED ACFT WISHING TO OBTAIN SUCH AN
+  AUTH OR CLR INTO CANADA'S TERRITORIAL AIRSPACE MAY APPLY TO THE
+  MINISTER OF TRANSPORT AT 1-877-992-6853 OR 1-613-992-6853 OR BY
+  EMAIL AT OPERATIONS.AVIATION(AT)TC.GC.CA.
+H1858/26                    VALID: 18-APR-26 1600 - 01-JUL-26 0600
+  DAILY 1600-0600
+  PURSUANT TO SECTION 5.1 OF THE AERONAUTICS ACT,
+  AIRSPACE WITHIN RADIUS 1500FT CENTRE 452946N 0733410W
+  (BELL CENTRE, CENTRE APRX 2.8NM SE MONTREAL/KRUGER
+  (HELI) (CSN2)) IS RESTRICTED. NO PERSON SHALL OPR
+  A REMOTELY PILOTED AIRCRAFT (RPA) IN THE AREA
+  DESCRIBED EXC FOR POLICE OPS OR UNLESS AUTH
+  HAS BEEN RECEIVED FM SPVM AT LEAST 72HR IN ADVANCE.
+  CTC SPVM AT 514-280-2468 OR DRONE(A)SPVM.QC.CA.
+  F) SFC  G) 1200FT AMSL
+H1802/26                    VALID: 09-APR-26 1353 - 08-JUL-26 2359
+  WX TOWER CABLE BALL MARKER MISSING 482042N 0791416W
+  (APRX 18NM NW ROUYN-NORANDA AD (CYUY)) 267FT AGL 1780FT AMSL
+N0796/26                    VALID: 07-APR-26 2100 - 06-JUL-26 2359
+  APR 07 2100-2359, APR 08-JUL 06 1600-1900 2100-2359
+  BLASTING ACT WILL TAKE PLACE WITHIN 1.8NM RADIUS CENTRE
+  453529N 0704055W (CENTRE APRX 30NM SSW ST-GEORGES AD (CYSG) )
+  SFC TO 2625FT AGL
+  F) SFC  G) 4921FT AMSL
+N0758/26                               VALID: 06-APR-26 1600 - UFN
+  DAILY 1600-1900 2100-2359
+  BLASTING ACT WILL TAKE PLACE WITHIN
+  RADIUS 2.9NM CENTRE 453310N 0704420W
+  (CENTRE APRX 33NM SSW ST-GEORGES AD (CYSG) )
+  2625FT AGL
+  F) SFC  G) 5052FT AMSL
+N0737/26                               VALID: 31-MAR-26 1212 - UFN
+  DUE BLASTING:
+  T737 BTN OMALI AND REVEN: MEA/MOCA TO READ: 6600
+N0520/26                    VALID: 08-MAR-26 1300 - 05-JUN-26 2359
+  DAILY 1300-1500 1600-1800 2100-2359
+  BLASTING ACT WILL TAKE PLACE WITHIN RADIUS 3.8NM CENTRE
+  471120N 0705653W (CENTRE APRX 18NM NW ISLE-AUX-GRUES AD (CSH2))
+  SFC TO 2700FT AGL
+  F) SFC  G) 6112FT AMSL
+H1101/26                               VALID: 08-MAR-26 1300 - UFN
+  DAILY 1300-1500 1600-1800 2100-2359
+  DUE BLASTING
+  T603: BTN GADAL AND KESLU: MEA/MOCA TO READ 7700
+
+CZQX        GANDER OCEANIC FIR/UIR
+----------------------------------
+
+H2205/26                    VALID: 14-MAY-26 0901 - 27-MAY-26 2359
+  TRIGGER NOTAM - PERM AIRAC AIP AMDT (AIRAC CANADA) ISSUES
+  10/2026 TO 15/2026 WEF 14 MAY 2026. AIP CANADA, CANADA FLT
+  SUPPLEMENT (CFS), CANADA AIR PILOT (CAP), RESTRICTED CANADA AIR
+  PILOT (RCAP), TERMINAL, LOW AND HIGH ENR CHARTS AMENDED.
+H2442/26                               VALID: 12-MAY-26 1744 - UFN
+  AIRSPACE SECURITY WARNING ISSUED BY THE DEPARTMENT OF TRANSPORT
+  IN RESPONSE TO THE SECURITY SITUATION IN MALI. CANADIAN AIR
+  OPERATORS AND OWNERS OF AIRCRAFT REGISTERED IN CANADA ARE
+  RECOMMENDED TO MAINTAIN A FLIGHT LEVEL EQUAL TO OR ABOVE FL320 IN
+  THE PORTIONS OF FIR DAKAR (GOOO) AND FIR NIAMEY (DRRR) LOCATED IN
+  THE TERRITORY OF MALI DUE TO THE POTENTIAL RISK FROM MILITANT
+  ACTIVITY AND ANTI-AIRCRAFT WEAPONRY.
+H2440/26                               VALID: 12-MAY-26 1740 - UFN
+  AIRSPACE SECURITY WARNING ISSUED BY THE DEPARTMENT OF TRANSPORT
+  IN RESPONSE TO THE SECURITY SITUATION IN MYANMAR. CANADIAN AIR
+  OPERATORS AND OWNERS OF AIRCRAFT REGISTERED IN CANADA ARE
+  RECOMMENDED TO MAINTAIN A FLIGHT LEVEL AT OR ABOVE FL260 IN FIR
+  YANGON (VYYF) DUE TO THE RISK FROM ANTI-AIRCRAFT WEAPONRY.
+H2172/26                    VALID: 29-APR-26 1602 - 30-JUL-26 1600
+  DUE TO SYSTEM LIMITATIONS THE FOLLOWING FIXES ARE NOT TO BE FLT
+  PLANNED:
+  443000N 0500000W, 443000N 0400000W, 443000N 0300000W,
+  603000N 0300000W.
+  FLT THAT FILE THESE FIXES WILL BE REROUTED.
+H2141/26                    VALID: 28-APR-26 1528 - 27-JUL-26 1800
+  ALL ACFT, REGARDLESS OF THE STATE OF REGISTRY, DIRECTLY OR
+  INDIRECTLY OWNED, CHARTERED, LEASED, OPERATED OR OTHERWISE
+  CONTROLLED BY A PERSON CONNECTED WITH EITHER THE RUSSIAN
+  FEDERATION OR OF BELARUS OR BY A CORPORATION OR ENTITY THAT IS
+  INCORPORATED OR FORMED UNDER THE LAWS OF THE RUSSIAN FEDERATION
+  OR BELARUS, AND ALL OPERATORS HOLDING AN AIR OPERATOR CERTIFICATE
+  (AOC) ISSUED BY RUSSIAN FEDERATION AND/OR BELARUSIAN AUTHORITIES
+  ARE PROHIBITED TO ENTER, EXIT OR OVERFLY CANADA'S TERRITORIAL
+  AIRSPACE (INCLUDING FLT WITHIN 12NM OF CANADA'S COASTS).
+  EXCEPTIONS PERMITTED FOR ACFT EXPERIENCING INFLIGHT EMERG.
+  ALL AUTH OBTAINED PRIOR TO 27 FEB 2022 FOR ACFT AND OPS SUBJECT
+  TO THIS NOTAM ARE REVOKED.
+  HUMANITARIAN, SAR, MEDEVAC AND ANY OTHER FLT SEEKING AN
+  EXCEPTION TO THIS RESTRICTION MUST RECEIVE AUTH GRANTED AFTER 27
+  FEB 2022 FM THE MINISTER OF TRANSPORT TO OPERATE IN CANADA'S
+  TERRITORIAL AIRSPACE. AFFECTED ACFT WISHING TO OBTAIN SUCH AN
+  AUTH OR CLR INTO CANADA'S TERRITORIAL AIRSPACE MAY APPLY TO THE
+  MINISTER OF TRANSPORT AT 1-877-992-6853 OR 1-613-992-6853 OR BY
+  EMAIL AT OPERATIONS.AVIATION(AT)TC.GC.CA.
+H2104/26                    VALID: 27-APR-26 1124 - 27-JUL-26 2359
+  RESTRICTED AREA CYR727 GOOSE BAY DEACTIVATED.
+  F) 5000FT AMSL  G) 12500FT AMSL
+H1884/26                               VALID: 14-APR-26 1404 - UFN
+  GANDER OCEANIC ENTRY POINTS BOBTU AND TALGO NOT AVBL FOR EASTBOUND
+  FLT PLANNING. EASTBOUND FLT FM NEW YORK OCA WILL BE REQUIRED TO
+  ENTER GANDER OCA EAST OF 50W. ALL EASTBOUND NAT AIRCRAFT
+  TRANSITTING NEW YORK OCEANIC OCA TO CZQM OR CZQM TO NEW YORK OCA
+  MUST FILE NOVOK OR JEBBY.
+  SEE CANADA AIP ENR 7.1.6.1 FOR COMPULSORY REPORTING POINTS
+  AND ASSOCIATED 050W COORDINATES.
+H1534/26                               VALID: 27-MAR-26 1324 - UFN
+  GANDER RDO REMOTE COM OUTLET (RCO) INTL AIR FREQ 127.9MHZ AT PRINS
+  CHRISTIAN SUND, GREENLAND UNREL
+H1533/26                               VALID: 27-MAR-26 1324 - UFN
+  GANDER RDO REMOTE COM OUTLET (RCO) INTL AIR FREQ
+  127.9MHZ AT FREDERIKSDAL, GREENLAND UNREL
+N0708/26                               VALID: 26-MAR-26 1627 - UFN
+  PURSUANT TO SECTION 5.1 OF THE AERONAUTICS ACT, AIRSPACE WITHIN
+  RADIUS 1NM CENTRE 490533N 582558W (CENTRE APRX 32NM WNW SOUTH
+  BROOK (WATER) (CCT5), APRX 33NM NNE STEPHENVILLE DYMOND
+  AIRPORT AD (CYJT)) IS RESTRICTED FOR ON GOING COAST GUARD
+  OPS. NO PERSON SHALL OPR AN ACFT, INCLUDING REMOTELY PILOTED
+  ACFT (RPA-DRONE), WITHIN THE AREA DESCRIBED EXC FOR MEDEVAC AND
+  COAST GUARD OPS. FOR AUTH TO ENTER CTC CANADIAN COAST GUARD
+  709-725-7202 OR 709-772-6220.
+  F) SFC  G) 5000FT AMSL
+N0409/26                               VALID: 20-FEB-26 1552 - UFN
+  AMEND PUBLICATIONS: QUARRY AND BLASTING ACT WITHIN RADIUS 984FT
+  CENTRE 490405N 0581654W (CENTRE APRX 26NM WNW SOUTH BROOK
+  (WATER) AD (CCT5)). SFC TO 984FT AGL
+  F) SFC  G) 1083FT AMSL
+
+BGGL        SONDRESTROM FIR
+---------------------------
+
+A0255/26                    VALID: 14-MAY-26 0000 - 27-MAY-26 2359
+  TRIGGER NOTAM -
+  PERM AIP GREENLAND AIRAC AMDT 04/26 WEF 14 MAY 2026:
+  REF GEN 3.4: NEW E-MAIL ADDRESS AND TEL NUMBER ADDED
+  FOR NUUK APP IN SUBSECTION 6. COMMUNICATION.
+A0256/26                    VALID: 14-MAY-26 0000 - 27-MAY-26 2359
+  TRIGGER NOTAM -
+  PERM AIP GREENLAND AIRAC AMDT 04/26 WEF 14 MAY 2026:
+  REF ENR 1.6:
+  NEW DESCRIPTION OF REQUIREMENTS FOR ATS SURVEILLANCE SERVICES
+  AND PROCEDURES IN BGGL FIR GND - FL 195 INCLUSIVE.
+A0257/26                    VALID: 14-MAY-26 0000 - 27-MAY-26 2359
+  TRIGGER NOTAM -
+  PERM AIP GREENLAND AIRAC AMDT 04/26 WEF 14 MAY 2026:
+  REF ENR 2.1:
+  NEW FREQ 121.300 MHZ ADDED TO NUUK FIR AND NUUK TMA ADDED.
+A0258/26                    VALID: 14-MAY-26 0000 - 27-MAY-26 2359
+  TRIGGER NOTAM -
+  PERM AIP GREENLAND AIRAC AMDT 04/26 WEF 14 MAY 2026:
+  REF ENR 3.2:
+  ROUTES UT594, UT596, UT598, UT599 AND Y47 CHANGED.
+  NEW ROUTES Y686, Y687, Y688 AND Y689 ADDED.
+  ROUTE Y68 WITHDRAWN.
+A0384/26                    VALID: 14-MAY-26 0000 - 31-DEC-99 2359
+  REF AIP AIRAC AMDT 04/26, ENR 3.2 - 14.
+  IN RNAV ROUTE Y689 THE SIGNIFICANT POINT PINCU,
+  SHALL BE REPLACED BY 59N050W.
+A0389/26                    VALID: 14-MAY-26 0000 - 27-MAY-26 2359
+  TRIGGER NOTAM -
+  PERM AIP GREENLAND AIRAC AMDT 04/26 WEF 14 MAY 2026:
+  REF ENR 6.1: NUUK TMA ADDED.
+  ROUTES UT594, UT596, UT598, UT599 AND Y47 CHANGED.
+  NEW ROUTES Y686, Y687, Y688 AND Y689 ADDED.
+  ROUTE Y68 WITHDRAWN.
+  NEW SIGNIFICANT POINTS ACSUS, ASRIX, DEDZU, DEGUL, EFNOC,
+  ELRUP, ERALA, GENSA, IDROT, KOJUB, KUVIG, LUFWU, NITOQ,
+  OTWAT, PAZIT, QARGO, RAVBA, RAVUD, TUTGA, ULFIQ,
+  UPOKI AND WOXPO ADDED.
+  SIGNIFICANT POINTS BAMAM AND RAJAX WITHDRAWN.
+A0391/26                    VALID: 14-MAY-26 0000 - 27-MAY-26 2359
+  TRIGGER NOTAM -
+  PERM AIP GREENLAND AIRAC AMDT 04/26 WEF 14 MAY 2026:
+  REF ENR 4.4:
+  NEW SIGNIFICANT POINTS ACSUS, ASRIX, DEDZU, DEGUL, EFNOC,
+  ELRUP, ERALA, GENSA, IDROT, KOJUB, KUVIG, LUFWU, NITOQ,
+  OTWAT, PAZIT, QARGO, RAVBA, RAVUD, TUTGA, ULFIQ,
+  UPOKI AND WOXPO ADDED.
+  SIGNIFICANT POINTS BAMAM AND RAJAX WITHDRAWN.
+
+EGGX        SHANWICK OCEANIC FIR
+--------------------------------
+
+V0015/26                    VALID: 22-APR-26 1025 - 20-JUL-26 2300
+  SECURITY - HAZARDOUS SITUATION IN LEBANON. UK REGISTERED AIR
+  OPERATORS ARE RECOMMENDED NOT TO ENTER FIR BEIRUT (OLBB).
+  POTENTIAL RISK FROM HEIGHTENED MILITARY ACTIVITY. FOR MORE INFO
+  CONTACT UK DEPARTMENT FOR TRANSPORT 02070 826639 OR 02079 443111
+  OUT OF HOURS. AR-2026-3194/01.
+  F) SFC  G) UNL
+V0013/26                    VALID: 17-MAR-26 1452 - 29-MAY-26 1200
+  SECURITY - HAZARDOUS SITUATION IN AFGHANISTAN. UK REGISTERED AIR 
+  OPERATORS ARE ADVISED TO TAKE POTENTIAL RISK INTO ACCOUNT WITHIN
+  FIR KABUL (OAKX). POTENTIAL RISK FROM HEIGHTENED MILITARY
+  ACTIVITY. AR-2026-1616/01.
+  F) SFC  G) UNL
+V0009/26                               VALID: 20-FEB-26 1338 - UFN
+  SECURITY - HAZARDOUS SITUATION IN LIBYA
+  UK REGISTERED AIR OPERATORS ARE RECOMMENDED NOT TO ENTER FIR
+  TRIPOLI (HLLL). POTENTIAL RISK FROM ANTI-AIRCRAFT WEAPONRY.
+  THIS SUPERSEDES THE ADVICE IN THE CURRENT UK AIP.
+  UK AIP ENR 1.1. PARA 1.4.5 REFERS.
+  F) SFC  G) UNL
+
+EGPX        SCOTTISH FIR/UIR
+----------------------------
+
+B0833/26                    VALID: 25-MAY-26 0800 - 25-MAY-26 1600
+  LEUCHARS LOWER AIRSPACE RADAR SERVICE NOT AVBL
+D2042/26                    VALID: 25-MAY-26 0800 - 25-MAY-26 1600
+  THE FOLLOWING DANGER AREA IS DEACTIVATED
+  EGD510C SPADEADAM
+  F) SFC  G) 5500FT AMSL
+D2041/26                    VALID: 25-MAY-26 0800 - 29-MAY-26 1500
+  25-28 0800-1600, 29 0800-1500
+  THE FOLLOWING DANGER AREAS ARE DEACTIVATED
+  EGD510A SPADEADAM
+  EGD510B SPADEADAM
+  F) SFC  G) 5500FT AMSL
+D2102/26                    VALID: 25-MAY-26 0800 - 25-MAY-26 2100
+  DANGER AREA EGD703 TAIN DEACTIVATED
+  F) SFC  G) 15000FT AMSL
+H2649/26                    VALID: 25-MAY-26 0800 - 25-MAY-26 1600
+  UAS OPR WI AREA BOUNDED BY 553231N 0034002W - 553247N 0033935W -
+  553240N 0033918W - 553233N 0033931W - 553224N 0033944W -
+  553231N 0034002W (ROBERTON). MAX HGT 230FT AGL.
+  FOR INFO 07734 458917.
+  AR-2026-4308/01.
+  F) SFC  G) 1000FT AMSL
+H2620/26                    VALID: 25-MAY-26 0700 - 25-MAY-26 1600
+  CIVIL AIRCRAFT NOTIFICATION PROCEDURE - UNDERSLUNG LOADS OPR WI
+  2NM RADIUS OF PSN 561258N 0045012W (REST AND BE THANKFUL, ARGYLL
+  AND BUTE) LOW FLYING AREA 14. MAX HGT 500FT AGL. ACFT MAY BE
+  RESTRICTED IN ABILITY TO MANOEUVRE AND UNABLE TO COMPLY WITH RAC
+  OPS CTC
+  07557 574508. 26/05/198/LFC
+  F) SFC  G) 3900FT AMSL
+H2646/26                    VALID: 25-MAY-26 0700 - 25-MAY-26 2030
+  CIVIL AIRCRAFT NOTIFICATION PROCEDURE -
+  UNDERSLUNG LOADS OPR WI 2NM RADIUS OF PSN 564915N 0032915W,
+  (PERTH AND KINROSS) LOW FLYING AREA 14 AND NIGHT SECTOR 1C.
+  MAX HGT 500FT AGL. ACFT MAY BE RESTRICTED IN ABILITY TO MANOEUVRE
+  AND UNABLE TO COMPLY WITH RAC OPS
+  CTC 01667464404. 26/05/201/LFC
+  F) SFC  G) 3100FT AMSL
+H2658/26                    VALID: 25-MAY-26 0600 - 26-JUN-26 1600
+  0600-1600
+  PIPELINE INSPECTION NOTIFICATION PROCEDURE SYSTEM (PINS)
+  WILL TAKE PLACE IN THE FOLLOWING LOW FLYING AREAS-
+  1, 2, 3, 4, 5, 6, 7N, 7S, 8, 9, 10, 11N,
+  11S, 12, 18, 19, THAMES VALLEY AVOIDANCE AREA
+  MAX HEIGHT 2000FT AGL.
+  UK AIP ENR 6 (PINS AREAS AND UK DAY LOW FLYING SYSTEM (DLFS))
+  REFERS. 26/05/206/LFC
+  F) SFC  G) 6500FT AMSL
+D2079/26                    VALID: 22-MAY-26 0900 - 27-MAY-26 1700
+  22 25 27 0900-1700, 26 0900-2359
+  DANGER AREA EGD604 BARRY BUDDON ACTIVATED
+  F) SFC  G) 3000FT AMSL
+H2569/26                    VALID: 20-MAY-26 1425 - 06-AUG-26 1400
+  TUE-THU 1000-1400
+  UAS OPR BEYOND VISUAL LINE OF SIGHT (BVLOS) UTILISING VISUAL
+  OBSERVERS (EXTENDED LINE OF SIGHT) WI 0.07NM RADIUS OF
+  554008N 0022007W (ECCLES). MAX HGT 329FT AGL. FOR INFO 01914
+  994700 / 07762 568181. AR-2026-4077/02.
+  F) SFC  G) 600FT AMSL
+H1131/26                    VALID: 18-MAY-26 0500 - 29-MAY-26 1700
+  0500-1700
+  NATO EXER DYNAMIC MONGOOSE. MULTIPLE MIXED ACFT WILL OPR WI AREA
+  BOUNDED BY 573000N 0041500E - 573000N 0080000W - 610000N 0080000W
+  - 610000N 0000000E - 600000N 0000000E - 573000N 0041500E (ATLANTIC
+  OCEAN AND NORTH SEA). ACFT MAY BE UNABLE TO COMPLY WITH RAC.
+  FOR INFO 01923 956632. AR-2026-1983/01.
+  F) SFC  G) 9000FT AMSL
+H2357/26                    VALID: 17-MAY-26 2301 - 25-MAY-26 2259
+  VENTING OF HIGH PRESSURE GAS WI 0.25NM RADIUS OF 562859N 0031134W
+  (SOUTH OF LITTLETON).  FOR INFO 07731 518276 / 01926 568755.
+  AR-2026-3260/01.
+  F) SFC  G) 2600FT AMSL
+B0804/26                               VALID: 13-MAY-26 0000 - UFN
+  UK NOTAM SERIES - ADD TURKS AND CAICOS ISLANDS TO THE 'U' SERIES.
+  UK AIP GEN 3.1.3.6 REFERS.
+H1639/26                    VALID: 02-MAY-26 0418 - 29-JUL-26 2034
+  SR-SS
+  UAS OPR BEYOND VISUAL LINE OF SIGHT (BVLOS) UTILISING VISUAL
+  OBSERVERS (EXTENDED LINE OF SIGHT) WI 1.4NM RADIUS OF PSN
+  585608N 0031815W (GRAEMSAY). MAX HGT 263FT AGL. FOR INFO
+  07852 318946. AR-2026-2840/01.
+  F) SFC  G) 600FT AMSL
+V0015/26                    VALID: 22-APR-26 1025 - 20-JUL-26 2300
+  SECURITY - HAZARDOUS SITUATION IN LEBANON. UK REGISTERED AIR
+  OPERATORS ARE RECOMMENDED NOT TO ENTER FIR BEIRUT (OLBB).
+  POTENTIAL RISK FROM HEIGHTENED MILITARY ACTIVITY. FOR MORE INFO
+  CONTACT UK DEPARTMENT FOR TRANSPORT 02070 826639 OR 02079 443111
+  OUT OF HOURS. AR-2026-3194/01.
+  F) SFC  G) UNL
+H1710/26                    VALID: 20-APR-26 0830 - 17-JUL-26 2000
+  0830-2000
+  FLYING OF LARGE MODEL ACFT WI 0.4NM RADIUS OF 561033N 0030748W
+  (COALTOWN OF BALGONIE, FIFE). FOR INFO 07801 270760.
+  AR-2026-2987/01. F) SFC  G) 1700FT AMSL
+H1645/26                    VALID: 15-APR-26 0800 - 13-JUN-26 2200
+  0800-2200
+  LIVE FIRING WI 1NM RADIUS OF 560538N 0044806W (GARELOCHHEAD SMALL
+  ARMS RANGE). HGT UP TO 750FT AGL. FOR INFO 07810 654948 /
+  07976 154900. AR-2026-2862/02.
+  F) SFC  G) 3000FT AMSL
+H1465/26                    VALID: 11-APR-26 0700 - 30-JUN-26 2000
+  0700-2000
+  FLYING OF LARGE MODEL ACFT WI 0.5NM RADIUS OF 554159N 0035550W
+  (NETHERBURN).  FOR INFO 07808 772189. AR-2026-2596/01.
+  F) SFC  G) 1800FT AMSL
+H1570/26                    VALID: 09-APR-26 0000 - 01-JUN-26 2359
+  C BAND HIGH INTENSITY RADIO TRANSMISSION AREA (HIRTA) IN LOW
+  FLYING AREA 14 AND NIGHT SECTOR 1C AT PSN 574254N 0032044W,
+  (RAF LOSSIEMOUTH, MORAYSHIRE)
+  RADIUS 0.1NM. MAX HEIGHT 114FT AGL. 26/04/085/LFC
+  SAFE DISTANCES
+  CIVILIAN ACFT                   0.0556NM        20FT AGL
+  MIL ACFT SUSCEPTIBILITY
+  VERY LOW                        0.0540NM        10FT AGL
+  LOW                             0.0567NM        26FT AGL
+  MEDIUM                          0.0626NM        62FT AGL
+  HIGH                            0.0711NM        114FT AGL
+  PULSE LOW                       0.0540NM        10FT AGL
+  PULSE MEDIUM                    0.0540NM        10FT AGL
+  PULSE HIGH                      0.0540NM        10FT AGL
+  F) SFC  G) 214FT AMSL
+H1167/26                    VALID: 02-APR-26 1600 - 01-JUN-26 2100
+  1600-2100
+  UAS SWARM OPR WI 1NM RADIUS OF 563718N 0035600W (CAMSERNEY DULL).
+  SWARM MADE UP OF 50 UAS. MAX HGT 394FT AGL. FOR INFO 07823 886018.
+  AR-2026-2181/01.
+  F) SFC  G) 2100FT AMSL
+V0013/26                    VALID: 17-MAR-26 1452 - 29-MAY-26 1200
+  SECURITY - HAZARDOUS SITUATION IN AFGHANISTAN. UK REGISTERED AIR 
+  OPERATORS ARE ADVISED TO TAKE POTENTIAL RISK INTO ACCOUNT WITHIN
+  FIR KABUL (OAKX). POTENTIAL RISK FROM HEIGHTENED MILITARY
+  ACTIVITY. AR-2026-1616/01.
+  F) SFC  G) UNL
+H0875/26                               VALID: 05-MAR-26 1158 - UFN
+  SR-SS
+  NEW MODEL AIRCRAFT FLYING SITE - MEIKLE WARTLE
+  LOCATION: 572146N 0022656W (WESTERTOWN)
+  VERTICAL LIMITS: SFC-1100FT AGL
+  HOURS: SR-SS
+  CONTACT: 07722 883203 OR 07704 171305
+  SITE ELEVATION: 420FT AMSL
+  UK AIP ENR 5.5 REFERS.
+  F) SFC  G) 1520FT AMSL
+V0009/26                               VALID: 20-FEB-26 1338 - UFN
+  SECURITY - HAZARDOUS SITUATION IN LIBYA
+  UK REGISTERED AIR OPERATORS ARE RECOMMENDED NOT TO ENTER FIR
+  TRIPOLI (HLLL). POTENTIAL RISK FROM ANTI-AIRCRAFT WEAPONRY.
+  THIS SUPERSEDES THE ADVICE IN THE CURRENT UK AIP.
+  UK AIP ENR 1.1. PARA 1.4.5 REFERS.
+  F) SFC  G) UNL
+
+EGTT        LONDON FIR/UIR
+--------------------------
+
+H2349/26                    VALID: 25-MAY-26 0845 - 25-MAY-26 1700
+  FLYING OF LARGE MODEL ACFT WI 0.5NM RADIUS OF 535529N 0005828W
+  (ELVINGTON).  FOR INFO 07973 343893 / 07774 768342.
+  AR-2026-3868/01.
+  F) SFC  G) 1600FT AMSL
+D2083/26                    VALID: 25-MAY-26 0830 - 31-MAY-26 1430
+  25 0830-1900, 26 0830-1630, 31 0900-1430
+  DANGER AREA EGD410 STRENSALL ACTIVATED
+  F) SFC  G) 1000FT AMSL
+B0847/26                    VALID: 25-MAY-26 0830 - 29-MAY-26 1300
+  YEOVILTON LOWER AIRSPACE RADAR SERVICE
+  AMENDED HOURS OF OPERATION
+  MON     CLOSED
+  TUE-THU 0900-1600
+  FRI     0830-1300
+D1698/26                    VALID: 25-MAY-26 0800 - 25-MAY-26 1600
+  DANGER AREA EGD118 PEMBREY DEACTIVATED
+  F) SFC  G) 12000FT AMSL
+D2091/26                    VALID: 25-MAY-26 0800 - 25-MAY-26 1600
+  DANGER AREA EGD207 HOLBEACH DEACTIVATED.
+  F) SFC  G) 23000FT AMSL
+D2105/26                    VALID: 25-MAY-26 0800 - 25-MAY-26 1530
+  DANGER AREA EGD307 DONNA NOOK DEACTIVATED
+  F) SFC  G) 20000FT AMSL
+H2642/26                    VALID: 25-MAY-26 0800 - 29-MAY-26 1300
+  0800-1300
+  MET BALLOON RELEASE/S WI 1NM RADIUS OF 530058N 0014431W
+  (ASHBOURNE). THIS ACTIVITY WILL NOT BE WHOLLY CONTAINED WI
+  LATERAL DIMENSION AS NOTIFIED. ASSOCIATED EQUIPMENT WILL
+  SUBSEQUENTLY DESCEND BY PARACHUTE. FOR INFO 01142131050.
+  AR-2025-6626/37.
+  F) SFC  G) UNL
+H2643/26                    VALID: 25-MAY-26 0800 - 29-MAY-26 1300
+  0800-1300
+  MET BALLOON RELEASE/S WI 1NM RADIUS OF 525611N 0030519W
+  (WREXHAM). THIS ACTIVITY WILL NOT BE WHOLLY CONTAINED WI LATERAL
+  DIMENSION AS NOTIFIED. ASSOCIATED EQUIPMENT WILL SUBSEQUENTLY
+  DESCEND BY PARACHUTE. FOR INFO 01142131050. AR-2025-6624/33.
+  F) SFC  G) UNL
+B0850/26                    VALID: 25-MAY-26 0800 - 25-MAY-26 1600
+  BOSCOMBE LOWER AIRSPACE RADAR SER CLSD
+H2644/26                    VALID: 25-MAY-26 0800 - 29-MAY-26 1300
+  0800-1300
+  MET BALLOON RELEASE/S WI 1NM RADIUS OF 532322N 0012610W
+  (SHEFFIELD). THIS ACTIVITY WILL NOT BE WHOLLY CONTAINED WI
+  LATERAL DIMENSION AS NOTIFIED. ASSOCIATED EQUIPMENT WILL
+  SUBSEQUENTLY DESCEND BY PARACHUTE. FOR INFO 0114 213 1050.
+  AR-2025-5247/39.
+  F) SFC  G) UNL
+H2645/26                    VALID: 25-MAY-26 0800 - 29-MAY-26 1300
+  0800-1300
+  MET BALLOON RELEASE/S WI 1NM RADIUS OF 532327N 0013910W
+  (SHEFFIELD). THIS ACTIVITY WILL NOT BE WHOLLY CONTAINED WI
+  LATERAL DIMENSION AS NOTIFIED. ASSOCIATED EQUIPMENT WILL
+  SUBSEQUENTLY DESCEND BY PARACHUTE. FOR INFO 0114 213 1050.
+  AR-2025-5249/39.
+  F) SFC  G) UNL
+B0853/26                    VALID: 25-MAY-26 0800 - 29-MAY-26 1600
+  MARHAM LOWER AIRSPACE RADAR SERVICE OPERATING HOURS
+  25  CLOSED
+  26  0900-1630
+  27  0730-1630
+  28  0900-1630
+  29  0845-1600
+B0827/26                    VALID: 25-MAY-26 0730 - 25-MAY-26 1600
+  CULDROSE LOWER AIRSPACE RADAR SERVICE NOT AVBL
+H2584/26                    VALID: 25-MAY-26 0700 - 21-AUG-26 1500
+  MON-FRI 0700-1500
+  UAS OPR WI AREA BOUNDED BY 521158N 0001919W - 521158N 0001657W -
+  521118N 0001700W - 521124N 0001549W - 521336N 0001344W -
+  521356N 0001059W - 521358N 0000944W - 521347N 0000645W -
+  521410N 0000646W - 521419N 0000610W - 521349N 0000445W -
+  521334N 0000453W - 521322N 0000819W - 521320N 0001310W -
+  521103N 0001510W - 521046N 0001658W - 521023N 0001655W -
+  521022N 0001924W - 521158N 0001919W (CAMBOURNE TO ROXTON). MAX HGT
+  394FT AGL. CONCURRENT OPR OF MULTIPLE UAS. FOR INFO 07976 281355.
+  AR-2026-4240/01.
+  F) SFC  G) 700FT AMSL
+B0851/26                    VALID: 25-MAY-26 0700 - 25-MAY-26 1600
+  PLYMOUTH MIL LOWER AIRSPACE RADAR SER EAST AND WEST CLSD. SPECIAL 
+  USE AIRSPACE CROSSING SER PROVIDED BY SWANWICK MIL.
+D2112/26                    VALID: 25-MAY-26 0700 - 25-MAY-26 1700
+  DANGER AREA EGD009B WEMBURY ACTIVATED
+  F) SFC  G) 2000FT AMSL
+H2658/26                    VALID: 25-MAY-26 0600 - 26-JUN-26 1600
+  0600-1600
+  PIPELINE INSPECTION NOTIFICATION PROCEDURE SYSTEM (PINS)
+  WILL TAKE PLACE IN THE FOLLOWING LOW FLYING AREAS-
+  1, 2, 3, 4, 5, 6, 7N, 7S, 8, 9, 10, 11N,
+  11S, 12, 18, 19, THAMES VALLEY AVOIDANCE AREA
+  MAX HEIGHT 2000FT AGL.
+  UK AIP ENR 6 (PINS AREAS AND UK DAY LOW FLYING SYSTEM (DLFS))
+  REFERS. 26/05/206/LFC
+  F) SFC  G) 6500FT AMSL
+H2480/26                    VALID: 25-MAY-26 0405 - 20-AUG-26 1920
+  MON-FRI SR-SS
+  UAS OPR WI 1NM RADIUS OF 510636N 0020223W (CHILMARK). MAX HGT
+  1000FT AGL. FOR INFO 07826 918598. AR-2026-3786/05.
+  F) SFC  G) 1700FT AMSL
+H2654/26                    VALID: 25-MAY-26 0401 - 25-MAY-26 2006
+  SR-SS
+  CIVIL AIRCRAFT NOTIFICATION PROCEDURE - MULTIPLE PARAGLIDERS OPR
+  WI 2NM RADIUS OF PSN 514021N 0013143W (BUCKLAND, OXFORDSHIRE). LOW
+  FLYING AREA 1C 2000FT AGL. CTC 07803409988. 26/05/205/LFC
+  F) SFC  G) 2500FT AMSL
+H2585/26                    VALID: 24-MAY-26 2030 - 24-MAY-26 2130
+  FIREWORKS WI 0.1NM RADIUS OF 515652N 0003755E (HALSTEAD).  FOR
+  INFO 07763 380849. AR-2026-4255/01.
+  F) SFC  G) 700FT AMSL
+H2202/26                    VALID: 24-MAY-26 1700 - 29-MAY-26 2259
+  1700-2259
+  LASERS, SEARCHLIGHTS WI 1NM RADIUS OF 545241N 0032251W (SILLOTH). 
+  FOR INFO 07552 020973. AR-2026-3604/01.
+  F) SFC  G) UNL
+H2348/26                    VALID: 24-MAY-26 1230 - 24-MAY-26 2100
+  UAS OPR WI 0.3NM RADIUS OF 513621N 0000356W (TOTTENHAM). MAX HGT
+  400FT AGL. FOR INFO 07920 786990. AR-2026-3871/01.
+  F) SFC  G) 500FT AMSL
+H2633/26                    VALID: 24-MAY-26 1050 - 25-MAY-26 1306
+  24 1050-1120, 25 1236-1306
+  BATTLE OF BRITAIN MEMORIAL FLIGHT FLYPAST WI 1NM RADIUS OF
+  530257N 0000241W (CARRINGTON). FOR OPERATIONAL CALLS ONLY CTC
+  01526 347716. AR-2026-4195/01.
+  F) SFC  G) 2100FT AMSL
+D2115/26                    VALID: 24-MAY-26 0600 - 24-MAY-26 2359
+  DANGER AREA EGD128 EVERLEIGH  ACTIVATED
+  F) SFC  G) 3500FT AMSL
+H2566/26                    VALID: 24-MAY-26 0410 - 24-MAY-26 2004
+  SR-SS
+  KITE FLYING WI 2NM RADIUS OF 503050N 0022722W (ISLE OF PORTLAND
+  KITE FLYING SITE, DORSET. MAX HGT 3000FT AGL.
+  FOR INFO 07717 155066. AR-2026-4210/01.
+  F) SFC  G) 3400FT AMSL
+H2655/26                    VALID: 24-MAY-26 0402 - 24-MAY-26 2005
+  SR-SS
+  CIVIL AIRCRAFT NOTIFICATION PROCEDURE - MULTIPLE PARAGLIDERS OPR
+  WI 2NM RADIUS OF PSN 514021N 0013143W (BUCKLAND, OXFORDSHIRE). LOW
+  FLYING AREA 1C 2000FT AGL. CTC 07803 409988. 26/05/204/LFC
+  F) SFC  G) 2500FT AMSL
+H2619/26                    VALID: 24-MAY-26 0330 - 25-MAY-26 2000
+  0330-2000
+  CIVIL AIRCRAFT NOTIFICATION PROCEDURE - MULTIPLE PARAGLIDERS OPR
+  IN LOW FLYING AREA 7 WI 2NM RADIUS OF PSN 525141N 0043120W
+  (LLANENGAN,GWYNEDD). 2000FT AGL. CTC 07790 904088. 26/05/195/LFC
+  F) SFC  G) 3200FT AMSL
+H2631/26                    VALID: 23-MAY-26 1355 - 25-MAY-26 1420
+  23 1355-1425, 25 1350-1420
+  BATTLE OF BRITAIN MEMORIAL FLIGHT FLYPAST WI 1NM RADIUS OF
+  535235N 0023324W (CHIPPING) . FOR OPERATIONAL CALLS ONLY CTC 01526
+  347716. AR-2026-4174/01.
+  F) SFC  G) 2800FT AMSL
+H2627/26                    VALID: 23-MAY-26 1045 - 25-MAY-26 1355
+  23 1045-1125, 24 1154-1224, 25 1325-1355
+  BATTLE OF BRITAIN MEMORIAL FLIGHT FLYPAST WI 1NM RADIUS OF
+  530757N 0021801W (SMALLWOOD). FOR OPERATIONAL CALLS ONLY CTC
+  01526 347716. AR-2026-4175/01.
+  F) SFC  G) 2400FT AMSL
+H2538/26                    VALID: 23-MAY-26 0900 - 31-MAY-26 1600
+  0900-1600
+  GLIDER AREAS WI 1.5NM RADIUS OF 531445N 0005129W (DARLTON).  FOR
+  INFO 07772 704178 OR 07887 726509. AR-2026-4139/03.
+  F) SFC  G) 5300FT AMSL
+H2512/26                    VALID: 23-MAY-26 0600 - 25-MAY-26 2159
+  0600-2159
+  MIL ACFT SHALL AVOID AN EQUESTRIAN EVENT WI 2NM RADIUS OF PSN
+  511540N 0004903W (TWESELDOWN, HAMPSHIRE) LOW FLYING AREA 1B AND
+  NIGHT ROTARY REGION 1. BTN SFC AND 2000FT AGL. EVENT CTC 01252
+  819961. 26/05/164 LFC
+  F) SFC  G) 2700FT AMSL
+H2418/26                    VALID: 23-MAY-26 0500 - 20-AUG-26 1700
+  0500-1700
+  UAS OPR BEYOND VISUAL LINE OF SIGHT (BVLOS) UTILISING VISUAL
+  OBSERVERS (EXTENDED LINE OF SIGHT) WI AREA BOUNDED BY
+  514809N 0005054W - 514831N 0005002W - 514804N 0004936W -
+  514735N 0004849W - 514716N 0004811W - 514650N 0004715W -
+  514610N 0004528W - 514538N 0004425W - 514504N 0004342W -
+  514404N 0004240W - 514313N 0004155W - 514258N 0004142W -
+  514238N 0004231W - 514325N 0004318W - 514431N 0004416W -
+  514527N 0004520W - 514607N 0004648W - 514646N 0004835W -
+  514730N 0005001W - 514809N 0005054W
+  (BISHOPSTONE TO GREAT MISSENDEN). MAX HGT 500FT AGL. FOR INFO
+  07464 713829. AR-2026-4030/01.
+  F) SFC  G) 1300FT AMSL
+H2156/26                    VALID: 23-MAY-26 0408 - 19-AUG-26 1923
+  SR-SS
+  FLYING OF LARGE MODEL ACFT WI 1NM RADIUS OF 510652N 0021702W
+  (MERE). FOR INFO 07812 707597. AR-2026-3531/01.
+  F) SFC  G) 2900FT AMSL
+H2626/26                    VALID: 23-MAY-26 0400 - 24-MAY-26 2016
+  SR-SS
+  CIVIL AIRCRAFT NOTIFICATION PROCEDURE - MULTIPLE PARAGLIDERS
+  OPR WI 2NM RADIUS OF PSN 530107N 0022733W (HATHERTON,CHESHIRE).
+  LOW FLYING AREA 9A. 2000FT AGL. CTC 07301090227 . 26/05/200/LFC
+  F) SFC  G) 3800FT AMSL
+H2099/26                    VALID: 23-MAY-26 0358 - 31-MAY-26 2012
+  SR-SS
+  MAJOR GLIDING COMPETITION. INTENSE ACT WI 5NM RADIUS
+  515602N 0003807W (LEIGHTON BUZZARD). UP TO 50 GLIDERS PLUS TUG
+  ACFT OPR. SEE SEPARATE DAILY NOTAM AND GLIDINGTASKS.CO.UK FOR
+  GLIDER
+  ROUTES OUTSIDE THIS AREA. FOR INFO CTC 01582 691936 OR CH 119.905.
+  AR-2026-3422/01.
+  F) SFC  G) FL100
+H2580/26                    VALID: 22-MAY-26 1500 - 25-MAY-26 0500
+  1500-0500
+  LASER DISPLAY WI 1NM RADIUS OF 543900N 0033033W (GREAT CLIFTON).
+  FOR INFO 07708 706442. AR-2026-4254/01.
+  F) SFC  G) UNL
+J0767/26                    VALID: 22-MAY-26 1200 - 24-MAY-26 2200
+  22 1200-2200, 23 24 0830-2200
+  RESTRICTED AREA (TEMPORARY) ACTIVE FOR UAS ONLY WI 0.8NM RADIUS 
+  OF 545240N 0012840W (SUNDERLAND). DOES NOT APPLY TO ANY UAS FLYING
+  IN ACCORDANCE WITH EXCEPTIONS STATED IN AIC M 037/2026. FURTHER
+  DETAILS
+  WWW.NATS.AERO/AIS. RESTRICTION OF FLYING REGULATIONS MADE UNDER
+  ARTICLE 239 OF AIR NAV ORDER 2016. AR-2026-1024/01.
+  F) SFC  G) 1500FT AMSL
+H2555/26                    VALID: 22-MAY-26 1200 - 24-MAY-26 2259
+  1200-2259
+  UAS SWARM OPR WI 0.2NM RADIUS OF 521408N 0003612W (PODDINGTON).
+  SWARM MADE UP OF 120 UAS. MAX HGT 400FT AGL. FOR INFO 07970
+  017256. AR-2026-3945/03.
+  F) SFC  G) 800FT AMSL
+H2556/26                    VALID: 22-MAY-26 0900 - 25-MAY-26 1700
+  0900-1700
+  KITE FLYING WI 0.6NM RADIUS OF 513346N 0034332W (MARGAM COUNTY
+  PARK, PORT TALBOT). MAX HGT 2000FT AGL. FOR INFO 07742 421403.
+  AR-2026-1604/01.
+  F) SFC  G) 2700FT AMSL
+H0680/26                    VALID: 22-MAY-26 0800 - 10-JUN-26 2000
+  0800-2000
+  FLYING OF LARGE MODEL ACFT WI 1NM RADIUS OF 522930N 0010010W
+  (LAUGHTON).  FOR INFO 07824862575. AR-2025-7014/01.
+  F) SFC  G) 2100FT AMSL
+J1110/26                    VALID: 22-MAY-26 0800 - 25-MAY-26 1900
+  0800-1900
+  RESTRICTED AREA (TEMPORARY) ACTIVE (SALTBY) WI 2NM RADIUS OF PSN
+  524947N 0004245W. APPLIES TO ALL ACFT INCLUDING ANY SMALL BALLOON,
+  ANY KITE, ANY UAS AND ANY PARACHUTE INCLUDING A PARASCENDING
+  PARACHUTE OR PARAMOTOR. DOES NOT APPLY TO ANY ACFT FLYING IN
+  ACCORDANCE WITH EXCEPTIONS STATED IN THE AIC. AIC M 040/2026 WITH
+  CHART, REFERS. FURTHER DETAILS WWW.NATS.AERO/AIS. RESTRICTION OF
+  FLYING REGULATIONS MADE UNDER ARTICLE 239 OF THE AIR NAV ORDER
+  2016. AR-2026-1467/01.
+  F) SFC  G) 5600FT AMSL
+H2510/26                    VALID: 22-MAY-26 0600 - 24-MAY-26 2159
+  0600-2159
+  MIL ACFT SHALL AVOID AN EQUESTRIAN EVENT WI 2NM RADIUS OF PSN
+  531903N 0010227W (WORKSOP, NOTTINGHAMSHIRE) LOW FLYING AREAS 11, 8
+  AND NIGHT SECTOR 3A. SFC TO 2000FT AGL. 26/05/162/LFC
+  F) SFC  G) 2300FT AMSL
+H2215/26                    VALID: 22-MAY-26 0415 - 29-MAY-26 2015
+  SR-SS
+  VINTAGE GLIDER CLUB NATIONAL RALLY - INTENSE GLIDING ACTIVITY WI
+  25NM RADIUS OF 505107N 0031639W (NORTH HILL GLIDER SITE). SOME
+  VINTAGE GLIDERS EQUIPPED WITH FLARM ELECTRONIC CONSPICUITY. FOR
+  INFO 07964 693311 / 01404 841386 OR CH 129.905. AR-2026-3401/05.
+  F) SFC  G) 6000FT AMSL
+H2416/26                    VALID: 22-MAY-26 0359 - 17-AUG-26 1920
+  SR-SS
+  FLYING OF LARGE MODEL ACFT WI 1NM RADIUS OF 514301N 0001544W
+  (SOUTH MIMMS).  FOR INFO 07710924721. AR-2026-4025/01.
+  F) SFC  G) 2000FT AMSL
+H2411/26                    VALID: 22-MAY-26 0357 - 17-AUG-26 1921
+  SR-SS
+  FLYING OF LARGE MODEL ACFT WI 1NM RADIUS OF 515904N 0000953W
+  (BALDOCK). FOR INFO 07710 924721. AR-2026-4024/01.
+  F) SFC  G) 2000FT AMSL
+H2414/26                    VALID: 22-MAY-26 0348 - 17-AUG-26 1919
+  SR-SS
+  FLYING OF LARGE MODEL ACFT WI 1NM RADIUS OF 525528N 0005747E
+  (WESTGATE). FOR INFO 07710 924721. AR-2026-4022/01.
+  F) SFC  G) 1700FT AMSL
+H2393/26                    VALID: 22-MAY-26 0000 - 27-MAY-26 2359
+  A CULTURAL EVENT WILL TAKE PLACE IN LOW FLYING AREA 17/ NIGHT
+  SECTOR 3BW WI 2NM RADIUS OF PSN 541025N 0030404W (ULVERSTON,
+  BARDSEA). MILITARY AIRCRAFT SHALL AVOID THE AREA BETWEEN SFC TO
+  2000FT AGL. CTC 07765 241453 26/05/146/LFC
+  F) SFC  G) 2500FT AMSL
+H1763/26                    VALID: 21-MAY-26 1900 - 24-MAY-26 2259
+  21 1900-0400, 22-24 1900-2259
+  LASERS, FIREWORKS WI 1NM RADIUS OF 545231N 0012819W (PENSHAW).
+  FIREWORKS UP TO 400FT AGL. FOR INFO 07983 660448. AR-2026-2177/03.
+  F) SFC  G) UNL
+D1556/26                    VALID: 21-MAY-26 1630 - 28-MAY-26 2259
+  21 28 1630-2259
+  DANGER AREA EGD408 FELDOM ACTIVATED
+  F) SFC  G) 3000FT AMSL
+H2266/26                    VALID: 21-MAY-26 1500 - 25-MAY-26 0700
+  SEARCHLIGHT DISPLAY WI 1NM RADIUS OF 514644N 0024314W (MITCHEL
+  TROY). FOR INFO 07922 008364. AR-2026-3696/01.
+  F) SFC  G) UNL
+H2589/26                    VALID: 21-MAY-26 1030 - 31-MAY-26 1700
+  21 1030-1700, 22-31 0700-1700
+  AERIAL SURVEY. ONE DA42 OPR ROUTING:
+  531650N 0005716W
+  540504N 0004931E
+  534828N 0010144E
+  534814N 0011226E
+  530219N 0022255E
+  531650N 0005716W
+  (RETFORD/GAMSTON AD AND NORTH SEA).  FOR INFO 01777 838731.
+  AR-2026-4258/02.
+  F) SFC  G) 2600FT AMSL
+H2192/26                    VALID: 21-MAY-26 0900 - 25-MAY-26 1600
+  0900-1600
+  AREA OF INTENSE AERIAL ACTIVITY WI AREA BOUNDED BY
+  523207N 0024717W - 523619N 0022829W - 523104N 0021535W -
+  522042N 0021702W - 521338N 0024428W - 522232N 0024230W -
+  523207N 0024717W (TENBURY WELLS TO BRIDGNORTH).  FORMATION OF UP
+  TO 24 LIGHT ACFT. FOR INFO 07969 664202. AR-2026-3598/01.
+  F) 1500FT AMSL  G) 6800FT AMSL
+H2558/26                    VALID: 20-MAY-26 1700 - 24-MAY-26 2200
+  1700-2200
+  LASER DISPLAY WI 1NM RADIUS OF 513236N 0022343W (CHIPPING
+  SODBURY). FOR INFO 07780 555159. AR-2026-4203/01.
+  F) SFC  G) UNL
+H2565/26                    VALID: 20-MAY-26 1323 - 05-JUN-26 2018
+  SR-SS
+  UAS OPR WI 1NM RADIUS OF 521436N 0002145W (COLMWORTH). MAX HGT
+  400FT AGL. FOR INFO 07917 781714 / 07979 646975. AR-2026-3437/02.
+  F) SFC  G) 700FT AMSL
+J1349/26                    VALID: 20-MAY-26 1154 - 30-JUN-26 1700
+  MON-THU 0700-1700
+  TEMPO DANGER AREA (TDA) EGD390A INSTALLED WI 1.61NM RADIUS OF
+  535647N 0010421W (CLEMENTHORPE, YORK). BEYOND VISUAL LINE OF
+  SIGHT (BVLOS) UAS OPS CONTAINED WHOLLY WI THE TDA. MAX HGT 400FT
+  AGL. EMERG SERVICES ACFT MAY ENTER THE AIRSPACE IN ACCORDANCE
+  WITH LOCAL DECONFLICTION AGREEMENTS. OPEN AND SPECIFIC CAT VLOS
+  UAS OPS ARE PERMITTED WI THE TDA WITHOUT PRIOR APPROVAL OR
+  DECONFLICTION. OTHER NON-STANDARD FLIGHT, FLIGHT RESTRICTION ZONE
+  OR CONTROLLED AIRSPACE APPROVALS MUST BE OBTAINED. OPERATORS ARE
+  REMINDED OF THEIR RESPONSIBILITY UNDER CAP722 5.2.2.3 REGARDING
+  OPR IN CLOSE PROXIMITY TO AN EMERG RESPONSE EFFORT. FOR INFO
+  AROPS(AT)CAA.CO.UK.  AR-2026-1395/07.
+  F) SFC  G) 600FT AMSL
+H2496/26                    VALID: 20-MAY-26 1100 - 17-AUG-26 2259
+  1100-2259
+  UAS SWARM OPR WI 0.2NM RADIUS OF 511817N 0021844W (HINTON
+  CHARTERHOUSE). SWARM MADE UP OF 1000 UAS. MAX HGT 400FT AGL. FOR
+  INFO 07915 311799. AR-2026-4096/01.
+  F) SFC  G) 800FT AMSL
+H2302/26                    VALID: 20-MAY-26 0900 - 29-MAY-26 1200
+  20-21 0900-2100, 22 0900-1200, 26-28 0900-2100, 29 0900-1200
+  UAS OPR WI 0.5NM RADIUS OF 522811N 0010341W (THEDDINGWORTH).
+  MAX HGT 394FT AGL. FOR INFO 07944 286191 OR 07305 819350.
+  AR-2026-3757/01.
+  F) SFC  G) 1000FT AMSL
+B0835/26                    VALID: 20-MAY-26 0800 - 05-JUN-26 1700
+  0800-1700
+  GNSS(GPS) SIGNAL JAMMING. JAMMERS LOCATED WI 8.1NM RADIUS PSN
+  520053N 0033831W (SENNYBRIDGE). ACTIVITY MAY AFFECT ACFT WI 60NM.
+  MAY ALSO AFFECT AIRBORNE ELECTRONIC SITUATIONAL AWARENESS DEVICES
+  AND UAS CONTROL. GNSS(GPS) RECEIVERS MAY SUFFER INTERMITTENT /
+  TOTAL FAILURE OR GIVE INCORRECT POSITION INFO. FOR INFO/CEASE
+  JAMMING 01874 635599 / 01980 957904. AR-2026-954/06.
+J1175/26                    VALID: 19-MAY-26 0600 - 30-MAY-26 2200
+  TUE 0600-1500, WED-FRI 0600-1800, SAT 1200-2200
+  TEMPO DANGER AREA (TDA) EGD291A INSTALLED WI AREA BOUNDED BY
+  STRAIGHT LINES JOINING:
+  523704N 0010751W - 523704N 0010749W - 523647N 0010749W -
+  523550N 0010736W - 523550N 0010741W - 523645N 0010752W -
+  523649N 0010755W - 523702N 0010826W - 523710N 0010846W -
+  523712N 0010844W - 523653N 0010758W - 523649N 0010752W -
+  523704N 0010751W (KNIGHTON FIELDS, LEICESTER). BEYOND VISUAL LINE
+  OF SIGHT (BVLOS) UAS OPS WITHOUT VISUAL OBSERVERS CONTAINED WHOLLY
+  WI THE TDA. MAX HGT 200FT AGL. EMERG SERVICES ACFT MAY ENTER THE
+  AIRSPACE IN ACCORDANCE WITH LOCAL DECONFLICTION AGREEMENTS. FOR
+  INFO 07484 424457. AR-2025-9316/28.
+  F) SFC  G) 500FT AMSL
+J1178/26                    VALID: 19-MAY-26 0600 - 30-MAY-26 2200
+  TUE 0600-1500, WED-FRI 0600-1800, SAT 1200-2200
+  TEMPO DANGER AREA (TDA) EGD179A INSTALLED WI AREA BOUNDED BY
+  512329N 0000459W - 512330N 0000453W - 512336N 0000439W -
+  512417N 0000415W - 512423N 0000416W - 512423N 0000410W -
+  512414N 0000407W - 512327N 0000443W - 512239N 0000531W -
+  512240N 0000534W - 512247N 0000531W - 512311N 0000514W -
+  512258N 0000554W - 512259N 0000555W - 512314N 0000514W -
+  512333N 0000521W - 512348N 0000551W - 512353N 0000558W -
+  512353N 0000557W - 512342N 0000534W - 512329N 0000459W (THORNTON
+  HEATH, SOUTH NORWOOD). BEYOND VISUAL LINE OF SIGHT (BVLOS) UAS OPS
+  WITHOUT VISUAL OBSERVERS CONTAINED WHOLLY WI THE TDA. MAX HGT
+  400FT AGL. EMERG SERVICES ACFT MAY ENTER THE AIRSPACE IN
+  ACCORDANCE WITH LOCAL DECONFLICTION AGREEMENTS. FOR INFO 07484
+  424457.
+  AR-2026-2419/04.
+  F) SFC  G) 600FT AMSL
+H2410/26                    VALID: 18-MAY-26 1100 - 01-AUG-26 2230
+  1100-2230
+  UAS SWARM OPR WI 0.15NM RADIUS OF 514517N 0001548W (WEST OF
+  HATFIELD). SWARM MADE UP OF 600 UAS. MAX HGT 400FT AGL. FOR INFO
+  07738 612566. AR-2026-4018/01.
+  F) SFC  G) 700FT AMSL
+H2153/26                    VALID: 18-MAY-26 0410 - 15-AUG-26 1931
+  SR-SS
+  FLYING OF LARGE MODEL ACFT WI 0.3NM RADIUS OF 514901N 0015625W
+  (CHEDWORTH). FOR INFO 07816 506828. AR-2026-3497/01.
+  F) SFC  G) 2400FT AMSL
+H2336/26                    VALID: 13-MAY-26 0402 - 09-AUG-26 1949
+  SR-SS
+  FLYING OF LARGE MODEL ACFT WI 0.5NM RADIUS OF 543319N 0010408W
+  (GUISBOROUGH).  FOR INFO 07528 971745. AR-2026-3851/01.
+  F) SFC  G) 1500FT AMSL
+B0804/26                               VALID: 13-MAY-26 0000 - UFN
+  UK NOTAM SERIES - ADD TURKS AND CAICOS ISLANDS TO THE 'U' SERIES.
+  UK AIP GEN 3.1.3.6 REFERS.
+H2024/26                    VALID: 12-MAY-26 0407 - 08-AUG-26 1945
+  SR-SS
+  FLYING OF LARGE MODEL ACFT WI 0.5NM RADIUS OF 532534N 0002805W
+  (1.5NM NE OF GLENTHAM).  FOR INFO 07851 515104 / 07769 786270.
+  AR-2026-3390/01.
+  F) SFC  G) 1700FT AMSL
+H2305/26                    VALID: 11-MAY-26 2300 - 29-JUN-26 2300
+  UAS OPR BEYOND VISUAL LINE OF SIGHT (BVLOS) UTILISING VISUAL
+  OBSERVERS (EXTENDED LINE OF SIGHT) WI 0.1NM RADIUS OF
+  520247N 0004935W (FAIRFIELDS, BUCKINGHAMSHIRE). MAX HGT 328FT AGL.
+  FOR INFO 00447762568181. AR-2026-3651/02.
+  F) SFC  G) 700FT AMSL
+H2306/26                    VALID: 11-MAY-26 2300 - 30-JUL-26 2300
+  UAS OPR BEYOND VISUAL LINE OF SIGHT (BVLOS) UTILISING VISUAL
+  OBSERVERS (EXTENDED LINE OF SIGHT) WI 0.31NM RADIUS OF
+  545556N 0013708W (TEAM VALLEY, GATESHEAD). MAX HGT 328FT AGL. FOR
+  INFO 07762 568181. AR-2026-3653/01.
+  F) SFC  G) 500FT AMSL
+H2234/26                    VALID: 07-MAY-26 0900 - 04-AUG-26 1900
+  0900-1900
+  FLYING OF LARGE MODEL ACFT WI 1NM RADIUS OF 514105N 0000741W
+  (BOTANY BAY). FOR INFO 07886 138027. AR-2026-3652/02.
+  F) SFC  G) 2000FT AMSL
+H2187/26                    VALID: 06-MAY-26 1900 - 31-MAY-26 2200
+  1900-2200
+  UAS SWARM OPR WI 1NM RADIUS OF 504050N 0012326W (CALBOURNE).
+  SWARM MADE UP OF 150 UAS. MAX HGT 600FT AGL. FOR INFO 07919
+  578177. AR-2026-3599/01.
+  F) SFC  G) 1300FT AMSL
+H2105/26                    VALID: 06-MAY-26 0800 - 31-MAY-26 1800
+  0800-1800
+  UAS SWARM OPR WI 0.5NM RADIUS OF 524650N 0004225W (SEWSTERN).
+  SWARM MADE UP OF 140 UAS. MAX HGT 400FT AGL. FOR INFO 07929
+  523990. AR-2026-3498/01.
+  F) SFC  G) 900FT AMSL
+H2134/26                    VALID: 05-MAY-26 1830 - 30-MAY-26 2200
+  1830-2200
+  UAS SWARM OPR WI 1NM RADIUS OF 504109N 0011423W (DOWNEND, ISLE OF
+  WIGHT). SWARM MADE UP OF 150 UAS. MAX HGT 600FT AGL. FOR INFO
+  07919 578177
+  F) SFC  G) 1100FT AMSL
+H1979/26                    VALID: 04-MAY-26 0800 - 30-JUL-26 2000
+  0800-2000
+  FLYING OF LARGE MODEL ACFT WI 0.3NM RADIUS OF 532854N 0022839W
+  (GLAZEBURY). FOR INFO 07969 460032. AR-2026-3321/01.
+  F) SFC  G) 1600FT AMSL
+H1576/26                    VALID: 02-MAY-26 0530 - 01-JUN-26 1800
+  0530-1800
+  UAS OPR WI 1.08NM RADIUS OF 524837N 0040726W (LLANBEDR). MAX HGT
+  1800FT AGL. FOR INFO 07375 905933. AR-2026-2739/01.
+  F) SFC  G) 2200FT AMSL
+H2049/26                    VALID: 01-MAY-26 2000 - 30-JUN-26 0500
+  2000-0500
+  FLARE FIRING WI 1NM RADIUS OF 513708N 0024553W (CAERWENT). FLARES
+  WILL DESCEND BY PARACHUTE. FOR INFO 01874 635599. AR-2026-3436/01.
+  F) SFC  G) 1500FT AMSL
+H2052/26                    VALID: 01-MAY-26 0800 - 30-JUN-26 1500
+  0800-1500
+  LIVE FIRING WI 1NM RADIUS OF 513429N 0024608W (ROGIET MOOR SMALL
+  ARMS RANGE). INCREASE TO AIR DANGER HEIGHT. FOR INFO
+  01874 635599. AR-2026-3438/01.
+  F) SFC  G) 900FT AMSL
+J0966/26                    VALID: 30-APR-26 2300 - 31-MAY-26 1800
+  2300-1800
+  TEMPO DANGER AREA (TDA) EGD098B ACTIVATED WI AN AREA BOUNDED BY
+  504703N 0005208E - 505315N 0010128E - 504948N 0011548E -
+  504139N 0011414E - 503926N 0010808E - 504703N 0005208E (ENGLISH
+  CHANNEL). BEYOND VISUAL LINE OF SIGHT UAS OPS CONTAINED WHOLLY WI
+  THE TDA. A SPECIAL USE AIRSPACE ACTIVITY INFORMATION SERVICE
+  (SUAAIS) WILL BE AVBL FM EITHER LONDON INFO ON  FREQ 124.600MHZ
+  (OPR H24) OR FM LYDD ATC ON CH 120.705 LYDD APPROACH DURING THE HR
+  OF
+  WATCH. AIC Y 019/2026 REFERS. AR-2023-11556.
+  F) SFC  G) 1500FT AMSL
+J0967/26                    VALID: 30-APR-26 2300 - 31-MAY-26 1800
+  2300-1800
+  TEMPO DANGER AREA (TDA) EGD098D ACTIVATED WI AN AREA BOUNDED BY
+  505315N 0010128E - 510149N 0011316E - 510635N 0012927E -
+  510336N 0013547E - 510227N 0013230E - 505659N 0012114E -
+  505345N 0011650E - 504948N 0011548E - 505315N 0010128E (ENGLISH
+  CHANNEL). BEYOND VISUAL LINE OF SIGHT UAS OPS CONTAINED WHOLLY WI
+  THE TDA. A SPECIAL USE AIRSPACE ACTIVITY INFORMATION SERVICE
+  (SUAAIS) WILL BE AVBL FM EITHER LONDON INFO ON FREQ 124.600MHZ
+  (OPR H24) OR FM LYDD ATC ON CH 120.705 LYDD APPROACH DURING THE HR
+  OF
+  WATCH. AIC Y 019/2026 REFERS. AR-2023-11556.
+  F) SFC  G) 1500FT AMSL
+J0968/26                    VALID: 30-APR-26 2300 - 31-MAY-26 1800
+  2300-1800
+  TEMPO DANGER AREA (TDA) EGD098A ACTIVATED WI AN AREA BOUNDED BY
+  504815N 0004937E - 505359N 0005825E - 505315N 0010128E -
+  504703N 0005208E - 504815N 0004937E (ENGLISH CHANNEL). BEYOND
+  VISUAL LINE OF SIGHT UAS OPS CONTAINED WHOLLY WI THE TDA. A
+  SPECIAL USE
+  AIRSPACE ACT INFO SER (SUAAIS) WILL BE AVBL FM EITHER LONDON INFO
+  ON FREQ 124.600MHZ (OPR H24) OR FM LYDD ATC ON CH 120.705 LYDD
+  APCH
+  DURING THE HR OF WATCH. AIC Y 019/2026 REFERS. AR-2023-11556.
+  F) SFC  G) 1500FT AMSL
+J0969/26                    VALID: 30-APR-26 2300 - 31-MAY-26 1800
+  2300-1800
+  TEMPO DANGER AREA (TDA) EGD098C ACTIVATED WI AN AREA BOUNDED BY
+  505359N 0005825E - 510326N 0011118E - 510756N 0012635E -
+  510635N 0012927E - 510149N 0011316E - 505315N 0010128E -
+  505359N 0005825E (ENGLISH CHANNEL). BEYOND VISUAL LINE OF SIGHT
+  UAS OPS CONTAINED WHOLLY WI THE TDA. A SPECIAL USE AIRSPACE
+  ACTIVITY
+  INFORMATION SERVICE (SUAAIS) WILL BE AVBL FM EITHER LONDON INFO ON
+  FREQ 124.600MHZ (OPR H24) OR FM LYDD ATC ON CH 120.705 LYDD
+  APPROACH DURING THE HR OF WATCH. AIC Y 019/2026 REFERS.
+  AR-2023-11556.
+  F) SFC  G) 1500FT AMSL
+J0970/26                    VALID: 30-APR-26 2300 - 31-MAY-26 1800
+  2300-1800
+  TEMPO DANGER AREA (TDA) EGD098E ACTIVATED WI AN AREA BOUNDED BY
+  510756N 0012635E - 511454N 0013137E - 512251N 0013322E -
+  511740N 0015439E - 511447N 0020000E - 511153N 0015200E -
+  510607N 0014309E - 510336N 0013547E - 510756N 0012635E (ENGLISH
+  CHANNEL).BEYOND VISUAL LINE OF SIGHT UAS OPS CONTAINED WHOLLY WI
+  THE TDA. A SPECIAL USE AIRSPACE ACT INFO SER (SUAAIS) WILL BE AVBL
+  FM EITHER LONDON INFO ON FREQ 124.600MHZ (OPR H24) OR FM LYDD ATC
+  ON CH 120.705 LYDD APCH DURING THE HR OF WATCH. AIC Y 019/2026
+  REFERS.
+  AR-2023-11556.
+  F) SFC  G) 2500FT AMSL
+J0971/26                    VALID: 30-APR-26 2300 - 31-MAY-26 1800
+  2300-1800
+  TEMPO DANGER AREA (TDA) EGD098F ACTIVATED WI AN AREA BOUNDED BY
+  510341N 0010445E - 510359N 0010700E - 510414N 0011100E -
+  510537N 0011311E - 510612N 0011652E THENCE THE ANTICLOCKWISE ARC
+  OF A CIRCLE OF RADIUS OF 2.25 NM CENTRED ON 510800N 0011900E BTN
+  510612N 0011652E - 510546N 0011912E - 510326N 0011118E -
+  505829N 0010432E - 510120N 0010148E - 510212N 0010531E -
+  510341N 0010445E(ENGLISH CHANNEL). BEYOND VISUAL LINE OF SIGHT UAS
+  OPS CONTAINED WHOLLY WI THE TDA. A SPECIAL USE AIRSPACE ACTIVITY
+  INFORMATION SERVICE (SUAAIS) WILL BE AVBL FM EITHER LONDON INFO ON
+  FREQ 124.600MHZ (OPR H24) OR FM LYDD ATC ON CH 120.705 LYDD
+  APPROACH DURING THE HR OF WATCH. AIC Y 019/2026 REFERS.
+  AR-2023-11556.
+  F) SFC  G) 800FT AMSL
+J0973/26                    VALID: 30-APR-26 2300 - 31-MAY-26 1800
+  2300-1800
+  TEMPO DANGER AREA (TDA) EGD098H ACTIVATED WI AN AREA BOUNDED BY
+  STRAIGHT LINES JOINING 510831N 0012227E - 510756N 0012635E -
+  510629N 0012136E THENCE THE ANTICLOCKWISE ARC OF A CIRCLE RADIUS
+  OF 2.25NM CENTRED ON 510800N 0011900E BTN 510629N 0012136E -
+  510831N 0012227E (PORT OF DOVER). BEYOND VISUAL LINE OF SIGHT UAS
+  OPS CONTAINED WHOLLY WI THE TDA. A SPECIAL USE AIRSPACE ACTIVITY
+  INFORMATION SERVICE (SUAAIS) WILL BE AVBL FM EITHER LONDON INFO ON
+  FREQ 124.600MHZ (OPR H24) OR FM LYDD ATC ON CH 120.705 LYDD
+  APPROACH DURING THE HR OF WATCH. AIC Y 019/2026 REFERS.
+  AR-2023-11556.
+  F) SFC  G) 800FT AMSL
+J0972/26                    VALID: 30-APR-26 2300 - 31-MAY-26 1800
+  2300-1800
+  TEMPO DANGER AREA (TDA) EGD098G ACTIVATED WI AN AREA BOUNDED BY
+  504118N 0002647E - 504815N 0004937E - 503926N 0010808E -
+  503300N 0005110E - 504118N 0002647E (ENGLISH CHANNEL). BEYOND
+  VISUALLINE OF SIGHT UAS OPS CONTAINED WHOLLY WI THE TDA. A SPECIAL
+  USE AIRSPACE ACT INFO SER (SUAAIS) WILL BE AVBL FM EITHER LONDON
+  INFO ON FREQ 124.600MHZ (OPR H24) OR FM LYDD ATC ON CH 120.705
+  LYDD APCH DURING THE HR OF WATCH. AIC Y 019/2026 REFERS.
+  AR-2023-11556. F) SFC  G) 2000FT AMSL
+J0974/26                    VALID: 30-APR-26 2300 - 31-MAY-26 1800
+  2300-1800
+  TEMPO DANGER AREA (TDA) EGD098L ACTIVATED WI AN AREA BOUNDED BY
+  510845N 0012007E - 510831N 0012227E THEN THE CLOCKWISE ARC OF A
+  CIRCLE OF RADIUS 2.25NM CENTRED ON 510800N 0011900E TO
+  510629N 0012136E - 510751N 0012036E - 510757N 0012004E -
+  510845N 0012007E (PORT OF DOVER, ENGLISH CHANNEL). BEYOND VISUAL
+  LINE OF SIGHT UAS OPS CONTAINED WHOLLY WI THE TDA. A SPECIAL USE
+  AIRSPACE ACT INFO SER (SUAAIS) WILL BE AVBL FM EITHER LONDON INFO
+  ON FREQ 124.600MHZ (OPR H24) OR FM LYDD ATC ON CH 120.705 LYDD
+  APCH
+  DURING THE HR OF WATCH. AIC Y 019/2026 REFERS. AR-2023-11556.
+  F) SFC  G) 900FT AMSL
+H1851/26                    VALID: 27-APR-26 0900 - 26-JUL-26 0100
+  0900-0100
+  UAS SWARM OPR WI 1NM RADIUS OF 530714N 0010118W (BILSTHORPE,
+  NEWARK). SWARM MADE UP OF 500 UAS. MAX HGT 600FT AGL. FOR INFO
+  07547 155440. AR-2026-3193/01.
+  F) SFC  G) 1000FT AMSL
+H1844/26                    VALID: 27-APR-26 0800 - 25-JUL-26 1900
+  0800-1900
+  FLYING OF LARGE MODEL ACFT WI 0.13NM RADIUS OF 524451N 0025108W
+  (VCY MONTFORD BRIDGE ABANDONED AD). FOR INFO 07909 511031.
+  AR-2026-3171/01.
+  F) SFC  G) 1800FT AMSL
+H1877/26                    VALID: 27-APR-26 0800 - 26-MAY-26 1500
+  0800-1500
+  KITE FLYING WI 0.5NM RADIUS OF 505208N 0005243W (FUNTINGTON). MAX
+  HGT 1000FT AGL. FOR INFO 07879 592979. AR-2026-3232/01.
+  F) SFC  G) 1300FT AMSL
+H1782/26                    VALID: 27-APR-26 0700 - 20-JUL-26 2130
+  0700-2130
+  LIVE FIRING WI 0.7NM RADIUS OF 510911N 0012307W (MOODY'S DOWN
+  SMALL ARMS RANGE). INCREASE TO AIR DANGER HEIGHT. FOR INFO 07970
+  337 862 / 07901 116 931. AR-2026-3078/02.
+  F) SFC  G) 1100FT AMSL
+B0726/26                    VALID: 24-APR-26 0823 - 29-MAY-26 1100
+  APR 24 0630-1100, APR 27 1030-1100, MAY 04 25 0630-1800, MAY , 
+  05-07 1700-1800, MAY 08 15 22 29 0630-1100
+  WARTON LOWER AIRSPACE RADAR SERVICE NOT AVBL
+H1745/26                    VALID: 24-APR-26 0700 - 22-JUL-26 2000
+  0700-2000
+  FLYING OF LARGE MODEL ACFT WI 0.5NM RADIUS OF 514219N 0000746W
+  (CUFFLEY).  FOR INFO 07496 769327 / 07733 112937. AR-2026-3028/01.
+  F) SFC  G) 1600FT AMSL
+V0015/26                    VALID: 22-APR-26 1025 - 20-JUL-26 2300
+  SECURITY - HAZARDOUS SITUATION IN LEBANON. UK REGISTERED AIR
+  OPERATORS ARE RECOMMENDED NOT TO ENTER FIR BEIRUT (OLBB).
+  POTENTIAL RISK FROM HEIGHTENED MILITARY ACTIVITY. FOR MORE INFO
+  CONTACT UK DEPARTMENT FOR TRANSPORT 02070 826639 OR 02079 443111
+  OUT OF HOURS. AR-2026-3194/01.
+  F) SFC  G) UNL
+H1609/26                    VALID: 22-APR-26 0449 - 20-JUL-26 2022
+  SR-SS
+  FLYING OF LARGE MODEL ACFT WI 0.5NM RADIUS OF 534202N 0011955W
+  (PONTEFRACT, WEST YORKSHIRE).  FOR INFO 07802 725231.
+  AR-2026-2809/01.
+  F) SFC  G) 1800FT AMSL
+H1764/26                    VALID: 19-APR-26 0700 - 17-JUL-26 1800
+  0700-1800
+  AREA OF INTENSE AERIAL ACTIVITY WI 1NM RADIUS OF 514343N 0002251W
+  (PLAISTOWS).  INCREASED MICROLGHT TRAINING, AIRCRAFT JOINING
+  CIRCUIT FROM MULTIPLE DIRECTIONS. AIR GROUND CH 129.830. FOR INFO
+  07855 424049 / 07786 034439. AR-2026-3056/01.
+  F) SFC  G) 2400FT AMSL
+H1683/26                    VALID: 19-APR-26 0505 - 17-JUL-26 2014
+  SR-SS
+  FLYING OF LARGE MODEL ACFT WI AREA BOUNDED BY
+  505527N 0020138W - 505544N 0020054W - 505518N 0020026W -
+  505507N 0020051W - 505458N 0020112W - 505527N 0020138W (CASHMOOR).
+  FOR INFO 07909 022800. AR-2026-2922/01.
+  F) SFC  G) 1900FT AMSL
+H0864/26                    VALID: 16-APR-26 0900 - 13-JUL-26 2259
+  0900-2259
+  UAS SWARM OPR WI 0.3NM RADIUS OF 531152N 0021040W (NORTH RODE).
+  SWARM MADE UP OF 1000 UAS. MAX HGT 400FT AGL. FOR INFO 02031
+  516891. AR-2026-1719/02.
+  F) SFC  G) 900FT AMSL
+H1388/26                    VALID: 16-APR-26 0501 - 10-JUL-26 2021
+  SR-SS
+  FLYING OF LARGE MODEL ACFT WI 0.5NM RADIUS OF 522358N 0000614W 
+  (WISTOW). FOR INFO 07586 292737. AR-2026-2486/01.
+  F) SFC  G) 1700FT AMSL
+H1436/26                    VALID: 15-APR-26 0700 - 13-JUL-26 2130
+  0700-2130
+  FLYING OF LARGE MODEL ACFT WI 1NM RADIUS OF 521435N 0012040W
+  (SOUTHAM, WARWICKSHIRE).  FOR INFO 07801 281492. AR-2026-2566/01.
+  F) SFC  G) 2100FT AMSL
+H1563/26                    VALID: 15-APR-26 0511 - 11-JUL-26 2026
+  SR-SS
+  FLYING OF LARGE MODEL ACFT WI 1NM RADIUS OF 515909N 0020453W
+  (BISHOPS CLEEVE). FOR INFO 07778 034399. AR-2026-2712/01.
+  F) SFC  G) 1700FT AMSL
+H1631/26                    VALID: 14-APR-26 0510 - 12-JUL-26 2020
+  SR-SS
+  UAS OPR WI 1NM RADIUS OF 515056N 0005818W (WESTCOTT). BEYOND
+  VISUAL LINE OF SIGHT. MAX HGT 50FT AGL. FOR INFO 07852 318946.
+  AR-2026-2843/01.
+  F) SFC  G) 500FT AMSL
+H1643/26                    VALID: 13-APR-26 1903 - 12-JUN-26 0354
+  SS-SR
+  UNMANNED CAPTIVE BALLOON IN LOW FLYING AREA 2 WI 1NM RADIUS OF 
+  PSN 511732N 0023002W (BATH, SOMERSET) MAX HGT 200FT AGL. CTC 01761
+  458389. 26/04/130/LFTP
+  F) SFC  G) 600FT AMSL
+H1647/26                    VALID: 13-APR-26 1400 - 12-JUL-26 2013
+  SR-SS
+  UNMANNED CAPTIVE BALLOON IN LOW FLYING AREA THAMES VALLEY 
+  AVOIDANCE AREA WI 1NM RADIUS OF PSN 513655N 0001722E (BRENTWOOD,
+  ESSEX) MAX HEIGHT 200FT AGL. 26/04/133/LFTP CTC 07415 711454
+  F) SFC  G) 500FT AMSL
+H1646/26                    VALID: 13-APR-26 1350 - 12-JUL-26 2022
+  SR-SS
+  UNMANNED CAPTIVE BALLOON IN LOW FLYING AREA 2 WI 1NM RADIUS OF PSN
+  513412N 0014819W (BARNFIELD, SWINDON) MAX HEIGHT 200FT AGL.
+  26/04/132/LFTP CTC 01793 267585
+  F) SFC  G) 600FT AMSL
+H1644/26                    VALID: 13-APR-26 1340 - 12-JUL-26 2016
+  SR-SS
+  UNMANNED CAPTIVE BALLOON IN LOW FLYING AREA 11 WI 1NM RADIUS OF
+  PSN 521529N 0002339E (STUDLANDS PARK, NEWMARKET) MAX HGT 200FT
+  AGL. 26/04/131/LFTP CTC 01638476115
+  F) SFC  G) 280FT AMSL
+H1491/26                    VALID: 12-APR-26 0513 - 09-JUL-26 2040
+  SR-SS
+  FLARE FIRING WI 2.5NM RADIUS OF 542211N 0014603W (CATTERICK 
+  GARRISON). FLARES WILL DESCEND BY PARACHUTE. FOR INFO 01748
+  875503. AR-2026-2557/01.
+  F) SFC  G) 1500FT AMSL
+H1500/26                    VALID: 11-APR-26 0700 - 30-JUN-26 1900
+  0700-1900
+  FLYING OF LARGE MODEL ACFT WI 1NM RADIUS OF 522242N 0005308E
+  (KNETTISHALL). FOR INFO 07914 094525. AR-2026-2652/01.
+  F) SFC  G) 1200FT AMSL
+H1326/26                    VALID: 11-APR-26 0500 - 24-JUN-26 2259
+  LIVE FIRING WI 0.7NM RADIUS OF 514910N 0011008W (OTMOOR SMALL ARMS
+  RANGE). INCREASE TO AIR DANGER HEIGHT. FOR INFO 07970 337 862 OR
+  07901 116931. AR-2026-2395/01.
+  F) SFC  G) 1000FT AMSL
+H1554/26                    VALID: 09-APR-26 0900 - 06-JUL-26 1900
+  0900-1900
+  FLYING OF LARGE MODEL ACFT WI 0.25NM RADIUS OF 525252N 0014647W
+  (MARCHINGTON). FOR INFO 07984 405101. AR-2026-2704/01.
+  F) SFC  G) 1800FT AMSL
+H1518/26                    VALID: 09-APR-26 0511 - 03-JUL-26 2018
+  SR-SS
+  UAS OPR BEYOND VISUAL LINE OF SIGHT (BVLOS) UTILISING VISUAL 
+  OBSERVERS (EXTENDED LINE OF SIGHT) WI 0.5NM RADIUS OF
+  520950N 0012303E (WICKHAM MARKET). MAX HGT 660FT AGL.
+  FOR INFO 07818 502243. AR-2026-2674/01.
+  F) SFC  G) 800FT AMSL
+H1520/26                    VALID: 09-APR-26 0511 - 03-JUL-26 2018
+  SR-SS
+  UAS OPR WI 0.8NM RADIUS OF 521117N 0012724E (SAXMUNDHAM). MAX HGT
+  660FT AGL. FOR INFO 07818 502243. AR-2026-2669/01.
+  F) SFC  G) 800FT AMSL
+H1512/26                    VALID: 09-APR-26 0510 - 03-JUL-26 2018
+  SR-SS
+  UAS OPR WI 0.2NM RADIUS OF 522008N 0013027E (HALESWORTH, 
+  SUFFOLK). MAX HGT 657FT AGL. FOR INFO 07818 502243.
+  AR-2026-2671/01. F) SFC  G) 800FT AMSL
+H1516/26                    VALID: 09-APR-26 0510 - 03-JUL-26 2018
+  SR-SS
+  UAS OPR BEYOND VISUAL LINE OF SIGHT (BVLOS) UTILISING VISUAL
+  OBSERVERS (EXTENDED LINE OF SIGHT) WI AREA BOUNDED BY
+  521741N 0013228E - 521730N 0013256E - 521531N 0013101E -
+  521519N 0013125E - 521538N 0013158E - 521528N 0013213E -
+  521507N 0013226E - 521502N 0013256E - 521451N 0013316E -
+  521446N 0013344E - 521442N 0013404E - 521341N 0013500E -
+  521328N 0013442E - 521349N 0013411E - 521345N 0013327E -
+  521408N 0013304E - 521430N 0013257E - 521457N 0013156E -
+  521453N 0013140E - 521455N 0013051E - 521447N 0012955E -
+  521524N 0012944E - 521703N 0013118E - 521741N 0013228E (MIDDLETON,
+  SUFFOLK). MAX HGT 657FT AGL. FOR INFO 07818 502243.
+  AR-2026-2667/01. F) SFC  G) 800FT AMSL
+H1555/26                    VALID: 09-APR-26 0500 - 03-JUL-26 2100
+  0500-2100
+  UAS OPR BEYOND VISUAL LINE OF SIGHT (BVLOS) UTILISING VISUAL
+  OBSERVERS (EXTENDED LINE OF SIGHT) WI AREA BOUNDED BY
+  521401N 0013730E - 521245N 0013744E - 521244N 0013653E -
+  521228N 0013658E - 521219N 0013640E - 521211N 0013609E -
+  521205N 0013607E - 521205N 0013554E - 521234N 0013500E -
+  521253N 0013447E - 521252N 0013359E - 521238N 0013357E -
+  521242N 0013317E - 521250N 0013319E - 521312N 0013348E -
+  521321N 0013345E - 521327N 0013422E - 521332N 0013459E -
+  521359N 0013533E - 521419N 0013620E - 521401N 0013730E (LEISTON,
+  SUFFOLK). MAX HGT 657FT AGL. FOR INFO 07818
+  502243. AR-2026-2681/01.
+  F) SFC  G) 800FT AMSL
+H1273/26                    VALID: 07-APR-26 0500 - 05-JUL-26 1700
+  0500-1700
+  UAS OPR BEYOND VISUAL LINE OF SIGHT (BVLOS) UTILISING VISUAL
+  OBSERVERS (EXTENDED LINE OF SIGHT) WI AREA BOUNDED BY:
+  521246N 0013312E - 521314N 0013409E - 521327N 0013440E -
+  521333N 0013502E - 521412N 0013547E - 521419N 0013552E -
+  521414N 0013634E - 521351N 0013639E - 521335N 0013709E -
+  521323N 0013727E - 521301N 0013724E - 521302N 0013652E -
+  521323N 0013651E - 521322N 0013622E - 521301N 0013539E -
+  521259N 0013547E - 521300N 0013626E - 521251N 0013629E -
+  521244N 0013620E - 521238N 0013624E - 521235N 0013651E -
+  521233N 0013703E - 521226N 0013707E - 521220N 0013657E -
+  521216N 0013609E - 521222N 0013542E - 521221N 0013535E -
+  521230N 0013519E - 521236N 0013448E - 521252N 0013515E -
+  521257N 0013508E - 521301N 0013443E - 521258N 0013410E -
+  521242N 0013344E - 521246N 0013312E (SIZEWELL). MAX HGT 500FT AGL.
+  FOR INFO 07464 713829. AR-2026-2291/01.
+  F) SFC  G) 600FT AMSL
+B0592/26                    VALID: 04-APR-26 0800 - 28-JUN-26 1600
+  SAT-SUN 0800-1600
+  BRIZE NORTON LOWER AIRPSACE RADAR SERVICE NOT AVBL
+H1377/26                    VALID: 04-APR-26 0537 - 29-JUN-26 2027
+  SR-SS
+  UAS OPR WI 1NM RADIUS OF 510405N 0015526W (COMPTON CHAMBERLAYNE).
+  MAX HGT 400FT AGL. FOR INFO 07826 918598 OR 07345 454315.
+  AR-2026-2456/01.
+  F) SFC  G) 1100FT AMSL
+H1467/26                    VALID: 03-APR-26 1100 - 30-JUN-26 1900
+  1100-1900
+  UAS SWARM OPR WI 0.1NM RADIUS OF 504455N 0004608W (CHURCH 
+  NORTON). SWARM MADE UP OF 100 UAS. MAX HGT 600FT AGL. FOR INFO
+  01243908031. AR-2026-2618/01.
+  F) SFC  G) 700FT AMSL
+H0954/26                    VALID: 01-APR-26 0900 - 29-JUN-26 2000
+  0900-2000
+  FLYING OF LARGE MODEL ACFT WI 1NM RADIUS OF 531943N 0004728W
+  (LITTLEBOROUGH). FOR INFO 07710 863042 / 07865 936556.
+  AR-2026-1889/01.
+  F) SFC  G) 1100FT AMSL
+H1235/26                    VALID: 01-APR-26 0700 - 29-JUN-26 1900
+  FLYING OF LARGE MODEL ACFT WI 1NM RADIUS OF 505833N 0010222W
+  (RAMSDEAN). FOR INFO 07739347722. AR-2026-2248/01.
+  F) SFC  G) 2300FT AMSL
+H1293/26                    VALID: 01-APR-26 0700 - 29-JUN-26 1600
+  0700-1600
+  FLYING OF LARGE MODEL ACFT WI 1NM RADIUS OF 504836N 0040003W
+  (0.75NM NW OF EXBOURNE).  FOR INFO 07966 292903 / 07474 552246.
+  AR-2026-2339/01.
+  F) SFC  G) 3500FT AMSL
+H1234/26                    VALID: 01-APR-26 0542 - 29-JUN-26 2039
+  SR-SS
+  UAS OPR WI 1NM RADIUS OF 531026N 0015849W (THE ROACHES). MAX HGT
+  329FT AGL. FOR INFO 07834 535382. AR-2026-2240/01.
+  F) SFC  G) 2000FT AMSL
+H1200/26                    VALID: 31-MAR-26 0700 - 28-JUN-26 1800
+  0700-1800
+  FLYING OF LARGE MODEL ACFT WI 1NM RADIUS OF 513348N 0013008W
+  (LETCOMBE BASSETT). FOR INFO 07454 733211. AR-2026-2209/01.
+  F) SFC  G) 2200FT AMSL
+H0306/26                    VALID: 29-MAR-26 0830 - 26-JUN-26 1830
+  0830-1830
+  FLYING OF LARGE MODEL ACFT WI 1NM RADIUS OF 521126N 0002448W
+  (RAVENSDEN).  FOR INFO 07876 200320. AR-2026-545/01.
+  F) SFC  G) 1300FT AMSL
+H0307/26                    VALID: 29-MAR-26 0830 - 26-JUN-26 1830
+  0830-1830
+  FLYING OF LARGE MODEL ACFT WI 1NM RADIUS OF 521200N 0002130W
+  (COLESDEN).  FOR INFO 07876 200320 / 07785 397346. AR-2026-544/01.
+  F) SFC  G) 1300FT AMSL
+H1007/26                    VALID: 28-MAR-26 0930 - 28-MAY-26 1830
+  MAR 28 0930-1930, MAR 29-MAY 28 0830-1830
+  FLYING OF LARGE MODEL ACFT WI 1NM RADIUS OF 540815N 0002238W (WOLD
+  NEWTON, EAST YORKSHIRE).  FOR INFO 07483 223878. AR-2026-1978/01.
+  F) SFC  G) 1600FT AMSL
+H1053/26                    VALID: 26-MAR-26 1000 - 23-JUN-26 2200
+  MAR 26 27 28 1000-2300, MAR 29-JUN 23 0900-2200
+  UAS SWARM OPR WI 0.4NM RADIUS OF 502323N 0050309W (NEWQUAY,
+  CORNWALL). SWARM MADE UP OF 100 UAS. MAX HGT 600FT AGL. FOR INFO
+  07502 333038. AR-2026-2046/02.
+  F) SFC  G) 900FT AMSL
+H1230/26                    VALID: 26-MAR-26 0550 - 23-JUN-26 2037
+  SR-SS
+  FLYING OF LARGE MODEL ACFT WI 0.5NM RADIUS OF 533943N 0003340W
+  (WINTERTON, LINCOLNSHIRE). FOR INFO 07508 525011. AR-2026-2242/01.
+  F) SFC  G) 1600FT AMSL
+H1182/26                    VALID: 23-MAR-26 0611 - 19-JUN-26 2038
+  SR-SS
+  CAPTIVE UNMANNED HELIUM BALLOON WI 1NM RADIUS OF 514747N 0035010W
+  (CWMLLYNFELL). MAX HGT 492FT AGL. FOR INFO 07710 701229.
+  AR-2026-150/01.
+  F) SFC  G) 1700FT AMSL
+V0013/26                    VALID: 17-MAR-26 1452 - 29-MAY-26 1200
+  SECURITY - HAZARDOUS SITUATION IN AFGHANISTAN. UK REGISTERED AIR 
+  OPERATORS ARE ADVISED TO TAKE POTENTIAL RISK INTO ACCOUNT WITHIN
+  FIR KABUL (OAKX). POTENTIAL RISK FROM HEIGHTENED MILITARY
+  ACTIVITY. AR-2026-1616/01.
+  F) SFC  G) UNL
+H0944/26                    VALID: 17-MAR-26 0800 - 14-JUN-26 1900
+  MAR 17-28 0800-2000, MAR 29-JUN 14 0700-1900
+  FLYING OF LARGE MODEL ACFT WI 0.55NM RADIUS OF 522203N 0012346W
+  (WOLSTON). FOR INFO 075196 65738. AR-2026-1858/01.
+  F) SFC  G) 1900FT AMSL
+H1031/26                    VALID: 17-MAR-26 0800 - 12-JUN-26 2000
+  MAR 17 - 28 0800-2100, MAR 29 - JUN 12 0700-2000
+  FLYING OF LARGE MODEL ACFT WI 0.5NM RADIUS OF 520800N 0010843W
+  (MORETON PINKNEY). FOR INFO 07746 169314 OR 07973 134141.
+  AR-2026-2004/01.
+  F) SFC  G) 2100FT AMSL
+H0793/26                    VALID: 16-MAR-26 0900 - 08-JUN-26 1700
+  MAR 16-28 0900-1800, MAR 29-JUN 08 0800-1700
+  FLYING OF LARGE MODEL ACFT WI 0.3NM RADIUS OF 511327N 0000111W
+  (OXTED).  FOR INFO 07966439835. AR-2026-1583/01.
+  F) SFC  G) 1800FT AMSL
+H0961/26                    VALID: 14-MAR-26 0900 - 10-JUN-26 2000
+  MAR 14 - MAR 28 0900-2100, MAR 29 - JUN 10 0800-2000
+  FLYING OF LARGE MODEL ACFT WI 0.5NM RADIUS OF 531742N 0033004W
+  (GYPSY LANE).  FOR INFO 07876 597863. AR-2026-1916/01.
+  F) SFC  G) 1600FT AMSL
+J0536/26                    VALID: 10-MAR-26 0945 - 10-JUN-26 2259
+  RESTRICTED AREA (TEMPORARY) INSTALLED FOR UAS ONLY (WHITFIELD)
+  WI AREA BOUNDED BY: 510856N 0011641E - 510907N 0011655E -
+  510912N 0011707E - 510910N 0011724E - 510904N 0011734E -
+  510855N 0011736E - 510852N 0011732E - 510845N 0011735E -
+  510838N 0011730E - 510831N 0011707E - 510831N 0011658E -
+  510842N 0011641E - 510849N 0011638E - 510856N 0011641E.
+  DOES NOT APPLY TO ANY UAS OPERATED BY OR ON BEHALF OF A POLICE AIR
+  SUPPORT UNIT, AN EMERGENCY MEDICAL SERVICE, THE MARITIME AND
+  COASTGUARD AGENCY OR ANY UAS FLYING IN ACCORDANCE WITH A PERMISION
+  ISSUED BY BORDER FORCE CTC EMAIL: SECMANKENT(AT)HOMEOFFICE.GOV.UK.
+  RESTRICTION OF FLYING REGULATIONS MADE UNDER ARTICLE 239 OF THE
+  AIR NAV ORDER 2016.
+  ON EXPIRY OF THIS NOTAM DETAILS WILL BE INCLUDED IN THE UK AIP ENR
+  5.1.  AR-2025-9694/03.
+  F) SFC  G) 1000FT AMSL
+H0898/26                    VALID: 09-MAR-26 1000 - 06-JUN-26 2259
+  MAR 09 - 28 1000-2359, MAR 29 - JUN 06 0900-2259
+  UAS SWARM OPR WI 0.5NM RADIUS OF 522125N 0010447W (WINWICK). SWARM
+  MADE UP OF 500 UAS. MAX HGT 600FT AGL. FOR INFO 07970 017256.
+  AR-2026-1769/01.
+  F) SFC  G) 1200FT AMSL
+H0879/26                    VALID: 06-MAR-26 0001 - 03-JUN-26 2259
+  UAS OPR BEYOND VISUAL LINE OF SIGHT (BVLOS) UTILISING VISUAL
+  OBSERVERS (EXTENDED LINE OF SIGHT) WI 2NM RADIUS OF
+  515053N 0005735W (WESTCOTT). MAX HGT 400FT AGL. FOR INFO
+  07852 318946. AR-2026-1737/01.
+  F) SFC  G) 1000FT AMSL
+H0669/26                    VALID: 05-MAR-26 0830 - 02-JUN-26 1900
+  MAR 05-MAR 28 0830-2000, MAR 29-JUN 02 0730-1900
+  FLYING OF LARGE MODEL ACFT WI 0.18NM RADIUS OF 523620N 0012748W
+  (SIBSON).  FOR INFO 07916 536553. AR-2026-1398/02.
+  F) SFC  G) 1500FT AMSL
+H0659/26                    VALID: 04-MAR-26 0800 - 01-JUN-26 2000
+  MAR 04-28 0800-2100, MAR 29-JUN 01 0700-2000
+  FLYING OF LARGE MODEL ACFT WI 1NM RADIUS OF 510718N 0021047W
+  (MONKTON DEVERILL).  FOR INFO 07962 013388. AR-2026-1376/01.
+  F) SFC  G) 2300FT AMSL
+H0712/26                    VALID: 03-MAR-26 0654 - 25-MAY-26 2009
+  SR-SS
+  FLYING OF LARGE MODEL ACFT WI 0.8NM RADIUS OF 503439N 0033202W
+  (ASHCOMBE).  FOR INFO 07474 424630. AR-2026-1483/01.
+  F) SFC  G) 2400FT AMSL
+B0394/26                               VALID: 02-MAR-26 0000 - UFN
+  WESTERN RADAR ADMIN PHONE NUMBER CHANGED TO 01489-445560.
+  UK AIP ENR 1.6.4.2.1 RERERS.
+B0392/26                    VALID: 25-FEB-26 1312 - 24-MAY-26 2359
+  DANGER AREA EGD218B FAIRFORD IS MISSING FROM THE FOLLOWING 
+  1:250,000 VFR CHARTS:
+  SHEET 6 ENGLAND EAST - EDITION 17 EFFECTIVE 10 JUL 25
+  SHEET 5 CENTRAL ENGLAND AND WALES - EDITION 16 EFFECTIVE 07 AUG 25
+  FURTHER DETAILS ARE AVBL VIA ENR 5.1 AND ON THE NATS INTERNET
+  BRIEFING SERVICE
+  1:250K VFR CHART AMENDMENT PAGE
+  F) FL050  G) FL240
+H0692/26                    VALID: 25-FEB-26 0700 - 25-MAY-26 2200
+  FEB 25-MAR 28 0700-2300, MAR 29-MAY 25 0600-2200
+  UAS OPR BEYOND VISUAL LINE OF SIGHT (BVLOS) UTILISING VISUAL
+  OBSERVERS (EXTENDED LINE OF SIGHT) WI 1NM RADIUS OF 522408N
+  0001405W (WOOD WALTON, CAMBRIDGESHIRE). MAX HGT 400FT AGL. FOR
+  INFO 07970 676628. AR-2026-1437/01.
+  F) SFC  G) 600FT AMSL
+V0009/26                               VALID: 20-FEB-26 1338 - UFN
+  SECURITY - HAZARDOUS SITUATION IN LIBYA
+  UK REGISTERED AIR OPERATORS ARE RECOMMENDED NOT TO ENTER FIR
+  TRIPOLI (HLLL). POTENTIAL RISK FROM ANTI-AIRCRAFT WEAPONRY.
+  THIS SUPERSEDES THE ADVICE IN THE CURRENT UK AIP.
+  UK AIP ENR 1.1. PARA 1.4.5 REFERS.
+  F) SFC  G) UNL
+B0185/26                               VALID: 28-JAN-26 1401 - UFN
+  PLYMOUTH MIL (EAST) LOWER AIRSPACE RADAR SERVICE (LARS)
+  FREQ 124.150MHZ CHANGED TO 8.33KHZ CHANNEL 124.155
+  UK AIP ENR 1.6, ENR 1.8, ENR 5.1, ENR 5.2, ENR 6 REFERS
+
+EHAA        AMSTERDAM FIR
+-------------------------
+
+B0456/26                    VALID: 23-MAY-26 0700 - 31-MAY-26 1700
+  23 29 30 31 0700-1700
+  PJE AT STANDDAARBUITEN, PSN 513622N 0043256E, RADIUS 2NM.
+  F) GND  G) 2500FT AGL
+A0784/26                    VALID: 14-MAY-26 0000 - 27-MAY-26 2359
+  TRIGGER NOTAM - PERM AIRAC AIP AMDT 05/2026 WEF 14 MAY 2026: NIL.
+  CONTAINS NON AIRAC INFORMATION ONLY.
+B0610/26                               VALID: 12-MAY-26 1057 - UFN
+  AMSTERDAM INFORMATION 119.175MHZ EXPECT LIMITED RADIO COVERAGE
+  BELOW 1500FT AROUND 531607N 0033735E (OIL PLATFORM K14-FA-1)
+  RADIUS 30NM.
+B0581/26                               VALID: 05-MAY-26 0913 - UFN
+  LIMITED SURVEILLANCE COVERAGE OVER THE NORTH SEA BELOW FL055.
+A0825/26                    VALID: 10-APR-26 0754 - 10-JUL-26 0900
+  AMSTERDAM INFORMATION 124.300MHZ, EXPECT LIMITED RADIO COVERAGE
+  BELOW 1500FT BETWEEN EHRD CTR AND EHSE.
+B0494/26                               VALID: 08-APR-26 0600 - UFN
+  AMSTERDAM INFORMATION 119.175MHZ EXPECT LIMITED RADIO COVERAGE 
+  BELOW
+  1500FT AROUND 541257N 0044938E (OIL RIG F15-A) RADIUS 30NM.
+A0559/26                               VALID: 02-MAR-26 1450 - UFN
+  ADVANCE NOTICE: AIP AMDT 03/2026, EFF 19 MAR 2026, CONTAINS
+  ERRONEOUS SID CODING DATA. SID-SPECIFIC CORRECTIONS AND ASSOCIATED
+  CONSTRAINTS ARE PUBLISHED IN INDIVIDUAL NOTAM. NAVIGATION DATABASE
+  CORRECTIONS ARE IN PROGRESS. IN CASE OF DISCREPANCIES BETWEEN THE
+  PUBLISHED CHART AND THE FMS, THE CONSTRAINTS PUBLISHED IN THE
+  APPLICABLE NOTAM SHALL BE APPLIED.
+  REF AIP AIRAC 03/2026 WEF 19 MAR, EHAM AD 2.22, EHBK AD 2.22, EHEH
+  AD 2.22, EHGG AD 2.22, EHKD AD 2.22, EHRD AD 2.22.
+
+EDWW        BREMEN FIR
+----------------------
+
+M1596/26                    VALID: 25-MAY-26 0800 - 25-AUG-26 1630
+  UAS OPERATION 1.5NM RADIUS CENTERED ON 523651N 0091534E
+  NIENBURG/LANGENDAMM (4.2NM W NIENBURG DVOR/DME NIE)
+  F) GND  G) 330FT AGL
+M1597/26                    VALID: 25-MAY-26 0800 - 25-AUG-26 1630
+  UAS OPERATION 1.5NM RADIUS CENTERED ON 523656N 0091753E
+  NIENBURG/LANGENDAMM (2.8NM WSW NIENBURG DVOR/DME NIE)
+  F) GND  G) 330FT AGL
+M1614/26                    VALID: 25-MAY-26 0400 - 28-MAY-26 0400
+  25 0400-1600,,  26 0400-0700 2000-0700,,  27 2000-0400
+  GERMAN MIL COM CENTER LIMITED DUE TO LACK OF PERSONNEL.
+  GERMAN MIL NOTAM OFFICE PROVIDES NORMAL SERVICE.
+M1595/26                    VALID: 25-MAY-26 0257 - 29-MAY-26 1927
+  DAILY SR - SS
+  ATTENTION TO ALL MIL FLIGHTS. INCREASED GLIDER FLYING IN VMC
+  2NM AROUND KAMMERMARK GLIDER SITE, POSITION 531143N0120951E
+  (24NM NE BRUENKENDORF DVOR/DME BKD). EXCEPTIONS FOR AIR DEFENCE,
+  SAR, HOSP AND HUM FLIGHTS.
+  F) GND  G) 2000FT AMSL
+B0336/26                    VALID: 23-MAY-26 0600 - 26-MAY-26 1935
+  DAILY 0600-SS
+  PJE 2NM RADIUS CENTERED ON 523954N 0075519E QUAKENBRUECK
+  (19.9NM WNW DIEPHOLZ NDB DP).
+  DRG EDR202C ACT BLW EDR.
+  F) GND  G) FL140
+D1187/26                    VALID: 23-MAY-26 0314 - 25-MAY-26 1937
+  23 SR-SS, 24 SR-2100, 25 SR-SS
+  ASCENT OF KITES 1NM RADIUS CENTERED ON 533440N 0081500E
+  TOSSENS (23.4NM WSW NORDHOLZ NDB NOR).
+  F) GND  G) 900FT AMSL
+D1290/26                    VALID: 22-MAY-26 2200 - 25-MAY-26 2200
+  RESTRICTED AREA EDR112A+B (SENNE) ADDN ACTIVE.
+  F) GND  G) 10000FT AMSL
+D1226/26                    VALID: 22-MAY-26 0930 - 25-MAY-26 1500
+  DAILY 0930-1500
+  INTENSIVE PARAGLIDING AND WINCH LAUNCH IN VMC 2NM RADIUS CENTERED 
+  ON 514605N 0141807E, COTTBUS (31.3NM SE KLASDORF DVOR/DME KLF) .
+  F) GND  G) 2500FT AMSL
+M1615/26                               VALID: 22-MAY-26 0830 - UFN
+  THERE IS ONLY ONE SAR HELICOPTER AVBL WITHIN THE AREA OF
+  RESPONSIBILITY OF ARCC GLUECKSBURG. STATIONED AT NORDHOLZ.
+M1522/26                    VALID: 22-MAY-26 0340 - 25-MAY-26 1900
+  SR-SS
+  INCREASED GLIDER FLYING ACTIVITIES 4NM AROUND BRONKOW,
+  POSITION 514014N0135737E (26NM SE DVOR KLF) .
+  MIL AIR TRAFFIC PROHIBITED EXCEPT
+  AIR DEFENCE, SAR, HOSP, HUM AND RESCUE.
+  F) SFC  G) FL076
+M1572/26                               VALID: 19-MAY-26 1640 - UFN
+  THERE IS ONLY ONE SAR HELICOPTER AVBL WITHIN THE AREA OF
+  RESPONSIBILITY OF ARCC GLUECKSBURG. STATIONED AT WARNEMUENDE.
+F1457/26                    VALID: 14-MAY-26 0724 - 28-MAY-26 0723
+  TRIGGER NOTAM - AIP SUP IFR 27/26 WEF 14 MAY 2026 UNTIL FURTHER
+  NOTICE.
+  TEMPO OBST WHICH ARE NOT PUBLISHED IN THE AIP.
+B0341/26                               VALID: 14-MAY-26 0332 - UFN
+  FOR FLIGHTS OVER OR NEAR CONFLICT ZONES OUTSIDE GERMANY REFER TO
+  THE GERMAN AERONAUTICAL INFORMATION CIRCULAR (AIC).
+B0195/26                    VALID: 14-MAY-26 0000 - 27-MAY-26 2359
+  TRIGGER NOTAM - PERM AIRAC AIP IFR AMDT 05/26 WEF 14 MAY 2026.
+  CHANGES TO MULTIPLE AIRSPACES.
+B0198/26                    VALID: 14-MAY-26 0000 - 27-MAY-26 2359
+  TRIGGER NOTAM - PERM AIRAC AIP AMDT 05/26 WEF 14 MAY 2026. CHANGES
+  TO RNAV ROUTES.
+B0200/26                    VALID: 14-MAY-26 0000 - 27-MAY-26 2359
+  TRIGGER NOTAM - PERM AIRAC AIP AMDT 05/26 WEF 14 MAY 2026. CHANGES
+  TO EN-ROUTE RADIO NAVIGATION AIDS AND LIST OF RADIO NAVIGATION
+  AIDS BY IDENTIFICATION.
+B0202/26                    VALID: 14-MAY-26 0000 - 27-MAY-26 2359
+  TRIGGER NOTAM - PERM AIRAC AIP AMDT 05/26 WEF 14 MAY 2026. CHANGES
+  TO NAME-CODE DESIGNATORS FOR SIGNIFICANT POINTS.
+B0337/26                               VALID: 12-MAY-26 0851 - UFN
+  MILITARY INVASION OF UKRAINE BY RUSSIAN FEDERATION.
+  REROUTINGS, EXTENDED ROUTE PORTIONS BELOW FL245 AND DELAY MAY BE
+  EXPECTED WITHIN LOWER AND UPPER GERMAN AIRSPACE DUE TO AIRSPACE
+  RESTRICTIONS FOR THE EXECUTION OF MILITARY MISSIONS.
+  IT IS RECOMMENDED TO CONSIDER THE USE OF EXTRA-FUEL.
+B0332/26                               VALID: 11-MAY-26 0557 - UFN
+  NO APP BY BREMEN ACC FOR OAT ARR AND DEP WO PPR TO/FM SCHLESWIG
+  (ETNS), NORDHOLZ (ETMN) AND HOHN (ETNH) WHEN CORRESPONDING MIL APP
+  IS NOT ACT. PPR CAN BE RECEIVED ON DAY BEFORE FLT FM LOCAL MIL
+  ATC.
+B0292/26                    VALID: 01-MAY-26 0333 - 29-AUG-26 1859
+  LASER ACTIVITIES 0.5NM RADIUS CENTERED ON 521005N 0140653E,
+  FALKENBERG (22.3NM ENE KLASDORF DVOR/DME KLF) .
+  F) GND  G) UNL
+B0190/26                    VALID: 02-APR-26 0801 - 04-JUN-26 2359
+  SECURITY - HAZARDOUS SITUATION IN LEBANON
+  CIVIL GERMAN AIR OPERATORS ARE RECOMMENDED NOT TO ENTER FIR
+  BEIRUT. POTENTIAL RISK FROM ANTI-AVIATION WEAPONRY, MILITARY
+  OPERATIONS AND ARMED CONFLICTS.
+B0189/26                    VALID: 02-APR-26 0756 - 04-JUN-26 2359
+  SECURITY - HAZARDOUS SITUATION IN IRAN
+  CIVIL GERMAN AIR OPERATORS ARE RECOMMENDED NOT TO ENTER
+  FIR TEHRAN (OIIX). POTENTIAL RISK TO AVIATION FROM ESCALATING
+  CONFLICT AND ANTI-AVIATION WEAPONRY.
+  THIS NOTAM OVERRULES THE RECOMMENDATION PROVIDED IN THE CURRENTLY
+  APPLICABLE AIC.
+B0130/26                               VALID: 09-MAR-26 0855 - UFN
+  GPS UNRELIABLE AND POSSIBLY NOT AVBL IN EASTERN PART OF BREMEN 
+  FIR.
+B0111/26                    VALID: 07-MAR-26 0000 - 04-JUN-26 2359
+  LASER ACTIVITIES 0.5NM RADIUS CENTERED ON 521231N 0140718E
+  LINDENBERG (23.6NM ENE KLASDORF DVOR/DME KLF) .
+  F) GND  G) UNL
+B0686/25                               VALID: 12-SEP-25 1549 - UFN
+  FLIGHTS FROM EDXB, EDHK, EDXF, EDXW, EDXY, EDXR, EDXK, EDXJ AND 
+  EDXM TO EKTD ARE NO LONGER EXEMPT FROM THE OBLIGATION TO SUBMIT A
+  FLIGHT PLAN.
+  REF AIP VFR ENR 1-53.
+
+EDMM        MUNICH FIR
+----------------------
+Please see section EXTENDED AREA AROUND DESTINATION
+
+==================== END OF LIDO-NOTAM-BULLETIN ====================
+
+
+
+Route
+
+
+
+
+SigWx 1 of 3
+
+
+
+
+SigWx 2 of 3
+
+
+
+
+SigWx 3 of 3
+
+
+
+
+UAD 1 of 3
+
+
+
+
+UAD 2 of 3
+
+
+
+
+UAD 3 of 3
+
+
+
+
+Vertical profile
+
+
+
+
+Official VAA/TCA
+--------------------------------------------------------------------
+NO DATA AVAILABLE
+
+
+
+
+
+CDA
+--------------------------------------------------------------------
+NO DATA AVAILABLE
+
+
+
+
+
+Additional Docs
+--------------------------------------------------------------------
+NO DATA AVAILABLE
+
+
+
+
+
+Dispatcher Maps
+--------------------------------------------------------------------
+NO DATA AVAILABLE
+
+
+
+
+
+RAIM
+--------------------------------------------------------------------
+FUEL ADVISORY:
+
+THERE ARE NO RAIM OUTAGES FOR FUEL ADVISORY
+
+--------------------------------------------------------------------
+
+RAIM BRIEFING
+
+KLAX --> EDDM    LH1001 / 24-May-26
+
+VALID: 24-May-26 19:55 - 25-May-26 09:38
+
+MINIMUM NUMBER OF HEALTHY SATELLITES: 31
+
+DURING VALIDITY OF THE BRIEFING PACKAGE FOLLOWING RAIM OUTAGES EXIST
+
+
+DEPARTURE AIRPORT
+
+KLAX / LAX    LOS ANGELES INTL
+    PRECISION       BARO AIDED      MASK ANGLE      OUTAGE
+    RNP 0.30        no              5.0             NO OUTAGES
+
+DESTINATION AIRPORT
+
+EDDM / MUC    MUNICH
+    PRECISION       BARO AIDED      MASK ANGLE      OUTAGE
+    RNP 0.30        no              5.0             NO OUTAGES
+
+
+
+Runway Analysis
+--------------------------------------------------------------------
+TAKEOFF AND LANDING REPORT DLH 1001 KLAX-EDDM 24MAY26
+TLR-1 SEQ-173840688 24MAY26 1934Z
+A/C G-CIVB  B747-400 RB211-524G/H  BEW/CG 178756/.....
+
+/// TAKEOFF DATA ///
+
+APT   PRWY  POAT PWIND  PQNH  PMRTW FLP MT V1 VR V2 PTOW MFPTW LIMIT
+KLAX  24L   18.0 238M09 30.04 3786  20  50 44 52 64 3201 3841  FLD
+
+RMKS D-TO1 - SEL TEMP 50
+     BLEEDS ON
+
+---- ---- ------ ----- ------- --- --- --- --- --- -----------------
+RWY  OAT  WIND   QNH   MRTW    FLP V1  VR  V2  PWR CONFIG/CONDITION
+
+--------------------------- ACARS RUNWAYS --------------------------
+RWY          ACARS  LENGTH PMTOW NOTES
+06L                   8926  3338 ILS 108.50
+06R                  10285  3386 ILS 111.70
+07L                  12091  3729 ILS 111.10
+07R                  11095  3847 ILS 109.90
+24L                  10285  3786 ILS 111.70
+24R                   8926  3825 ILS 108.50
+25L                  11095  3861 ILS 109.90
+25R                  12091  3821 ILS 111.10
+
+-------------------- DRY RWY - PTOW - CALM WIND --------------------
+RWY          MTOW MT CONFIG                   FLP  V1  VR  V2  LIMIT
+06L          3301 31 D-TO1 - BLEEDS ON         10 143 155 169  FLD
+06R          3795 49 D-TO - BLEEDS ON          10 146 157 169  FLD
+07L          3796 48 D-TO1 - BLEEDS ON         10 149 158 169  FLD
+07R          3843 51 D-TO1 - BLEEDS ON         20 145 152 164  FLD
+24L          3700 47 D-TO1 - BLEEDS ON         20 143 152 163  FLD
+24R          3751 49 D-TO - BLEEDS ON          20 141 150 164  FLD
+25L          3264 30 D-TO2 - BLEEDS ON         10 146 157 169  FLD
+25R          3929 53 D-TO1 - BLEEDS ON         20 145 153 164  FLD
+
+--------------- DRY RWY - PTOW PLUS 8000 - CALM WIND ---------------
+RWY          MTOW MT CONFIG                   FLP  V1  VR  V2  LIMIT
+06L          3443 34 D-TO1 - BLEEDS ON         20 140 152 165  FLD
+06R          3969 53 D-TO - BLEEDS ON          20 145 154 166  AFM
+07L          3969 52 D-TO1 - BLEEDS ON         20 147 155 166  AFM
+07R          3843 48 D-TO1 - BLEEDS ON         20 146 155 166  FLD
+24L          3969 53 D-TO - BLEEDS ON          20 145 154 166  AFM
+24R          3479 35 D-TO1 - BLEEDS ON         20 142 153 165  FLD
+25L          3885 49 D-TO - BLEEDS ON          10 149 159 171  FLD
+25R          3929 51 D-TO1 - BLEEDS ON         20 147 155 166  FLD
+
+-------------------- WET RWY - PTOW - CALM WIND --------------------
+RWY          MTOW MT CONFIG                   FLP  V1  VR  V2  LIMIT
+06L          3343 33 D-TO1 - BLEEDS ON         20 130 150 163  FLD
+06R          3855 53 D-TO - BLEEDS ON          20 136 151 164  FLD
+07L          3880 52 D-TO1 - BLEEDS ON         20 139 153 164  FLD
+07R          3729 48 D-TO1 - BLEEDS ON         20 136 152 164  FLD
+24L          3855 53 D-TO - BLEEDS ON          20 136 151 164  FLD
+24R          3382 34 D-TO1 - BLEEDS ON         20 133 150 163  FLD
+25L          3765 48 D-TO - BLEEDS ON          10 140 156 169  FLD
+25R          3843 51 D-TO1 - BLEEDS ON         20 139 153 164  FLD
+
+--------------- WET RWY - PTOW PLUS 8000 - CALM WIND ---------------
+RWY          MTOW MT CONFIG                   FLP  V1  VR  V2  LIMIT
+06L          3604 40 D-TO - BLEEDS ON          20 131 152 166  FLD
+06R          3855 50 D-TO - BLEEDS ON          20 137 154 166  FLD
+07L          3880 49 D-TO1 - BLEEDS ON         20 140 155 166  FLD
+07R          3818 47 D-TO - BLEEDS ON          10 141 159 171  FLD
+24L          3855 50 D-TO - BLEEDS ON          20 137 154 166  FLD
+24R          3382 31 D-TO1 - BLEEDS ON         20 133 152 165  FLD
+25L          3947 53 D-TO - BLEEDS ON          20 138 154 166  FLD
+25R          3843 48 D-TO1 - BLEEDS ON         20 140 155 166  FLD
+
+/// LANDING DATA ///
+
+APT   PRWY  POAT PWIND  PQNH  PMRLW FLP  PLDW  LIMIT
+EDDM  26L   20.0 037M05 1029  2858  30   2217  AFM
+
+RMKS WET RUNWAY
+
+-------- ---- ------ ----- ------- --- ----- --- -------------------
+RWY      OAT  WIND   QNH   MRLW    FLP VREF  PWR CONFIG/CONDITION
+
+--------------------------- ACARS RUNWAYS --------------------------
+RWY          ACARS  LENGTH PMRLW NOTES
+08L                  13123  2858 ILS 109.50
+08R                  13123  2858 ILS 109.30
+26L                  13123  2858 ILS 108.30
+26R                  13123  2858 ILS 108.70
+
+-------------- FLAPS 30 - PACKS ON - NO ENROUTE ICING --------------
+DRY RWY / WET RWY
+            08L            08R            26L            26R
+  OAT       13123 FT       13123 FT       13123 FT       13123 FT
+   15       2858A/2858A    2858A/2858A    2858A/2858A    2858A/2858A
+ / 20       2858A/2858A    2858A/2858A    2858A/2858A    2858A/2858A
+   25       2858A/2858A    2858A/2858A    2858A/2858A    2858A/2858A
+HW/10KT         0/    0        0/    0        0/    0        0/    0
+TW/10KT         0/    0        0/    0        0/    0        0/    0
+
+--------- LANDING DISTANCE - FLAPS 30 - MAX MANUAL BRAKING ---------
+                   ACTUAL            FACTORED
+  LDW     VREF     DRY      WET      DRY      WET
+  2160    132     3442     4458     4603     5772
+  2200    133     3483     4512     4668     5851
+/ 2240    135     3524     4565     4733     5930
+  2280    136     3566     4620     4798     6010
+  2320    137     3608     4674     4864     6090
+HW/KT              -21      -27      -24      -31
+TW/KT               63       82       93      114
+
+END TAKEOFF AND LANDING REPORT DLH 1001 KLAX-EDDM 24MAY26
+

@@ -3,8 +3,9 @@
 $Host.UI.RawUI.WindowTitle = "FrankenCDUProxy"
 KillPythonScript "frankencduproxy.py"
 
-$env:PYTHONPATH = $PsxhacksDevel
+$repo = Resolve-AddonRepo $FrankencduproxyRepo
+$env:PYTHONPATH = $repo
 
-& $PsxhacksPython "$PsxhacksDevel\frankencduproxy.py" @FrankencduproxyOptions
+& $PsxhacksPython "$repo\frankencduproxy.py" @FrankencduproxyOptions
 
 # Read-Host -Prompt "Press Enter to exit"

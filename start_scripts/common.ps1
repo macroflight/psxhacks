@@ -81,6 +81,11 @@ $SimObjectRouterDir    = "$SimBase\sim_object_router"
 # Where the ACARS Print app is installed
 $AcarsPrintDir      = "$SimBase\acars_print\AcarsPrintV1_1"
 
+# Location of SRSL-PSX (SmartRunway, SmartLanding) — master and slave instances
+# are in separate directories since they connect to different PSX instances.
+$SrslPsxMasterDir   = "$SimBase\SRSL-PSX\2026-05-23-master"
+$SrslPsxSlaveDir    = "$SimBase\SRSL-PSX\2026-05-23"
+
 # Flavor-derived variables — overridden at runtime by psxhacks-current-flavor.ps1.
 # These defaults apply when configure_flavor.ps1 has not yet been run.
 $AirlineIcao    = "BAW"
@@ -121,14 +126,33 @@ $FrankenrouterSlaveWeb      = "http://localhost:8747"
 # sim, and my master sim is on port 10748
 #
 # $ExampleOptions = @("--foo", "--bar=123")
-$FrankenfreezeOptions = @()
-$FrankentankerOptions = @()
+$FrankenweatherOptions = @()
+$FrankentankerOptions  = @()
 $FrankenusbOptions  = @()
 $FrankenwindOptions  = @()
-$FrankenturbOptions = @()
 $FrankenidentOptions = @()
-$FrankenutilOptions = @()
+$FrankenidentMasterOptions = @("--psx-port=10748")
 $FrankencduproxyOptions = @()
+$FrankenmsfsbridgeOptions = @()
+$FrankenprintOptions = @()
+$FrankenpushOptions  = @()
+
+# Per-addon alternative psxhacks repo directory name.
+# Set to the name of a sibling directory to run that addon from a different
+# checkout of the psxhacks repo.  Leave $null to use $PsxhacksDevel.
+# Example: $FrankenusbRepo = "psxhacks-frankenusb-devel"
+#   -> runs C:\fs\psxhacks-frankenusb-devel\frankenusb.py
+$FrankencduproxyRepo    = $null
+$FrankenweatherRepo     = $null
+$FrankenidentRepo       = $null
+$FrankenidentMasterRepo = $null
+$FrankentankerRepo      = $null
+$FrankenusbRepo         = $null
+$FrankenwindRepo        = $null
+$CpdlcRepo              = $null
+$FrankenmsfsbridgeRepo  = $null
+$FrankenprintRepo       = $null
+$FrankenpushRepo        = $null
 
 # Which of the addons that we can manage you actually want started in
 # your sim. You can override these in the override file.
@@ -137,18 +161,18 @@ $FrankencduproxyOptions = @()
 # Addons that run in the master sim (if enabled)
 #
 
-$StartFrankenfreeze = $false
-$StartFrankentanker = $false
+$StartFrankenweather     = $false
+$StartFrankenmsfsbridge  = $false
+$StartFrankentanker  = $false
 $StartFrankenusb    = $false
-$StartFrankenwind   = $false
-$StartFrankenturb   = $false
 $StartFrankenident  = $false
-$StartFrankenutil   = $false
-
+$StartFrankenidentMaster = $false
 $StartPsxSounds     = $false
 $StartVpilot        = $false
 $StartPsxNetVatsim  = $false
 $StartAcarsPrint    = $false
+$StartFrankenprint  = $false
+$StartFrankenpush   = $false
 $StartEfb           = $false
 $StartSimObjectRouter    = $false
 
@@ -158,6 +182,9 @@ $StartPsxNetGroundCrew   = $false
 
 $StartFrankencduproxy = $false
 $StartCsCdu           = $false
+
+$StartSrslPsxMaster = $false
+$StartSrslPsxSlave  = $false
 $CsCduExe = "$SimBase\hw\cs_cdu\CockpitSimulator v2025.2.7.exe"
 
 #
@@ -177,6 +204,7 @@ $StopBeforeMsfsStart       = $true
 
 # Retry interval and timeout (seconds) used by apply_window_positions.ps1 when
 # waiting for an addon window to appear after the addon is started.
+$WindowPositionInitialDelay    = 2
 $WindowPositionSleepSeconds    = 0.5
 $WindowPositionSleepSecondsMax = 5
 
@@ -193,18 +221,21 @@ $SimAddonNames = [ordered]@{
     "PSX.NET.EFB"          = "PSX.NET EFB"
     "ACARS Print App"      = "ACARS Print App"
     "frankenusb"           = "FrankenUSB"
-    "frankenfreeze"        = "FrankenFreeze"
+    "frankenweather"       = "FrankenWeather"
     "frankentanker"        = "FrankenTanker"
-    "frankenwind"          = "FrankenWind"
-    "frankenturb"          = "FrankenTurb"
     "frankenident"         = "FrankenIDENT"
-    "frankenutil"          = "FrankenUtil"
+    "frankenident_master"  = "FrankenIDENT Master"
     "frankencduproxy"      = "FrankenCDU Proxy"
+    "frankenmsfsbridge"    = "FrankenMSFSBridge"
+    "frankenprint"         = "FrankenPrinter"
+    "frankenpush"          = "FrankenPush"
     "frankenrouter slave"    = "FrankenRouter (slave)"
     "frankenrouter master"   = "FrankenRouter (master)"
     "PSX.NET.WeatherRadar"   = "PSX.NET WeatherRadar"
     "PSX.NET.GroundCrew"     = "PSX.NET GroundCrew"
     "SimObjectRouter"        = "SimObjectRouter"
+    "SRSL-PSX master"        = "SRSL-PSX (master)"
+    "SRSL-PSX slave"         = "SRSL-PSX (slave)"
 }
 
 
@@ -245,6 +276,13 @@ function start_nonscripted_apps {
         Write-Output "Starting $app..."
         Start-Process $app
     }
+}
+
+# Returns the psxhacks directory for a given addon.
+# If $repoName is set, resolves $SimBase\$repoName; otherwise $PsxhacksDevel.
+function Resolve-AddonRepo([string]$repoName) {
+    if ([string]::IsNullOrWhiteSpace($repoName)) { return $PsxhacksDevel }
+    return Join-Path $SimBase $repoName
 }
 
 if (Test-Path $OverrideFile) { . $OverrideFile }

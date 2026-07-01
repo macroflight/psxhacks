@@ -93,6 +93,9 @@ LEFT_RIGHT_CONTROLS = {
     'MfIduInbdCp': 'MfIduInbdFo',
     'MfIduOutbdCp': 'MfIduOutbdFo',
     'LwrCrtCp': 'LwrCrtFo',
+    # Radio control panels
+    'RotSelRcpL': 'RotSelRcpR',
+    'SwitchesRcpL': 'SwitchesRcpR',
 }
 
 _RIGHT_LEFT_CONTROLS = {v: k for k, v in LEFT_RIGHT_CONTROLS.items()}
@@ -144,6 +147,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.thrustaxis_latch_state = {}
         self.thrustaxis_last_update = {}
 
+        # Which of the RCP knobs are we turning using RADIO_TUNE button events?
+        # Set to "big" on startup but toggled by RADIO_TUNE_TOGGLE_KNOB
+        self.rotselrcp_knob = 'big'
+
         # Temporary cache for the AXIS SET type. We need to keep track
         # if e.g the flap lever axis is in sync with PSX.
         self.axis_set_state = {}
@@ -164,6 +171,9 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         # The position the 3-position selector is in (IAS/MACH,
         # HDG/TRK or ALTITUDE)
         self.tmboeing_mode = None
+
+        # Active mode for each MODAL_ROTARY, keyed by 'rotary id'
+        self.modal_rotary_mode = {}
 
         # True when operating from the right (FO) seat; remaps variables
         # listed in LEFT_RIGHT_CONTROLS to their right-seat equivalents.
@@ -261,7 +271,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
 
         Used whenever we switch tiller mode on and off.
         """
-        self.logger.info("centreing aileron and tiller")
+        self.logger.info("Centering aileron and tiller")
         await self.psx_axis_queue.put({
             'variable': 'Tiller',
             'indexes': [0],
@@ -477,8 +487,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         # Get current PSX Tla value
         try:
             psx_tlas = self.psx.get('Tla').split(';')
-        except AttributeError:
-            # Safe default
+        except (AttributeError, TypeError):
             psx_tlas = [0, 0, 0, 0]
 
         # If we need to send a new Tla to PSX
@@ -678,7 +687,9 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         psx_value = None
         (lowerlimit, upperlimit) = (0, 0)
 
-        psx_current_value = int(self.psx.get(axis_config['psx variable']))
+        psx_current_value = self.psx_get_int(axis_config['psx variable'])
+        if psx_current_value is None:
+            return
         (psx_current_lowerlimit, psx_current_upperlimit) = (0, 0)
 
         for zone in axis_config['zones']:
@@ -844,7 +855,11 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
 
         def printstate():
             index0 = axis_config['engine indexes'][0]
-            tla = int(self.psx.get('Tla').split(';')[index0])
+            try:
+                tla = int(self.psx.get('Tla').split(';')[index0])
+            except (AttributeError, IndexError, TypeError, ValueError):
+                self.logger.error("printstate: could not read Tla[%s] from PSX", index0)
+                return
             self.logger.info(
                 "thrustaxis=%s, PSX Tla: %.0f, last update: %.0f, latched=%s",
                 thrustaxis, tla, get_last_update(), get_latch_state()
@@ -891,6 +906,12 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 })
             return
 
+        # Block axis control in stepped reverse modes
+        stepped_mode = self.axis_reverse_mode.get(joystick_name, {}).get(event.axis)
+        if stepped_mode in ('reverse_idle', 'reverse_full', 'reverse_idle_back'):
+            self.logger.debug("Stepped reverse mode %s active, axis has no control", stepped_mode)
+            return
+
         # Normal (non-button) mode
         reverse = bool(get_axis_mode(event.axis) == 'reverse')
         axis_position = event.value
@@ -909,8 +930,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             # Defaults to current PSX throttle position
             try:
                 tla = int(self.psx.get('Tla').split(';')[axis_config['engine indexes'][0]])
-            except AttributeError:
-                # Safe default
+            except (AttributeError, IndexError, TypeError, ValueError):
                 tla = 0
             self.logger.info("Initializing %s on %s to %s", thrustaxis, joystick_name, tla)
             self.thrustaxis_last_update[joystick_name][thrustaxis] = tla
@@ -959,7 +979,11 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
 
         # Get current PSX value (for the first of the thrust levers we
         # control with this axis)
-        tla = int(self.psx.get('Tla').split(';')[axis_config['engine indexes'][0]])
+        try:
+            tla = int(self.psx.get('Tla').split(';')[axis_config['engine indexes'][0]])
+        except (AttributeError, IndexError, TypeError, ValueError):
+            self.logger.error("Could not read Tla[%s] from PSX", axis_config['engine indexes'][0])
+            return
 
         diff_psx_vs_newinput = abs(tla - psx_value)
         diff_psx_vs_lastinput = abs(tla - get_last_update())
@@ -1017,6 +1041,73 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             self.logger.debug("Axis not latched, NOT moving PSX throttle(s)")
         self.logger.debug("EXITING!")
 
+    async def handle_stepped_reverse_toggle(self, joystick_name, button_config):
+        """Handle STEPPED_REVERSE_TOGGLE button press.
+
+        Cycles through four states on each button press:
+          normal → reverse_idle → reverse_full → reverse_idle_back → normal
+
+        Transitions to/from normal require the axis to be near idle.
+        In reverse_idle, reverse_full and reverse_idle_back modes the axis
+        has no control over the throttle.
+        """
+        axis = button_config['axis']
+        axis_config = self.config[joystick_name]['axis motion'][axis]
+        axis_position = self.joystick_get_axis_position(joystick_name, axis)
+
+        if joystick_name not in self.axis_reverse_mode:
+            self.axis_reverse_mode[joystick_name] = {}
+        if axis not in self.axis_reverse_mode[joystick_name]:
+            self.axis_reverse_mode[joystick_name][axis] = 'normal'
+        current_mode = self.axis_reverse_mode[joystick_name][axis]
+
+        unlocked_min = axis_config['reverse lever unlocked range'][0]
+        unlocked_max = axis_config['reverse lever unlocked range'][1]
+        axis_near_idle = unlocked_min <= axis_position <= unlocked_max
+
+        if current_mode == 'normal':
+            if not axis_near_idle:
+                self.logger.info(
+                    "STEPPED_REVERSE_TOGGLE: cannot enter reverse, axis not near idle (%s)",
+                    axis_position)
+                return
+            self.logger.info("STEPPED_REVERSE_TOGGLE: normal -> reverse_idle")
+            self.axis_reverse_mode[joystick_name][axis] = 'reverse_idle'
+            await self.psx_axis_queue.put({
+                'variable': axis_config['psx variable'],
+                'indexes': axis_config['engine indexes'],
+                'value': axis_config['psx reverse idle'],
+            })
+        elif current_mode == 'reverse_idle':
+            self.logger.info("STEPPED_REVERSE_TOGGLE: reverse_idle -> reverse_full")
+            self.axis_reverse_mode[joystick_name][axis] = 'reverse_full'
+            await self.psx_axis_queue.put({
+                'variable': axis_config['psx variable'],
+                'indexes': axis_config['engine indexes'],
+                'value': axis_config['psx reverse full'],
+            })
+        elif current_mode == 'reverse_full':
+            self.logger.info("STEPPED_REVERSE_TOGGLE: reverse_full -> reverse_idle_back")
+            self.axis_reverse_mode[joystick_name][axis] = 'reverse_idle_back'
+            await self.psx_axis_queue.put({
+                'variable': axis_config['psx variable'],
+                'indexes': axis_config['engine indexes'],
+                'value': axis_config['psx reverse idle'],
+            })
+        elif current_mode == 'reverse_idle_back':
+            if not axis_near_idle:
+                self.logger.info(
+                    "STEPPED_REVERSE_TOGGLE: cannot return to normal, axis not near idle (%s)",
+                    axis_position)
+                return
+            self.logger.info("STEPPED_REVERSE_TOGGLE: reverse_idle_back -> normal")
+            self.axis_reverse_mode[joystick_name][axis] = 'normal'
+            await self.psx_axis_queue.put({
+                'variable': axis_config['psx variable'],
+                'indexes': axis_config['engine indexes'],
+                'value': axis_config['psx idle'],
+            })
+
     async def handle_axis_motion(self, event):  # pylint: disable=too-many-branches
         """Handle any axis motion."""
         try:
@@ -1072,7 +1163,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
     async def handle_button(self, event):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         """Handle button press/release."""
 
-        async def handle_button_helper():  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
+        async def handle_button_helper():  # pylint: disable=too-many-branches,too-many-statements,too-many-locals,too-many-return-statements
             if button_config['button type'] == "SET":
                 # Set a PSX variable to the value in config
                 self.psx_send_and_set(
@@ -1107,9 +1198,14 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 if direction == 'down':
                     await self.handle_throttle_reverse_button(
                         'button', joystick_name, event, button_config, None)
+            elif button_config['button type'] == 'STEPPED_REVERSE_TOGGLE':
+                if direction == 'down':
+                    await self.handle_stepped_reverse_toggle(joystick_name, button_config)
             elif button_config['button type'] == 'INCREMENT':
                 psx_var = self.translate_var(button_config['psx variable'])
-                value = int(self.psx.get(psx_var))
+                value = self.psx_get_int(psx_var)
+                if value is None:
+                    return
                 increment = int(button_config['increment'])
                 new_value = value + increment
                 wrap = False
@@ -1129,9 +1225,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                     self.psx_send_and_set(psx_var, new_value)
             elif button_config['button type'] == 'INCREMENT_MULTI':
                 for (key, increment, minval, maxval, wrap) in button_config['psx variables']:
-                    cur = self.psx.get(self.translate_var(key))
-                    self.logger.info("INCREMENT_MULTI got %s for %s", cur, key)
-                    value = int(cur)
+                    value = self.psx_get_int(self.translate_var(key))
+                    self.logger.info("INCREMENT_MULTI got %s for %s", value, key)
+                    if value is None:
+                        continue
                     new_value = value + increment
                     if new_value < minval:
                         if wrap:
@@ -1148,7 +1245,9 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             elif button_config['button type'] == 'BIGMOMPSH':
                 psx_var = self.translate_var(button_config['psx variable'])
                 self.logger.debug("BIGMOMPSH event for %s", psx_var)
-                value = int(self.psx.get(psx_var))
+                value = self.psx_get_int(psx_var)
+                if value is None:
+                    return
                 new_value = value | 1
                 if new_value != value:
                     self.psx_send_and_set(psx_var, new_value)
@@ -1161,14 +1260,15 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             elif button_config['button type'] == 'TILLER_TOGGLE':
                 if self.aileron_tiller_active:
                     # Remove warning, centre aileron and tiller, disable tiller mode
+                    self.logger.info("Tiller toggled off")
                     self.psx.send(MSG_TYPE_TILLER, "")
                     await self.centre_ailerons_and_tiller()
                     self.aileron_tiller_active = False
                 else:
                     # Display warning message, centre aileron and tiller, enable tiller mode
+                    self.logger.info("Tiller toggled on")
                     self.psx.send(MSG_TYPE_TILLER, "TILLER ACTIVE")
                     await self.centre_ailerons_and_tiller()
-                    # Enable tiller mode
                     self.aileron_tiller_active = True
             elif button_config['button type'] == 'ACTION_FLIGHT_PHASE_TRIGGER':
                 for button, phase in button_config['button to phase'].items():
@@ -1232,13 +1332,128 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                     return
                 self.logger.debug("Sending to PSX: %s => %s", psx_variable, increment)
                 self.psx_send_and_set(psx_variable, increment)
-            elif button_config['button type'] == 'SEAT_TOGGLE':
-                self.right_seat = not self.right_seat
-                seat = "RIGHT" if self.right_seat else "LEFT"
-                self.logger.info("Seat mode: %s", seat)
+            elif button_config['button type'] == 'SEAT_SELECT':
+                current_seat = "RIGHT" if self.right_seat else "LEFT"
+                self.logger.info("SEAT_SELECT starting - current seat is %s", current_seat)
+
+                # Should frankenusb swap L/R buttons
+                select_usb_lr_swap = button_config.get(
+                    'select frankenusb left right swap', True)
+                select_layout = button_config.get(
+                    'select layout', True)
+                select_human_pilot = button_config.get(
+                    'select psx human pilot seat', True)
+                select_psxnetvatsim_acp = button_config.get(
+                    'select psxnetvatsim acp', True)
+                layouts = button_config.get(
+                    'layout left right', (1, 2))
+
+                self.logger.info("SEAT_SELECT: USB L/R swap: %s", select_usb_lr_swap)
+                self.logger.info("SEAT_SELECT: change layout: %s (layouts=%s)",
+                                 select_layout, layouts)
+                self.logger.info("SEAT_SELECT: change human pilot: %s", select_human_pilot)
+                self.logger.info("SEAT_SELECT: change PSX.NET.VATSIM ACP: %s",
+                                 select_psxnetvatsim_acp)
+
+                # First, figure out what seat we want to be in
+                seat = button_config.get('seat', 'TOGGLE')
+                if seat == 'TOGGLE':
+                    seat = "LEFT" if self.right_seat else "RIGHT"
+                elif seat not in ['RIGHT', 'LEFT']:
+                    # Any invalid config becomes the left seat
+                    seat = "LEFT"
+                self.logger.info("SEAT_SELECT: new seat will be %s", seat)
+
+                # Should frankenusb swap all L/R controls in the cabin?
+                if select_usb_lr_swap:
+                    if seat == 'RIGHT':
+                        self.right_seat = True
+                    else:
+                        self.right_seat = False
+
+                # Should we select a layout?
+                if select_layout:
+                    if seat == 'RIGHT':
+                        self.psx_send_and_set("layout", layouts[1])
+                    else:
+                        self.psx_send_and_set("layout", layouts[0])
+
+                # Should we select the human pilot seat?
+                if select_human_pilot:
+                    if seat == 'RIGHT':
+                        # keyboard control RCP R
+                        self.psx_send_and_set("Qi217", "7")
+                    else:
+                        self.psx_send_and_set("Qi217", "6")
+
+                # Should we select PSX.NET.VATSIM ACP?
+                if select_psxnetvatsim_acp:
+                    if seat == 'RIGHT':
+                        self.psx_send_and_set("addon", "PSXNETVATSIM:SELECT_ACP:RIGHT")
+                    else:
+                        self.psx_send_and_set("addon", "PSXNETVATSIM:SELECT_ACP:LEFT")
+
+                if seat != current_seat:
+                    self.logger.info("SEAT_SELECT seat changed %s -> %s", current_seat, seat)
+            elif button_config['button type'] == 'MODAL_ROTARY':
+                if direction == 'down':
+                    rotary_id = button_config['rotary id']
+                    current_mode = self.modal_rotary_mode.get(rotary_id)
+                    if current_mode is None:
+                        self.logger.warning("MODAL_ROTARY '%s' has no mode set", rotary_id)
+                        return
+                    mode_config = button_config['modes'].get(current_mode)
+                    if mode_config is None:
+                        self.logger.warning("MODAL_ROTARY '%s' mode '%s' not in modes config",
+                                            rotary_id, current_mode)
+                        return
+                    psx_var = self.translate_var(mode_config['psx variable'])
+                    if 'value cw' in mode_config:
+                        dir_key = 'value ' + button_config['direction']
+                        value = mode_config[dir_key]
+                    else:
+                        value = mode_config['increment']
+                        if button_config['direction'] == 'ccw':
+                            value = -value
+                        if ('minimum interval' in button_config and
+                                time.time() - last_event < button_config['minimum interval']):
+                            value *= button_config['acceleration']
+                        if 'increment index' in mode_config:
+                            fields = ['0'] * mode_config['fields']
+                            fields[mode_config['increment index']] = str(value)
+                            value = ';'.join(fields)
+                    self.psx_send_and_set(psx_var, value)
+            elif button_config['button type'] == 'MODAL_ROTARY_MODE_SET':
+                if direction == 'down':
+                    rotary_id = button_config['rotary id']
+                    self.modal_rotary_mode[rotary_id] = button_config['mode']
+                    self.logger.info("MODAL_ROTARY '%s' mode set to '%s'",
+                                     rotary_id, button_config['mode'])
+            elif button_config['button type'] == 'MODAL_ROTARY_MODE_CYCLE':
+                if direction == 'down':
+                    rotary_id = button_config['rotary id']
+                    mode_order = button_config['mode order']
+                    current_mode = self.modal_rotary_mode.get(rotary_id)
+                    if current_mode not in mode_order:
+                        next_mode = mode_order[0]
+                    else:
+                        idx = (mode_order.index(current_mode) + 1) % len(mode_order)
+                        next_mode = mode_order[idx]
+                    self.modal_rotary_mode[rotary_id] = next_mode
+                    self.logger.info("MODAL_ROTARY '%s' mode cycled to '%s'", rotary_id, next_mode)
             elif button_config['button type'] == 'ADDON':
                 # Send a custom addon= message stored in button_config['value']
                 self.psx_send_and_set("addon", button_config['value'])
+            elif button_config['button type'] == 'RADIO_TUNE_TOGGLE_KNOB':
+                self.rotselrcp_knob = 'big' if self.rotselrcp_knob == 'small' else 'small'
+            elif button_config['button type'] == 'RADIO_TUNE':
+                turn = int(button_config['value'])
+                elems = ["0", "0", "0"]
+                index = 1 if self.rotselrcp_knob == 'big' else 2
+                elems[index] = str(turn)
+                new_psx_value = ";".join(elems)
+                psx_var = self.translate_var(button_config['psx variable'])
+                self.psx_send_and_set(psx_var, new_psx_value)
             else:
                 raise FrankenUsbException(f"Unknown button type {button_config['button type']}")
             # End of helper
@@ -1484,7 +1699,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         """Log the value of a PSX variable."""
         self.logger.info("PSX variable %s is now %s", key, value)
 
-    async def setup_psx_connection(self):
+    async def setup_psx_connection(self):  # pylint: disable=too-many-statements
         """Set up the PSX connection."""
         def setup():
             self.psx.send("demand", "GroundSpeed")
@@ -1528,6 +1743,16 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         # Subscribe to EICAS messages that another addon might set
         self.psx.subscribe(MSG_TYPE_FLT_CTL_LOCK)
 
+        # Disable tiller above 40 kt
+        def groundspeed(_, value):
+            gs = float(value)
+            if gs > 40.0 and self.aileron_tiller_active:
+                self.logger.info("Ground speed %.1f kt > 40 kt, disabling tiller", gs)
+                self.aileron_tiller_active = False
+                self.psx.send(MSG_TYPE_TILLER, "")
+                asyncio.create_task(self.centre_ailerons_and_tiller())
+        self.psx.subscribe("GroundSpeed", groundspeed)
+
         # Needed for autothrottle
         self.psx.subscribe("Afds", self.print_psx_variable)
 
@@ -1549,6 +1774,12 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                     if 'psx variables' in action:
                         for keytuple in action['psx variables']:
                             psx_variables.add(keytuple[0])
+        # Also subscribe to the seat-translated equivalent of any translatable variable
+        for var in list(psx_variables):
+            if var in LEFT_RIGHT_CONTROLS:
+                psx_variables.add(LEFT_RIGHT_CONTROLS[var])
+            elif var in _RIGHT_LEFT_CONTROLS:
+                psx_variables.add(_RIGHT_LEFT_CONTROLS[var])
         self.logger.info("Subscribing to PSX variables %s", psx_variables)
         for psx_variable in psx_variables:
             self.psx.subscribe(psx_variable)
@@ -1567,6 +1798,15 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             if name in _RIGHT_LEFT_CONTROLS:
                 return _RIGHT_LEFT_CONTROLS[name]
         return name
+
+    def psx_get_int(self, key):
+        """Get a PSX variable as int, logging an error and returning None on failure."""
+        raw = self.psx.get(key)
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            self.logger.error("PSX variable %s: expected int, got %r", key, raw)
+            return None
 
     def psx_send_and_set(self, psx_variable, new_psx_value):
         """Send variable to PSX and store in local db."""

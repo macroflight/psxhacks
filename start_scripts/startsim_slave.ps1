@@ -25,6 +25,18 @@ if ($StartFrankenident ) {
 Write-Output "Starting PSX main clients..."
 Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_psx_clients.ps1"
 
+if ($StartPsxNetVatsim ) {
+    Write-Output "Starting PSX.NET.VATSIM..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_vatsim.ps1"
+    # Note: we position this window at the end since the app takes long to start sometimes
+}
+
+if ($StartVpilot ) {
+    Write-Output "Starting vPilot..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_vpilot.ps1"
+    Invoke-WindowPosition "vPilot"
+}
+
 if ($StartPsxNetMsfsRouter ) {
     Write-Output "Starting PSX.NET.MSFS.Router..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_msfs_router.ps1"
@@ -43,16 +55,22 @@ if ($StartFrankenusb ) {
     Invoke-WindowPosition "frankenusb"
 }
 
-if ($StartFrankenwind ) {
-    Write-Output "Starting FrankenWind..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenwind.ps1"
-    Invoke-WindowPosition "frankenwind"
+if ($StartSrslPsxSlave ) {
+    Write-Output "Starting SRSL-PSX..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_srsl_psx_slave.ps1"
+    Invoke-WindowPosition "SRSL-PSX slave"
 }
 
-if ($StartAcarsPrint ) {
+if ($StartAcarsPrint -and -not $StartFrankenprint ) {
     Write-Output "Starting ACARS Print..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_acarsprint.ps1"
     Invoke-WindowPosition "ACARS Print App"
+}
+
+if ($StartFrankenprint ) {
+    Write-Output "Starting FrankenPrinter..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenprint.ps1"
+    Invoke-WindowPosition "frankenprint"
 }
 
 if ($StartEfb ) {
@@ -61,28 +79,25 @@ if ($StartEfb ) {
     Invoke-WindowPosition "PSX.NET.EFB"
 }
 
-if ($StartVpilot ) {
-    Write-Output "Starting vPilot..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_vpilot.ps1"
-    Invoke-WindowPosition "vPilot"
-}
-
-if ($StartPsxNetVatsim ) {
-    Write-Output "Starting PSX.NET.VATSIM..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_vatsim.ps1"
-    Invoke-WindowPosition "vPilot"
-}
-
 if ($StartFrankencduproxy ) {
     Write-Output "Starting FrankenCDU proxy..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankencduproxy.ps1"
     Invoke-WindowPosition "frankencduproxy"
 }
 
+if ($StartFrankenmsfsbridge ) {
+    Write-Output "Starting FrankenMSFSBridge..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenmsfsbridge.ps1"
+    Invoke-WindowPosition "frankenmsfsbridge"
+}
+
 if ($StartCsCdu ) {
     Write-Output "Starting CS CDU..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_cs_cdu.ps1"
 }
+
+Delay 10
+Invoke-WindowPosition "PSX.NET.VATSIM"
 
 if ($StopBeforeMsfsStart) {
     Read-Host -Prompt "Now start MSFS and enter free flight, then press Enter"
@@ -107,13 +122,8 @@ if ($StartPsxNetGroundCrew ) {
 if ($StartSimObjectRouter ) {
     Write-Output "Starting SimObjectRouter..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_sim_object_router.ps1"
+    Delay 5
     Invoke-WindowPosition "SimObjectRouter"
-}
-
-if ($StartFrankenfreeze ) {
-    Write-Output "Starting Frankenfreeze..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenfreeze.ps1"
-    Invoke-WindowPosition "frankenfreeze"
 }
 
 Write-Output "Starting non-scripted apps..."

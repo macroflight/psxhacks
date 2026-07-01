@@ -17,13 +17,14 @@ if ($answer -notmatch '^[Yy]') {
 
 Write-Host ""
 
-KillPythonScript "frankenutil.py"
 KillPythonScript "psx-acars.py"
 KillPythonScript "frankentanker.py"
-KillPythonScript "frankenturb.py"
+KillPythonScript "frankenweather.py"
+KillPythonScript "frankenpush.py"
 
 KillProcess "PSX.Bacars.UI"
 KillProcess "PSX.NET"
+KillJavaJar "$SrslPsxMasterDir\SRSL-PSX.jar"
 
 # Ask PSX server to shut down gracefully before killing java.exe
 Write-Output "Shutting down PSX server..."
@@ -38,7 +39,3 @@ KillJavaJar "AerowinxStart.jar"
 # Stop master sim router last, after PSX has had time to shut down
 $masterRouterConfig = ($FrankenrouterMasterOptions | Where-Object { $_ -like "--config-file=*" }) -replace "^--config-file=", ""
 KillPythonScript $masterRouterConfig
-
-Delay 5
-
-Read-Host -Prompt "Done. Enter to close"

@@ -4,15 +4,19 @@ from __future__ import annotations
 import argparse
 import asyncio
 import collections
+import hashlib
+import hmac
 import itertools
 import json
 import logging
 import logging.handlers
+import datetime
 import math
 import os
 import pathlib
 import random
 import re
+import secrets
 import signal
 import statistics
 import string
@@ -34,15 +38,11 @@ from frankenrouter.webapi import RouterWebAPI
 __MYNAME__ = 'frankenrouter'
 __MY_DESCRIPTION__ = 'A PSX Router'
 
-__VERSION__ = '1.3.1'
+__VERSION__ = '1.3.7'
 
 # If we have no upstream connection and no cached data, assume this
 # version.
-PSX_DEFAULT_VERSION = '10.184 NG'
-
-# How long we wait for the upstream connection before accepting clients
-# and serving them cached data.
-UPSTREAM_WAITFOR = 5.0
+PSX_DEFAULT_VERSION = '10.187 NG'
 
 # Status display static config
 HEADER_LINE_LENGTH = 126
@@ -72,6 +72,25 @@ PSX_RESUME_ELEVATION_AFTER = 60
 
 # How often to sent master caution if filter status is bad
 FILTER_WARNING_INTERVAL = 60
+
+# Seconds to wait after all IRSes reach ≥60000 before broadcasting the alignment fix
+IRS_ALIGN_FIX_DELAY = 5.0
+
+# Value broadcast to upstream and all clients once IRSes are confirmed aligned
+IRS_ALIGN_FIX_VALUE = 'Qs355=102000;102000;102000'
+
+# Addon client patterns checked on the master router.
+# More than one match is always a critical error.
+MASTER_ADDON_PATTERNS = [
+    r'.*(BA ACARS|BACARS).*',
+    r'.*TURB.*',
+    r'.*UTIL.*',
+    r'.*TANKER.*',
+]
+# Subset where zero matches is also a warning.
+MASTER_ADDON_REQUIRED_PATTERNS = [
+    r'.*(BA ACARS|BACARS).*',
+]
 
 
 def trimstring(longname, maxlen=11, sep=".."):
@@ -159,6 +178,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.frdp_routerinfo_requested = False
         self.frdp_sharedinfo_requested = False
         self.frdp_flightinfo_requested = False
+        self.frankenweather_state: dict = None
+        self.frankenweather_received_at: float = 0.0
+        self.frankenweather_turbstate: dict = None
+        self.frankenweather_turbstate_received_at: float = 0.0
         self.flightinfo = {
             'last_updated_by': '',
             'last_updated_at': '',
@@ -168,6 +191,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             'captain_code': '',
             'fo_code': '',
             'seat_swap': False,
+            'p1_is_vatpri': False,
             'observers': '',
             'flight_number': '',
             'vatsim_callsign': '',
@@ -178,11 +202,20 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             'eobt': '',
             'comments': '',
             'scratchpad': '',
+            'checklist': [],
         }
         self.upstream_reconnect_requested = False
         self.longest_destination_string = 0
         self.rules = Rules(self)
         self.blocklist = set()
+        self.session_password = None
+        self.observer_session_password = None
+        self.observer_mode = False
+
+        # IRS alignment fix: timestamp when all three IRSes first reached ≥60000,
+        # and whether we have already sent the fix for this alignment cycle.
+        self._irs_all_aligned_since = None
+        self._irs_fix_sent = False
 
         # Keep track of when we last sent a filter state warning to EICAS
         self.filter_warning_sent = 0
@@ -227,6 +260,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.filter_traffic = True
         self.filter_elevation = True
 
+        # Keep track of our Qs121 keepalive
+        self.qs121_keepalive_last_warning = 0.0
+        self.qs121_keepalive_flip = False
+
+        # Set to True the first time the upstream sends load3 (welcome complete).
+        # Never reset after that; used by listener_task to gate client connections.
+        self.upstream_ever_welcomed = False
+
     def reset_after_upstream_connect(self):
         """Re-initialize certain variables after upstream connection."""
         self.last_load1 = 0.0
@@ -237,6 +278,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             'pilot_flying_simulator': "NO_CONTROL_LOCKS",
             'elevation_source_simulator': "NOSIM",
             'traffic_source_simulator': "NOSIM",
+            'errors': [],
         }
         # Track when we last send the start keyword upstream
         self.start_sent_at = 0.0
@@ -271,10 +313,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             '--read-buffer-size', type=int,
             action='store', default=1048576)
         parser.add_argument(
-            '--upstream-reconnect-delay', type=float,
-            action='store', default=1.0,
-            help="How long to wait between upstream connection attempts.")
-        parser.add_argument(
             '--status-interval',
             type=int, action='store', default=60,
             help="How often to print router status to terminal",
@@ -288,19 +326,24 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             '--state-cache-file',
             type=str, action='store', default="AUTO",
             help=(
-                "This file contains PSX state that is automatically read on startup" +
-                " and used until we have connected to the upstream router or PSX main" +
-                " server. We also save the current state to this file on shutdown."
+                "Path to the state cache file. Only used when --use-state-cache is given."
+                " Default: AUTO (a name based on the router identity)."
+            ),
+        )
+        parser.add_argument(
+            '--use-state-cache',
+            action='store_true',
+            help=(
+                "Read the state cache file on startup (if it exists) and save the current"
+                " state to the file periodically and on shutdown. Without this option the"
+                " router will only provide a fake client ID and PSX version to clients that"
+                " connect before it has connected to the PSX main server."
             ),
         )
         parser.add_argument(
             '--no-state-cache-file',
             action='store_true',
-            help=(
-                "Do not read the cached data on startup. In this case, the router" +
-                " will only provide a fake client ID and PSX version to clients that" +
-                " connect before it has connected to the PSX main server."
-            ),
+            help=argparse.SUPPRESS,
         )
         parser.add_argument(
             '--debug',
@@ -371,6 +414,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             return "slave"
         return "master"
 
+    def is_sharedinfo_authority(self):
+        """Return True if this router owns the SHAREDINFO state (master or standalone)."""
+        return self.config.identity.type in ('master', 'standalone')
+
     def is_client_connected(self, client_addr):
         """Return True if this client is connected."""
         if client_addr in self.clients:
@@ -440,9 +487,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.logger.info("")
         self.logger.info("-" * HEADER_LINE_LENGTH)
         self.logger.info(
-            ("This router \"%s\" port %d, %d/%d queue upstream/clients, uptime %d s" +
+            ("This %s router \"%s\" port %d, %d/%d queue upstream/clients, uptime %d s" +
              ", API port %s, cache=%s"),
-            self.config.identity.simulator, self.config.listen.port,
+            self.config.identity.type, self.config.identity.simulator, self.config.listen.port,
             self.messagequeue_from_upstream.qsize(),
             self.messagequeue_from_clients.qsize(),
             int(time.perf_counter() - self.starttime),
@@ -476,7 +523,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             upstreaminfo = f"upstream is {self.upstream.ip}:{self.upstream.port}"
             if self.upstream.uuid is not None:
                 upstreaminfo += f":{trimstring(self.upstream.uuid)}"
-            upstreaminfo += f" {self.upstream.display_name}"
+            upstreaminfo += f" {self.upstream.display_name} ({self.upstream.access_level})"
             if len(self.upstream.frdp_ping_rtts) > 0:
                 # Keep the last N samples
                 self.upstream.frdp_ping_rtts = self.upstream.frdp_ping_rtts[-FRDP_KEEP_RTT_SAMPLES:]
@@ -911,6 +958,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             # has access (i.e authenticated based on IP or password)
             if this_client.has_access():
                 await self.client_add_to_network(this_client)
+            else:
+                # Send a challenge so frankenrouter clients can authenticate
+                # with a hashed password instead of cleartext.
+                nonce = secrets.token_hex(16)
+                this_client.auth_nonce = nonce
+                await this_client.to_stream(
+                    f"addon=FRANKENROUTER:{self.frdp_version}:AUTH_CHALLENGE:{nonce}")
 
             # Wait for data from client
             while self.is_client_connected(this_client.peername):
@@ -1088,6 +1142,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
     async def upstream_connector_task(self, name):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         """Upstream connector Task."""
         try:  # pylint: disable=too-many-nested-blocks
+            reconnect_delay = 1.0
             while True:  # pylint: disable=too-many-nested-blocks
                 # Pause clients when we have no upstream connection
                 try:
@@ -1100,10 +1155,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 # upstream is down or unreachable
                 except (ConnectionError, OSError):
                     self.logger.warning(
-                        "Upstream connection refused, sleeping %.1f s before retry",
-                        self.args.upstream_reconnect_delay,
+                        "Upstream connection refused, retrying in %.0f s",
+                        reconnect_delay,
                     )
-                    await asyncio.sleep(self.args.upstream_reconnect_delay)
+                    await asyncio.sleep(reconnect_delay)
+                    reconnect_delay = min(reconnect_delay * 2, 60.0)
                     continue
                 except Exception:  # pylint: disable=broad-exception-caught
                     msg = f"Unhandled exception: {traceback.format_exc()}"
@@ -1115,6 +1171,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.upstream = connection.UpstreamConnection(
                     reader, writer, self)
                 self.upstream_connections += 1
+                reconnect_delay = 1.0
                 self.logger.info("Connected to upstream: %s", self.upstream.peername)
                 await self.log_connect_evt(self.upstream.peername)
 
@@ -1163,12 +1220,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         data = await self.upstream.read_line_from_stream()
                     except connection.ConnectionClosed as exc:
                         self.logger.info(
-                            "Upstream connection broke (%s), sleeping %.1f s before reconnect",
-                            exc,
-                            self.args.upstream_reconnect_delay,
+                            "Upstream connection broke (%s), reconnecting in %.0f s",
+                            exc, reconnect_delay,
                         )
                         await self.close_upstream_connection()
-                        await asyncio.sleep(self.args.upstream_reconnect_delay)
+                        await asyncio.sleep(reconnect_delay)
+                        reconnect_delay = min(reconnect_delay * 2, 60.0)
                         break
                     except Exception:  # pylint: disable=broad-exception-caught
                         msg = f"Unhandled exception: {traceback.format_exc()}"
@@ -1177,6 +1234,33 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         self.logger.critical("%s\nRouter is go-minded so trying to continue", msg)
                     if data is None:
                         continue
+                    # Intercept AUTH_FAILED before queuing: by the time
+                    # forwarder_task processes the queue the upstream
+                    # connection is already closed (self.upstream is None),
+                    # so the message would be silently dropped.
+                    line_text = data.rstrip(b'\r\n').decode(errors='replace')
+                    auth_fail_prefix = (
+                        f"addon=FRANKENROUTER:{self.frdp_version}:AUTH_FAILED:")
+                    if line_text.startswith(auth_fail_prefix):
+                        reason = line_text[len(auth_fail_prefix):]
+                        _sep = "!" * 60
+                        self.logger.error(_sep)
+                        self.logger.error(
+                            "FAILED TO CONNECT TO %s:%s DUE TO %s",
+                            self.config.upstream.host,
+                            self.config.upstream.port,
+                            reason)
+                        self.logger.error(_sep)
+                        await self.close_upstream_connection()
+                        # Let the logging queue drain before printing the prompt
+                        await asyncio.sleep(0.5)
+                        print("\nPress any key to exit...")
+                        try:
+                            import msvcrt  # pylint: disable=import-outside-toplevel
+                            msvcrt.getch()
+                        except ImportError:
+                            input()
+                        os._exit(1)  # pylint: disable=protected-access
                     t_read_data = time.perf_counter()
                     await self.messagequeue_from_upstream.put({
                         'payload': data,
@@ -1209,16 +1293,19 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
     async def listener_task(self, name):
         """Run the client listener."""
         try:
-            # Wait a while for the upstream connection. We prefer to give
-            # the clients the real data, not old cached variables.
-            started_waiting = time.perf_counter()
-            while not self.is_upstream_connected():
-                if time.perf_counter() - started_waiting > UPSTREAM_WAITFOR:
-                    self.logger.info(
-                        "Gave up waiting for upstream connection, will serve cached data")
-                    break
-                self.logger.info("Upstream not connected, not listening yet...")
-                await asyncio.sleep(1.0)
+            # If configured to do so (default), wait until the upstream has
+            # sent its welcome (load3) before accepting client connections.
+            # This guarantees every client gets a full, fresh variable set.
+            # The wait is skipped when:
+            #  - no upstream is configured (standalone / master mode), or
+            #  - wait_for_upstream_welcome is false in [listen] config.
+            # Once the upstream has welcomed us once, the gate stays open even
+            # if the upstream later disconnects and reconnects.
+            if self.config.upstream is not None and self.config.listen.wait_for_upstream_welcome:
+                self.logger.info(
+                    "Waiting for upstream welcome before accepting client connections...")
+                while not self.upstream_ever_welcomed:
+                    await asyncio.sleep(1.0)
 
             try:
                 self.proxy_server = await asyncio.start_server(
@@ -1299,6 +1386,27 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         if self.get_errors():
             self.logger.info("!!! After filter change, errors may remain for up to 60s")
 
+    @staticmethod
+    def _worldflight_countdown_str():
+        """Return a short countdown string to the next Worldflight start."""
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        # Worldflight starts at 08:00 AEDT (UTC+11) on the first Sunday in November,
+        # which is 21:00 UTC on the preceding Saturday.
+        year = now_utc.year
+        nov1 = datetime.datetime(year, 11, 1, tzinfo=datetime.timezone.utc)
+        days_until_sunday = (6 - nov1.weekday()) % 7  # weekday(): Mon=0 … Sun=6
+        first_sunday = nov1 + datetime.timedelta(days=days_until_sunday)
+        sat_21z = first_sunday.replace(hour=21, minute=0, second=0, microsecond=0)
+        wf_start = sat_21z - datetime.timedelta(days=1)
+        if wf_start <= now_utc:
+            nov1 = datetime.datetime(year + 1, 11, 1, tzinfo=datetime.timezone.utc)
+            days_until_sunday = (6 - nov1.weekday()) % 7
+            first_sunday = nov1 + datetime.timedelta(days=days_until_sunday)
+            sat_21z = first_sunday.replace(hour=21, minute=0, second=0, microsecond=0)
+            wf_start = sat_21z - datetime.timedelta(days=1)
+        total_hours = int((wf_start - now_utc).total_seconds() // 3600)
+        return f"ttwf={total_hours // 24}dh{total_hours % 24}"
+
     def print_aircraft_status(self):
         """Display a basic aircraft status line to verify sane data."""
         try:
@@ -1316,8 +1424,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             lat = math.degrees(float(PiBaHeAlTas[5]))
             lon = math.degrees(float(PiBaHeAlTas[6]))
             self.logger.info(
-                "pitch=%.1f bank=%.1f heading=%.0f altitude_true=%.0f TAS=%.0f lat=%.6f lon=%.6f",
-                pitch, bank, heading_true, alt_true_ft, tas, lat, lon
+                "pitch=%.1f bank=%.1f heading=%.0f altitude_true=%.0f"
+                " TAS=%.0f lat=%.6f lon=%.6f %s",
+                pitch, bank, heading_true, alt_true_ft, tas, lat, lon,
+                self._worldflight_countdown_str()
             )
 
     async def logging_task(self, name):  # pylint: disable=too-many-branches
@@ -1336,6 +1446,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
             console_formatter = logging.Formatter("%(asctime)s: %(message)s", datefmt="%H:%M:%S")
             file_formatter = logging.Formatter("%(asctime)s: %(message)s")
+            file_formatter.converter = time.gmtime
 
             console_handler = logging.StreamHandler()
             console_handler.setFormatter(console_formatter)
@@ -1420,6 +1531,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.traffic_logger.addHandler(queue_handler)
 
             file_formatter = logging.Formatter("%(asctime)s: %(message)s")
+            file_formatter.converter = time.gmtime
 
             file_handler = logging.handlers.RotatingFileHandler(
                 self.log_traffic_filename,
@@ -1523,8 +1635,27 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 # another frankenrouter.
                 if self.get_router_type() == 'slave':
                     if self.config.upstream.password and not self.upstream.frdp_auth_sent:
-                        await self.send_to_upstream(f"addon=FRANKENROUTER:{self.frdp_version}:AUTH:{self.config.upstream.password}")  # pylint: disable=line-too-long
-                        self.upstream.frdp_auth_sent = True
+                        if self.upstream.auth_nonce is not None:
+                            # New upstream: authenticate with HMAC-SHA256
+                            auth_hmac = hmac.new(
+                                self.config.upstream.password.encode(),
+                                self.upstream.auth_nonce.encode(),
+                                hashlib.sha256
+                            ).hexdigest()
+                            ver = self.frdp_version
+                            await self.send_to_upstream(
+                                f"addon=FRANKENROUTER:{ver}:AUTH:hmac-sha256:{auth_hmac}")
+                            self.upstream.frdp_auth_sent = True
+                        elif self.upstream.frdp_ident_sent and self.upstream.auth_wait_cycles >= 1:
+                            # Old upstream (never sent AUTH_CHALLENGE): fall back to cleartext
+                            ver = self.frdp_version
+                            pwd = self.config.upstream.password
+                            await self.send_to_upstream(
+                                f"addon=FRANKENROUTER:{ver}:AUTH:{pwd}")
+                            self.upstream.frdp_auth_sent = True
+                        elif self.upstream.frdp_ident_sent:
+                            # Give upstream one more cycle to send AUTH_CHALLENGE
+                            self.upstream.auth_wait_cycles += 1
                 #
                 # FRDP ROUTERINFO
                 #
@@ -1572,6 +1703,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             },
             "filter_elevation": self.filter_elevation,
             "filter_traffic": self.filter_traffic,
+            "observer_mode": self.observer_mode,
             "errors": self.get_errors(),
         }
         payload['connections'] = []
@@ -1585,6 +1717,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 "upstream": con.upstream,
                 "uuid": con.uuid,
                 "client_id": con.client_id,
+                "client_provided_id": con.client_provided_id,
                 "is_frankenrouter": con.is_frankenrouter,
                 "display_name": con.display_name,
                 "connected_time": int(time.perf_counter() - con.connected_at),
@@ -1612,7 +1745,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         if self.uuid is None:
             self.logger.info("No own UUID, cannot send sharedinfo")
             return
-        if not self.config.sharedinfo.master:
+        if self.config.identity.type != 'master':
             self.logger.debug("Not the SHAREDINFO master, not sending")
             return
         payload = {
@@ -1620,6 +1753,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             "pilot_flying_simulator": self.sharedinfo["pilot_flying_simulator"],
             "elevation_source_simulator": self.sharedinfo["elevation_source_simulator"],
             "traffic_source_simulator": self.sharedinfo["traffic_source_simulator"],
+            "errors": self.get_errors(),
         }
         payload_json = json.dumps(payload)
         # Store our own sharedinfo so we have all the data in the same place
@@ -1652,6 +1786,47 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             exclude_non_frankenrouter=True)
         # End of send_frdp_flightinfo()
 
+    def cache_frankenweather_addon(self, line: str) -> None:
+        """Parse and cache FRANKENWEATHER:STATE or TURBSTATE addon messages for the web UI."""
+        # line: "addon=FRANKENWEATHER:STATE:<uuid>:<json>"
+        # line: "addon=FRANKENWEATHER:TURBSTATE:<uuid>:<json>"
+        rest = line[len("addon=FRANKENWEATHER:"):]
+        if rest.startswith("TURBSTATE:"):
+            rest = rest[len("TURBSTATE:"):]
+            colon = rest.find(':')
+            if colon <= 0:
+                return
+            json_str = rest[colon + 1:]
+            try:
+                self.frankenweather_turbstate = json.loads(json_str)
+                self.frankenweather_turbstate_received_at = time.time()
+            except ValueError:
+                self.logger.warning("Malformed FRANKENWEATHER TURBSTATE addon: %s", line[:80])
+            return
+        if not rest.startswith("STATE:"):
+            return
+        rest = rest[len("STATE:"):]
+        colon = rest.find(':')
+        if colon <= 0:
+            return
+        json_str = rest[colon + 1:]
+        try:
+            self.frankenweather_state = json.loads(json_str)
+            self.frankenweather_received_at = time.time()
+        except ValueError:
+            self.logger.warning("Malformed FRANKENWEATHER STATE addon: %s", line[:80])
+
+    def _find_network_clients_matching(self, pattern):
+        """Return list of (simulator_name, display_name) for matching non-router clients."""
+        matches = []
+        for router in self.routerinfo.values():
+            for conn in router.get('connections', []):
+                if conn.get('upstream') or conn.get('is_frankenrouter'):
+                    continue
+                if re.match(pattern, conn.get('display_name', '')):
+                    matches.append((router.get('simulator_name', '?'), conn.get('display_name')))
+        return matches
+
     def get_errors(self):  # pylint: disable=too-many-branches
         """Return errors for this router (sent in FRDP ROUTERINFO)."""
         errors = []
@@ -1663,7 +1838,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         buf_limit = self.config.performance.write_buffer_critical_limit
         rx_limit = self.config.performance.received_messages_per_second_critical_limit
         tx_limit = self.config.performance.sent_messages_per_second_critical_limit
-        bucket = int(time.time() - 1.0)
+        now = int(time.time())
+        rate_window = 30
         for con in conns:
             # Skip test until connection has been established for more
             # than 60 seconds. We always have a high message rate
@@ -1675,18 +1851,22 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 errors.append(
                     f"Write buffer for {con.display_name} is {buf} bytes"
                     f" (limit {buf_limit})")
-            if bucket in con.received_stats:
-                rx = con.received_stats[bucket]['received_messages']
-                if rx > rx_limit:
-                    errors.append(
-                        f"Received message rate for {con.display_name} is {rx}/s"
-                        f" (limit {rx_limit})")
-            if bucket in con.sent_stats:
-                tx = con.sent_stats[bucket]['sent_messages']
-                if tx > tx_limit:
-                    errors.append(
-                        f"Sent message rate for {con.display_name} is {tx}/s"
-                        f" (limit {tx_limit})")
+            rx = sum(
+                con.received_stats.get(now - i, {}).get('received_messages', 0)
+                for i in range(1, rate_window + 1)
+            ) / rate_window
+            if rx > rx_limit:
+                errors.append(
+                    f"Received message rate for {con.display_name} is {rx:.0f}/s"
+                    f" ({rate_window}s avg, limit {rx_limit})")
+            tx = sum(
+                con.sent_stats.get(now - i, {}).get('sent_messages', 0)
+                for i in range(1, rate_window + 1)
+            ) / rate_window
+            if tx > tx_limit:
+                errors.append(
+                    f"Sent message rate for {con.display_name} is {tx:.0f}/s"
+                    f" ({rate_window}s avg, limit {tx_limit})")
         filterstatus = self.get_filter_status()
         if len(filterstatus['elevation']['disabled']) > 1:
             errors.append(
@@ -1703,11 +1883,48 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 errors.append("No sim is sending MSFS elevation to PSX")
             if len(filterstatus['traffic']['disabled']) < 1:
                 errors.append("No sim is sending vPilot traffic data")
+        if self.config.identity.type == 'master':
+            for pattern in MASTER_ADDON_PATTERNS:
+                matches = self._find_network_clients_matching(pattern)
+                if len(matches) > 1:
+                    errors.append(
+                        f"More than one client matching '{pattern}'"
+                        f" ({len(matches)} clients in:"
+                        f" {', '.join(sim for sim, _ in matches)})")
         return errors
 
     def get_warnings(self):  # pylint: disable=too-many-branches
         """Return warnings for this router (printed locally, not sent in ROUTERINFO)."""
         warnings = []
+        conns = list(self.clients.values())
+        if self.is_upstream_connected():
+            conns.append(self.upstream)
+        perf = self.config.performance
+        now = int(time.time())
+        rate_window = 30
+        for con in conns:
+            if (time.perf_counter() - con.connected_at) < 60:
+                continue
+            rx = sum(
+                con.received_stats.get(now - i, {}).get('received_messages', 0)
+                for i in range(1, rate_window + 1)
+            ) / rate_window
+            if perf.received_messages_per_second_warning_limit < rx \
+                    <= perf.received_messages_per_second_critical_limit:
+                warnings.append(
+                    f"Received message rate for {con.display_name} is {rx:.0f}/s"
+                    f" ({rate_window}s avg,"
+                    f" limit {perf.received_messages_per_second_warning_limit})")
+            tx = sum(
+                con.sent_stats.get(now - i, {}).get('sent_messages', 0)
+                for i in range(1, rate_window + 1)
+            ) / rate_window
+            if perf.sent_messages_per_second_warning_limit < tx \
+                    <= perf.sent_messages_per_second_critical_limit:
+                warnings.append(
+                    f"Sent message rate for {con.display_name} is {tx:.0f}/s"
+                    f" ({rate_window}s avg,"
+                    f" limit {perf.sent_messages_per_second_warning_limit})")
         checks = self.config.check
         if checks is None:
             return warnings
@@ -1730,6 +1947,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     warnings.append(f"Too few ({count}) clients matching {regexp}")
                 if check.limit_max and count > check.limit_max:
                     warnings.append(f"Too many ({count}) clients matching {regexp}")
+        if self.config.identity.type == 'master':
+            for pattern in MASTER_ADDON_REQUIRED_PATTERNS:
+                if not self._find_network_clients_matching(pattern):
+                    warnings.append(f"No client matching '{pattern}'")
         return warnings
 
     def print_client_errors(self):
@@ -1784,7 +2005,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             if self.upstream.is_frankenrouter:
                 # We are not standalone, do nothing
                 return
-            if self.config.sharedinfo.master:
+            if self.config.identity.type == 'master':
                 # We are a designated sharedinfo master, ensure filters off
                 if self.filter_elevation:
                     self.logger.info("Standalone or master sim - elevation filter disabled")
@@ -1890,50 +2111,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     await self.client_broadcast("Qs418=")
                     self.connection_state_changed()
 
-    async def _housekeeping_jettison_fix(self):
-        """Jettison selector switch bug workaround.
-
-        Workaround for problem described in
-        https://aerowinx.com/board/index.php/topic,7861.0.html
-        - send "jettison off" when connected to
-        upstream. This assumes you don't connect to a master
-        sim while fuel jettison is actually in progress, but
-        that seems rather unlikely.
-        Qi25="CfgJettisonMlw"; Mode=ECON; Min=0; Max=1;
-        Qh274="JettSelSystem"; Mode=ECON; Min=0; Max=4;
-        """
-        if (self.is_upstream_connected() and
-                (time.perf_counter() - self.upstream.connected_at) <
-                2 * self.args.housekeeping_interval):
-            self.logger.info("Checking if we need to apply the jettison switch fix")
-            try:
-                has_jettison_mlw = self.cache.get_value('Qi25')
-                jettison_sel = self.cache.get_value('Qh274')
-                self.logger.info(
-                    "Jettison check: Qi25=%s, Qh274=%s",
-                    has_jettison_mlw, jettison_sel)
-                if has_jettison_mlw == 0:
-                    if jettison_sel != 0:
-                        self.logger.warning(
-                            "Jettison selector mismatch (%s, %s) after"
-                            " connection, applying workaround Qh274=0",
-                            has_jettison_mlw, jettison_sel)
-                        await self.send_to_upstream("Qh274=0")
-                        await self.client_broadcast("Qh274=0")
-                elif has_jettison_mlw == 1:
-                    if jettison_sel != 2:
-                        self.logger.warning(
-                            "Jettison selector mismatch (%s, %s) after"
-                            " connection, applying workaround Qh274=2",
-                            has_jettison_mlw, jettison_sel)
-                        await self.send_to_upstream("Qh274=2")
-                        await self.client_broadcast("Qh274=2")
-                else:
-                    self.logger.info("No jettison fix needed")
-            except routercache.RouterCacheException:
-                self.logger.warning(
-                    "Not applying jettison workaround since data not in cache")
-
     def _housekeeping_remove_stale_masters(self):
         """Remove stale elevation or traffic master.
 
@@ -1964,23 +2141,117 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.sharedinfo['traffic_source_simulator'] = "NOSIM"
                 self.frdp_sharedinfo_requested = True
 
+    async def _housekeeping_refresh_qs121(self):
+        """Re-broadcast Qs121 when PSX stops sending it (aircraft stationary).
+
+        PSX sends Qs121 at 5 Hz while moving but stops when stationary. Slave
+        routers still need it at a steady rate, so we re-send the cached value
+        when it has not been updated for more than 1 s.
+
+        PSX main clients may ignore an identical Qs121 value. We alternate ±1
+        µrad on bank (index 1) so each keepalive is unique while remaining
+        physically imperceptible on a stationary aircraft.
+        """
+        if self.config.identity.type not in ['master', 'standalone']:
+            return
+        if not self.config.psx.qs121_keepalive:
+            return
+        if not self.cache.has_keyword('Qs121'):
+            return
+        age = self.cache.get_age('Qs121')
+        if age <= 1.0:
+            return
+        parts = self.cache.get_value('Qs121').split(';')
+        delta = 1 if self.qs121_keepalive_flip else -1
+        self.qs121_keepalive_flip = not self.qs121_keepalive_flip
+        parts[1] = str(int(parts[1]) + delta)
+        value = ';'.join(parts)
+        time_since_warning = time.perf_counter() - self.qs121_keepalive_last_warning
+        if time_since_warning > 60.0:
+            self.logger.info(
+                "No Qs121 seen in %.1fs, re-sending keepalive (normal when stationary)",
+                age)
+            self.qs121_keepalive_last_warning = time.perf_counter()
+        await self.client_broadcast(f"Qs121={value}")
+
+    async def _housekeeping_check_write_buffers(self):
+        """Disconnect clients whose write buffer exceeds 50% of the high water mark."""
+        for client in list(self.clients.values()):
+            if client.is_closing:
+                continue
+            transport = client.writer.transport
+            _, high = transport.get_write_buffer_limits()
+            buf = transport.get_write_buffer_size()
+            if buf > high // 2:
+                self.logger.warning(
+                    "!!! Write buffer for %s is %d bytes"
+                    " (50%% of high water mark %d) - forcibly disconnecting",
+                    client.display_name, buf, high)
+                self.status_display_requested = True
+                await self.close_client_connection(client, clean=False)
+
+    async def _housekeeping_irs_align_fix(self):
+        """Broadcast IRS_ALIGN_FIX_VALUE when any IRS hits 60000 and all are above 59000."""
+        if not self.config.psx.irs_align_fix:
+            return
+        now = time.perf_counter()
+        any_just_aligned = False
+        if self.cache.has_keyword('Qs355'):
+            try:
+                parts = [int(p) for p in self.cache.get_value('Qs355').split(';')]
+                any_just_aligned = (
+                    any(p == 60000 for p in parts) and
+                    all(p > 59000 for p in parts)
+                )
+            except (ValueError, AttributeError):
+                pass
+        if not any_just_aligned:
+            self._irs_all_aligned_since = None
+            self._irs_fix_sent = False
+            return
+        if self._irs_all_aligned_since is None:
+            self._irs_all_aligned_since = now
+        if self._irs_fix_sent:
+            return
+        if now - self._irs_all_aligned_since >= IRS_ALIGN_FIX_DELAY:
+            self.logger.info(
+                "IRS alignment fix: IRS alignment detected (Qs355=%s),"
+                " broadcasting %s",
+                self.cache.get_value('Qs355'), IRS_ALIGN_FIX_VALUE)
+            await self.send_to_upstream(IRS_ALIGN_FIX_VALUE)
+            await self.client_broadcast(IRS_ALIGN_FIX_VALUE)
+            self.cache.update('Qs355', '102000;102000;102000')
+            self._irs_fix_sent = True
+
     async def housekeeping_task(self, name):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
         """Miscellaneous housekeeping Task."""
         try:  # pylint: disable=too-many-nested-blocks
             last_run = 0.0
             while True:
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(0.5)
+                await self._housekeeping_refresh_qs121()
+                await self._housekeeping_check_write_buffers()
+                await self._housekeeping_irs_align_fix()
                 if time.perf_counter() - last_run > self.args.housekeeping_interval:
                     last_run = time.perf_counter()
                     self.logger.debug("Performing housekeeping")
-                    # Write chache to disk
-                    self.cache.write_to_file()
+                    if (self.config.upstream is not None and
+                            self.config.listen.wait_for_upstream_welcome and
+                            not self.upstream_ever_welcomed):
+                        _sep = "*" * 60
+                        self.logger.warning(_sep)
+                        self.logger.warning(
+                            "NOT ACCEPTING CLIENT CONNECTIONS YET — waiting for "
+                            "upstream welcome from %s:%s",
+                            self.config.upstream.host, self.config.upstream.port)
+                        self.logger.warning(_sep)
+                    if self.args.use_state_cache:
+                        self.cache.write_to_file()
 
                     # Call housekeeping functions
                     self._housekeeping_disable_filters_if_standalone()
                     await self._housekeeping_enable_psx_elevation_database()
                     await self._housekeeping_enable_master_caution()
-                    await self._housekeeping_jettison_fix()
                     self._housekeeping_remove_stale_masters()
 
                     # Do some minor housekeeping that does not need separate functions
@@ -2077,6 +2348,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 await self.send_to_upstream(extra_data['reply'], sender.peername)
             else:
                 await self.client_broadcast(extra_data['reply'], include=[sender.peername])
+                # Inform the connecting frankenrouter of its access level (on change only)
+                _access_map = {'full': 'crew', 'observer': 'observer'}
+                _level = _access_map.get(sender.access_level, 'unknown')
+                if _level != sender.frdp_last_sent_access_level:
+                    await self.client_broadcast(
+                        f"addon=FRANKENROUTER:{self.frdp_version}:ACCESS_LEVEL:{_level}",
+                        include=[sender.peername])
+                    sender.frdp_last_sent_access_level = _level
             self.logger.debug(
                 "Got FRDP PING message from %s, sending PONG: %s",
                 sender_hr, extra_data['reply'])
@@ -2154,6 +2433,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.info("Got load2 message from %s", sender_hr)
         elif code == RulesCode.LOAD3:
             self.logger.info("Got load3 message from %s", sender_hr)
+            if sender.upstream and not self.upstream_ever_welcomed:
+                self.upstream_ever_welcomed = True
+                self.logger.info("Upstream welcome complete; client listener may start")
         elif code == RulesCode.START:
             self.logger.info("Got start message from %s", sender_hr)
         elif code == RulesCode.PBSKAQ:
@@ -2166,12 +2448,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 await self.close_client_connection(sender)
         elif code == RulesCode.KEYVALUE_NORMAL:
             self.logger.debug("Got normal key-value from %s: %s", sender_hr, line)
-        elif code == RulesCode.SPEEDBRAKE_OVERRIDE:
-            self.logger.info("%s (from %s: %s)", message, sender_hr, line)
-            await asyncio.gather(
-                self.send_to_upstream(extra_data['override_line']),
-                self.client_broadcast(extra_data['override_line']),
-            )
         elif code == RulesCode.KEYVALUE_FILTERED_INGRESS:
             self.logger.info(
                 "Keyword update from %s dropped due to ingress filter (%s): %s",
@@ -2194,9 +2470,21 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.debug("Got FRDP ROUTERINFO: %s", line)
         elif code == RulesCode.FRDP_FLIGHTINFO:
             self.logger.debug("Got FRDP FLIGHTINFO")
+        elif code == RulesCode.FRDP_AUTH_CHALLENGE:
+            nonce = (extra_data or {}).get('nonce')
+            sender.auth_nonce = nonce
+            self.logger.info("Received AUTH_CHALLENGE from upstream, stored nonce")
         elif code == RulesCode.FRDP_AUTH_FAIL:
-            self.logger.warning("Client failed FRDP authentication: %s: %s", sender_hr, line)
-            # Disconnect clients that fail authentication
+            reason = message or "invalid password"
+            _sep = "!" * 60
+            self.logger.warning(_sep)
+            self.logger.warning(
+                "LOGIN FAILED FROM %s (%s) DUE TO %s",
+                sender.ip, sender.display_name, reason)
+            self.logger.warning(_sep)
+            await sender.to_stream(
+                f"addon=FRANKENROUTER:{self.frdp_version}:AUTH_FAILED:{reason}",
+                drain=True)
             await self.close_client_connection(sender, clean=False)
         elif code == RulesCode.FRDP_AUTH_OK:
             self.logger.info("Client %s successfully authenticated: %s", sender_hr, line)
@@ -2205,6 +2493,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.warning(
                 "Client %s successfully authenticated but already has access: %s",
                 sender_hr, line)
+        elif code == RulesCode.FRDP_ACCESS_LEVEL:
+            self.logger.debug(
+                "Upstream access level: '%s'", sender.access_level)
         elif code == RulesCode.NAME_FROM_FRANKENROUTER:
             self.logger.info("Client %s is a frankenrouter: %s", sender_hr, line)
         elif code == RulesCode.NAME_LEARNED:
@@ -2220,11 +2511,30 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         elif code == RulesCode.ADDON_FORWARDED:
             self.logger.info("Non-frankenrouter addon message from %s forwarded: %s",
                              sender_hr, line)
+        elif code == RulesCode.ADDON_FORWARDED_KNOWN:
+            self.logger.debug("Known addon message from %s forwarded: %s",
+                              sender_hr, line)
+            if line.startswith("addon=FRANKENWEATHER:"):
+                self.cache_frankenweather_addon(line)
         elif code == RulesCode.AGAIN:
             self.logger.info("Keyword again from %s forwarded: %s", sender_hr, line)
         elif code == RulesCode.BANG:
             self.logger.info("Sending synthetic bang reply to %s", sender_hr)
             await self.client_add_to_network(sender, bang_reply=True)
+        elif code == RulesCode.PARKING_BRAKE_FORCE_RELEASE:
+            self.logger.info("Forcing parking brake release due to %s (%s)",
+                             sender_hr, message)
+            for line in ['Qs357=1000;1000', 'Qh397=0']:
+                await asyncio.gather(
+                    self.send_to_upstream(line),
+                    self.client_broadcast(line),
+                )
+                await asyncio.sleep(0.2)
+            self.cache.update('Qh397', 0)
+
+        elif code == RulesCode.OBSERVER_MODE:
+            self.logger.debug(
+                "Observer mode: dropped key-value from %s: %s", sender_hr, line)
 
         # Take action
         if action == RulesAction.DROP:
@@ -2587,6 +2897,10 @@ shared cockpit master sim.
             if port != "":
                 self.config.upstream.port = int(port)
             if password != "":
+                if not re.match(r'^[\x21-\x7e]+$', password):
+                    raise SystemExit(
+                        "\nPassword contains invalid characters. "
+                        "Only printable ASCII characters (no spaces) are allowed.")
                 self.config.upstream.password = password
 
         else:
@@ -2610,6 +2924,10 @@ shared cockpit master sim.
             if port != "":
                 self.config.upstream.port = int(port)
             if password != "":
+                if not re.match(r'^[\x21-\x7e]+$', password):
+                    raise SystemExit(
+                        "\nPassword contains invalid characters. "
+                        "Only printable ASCII characters (no spaces) are allowed.")
                 self.config.upstream.password = password
 
         # Override with command line options
@@ -2638,7 +2956,10 @@ shared cockpit master sim.
         # Initialize the router cache
         self.cache = routercache.RouterCache(
             f"frankenrouter-{self.config.identity.router}.cache.json", self.config)
-        if not self.args.no_state_cache_file:
+        if self.args.no_state_cache_file:
+            print("WARNING: --no-state-cache-file is deprecated and has no effect."
+                  " State cache is now opt-in via --use-state-cache.")
+        if self.args.use_state_cache:
             self.cache.read_from_file()
 
         if self.args.debug:
@@ -2653,7 +2974,7 @@ shared cockpit master sim.
             for rule in self.config.access:
                 try:
                     print(f"config: access/{i}/display_name = {rule.display_name}")
-                    print(f"config: access/{i}/match_ipv4 = {rule.match_ipv4}")
+                    print(f"config: access/{i}/match_ip = {rule.match_ip}")
                     print(f"config: access/{i}/is_frankenrouter = {rule.is_frankenrouter}")
                 except AttributeError as exc:
                     print(f"Missing attribute - continuing: {exc}")
@@ -2702,6 +3023,8 @@ shared cockpit master sim.
                 raise SystemExit(f"{msg}\nRouter is stop-minded so shutting down now")  # pylint: disable=raise-missing-from
             self.logger.critical("%s\nRouter is go-minded so trying to continue", msg)
 
+        if self.args.use_state_cache:
+            self.cache.write_to_file()
         self.logger.info("All tasks ended, shutting down")
 
 

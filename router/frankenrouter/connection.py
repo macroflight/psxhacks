@@ -10,6 +10,10 @@ import socket
 
 NOACCESS_ACCESS_LEVEL = 'noaccess'
 
+# Name sources that take priority over fallback names set during access checks.
+# A name announced by the client itself always wins over config/session-password defaults.
+_AUTHORITATIVE_NAME_SOURCES = ('name message', 'FRDP IDENT', 'FRDP CLIENTINFO')
+
 # The correct separator
 PSX_PROTOCOL_SEPARATOR = b'\r\n'
 PSX_PROTOCOL_SEPARATOR_LENGTH = len(PSX_PROTOCOL_SEPARATOR)
@@ -98,6 +102,9 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         self.frdp_ping_sent = None
         # List of the most recent FRDP PING RTTs
         self.frdp_ping_rtts = []
+
+        # Last ACCESS_LEVEL value sent to this client (None = never sent)
+        self.frdp_last_sent_access_level = None
 
         # True if we have sent an FRDP IDENT message already
         self.frdp_ident_sent = False
@@ -256,6 +263,10 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
             self.logger.warning("Stripping away NULL byte from %s", data)
             data = data.replace(b'\x00', b'')
 
+        if data.startswith(b'\xef\xbb\xbf'):
+            self.logger.warning("Stripping UTF-8 BOM from message (addon bug)")
+            data = data[3:]
+
         # Remove any newline components from the end of the string
         data_no_newline = data.replace(b'\n', b'').replace(b'\r', b'')
         self.logger.debug("with newlines removed: %s", data_no_newline)
@@ -342,6 +353,9 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
         # List of variables this client has send demand= for
         self.demands = set()
 
+        # Nonce sent to this client in AUTH_CHALLENGE; used to verify HMAC AUTH
+        self.auth_nonce = None
+
         # Increase the write buffer a bit to fit a PSX welcome message
         self.writer.transport.set_write_buffer_limits(high=1048576, low=524288)
 
@@ -357,20 +371,23 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
             return True
         return False
 
-    def update_access_level(self, client_password=None):  # pylint: disable=too-many-branches
+    def update_access_level(self, client_password=None):  # pylint: disable=too-many-branches,too-many-statements
         """Get the access level for connecting client."""
 
         def set_level(access):
+            name_announced = self.display_name_source in _AUTHORITATIVE_NAME_SOURCES
             if access is None:
                 self.logger.info("Setting %s for %s", NOACCESS_ACCESS_LEVEL, self.peername)
                 self.access_level = NOACCESS_ACCESS_LEVEL
-                self.display_name = 'auth pending'
-                self.display_name_source = 'new connection'
+                if not name_announced:
+                    self.display_name = 'auth pending'
+                    self.display_name_source = 'new connection'
             else:
                 self.logger.info("Setting %s for %s", access.level, self.peername)
                 self.access_level = access.level
-                self.display_name = access.display_name
-                self.display_name_source = 'access config'
+                if not name_announced:
+                    self.display_name = access.display_name
+                    self.display_name_source = 'access config'
 
         client_ip = ipaddress.ip_address(self.ip)
         self.logger.info(
@@ -386,14 +403,21 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
 
             valid_ip = False
             matching_network = None
-            if access.match_ipv4 is not None:
-                for elem in access.match_ipv4:
+            if access.match_ip is not None:
+                for elem in access.match_ip:
                     if elem == 'ANY':
                         valid_ip = True
                         matching_network = elem
                     else:
                         network = ipaddress.ip_network(elem)
-                        if client_ip in network:
+                        # Unwrap IPv4-mapped IPv6 (e.g. ::ffff:192.168.1.1) so it
+                        # matches against IPv4 rules in the config.
+                        cmp_ip = client_ip
+                        if (client_ip.version == 6 and
+                                client_ip.ipv4_mapped is not None and
+                                network.version == 4):
+                            cmp_ip = client_ip.ipv4_mapped
+                        if cmp_ip.version == network.version and cmp_ip in network:
                             self.logger.info("Match: %s in %s", client_ip, network)
                             valid_ip = True
                             matching_network = network
@@ -401,7 +425,7 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
             self.logger.debug("Checking against %s, valid_password=%s, valid_ip=%s",
                               access, valid_password, valid_ip)
 
-            if access.match_ipv4 is not None and access.match_password is None:
+            if access.match_ip is not None and access.match_password is None:
                 # Only IP match required
                 if valid_ip:
                     self.logger.info("Access level %s granted based on IP match - %s in %s",
@@ -409,7 +433,7 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
                     set_level(access)
                     return
 
-            if access.match_password is not None and access.match_ipv4 is None:
+            if access.match_password is not None and access.match_ip is None:
                 # Only password match required
                 if valid_password:
                     self.logger.info("Access level %s granted based on password - %s is valid",
@@ -426,6 +450,29 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
                 set_level(access)
                 return
 
+        # No match for config rules; check runtime session passwords
+        if (
+            client_password is not None and
+            self.router.session_password is not None and
+            self.router.session_password == client_password
+        ):
+            self.logger.info("Access level full granted based on session password")
+            self.access_level = 'full'
+            if self.display_name_source not in _AUTHORITATIVE_NAME_SOURCES:
+                self.display_name = 'SESSIONPWD'
+                self.display_name_source = 'session password'
+            return
+        if (
+            client_password is not None and
+            self.router.observer_session_password is not None and
+            self.router.observer_session_password == client_password
+        ):
+            self.logger.info("Access level observer granted based on observer session password")
+            self.access_level = 'observer'
+            if self.display_name_source not in _AUTHORITATIVE_NAME_SOURCES:
+                self.display_name = 'OBSERVER'
+                self.display_name_source = 'observer session password'
+            return
         # No match for any rule, deny access
         set_level(None)
 
@@ -439,5 +486,15 @@ class UpstreamConnection(Connection):  # pylint: disable=too-few-public-methods
 
         self.upstream = True
 
+        # Access level granted by the upstream router ('crew', 'observer', 'unknown')
+        self.access_level = 'unknown'
+
         # True if we have sent an FRDP AUTH upstream
         self.frdp_auth_sent = False
+
+        # Nonce received from upstream in AUTH_CHALLENGE; None until received
+        self.auth_nonce = None
+
+        # Number of frdp_send_task cycles we have waited for a nonce before
+        # falling back to cleartext (for old upstreams that never challenge)
+        self.auth_wait_cycles = 0

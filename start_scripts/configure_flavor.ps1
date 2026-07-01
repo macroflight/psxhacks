@@ -34,15 +34,8 @@ $FlavorDefinitions = @(
     [ordered]@{
         Name        = "StartFrankentanker"
         Description = "Start Frankentanker addon"
-        Options     = @($true, $false)
-        Default     = $false
-        Type        = "bool"
-    },
-    [ordered]@{
-        Name        = "StartFrankenfreeze"
-        Description = "Start Frankenfreeze addon"
-        Options     = @($true, $false)
-        Default     = $false
+        Options     = @("on", "off")
+        Default     = "off"
         Type        = "bool"
     }
 )

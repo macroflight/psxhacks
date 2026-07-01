@@ -33,12 +33,19 @@ All sections are optional. If you omit a section, the router will use
 some safe default (e.g allow connections from 127.0.0.1, not log
 traffic, etc.)
 
+Note that some sections have two brackets around the name. This means
+that that section can be listed more than once in the file. E.g
+`[[access]]`, NOT `[access]`.
+
 ### `[identity]`
 
 - `simulator`: a string desribing the name of the simulator the router
   is located in.
 - `router`: a name describing the router. If you only have one router
   in your sim, you can use the same name as for the simulator.
+- `type`: set this to "master" (master router in a shared cockpit
+  setup), "slave" (router in a slave sim in a shared cockpit setup) or
+  "standalone" (single router not part of a shared cockpit setup).
 - `stop_minded`: if you want the router to stop if encountering
   unhandled but not necessarily fatal problems, set this to
   true. Useful for e.g router development.
@@ -50,21 +57,20 @@ Example:
 [identity]
 simulator = "FrankenSim"
 router = "router1"
-stop_minded = false
+type = "slave"
 ```
 
 ### `[listen]`
 
 - `port`: the port number the router should listen on
-- `rest_api_port`: if this is set, the REST API is started and listens on this port
+- `rest_api_port`: the port the router web interface and REST API
+  should listen to. Defaults to 8747. If you do not want to use the
+  web interface, set to false.
 
 Note: the normal port for a PSX router is 10748. If you want to use
 the router as a drop-in replacement for your PSX main server for a
 shared cockpit setup, you probably want to use port 10747, as your
 addons will already be configured to connect to that port.
-
-### `[upstream]`
-DEPRECATED, use [[upstream]] instead
 
 ### `[[upstream]]`
 
@@ -152,25 +158,25 @@ directory = 'C:\fs\PSX\Routerlogs'
   slave sim routers, i.e giving you control. This can be handy if you
   don't use frankenusb for your controls but still wants to use the
   flight control lock.
+- `parking_brake_fix`: defaults to false. If set to true, the router
+  will automatically release the parking brake when the slave sim sends
+  near-maximum brake pressure (>99%) while the parking brake is set.
+  This works around badly calibrated brake pedals that prevent the
+  parking brake from releasing when pressed. Only enable this if you
+  actually experience the problem.
+  Only applies to slave sim routers.
 
 Example:
 
 ```text
 [psx]
 variables = 'C:\fs\PSX\Variables.txt
-filter_elevation = true
 ```
 
 ### `[[access]]`
-
-This section can be listed (and usually will be) listed several times
-in the file.
-
-**Important: this section should have two brackets before and after
-its name, i.e `[[access]]`, NOT `[access]`.**
-
-Each access section describes one rule that control who can connect to
-the router and what access level (e.g full, read-only) they get.
+This section can be listed several times in the file. Each access
+section describes one rule that control who can connect to the router
+and what access level (e.g full, read-only) they get.
 
 Each client will be given access based on its IP address, whether it
 provided a password, etc.
@@ -194,46 +200,70 @@ displayed in the status display.
       access to the PSX network.
     - If set to `observer`, the client will have read-only access to
       the PSX network (but can send the demand keyword).
-- `match ipv4`: If is set, any client connecting from this list of
-  IPv4 networks will match. Note: to allow just one IP and not a
-  larger network, use the IP/32 notation. To allow any IP to connect,
-  set to `[ "ANY" ]`.
+- `match_ip`: If set, any client connecting from this list of IPv4 or
+  IPv6 networks will match. Note: to allow just one IP and not a
+  larger network, use the `/32` (IPv4) or `/128` (IPv6) prefix notation.
+  To allow any IP to connect, set to `[ "ANY" ]`.
+  The old key name `match_ipv4` still works but is deprecated.
 - `match_password`: If set, the router requires that the client provides
   this password to be given access.
 
-Note: if both `match_password` and `match ipv4` are set, the client must
+Note: if both `match_password` and `match_ip` are set, the client must
 have both an approved IP address and provide the password.
 
 Example:
 
 ```text
 [[access]]
-display_name = "Any client"
-match_ipv4 = [ "ANY" ]
+display_name = "Main sim PC"
+match_ip = [ "127.0.0.1/32", "192.168.86.9/32" ]
 level = "full"
 
 [[access]]
-display_name = "Any local client"
-match_ipv4 = [ "127.0.0.1/32", "192.168.86.34/32" ]
+display_name = "Remote CDU on iPad"
+match_ip = [ "192.168.86.8/32" ]
 level = "full"
 
 [[access]]
-display_name = "Ventus"
-match_ipv4 = [ "192.168.86.2/32" ]
+display_name = "A board in my sim I/O network"
+match_ip = [ "192.168.52.0/24" ]
+level = "full"
+
+# RemoteSim can only connect from this IPv6 address
+[[access]]
+display_name = "RemoteSim IPv6"
+match_ip = [ "2001:db8::42/128" ]
 level = "full"
 
 # RemoteSim can only connect from this IP address and must provide a password
 [[access]]
 display_name = "RemoteSim"
-match_ipv4 = [ "123.123.123.123/32" ]
+match_ip = [ "123.123.123.123/32" ]
 match_password = "some secret"
 level = "full"
 
+# RemoteSim2 can connect if a password is provided
 [[access]]
-display_name = "CDUPAD"
-match_ipv4 = [ "192.168.86.8/32" ]
+display_name = "RemoteSim2"
+match_password = "some other secret"
 level = "full"
 
+# Anyone can connect if they know the session password
+# (set in the master sim router web interface)
+[[access]]
+display_name = "Sim using session password"
+use_session_password = true
+```
+
+If you want any addon or router to be able to connect to your router
+without a password (only use if there's a firewall between you and the
+Internet):
+
+```text
+[[access]]
+display_name = "Any client"
+match_ip = [ "ANY" ]
+level = "full"
 ```
 
 ### `[[check]]`
@@ -243,9 +273,6 @@ expected number of various addons connected to the sim.
 
 This section can be listed (and usually will be) listed several times
 in the file.
-
-**Important: this section should have two brackets before and after
-its name, i.e `[[check]]`, NOT `[check]`.**
 
 - `checktype`:
     - If set to `is_frankenrouter`, the number of connected
@@ -280,6 +307,62 @@ limit_min = 1
 limit_max = 1
 comment = "There should be exactly one BACARS"
 ```
+
+### `[sharedinfo]`
+
+This section configures the dropdown options shown on the flight info
+page in the web interface. All entries are optional; if omitted the
+router uses built-in defaults.
+
+- `crew`: a list of pilot entries. Each entry has two keys:
+    - `portal_name`: the pilot's name as it appears in the Worldflight
+      portal (shown in the Captain / First Officer dropdowns).
+    - `callsign_suffix`: the callsign suffix used by this pilot (e.g
+      `"M"` for MACRO/M). This is appended to the airline ICAO code to
+      form the full VATSIM callsign.
+- `airframes`: a list of airframe strings shown in the Airframe
+  dropdown. Use any format that is meaningful to your crew, e.g
+  registration and type.
+- `portal_account`: a list of Worldflight portal account e-mail
+  addresses shown in the Portal account dropdown.
+- `airline_icao`: a list of airline ICAO codes shown in the Airline
+  ICAO dropdown.
+- `checklist`: a list of checklist item strings shown as toggles in
+  the pre-pre-flight checklist section of the flight info page.
+
+Example:
+
+```text
+[sharedinfo]
+airframes = [
+    "G-CIVB BAW B744",
+    "G-BNLY BAW B744",
+    "D-ABVW DLH B744",
+]
+portal_account = [
+    "captain@example.com",
+    "firstofficer@example.com",
+]
+airline_icao = ["BAW", "DLH"]
+checklist = [
+    "fuel ordered",
+    "VATPRI is elevation master",
+    "VATSIM flight plan filed with correct callsign",
+    "Correct Simbrief account used for plan",
+]
+
+[[sharedinfo.crew]]
+portal_name = "MACRO"
+callsign_suffix = "M"
+
+[[sharedinfo.crew]]
+portal_name = "SOMEUSER"
+callsign_suffix = "S"
+```
+
+Note that `crew` uses double-bracket (`[[sharedinfo.crew]]`) syntax
+because it is a list of tables, while the other entries in
+`[sharedinfo]` use normal array syntax.
 
 ### `[performance]`
 

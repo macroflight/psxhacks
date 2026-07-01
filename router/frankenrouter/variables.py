@@ -193,6 +193,13 @@ class Variables():  # pylint: disable=too-few-public-methods
             return True
         return False
 
+    def get_keyword_for_name(self, name):
+        """Return the Q-code keyword for a PSX variable name, or None if not found."""
+        for keyword, props in self.variables.items():
+            if props.get('name') == name:
+                return keyword
+        return None
+
     def sort_psx_keywords(self, input_list):
         """Sort PSX keywords numerically in the order PSX outputs them."""
         def alphanum_key(key):

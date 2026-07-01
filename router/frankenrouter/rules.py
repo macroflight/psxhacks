@@ -15,6 +15,8 @@ pyunittest.
 """
 
 import enum
+import hashlib
+import hmac
 import json
 import logging
 import re
@@ -35,6 +37,15 @@ FLIGHT_CONTROL_INPUT_KEYWORDS = frozenset({'Qs120', 'Qs357', 'Qs436', 'Qh388', '
 
 # Same for teh traffic keywords
 TRAFFIC_KEYWORDS = frozenset({'Qs450', 'Qs451'})
+
+# PTT buttons and audio panel switches: sim-local only, filtered from other sims
+# Qh82="LcpPttCp"; Qh93="LcpPttFo"; Qh410="SwitchesAudioL";
+# Qh411="SwitchesAudioC"; Qh412="SwitchesAudioR"
+PTT_KEYWORDS = frozenset({'Qh82', 'Qh93', 'Qh410', 'Qh411', 'Qh412'})
+
+# Addon names that are expected to produce regular addon= traffic; their
+# forwarded messages are logged at debug rather than info.
+_KNOWN_ADDONS = frozenset(('FRANKENCDUPROXY', 'FRANKENMSFSBRIDGE', 'FRANKENWEATHER'))
 
 
 class RulesAction(enum.Enum):
@@ -107,9 +118,11 @@ class RulesCode(enum.Enum):
     FRDP_ROUTERINFO = enum.auto()
     FRDP_SHAREDINFO = enum.auto()
     FRDP_FLIGHTINFO = enum.auto()
+    FRDP_AUTH_CHALLENGE = enum.auto()
     FRDP_AUTH_FAIL = enum.auto()
     FRDP_AUTH_OK = enum.auto()
     FRDP_AUTH_ALREADY_HAS_ACCESS = enum.auto()
+    FRDP_ACCESS_LEVEL = enum.auto()
     NAME_FROM_FRANKENROUTER = enum.auto()
     NAME_LEARNED = enum.auto()
     NAME_NOCHANGE = enum.auto()
@@ -119,6 +132,7 @@ class RulesCode(enum.Enum):
     NOWRITE = enum.auto()
     DEMAND = enum.auto()
     ADDON_FORWARDED = enum.auto()
+    ADDON_FORWARDED_KNOWN = enum.auto()
     AGAIN = enum.auto()
     START = enum.auto()
     LOAD1 = enum.auto()
@@ -129,6 +143,9 @@ class RulesCode(enum.Enum):
     EXIT = enum.auto()
     PBSKAQ = enum.auto()
     LAYOUT = enum.auto()
+    PTT = enum.auto()
+    PSXNETVATSIM = enum.auto()
+    CDUPROXY = enum.auto()
     KEYVALUE_FILTERED_INGRESS_SIM_LOCAL = enum.auto()
     KEYVALUE_FILTERED_EGRESS_SIM_LOCAL = enum.auto()
     KEYVALUE_FILTERED_INGRESS = enum.auto()
@@ -136,6 +153,8 @@ class RulesCode(enum.Enum):
     KEYVALUE_FILTER_EGRESS = enum.auto()
     KEYVALUE_NORMAL = enum.auto()
     SPEEDBRAKE_OVERRIDE = enum.auto()
+    PARKING_BRAKE_FORCE_RELEASE = enum.auto()
+    OBSERVER_MODE = enum.auto()
 
 
 class Rules():  # pylint: disable=too-many-public-methods
@@ -175,7 +194,10 @@ class Rules():  # pylint: disable=too-many-public-methods
             return self.myreturn(
                 RulesAction.DROP,
                 RulesCode.MESSAGE_INVALID,
-                message=f"Unexpected ID {payload}, expected {expected_id}"
+                message=(
+                    f"Unexpected PONG ID {payload}, expected {expected_id}"
+                    f" from {self.sender.display_name}"
+                )
             )
         frdp_rtt = time.perf_counter() - self.sender.frdp_ping_sent
         # FIXME: ignore RTT numbers in a period after upstream or a
@@ -200,7 +222,8 @@ class Rules():  # pylint: disable=too-many-public-methods
             )
         self.sender.simulator_name = simname
         self.sender.router_name = routername
-        self.sender.display_name = routername
+        self.sender.client_provided_id = simname
+        self.sender.display_name = f"{simname}/{routername}"
         self.sender.uuid = uuid
         self.sender.display_name_source = "FRDP IDENT"
         self.router.connection_state_changed()
@@ -256,7 +279,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         trigger a SHAREDINFO broadcast so all routers update their filters.
         Otherwise forward upstream toward the master.
         """
-        if self.router.config.sharedinfo.master:
+        if self.router.is_sharedinfo_authority():
             self.router.sharedinfo['elevation_source_simulator'] = payload
             self.logger.info("SET elevation_source_simulator to %s",
                              self.router.sharedinfo['elevation_source_simulator'])
@@ -274,7 +297,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         trigger a SHAREDINFO broadcast so all routers update their filters.
         Otherwise forward upstream toward the master.
         """
-        if self.router.config.sharedinfo.master:
+        if self.router.is_sharedinfo_authority():
             self.router.sharedinfo['traffic_source_simulator'] = payload
             self.router.frdp_sharedinfo_requested = True
             return self.myreturn(RulesAction.DROP, RulesCode.FRDP_TRAFFIC_SOURCE)
@@ -426,18 +449,10 @@ class Rules():  # pylint: disable=too-many-public-methods
             # Drop message
             return self.myreturn(RulesAction.DROP, RulesCode.FRDP_SHAREDINFO)
 
-        if self.router.config.sharedinfo.master:
-            # If we are supposed to be the master sim but we receive a
-            # SHAREDINFO message, complain, then decide who gets to be
-            # master (use highest UUID) and continue.
-            self.logger.warning(
-                "SHAREDINFO message received from %s, but we are supposed to be the master",
-                sharedinfo['master_uuid'])
-            if self.router.uuid < sharedinfo['master_uuid']:
-                self.logger.warning("ur UUID is lower, relinquish master role for this session")
-                self.router.config.sharedinfo.master = False
-            else:
-                self.logger.warning("Our UUID is higher, keeping master role")
+        if self.router.config.identity.type == 'master':
+            raise SystemExit(
+                f"SHAREDINFO message received from {sharedinfo['master_uuid']}, "
+                f"but this router is configured as master. This should never happen.")
 
         # Merge data from sharedinfo package into our own variables
         self.router.sharedinfo['master_uuid'] = sharedinfo['master_uuid']
@@ -445,14 +460,15 @@ class Rules():  # pylint: disable=too-many-public-methods
             'pilot_flying_simulator',
             'elevation_source_simulator',
             'traffic_source_simulator',
+            'errors',
         ]:
             if key in sharedinfo:
                 self.router.sharedinfo[key] = sharedinfo[key]
 
         # Update local filter state based on source assignments in SHAREDINFO.
         # Do NOT trigger frdp_sharedinfo_requested to avoid a broadcast loop.
-        # The master router never updates its own filters from SHAREDINFO.
-        if not self.router.config.sharedinfo.master:
+        # The master/standalone router never updates its own filters from SHAREDINFO.
+        if not self.router.is_sharedinfo_authority():
             own_sim = self.router.config.identity.simulator
             filter_changed = False
             if 'elevation_source_simulator' in sharedinfo:
@@ -475,22 +491,6 @@ class Rules():  # pylint: disable=too-many-public-methods
             RulesCode.KEYVALUE_FILTER_EGRESS,
             extra_data={'exclude_non_frankenrouter': True})
 
-    def _speedbrake_override(self, value):
-        """Return a SPEEDBRAKE_OVERRIDE result for a filtered Qh388 input."""
-        try:
-            lever = int(value)
-        except ValueError:
-            lever = 0
-        override = 41 if lever > 40 else 0
-        action_word = "arming" if override == 41 else "disarming"
-        msg = f"speedbrake input {value} from filtered sim, {action_word} speedbrake"
-        return self.myreturn(
-            RulesAction.DROP,
-            RulesCode.SPEEDBRAKE_OVERRIDE,
-            message=msg,
-            extra_data={'override_line': f'Qh388={override}'},
-        )
-
     def handle_addon_frankenrouter_flightinfo(self, payload):
         """Handle a FRDP FLIGHTINFO message.
 
@@ -510,11 +510,31 @@ class Rules():  # pylint: disable=too-many-public-methods
             RulesCode.FRDP_FLIGHTINFO,
             extra_data={'exclude_non_frankenrouter': True})
 
+    def handle_addon_frankenrouter_auth_challenge(self, nonce):
+        """Handle FRDP AUTH_CHALLENGE message received from upstream.
+
+        Format (received by downstream from upstream):
+        addon=FRANKENROUTER:<protocol version>:AUTH_CHALLENGE:<nonce>
+
+        Stores the nonce so frdp_send_task can use it to send a hashed AUTH.
+        """
+        if not self.sender.upstream:
+            return self.myreturn(
+                RulesAction.DROP, RulesCode.MESSAGE_INVALID,
+                message=f"Got FRDP AUTH_CHALLENGE from non-upstream: {self.line}"
+            )
+        return self.myreturn(
+            RulesAction.DROP, RulesCode.FRDP_AUTH_CHALLENGE,
+            extra_data={'nonce': nonce})
+
     def handle_addon_frankenrouter_auth(self, payload):
         """Handle FRDP AUTH message.
 
-        Format:
-        addon=FRANKENROUTER:<protocol version>:AUTH:<password>
+        Supports two formats:
+        - Cleartext (old): addon=FRANKENROUTER:<ver>:AUTH:<password>
+        - HMAC (new):      addon=FRANKENROUTER:<ver>:AUTH:hmac-sha256:<hmac_hex>
+          where hmac_hex = HMAC-SHA256(key=password, msg=nonce).hexdigest()
+          and nonce was sent by this router in an AUTH_CHALLENGE message.
         """
         if self.sender.upstream:
             return self.myreturn(
@@ -524,14 +544,67 @@ class Rules():  # pylint: disable=too-many-public-methods
         if self.sender.has_access():
             return self.myreturn(RulesAction.DROP, RulesCode.FRDP_AUTH_ALREADY_HAS_ACCESS)
         if payload == "":
-            # We don't allow empty passwords
-            return self.myreturn(RulesAction.DROP, RulesCode.FRDP_AUTH_FAIL)
-        # Try to authenticate
-        self.sender.update_access_level(payload)
+            return self.myreturn(RulesAction.DROP, RulesCode.FRDP_AUTH_FAIL,
+                                 message="empty password")
+        if payload.startswith("hmac-sha256:"):
+            received_hmac = payload[len("hmac-sha256:"):]
+            nonce = self.sender.auth_nonce
+            matched_password = None
+            if nonce:
+                candidates = [
+                    a.match_password
+                    for a in self.router.config.access
+                    if a.match_password is not None
+                ]
+                for session_pwd in (self.router.session_password,
+                                    self.router.observer_session_password):
+                    if session_pwd:
+                        candidates.append(session_pwd)
+                for pwd in candidates:
+                    expected = hmac.new(
+                        pwd.encode(), nonce.encode(), hashlib.sha256
+                    ).hexdigest()
+                    if hmac.compare_digest(received_hmac, expected):
+                        matched_password = pwd
+                        break
+            if matched_password is None:
+                fail_reason = "no challenge was issued" if not nonce else "invalid password"
+                return self.myreturn(RulesAction.DROP, RulesCode.FRDP_AUTH_FAIL,
+                                     message=fail_reason)
+            self.sender.update_access_level(matched_password)
+        else:
+            # Cleartext (backward compat for old downstream routers)
+            self.sender.update_access_level(payload)
         if not self.sender.has_access():
-            return self.myreturn(RulesAction.DROP, RulesCode.FRDP_AUTH_FAIL)
+            return self.myreturn(RulesAction.DROP, RulesCode.FRDP_AUTH_FAIL,
+                                 message="invalid password")
         self.router.connection_state_changed()
         return self.myreturn(RulesAction.DROP, RulesCode.FRDP_AUTH_OK)
+
+    def handle_addon_frankenrouter_access_level(self, payload):
+        """Handle FRDP ACCESS_LEVEL message.
+
+        Format:
+        addon=FRANKENROUTER:<protocol version>:ACCESS_LEVEL:<level>
+
+        Sent by the upstream router to inform us of the access level we have
+        been granted. Valid levels: 'crew', 'observer', 'unknown'.
+        """
+        if not self.sender.upstream:
+            return self.myreturn(
+                RulesAction.DROP, RulesCode.MESSAGE_INVALID,
+                message=f"Got ACCESS_LEVEL from non-upstream: {self.line}")
+        if payload not in ('crew', 'observer', 'unknown'):
+            return self.myreturn(
+                RulesAction.DROP, RulesCode.MESSAGE_INVALID,
+                message=f"Invalid ACCESS_LEVEL payload: {self.line}")
+        if payload != self.sender.access_level:
+            self.logger.info(
+                "Upstream access level changed: %s -> %s",
+                self.sender.access_level, payload)
+            self.sender.access_level = payload
+            self.router.status_display_requested = True
+        return self.myreturn(RulesAction.DROP, RulesCode.FRDP_ACCESS_LEVEL)
 
     def handle_addon_frankenrouter(self, rest):  # pylint: disable=too-many-return-statements,too-many-branches
         """Handle FRANKENROUTER addon message."""
@@ -566,13 +639,17 @@ class Rules():  # pylint: disable=too-many-public-methods
             return self.handle_addon_frankenrouter_clientinfo(payload)
         if message_type == 'AUTH':
             return self.handle_addon_frankenrouter_auth(payload)
+        if message_type == 'AUTH_CHALLENGE':
+            return self.handle_addon_frankenrouter_auth_challenge(payload)
+        if message_type == 'ACCESS_LEVEL':
+            return self.handle_addon_frankenrouter_access_level(payload)
         # Drop unknown FRDP messages
         return self.myreturn(
             RulesAction.DROP, RulesCode.MESSAGE_INVALID,
             message=f"Unsupported FRDP message type {message_type}: {self.line}"
         )
 
-    def handle_addon(self, rest):
+    def handle_addon(self, rest):  # pylint: disable=too-many-return-statements
         """Handle an addon= message."""
         try:
             (addon, payload) = rest.split(":", 1)
@@ -580,13 +657,21 @@ class Rules():  # pylint: disable=too-many-public-methods
             self.logger.debug("Got unsupported addon message: %s", rest)
             addon = rest
             payload = ""
+        # Drop addon=FRANKENCDUPROXY from from other sims
         if addon == 'FRANKENCDUPROXY':
             if (self.sender.is_frankenrouter and
                     self.router.config.identity.simulator != self.sender.simulator_name):
                 self.logger.info(
                     "Dropping FRANKENCDUPROXY addon from other-sim frankenrouter %s",
                     self.sender.simulator_name)
-                return self.myreturn(RulesAction.DROP, RulesCode.ADDON_FORWARDED)
+                return self.myreturn(RulesAction.DROP, RulesCode.CDUPROXY)
+
+        # Drop addon=FRANKENMSFSBRIDGE from non-elevation-master sources
+        if addon == 'FRANKENMSFSBRIDGE' and self.router.filter_elevation:
+            return self.myreturn(
+                RulesAction.DROP,
+                RulesCode.KEYVALUE_FILTERED_INGRESS_SILENT,
+                message="filtered FRANKENMSFSBRIDGE addon as filter_elevation is set")
 
         if addon == 'FRANKENROUTER':
             if ':' not in payload:
@@ -606,11 +691,22 @@ class Rules():  # pylint: disable=too-many-public-methods
                 )
             return self.handle_addon_frankenrouter(payload)
 
+        # Drop addon=PSXNETVATSIM:SELECT_ACP:* from other sims
+        if addon == 'PSXNETVATSIM' and 'SELECT_ACP:' in payload:
+            if self.sender.is_frankenrouter:
+                if self.router.config.identity.simulator != self.sender.simulator_name:
+                    self.logger.info(
+                        "Dropping addon=PSXNETVATSIM:SELECT_ACP from other sim %s: %s",
+                        self.sender.simulator_name, self.line)
+                    return self.myreturn(RulesAction.DROP, RulesCode.PSXNETVATSIM)
+
         # Unhandled addon messages should be forwarded, but only from
         # clients that are allowed to write.
         if not self.allow_write():
             return self.myreturn(RulesAction.DROP, RulesCode.NOWRITE)
-        return self.myreturn(RulesAction.NORMAL, RulesCode.ADDON_FORWARDED)
+        code = (RulesCode.ADDON_FORWARDED_KNOWN if addon in _KNOWN_ADDONS
+                else RulesCode.ADDON_FORWARDED)
+        return self.myreturn(RulesAction.NORMAL, code)
 
     def handle_name(self, rest):
         """Handle a name= message.
@@ -873,9 +969,21 @@ class Rules():  # pylint: disable=too-many-public-methods
         if key == 'layout':
             return self.handle_layout()
 
-        if (key in self.router.config.psx.filter_from_other_sim and
+        if key in PTT_KEYWORDS:
+            if self.sender.is_frankenrouter:
+                if self.router.config.identity.simulator != self.sender.simulator_name:
+                    audio_panel = key in ('Qh410', 'Qh411', 'Qh412')
+                    if not audio_panel or value in ('26', '-1'):
+                        self.logger.info(
+                            "Dropping PTT/audio variable from %s: %s",
+                            self.sender.simulator_name, self.line)
+                        return self.myreturn(RulesAction.DROP, RulesCode.PTT)
+
+        if (
+                key in self.router.config.psx.filter_from_other_sim and
                 self.sender.is_frankenrouter and
-                self.router.config.identity.simulator != self.sender.simulator_name):
+                self.router.config.identity.simulator != self.sender.simulator_name
+        ):
             self.logger.info(
                 "Dropping %s from other-sim frankenrouter %s", key, self.sender.simulator_name)
             return self.myreturn(RulesAction.DROP, RulesCode.KEYVALUE_FILTERED_INGRESS_SIM_LOCAL)
@@ -901,6 +1009,10 @@ class Rules():  # pylint: disable=too-many-public-methods
         if key == 'exit':
             return self.handle_exit()
 
+        # Observer mode: block all key-value writes from local clients
+        if not self.sender.upstream and self.router.observer_mode:
+            return self.myreturn(RulesAction.DROP, RulesCode.OBSERVER_MODE)
+
         # Update router variable stats database
         self.router.variable_stats_add(key, sender.peername)
 
@@ -919,25 +1031,6 @@ class Rules():  # pylint: disable=too-many-public-methods
         #
         # Ingress filtering. Some variables we don't even want in the cache.
         #
-
-        # Temporary tiller filtering
-        # https://aerowinx.com/board/index.php/topic,7858.0.html
-        if key == 'Qh426':
-            if self.router.config.filtering.tiller:
-                try:
-                    current_value = self.router.cache.get_value(key)
-                except RouterCacheException:
-                    current_value = int(value)
-                change = abs(current_value - int(value))
-                off_center = abs(int(value))
-                if (
-                        change < self.router.config.filtering.tiller_smallest_movement and
-                        off_center > self.router.config.filtering.tiller_center
-                ):
-                    return self.myreturn(
-                        RulesAction.DROP,
-                        RulesCode.KEYVALUE_FILTERED_INGRESS,
-                        message="filtered Qh426/Tiller")
 
         # Ingress filter: flight controls if this is a slave sim router
         if self.router.get_router_type() == 'slave':
@@ -960,10 +1053,7 @@ class Rules():  # pylint: disable=too-many-public-methods
                     )
                 else:
                     if flying != self.router.config.identity.simulator:
-                        # Someone else is pilot flying - filter flight controls,
-                        # with special handling for speedbrake lever.
-                        if key == 'Qh388':
-                            return self._speedbrake_override(value)
+                        # Someone else is pilot flying - filter flight controls.
                         self.logger.debug(
                             "%s update dropped - %s is pilot flying",
                             key, flying
@@ -974,6 +1064,28 @@ class Rules():  # pylint: disable=too-many-public-methods
                             message=(
                                 f"filtered flight control {key} as we are not the " +
                                 f"flying sim {flying}"
+                            )
+                        )
+
+        # Qs357="Brakes"; Mode=ECON; Min=3; Max=9;
+        # Qh397="ParkBrkLev"; Mode=ECON; Min=0; Max=1;
+        if key == 'Qs357':
+            # Parking brake release fix (opt-in via psx.parking_brake_fix config)
+            if (self.router.config.psx.parking_brake_fix and
+                    not self.sender.upstream and
+                    self.router.get_router_type() == 'slave'):
+                if (self.router.cache.get_value('Qh397') == 1 and
+                        self.router.cache.get_age('Qh397') > 5.0):
+                    (left, right) = value.split(';', 1)
+                    if int(left) > 990 and int(right) > 990:
+                        # Brakes pressed to almost 100%, ensure release.
+                        # Drop this message but RulesCode ensures we send
+                        # Qs357=1000;1000 + Qh397=0
+                        return self.myreturn(
+                            RulesAction.DROP,
+                            RulesCode.PARKING_BRAKE_FORCE_RELEASE,
+                            message=(
+                                f"Qs357 near max ({value}), forcing parking brake release"
                             )
                         )
 
@@ -1126,12 +1238,20 @@ class TestRules(unittest.TestCase):
             self.filter_from_other_sim = []
             self.filter_to_other_sim = []
 
+    class DummyConfigIdentity():  # pylint: disable=too-few-public-methods
+        """Implement small parts of the router for unit testing."""
+
+        def __init__(self):
+            """Initialize the identity config."""
+            self.simulator = 'MySim'
+
     class DummyConfig():  # pylint: disable=too-few-public-methods
         """Implement small parts of the router for unit testing."""
 
         def __init__(self):
             """Initialize the config."""
             self.psx = TestRules.DummyConfigPsx()
+            self.identity = TestRules.DummyConfigIdentity()
 
     class DummyFrankenrouter():  # pylint: disable=too-few-public-methods,too-many-instance-attributes
         """Implement small parts of the router for unit testing."""
@@ -1146,6 +1266,7 @@ class TestRules(unittest.TestCase):
             self.last_load3 = 0.0
             self.frdp_version = 1
             self.config = TestRules.DummyConfig()
+            self.observer_mode = False
 
         def is_upstream_connected(self):
             """Return dummy value."""
@@ -1192,9 +1313,9 @@ class TestRules(unittest.TestCase):
 
         def can_write(self):
             """Check if this client is allowed to write."""
-            if self.access_level == NOACCESS_ACCESS_LEVEL:
-                return False
-            return True
+            if self.access_level == 'full':
+                return True
+            return False
 
         def has_access(self):
             """Return true if client has access."""
@@ -1261,7 +1382,8 @@ class TestRules(unittest.TestCase):
         self.assertEqual(code, RulesCode.FRDP_IDENT)
         self.assertEqual(router.upstream.simulator_name, 'OtherSim')
         self.assertEqual(router.upstream.router_name, 'OtherRouter')
-        self.assertEqual(router.upstream.display_name, 'OtherRouter')
+        self.assertEqual(router.upstream.client_provided_id, 'OtherSim')
+        self.assertEqual(router.upstream.display_name, 'OtherSim/OtherRouter')
         self.assertEqual(router.upstream.uuid, 'fakeuuid')
         self.assertEqual(router.upstream.display_name_source, 'FRDP IDENT')
 
@@ -1322,7 +1444,8 @@ class TestRules(unittest.TestCase):
         self.assertEqual(code, RulesCode.FRDP_IDENT)
         self.assertEqual(testpeer.simulator_name, 'SomeSim')
         self.assertEqual(testpeer.router_name, 'SomeRouter')
-        self.assertEqual(testpeer.display_name, 'SomeRouter')
+        self.assertEqual(testpeer.client_provided_id, 'SomeSim')
+        self.assertEqual(testpeer.display_name, 'SomeSim/SomeRouter')
         self.assertEqual(testpeer.display_name_source, 'FRDP IDENT')
 
         # CLIENTINFO from client
@@ -1699,3 +1822,43 @@ class TestRules(unittest.TestCase):
         (action, code, *_) = rules.route("Qi17=42", testpeer)
         self.assertEqual(action, RulesAction.NORMAL)
         self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
+
+    def test_ptt_filter(self):
+        """Test PTT/audio variable filtering between sims."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+
+        router.upstream = self.DummyUpstreamConnection()
+        router.clients = {
+            ('127.0.0.1', 12345): self.DummyClientConnection(('127.0.0.1', 12345)),
+        }
+        testpeer = router.clients[('127.0.0.1', 12345)]
+
+        # PTT from a regular (non-frankenrouter) client: always pass
+        testpeer.is_frankenrouter = False
+        (action, code, *_) = rules.route("Qh82=1", testpeer)
+        self.assertEqual(action, RulesAction.NORMAL)
+        self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
+
+        # PTT from a frankenrouter on the same sim: pass
+        testpeer.is_frankenrouter = True
+        testpeer.simulator_name = router.config.identity.simulator
+        (action, code, *_) = rules.route("Qh93=1", testpeer)
+        self.assertEqual(action, RulesAction.NORMAL)
+        self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
+
+        # PTT from a frankenrouter on a different sim: drop with RulesCode.PTT
+        testpeer.simulator_name = 'OtherSim'
+        for key in ('Qh82', 'Qh93'):
+            (action, code, *_) = rules.route(f"{key}=1", testpeer)
+            self.assertEqual(action, RulesAction.DROP, msg=f"{key} should be dropped")
+            self.assertEqual(code, RulesCode.PTT, msg=f"{key} should use PTT code")
+
+        # Audio panel switches (Qh410/411/412): only drop for values "26" or "-1"
+        for key in ('Qh410', 'Qh411', 'Qh412'):
+            for val in ('26', '-1'):
+                (action, code, *_) = rules.route(f"{key}={val}", testpeer)
+                self.assertEqual(action, RulesAction.DROP, msg=f"{key}={val} should be dropped")
+                self.assertEqual(code, RulesCode.PTT, msg=f"{key}={val} should use PTT code")
+            (action, code, *_) = rules.route(f"{key}=1", testpeer)
+            self.assertEqual(action, RulesAction.NORMAL, msg=f"{key}=1 should pass")

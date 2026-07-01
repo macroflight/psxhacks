@@ -69,8 +69,8 @@ Quickstart Guide:
 - Have a single copy of the psxhacks repo that you update using e.g
   GitHub Desktop, installed as e.g C:\fs\psxhacks.
 - Install Python and a virtual environment with all the modules you
-  need (start_scripts will only with with the Python versions of
-  psxhacks, not the EXE files)
+  need (start_scripts will only work with the Python versions of
+  psxhacks, not the EXE files).
 - Create your own override file outside the Git repo, e.g
   C:\fs\psxhacks-start-override.ps1. If the file is named like that
   and on the same directory level as the Git repo, it will be found
@@ -93,25 +93,21 @@ Quickstart Guide:
 Most of the individual scripts can be run independently, e.g
 double-click start_cpdlc.ps1 to restart the CPDLC client.
 
-### frankenfreeze.py
+### frankenweather.py, frankenmsfsbridge.py, and frankenturb.py
 
-This will create cloud in PSX's weather model when MSFS is in
-cloud. This helps make PSX icing match MSFS conditions better, i.e you
-will see icing start when you enter a cloud in MSFS (if the
-temperature is right).
+Real-world weather and turbulence injection.
 
-### frankenwind.py
+- **frankenweather.py** replaces PSX's built-in weather with live data
+  from [Open-Meteo](https://open-meteo.com/) and VATSIM METARs,
+  including CAPE-based CB generation and optional MSFS sync.
+- **frankenmsfsbridge.py** is a companion for split-PC setups that
+  streams MSFS in-cloud state, QNH and wind to the PSX master over the
+  network.
+- **frankenturb.py** injects wind-driven terrain turbulence (wave,
+  rotor, mechanical, shear CAT) using Open-Meteo winds and Copernicus
+  GLO-30 DEMs.
 
-This will replace the PSX wind corridor data with the current MSFS
-wind at your altitude when the altimeter is set to STD, and restore
-the PSX data when the altimeter is set to QNH. The reasoning behind
-this is that the PSX wind data will match MSFS anyway when near an
-airport (i.e low, so QNH set).
-
-Use this if you feel that your winds are very different than other
-VATSIM users when enroute. Personally, I'm not convinced that this is
-needed, my enroute winds (from Simbrief) seems to match MSFS quite
-well.
+[Full documentation →](docs/frankenweather.md)
 
 ### frankentanker.py
 
@@ -209,7 +205,7 @@ c:\fs\psx\psxpython\venv-1\Scripts\pip install pygame
 c:\fs\psx\psxpython\venv-1\Scripts\pip install aiohttp
 ```
 
-SimConnect is needed for scripts that talk to MSFS (e.g frankenwind.py).
+SimConnect is needed for scripts that talk to MSFS (e.g frankenmsfsbridge.py).
 
 Pygame is needed for frankenusb.py.
 

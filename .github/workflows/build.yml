@@ -1,0 +1,50 @@
+name: Build Windows EXEs
+
+# Trigger on pushes to devel, or manually from the Actions tab.
+# Change 'devel' to whichever branch you want to track.
+on:
+  push:
+    branches: [devel]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pyinstaller "pyinstaller-hooks-contrib>=2024.0"
+
+      - name: Build EXEs
+        run: |
+          pyinstaller --clean frankenusb.spec
+          pyinstaller --clean frankenweather.spec
+          pyinstaller --clean frankenmsfsbridge.spec
+          pyinstaller --clean frankentanker.spec
+          pyinstaller --clean frankenpush.spec
+          pyinstaller --clean psx_shutdown.spec
+          pyinstaller --clean show_psx.spec
+          pyinstaller --clean show_usb.spec
+          pyinstaller --clean show_hid.spec
+          pyinstaller --clean --distpath dist router\frankenrouter.spec
+
+      - name: Copy config examples
+        run: |
+          Copy-Item config_examples\*.conf dist\
+          Copy-Item router\config_examples\*.conf dist\
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: psxhacks-${{ github.ref_name }}-${{ github.sha }}
+          path: dist/
+          retention-days: 90

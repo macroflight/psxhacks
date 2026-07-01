@@ -11,13 +11,20 @@ function Invoke-WindowPosition([string]$addon) {
 Write-Output "Starting PSX main server..."
 Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_main_server.ps1"
 
-Delay 5
+Delay 1
 
 Write-Output "Starting master sim router..."
 Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_router_master.ps1"
 Invoke-WindowPosition "frankenrouter master"
 
 Delay 5
+
+if ($StartFrankenidentMaster ) {
+    Write-Output "Starting FrankenIDENT..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenident_master.ps1"
+    Invoke-WindowPosition "frankenident_master"
+}
+
 
 if ($StartBacars ) {
     Write-Output "Starting BACARS..."
@@ -29,12 +36,6 @@ if ($StartPsxNet ) {
     Write-Output "Starting PSX.NET..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psxnet.ps1"
     Invoke-WindowPosition "PSX.NET"
-}
-
-if ($StartFrankenutil ) {
-    Write-Output "Starting FrankenUtil..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenutil.ps1"
-    Invoke-WindowPosition "frankenutil"
 }
 
 if ($StartCpdlc ) {
@@ -50,8 +51,20 @@ if ($StartFrankentanker ) {
     Invoke-WindowPosition "frankentanker"
 }
 
-if ($StartFrankenturb ) {
-    Write-Output "Starting FrankenTurb..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenturb.ps1"
-    Invoke-WindowPosition "frankenturb"
+if ($StartFrankenweather ) {
+    Write-Output "Starting FrankenWeather..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenweather.ps1"
+    Invoke-WindowPosition "frankenweather"
+}
+
+if ($StartFrankenpush ) {
+    Write-Output "Starting FrankenPush..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenpush.ps1"
+    Invoke-WindowPosition "frankenpush"
+}
+
+if ($StartSrslPsxMaster ) {
+    Write-Output "Starting SRSL-PSX..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_srsl_psx_master.ps1"
+    Invoke-WindowPosition "SRSL-PSX master"
 }

@@ -1,5 +1,81 @@
 # Changelog
 
+## 2026-06-30: version 1.3.7
+
+- **Hold client connections until upstream is ready (default on).** The
+  router now waits for the upstream PSX main server or master router to
+  complete its welcome sequence (i.e. send `load3`) before it opens its
+  listening port to clients. This guarantees that every connecting client
+  receives a full and current set of PSX variables, rather than an empty
+  or stale cache. Once the upstream has welcomed the router at least once,
+  the port stays open even if the upstream later disconnects and
+  reconnects. Opt out by setting `wait_for_upstream_welcome = false` in
+  the `[listen]` section of the config file.
+- **FRDP password hashing.** Passwords are no longer sent in cleartext
+  over the network. When connecting to an updated upstream router, the
+  downstream now authenticates with an HMAC-SHA256 challenge-response
+  (the upstream sends a one-time nonce; the downstream replies with
+  `AUTH:hmac-sha256:<HMAC-SHA256(password, nonce)>`). Old routers that
+  do not issue a challenge still receive the cleartext password, so
+  mixed-version networks continue to work during the transition.
+- **Bad-password handling.** When authentication fails, the upstream
+  router now sends an explicit `AUTH_FAILED:<reason>` message before
+  closing the connection. The downstream router intercepts this, logs a
+  prominent error (with `!` separator lines), stops the reconnect loop,
+  and prompts the user to press a key before exiting. Previously the
+  router would silently retry the bad password in an endless loop.
+- **Password character validation.** Passwords in the config file
+  (`match_password` and `[[upstream]] password`) are now validated on
+  startup; only printable ASCII characters (`!` through `~`, no spaces)
+  are accepted. The same check applies to passwords entered interactively
+  in dumb-client mode or with `--upstream-interactive`.
+
+## 2026-06-18: version 1.3.6
+
+- Added weather control panel to the router web UI
+
+## 2026-06-06: version 1.3.5
+
+- Document how to configure the flight info page
+- Make it more clear that observer mode is passive observer mode (you
+  cannot be observer and e.g do pushback)
+- Add new flight info toggle "Captain is VATPRI"
+- Make the state cache file opt-in. We probably don't want or need the
+  variable cache to be persistent. Make it opt-in and consider
+  removing later.
+
+## 2026-05-24: version 1.3.4
+
+- Remove temporary SRSL filter (SRSL 0.3 now supports shared cockpit)
+- Add possible workaround for IRS alignment failures
+
+## 2026-05-20: version 1.3.3
+
+- Observer mode controllable from web interface
+- Show critical errors in web interface
+- Check network for new errors (e.g more than one BACARS)
+- Disconnect clients if write buffer too big
+- Improve message rate monitoring
+- Exponential backoff delay when reconnecting to upstream
+- Drop PTT presses from other sims
+- Use UTC in logs
+- Possible workaround for "rubberband bug" (send Qs121 when main server is not)
+
+## 2026-05-14: version 1.3.2
+
+- Added flight information page in the router web UI. This can be used
+  as a scratchpad for shared cockpit data, e.g who sits in which seat,
+  which route we are flying, airframe, etc.
+- Added a "session password" feature - the master sim owner can now
+  generate a random session password and shared that with the crew,
+  who can use that instead of a normal static password to connect to
+  the master sim router. This is intended both to make it easier to
+  handle multiple master sims, but also to make it less likely that
+  people accidentally connect to an active master sim that is in use
+  without realizing it.
+- Router web UI revamped
+- Elevation and traffic filters easier to use
+
 ## 2026-05-03: version 1.3.0
 
 - Router network error reporting: each router now includes an `errors`

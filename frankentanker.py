@@ -838,19 +838,26 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.psx.send("demand", "LeftPfdAlt")
             self.psx_connected = True
             self.psx_paused = False
-            if self.mcduL is None:
-                self.mcduL = psx.MCDU("L", "L", 5, "<TANK", self.mcduEvent)
-            if self.mcduR is None:
-                self.mcduR = psx.MCDU("R", "L", 5, "<TANK", self.mcduEvent)
-            if self.mcduC is None:
-                self.mcduC = psx.MCDU("C", "L", 5, "<TANK", self.mcduEvent)
-            self.mcduL.plugin_to(self.psx)
-            self.mcduR.plugin_to(self.psx)
-            self.mcduC.plugin_to(self.psx)
             self.active_mcdus.clear()
-            self.active_mcdus.append(self.mcduL)
-            self.active_mcdus.append(self.mcduR)
-            self.active_mcdus.append(self.mcduC)
+            cdus = self.args.cdus.upper()
+            side = self.args.menu_side.upper()
+            row = self.args.menu_row
+            text = "<TANK" if side == "L" else "TANK>"
+            if "L" in cdus:
+                if self.mcduL is None:
+                    self.mcduL = psx.MCDU("L", side, row, text, self.mcduEvent)
+                self.mcduL.plugin_to(self.psx)
+                self.active_mcdus.append(self.mcduL)
+            if "R" in cdus:
+                if self.mcduR is None:
+                    self.mcduR = psx.MCDU("R", side, row, text, self.mcduEvent)
+                self.mcduR.plugin_to(self.psx)
+                self.active_mcdus.append(self.mcduR)
+            if "C" in cdus:
+                if self.mcduC is None:
+                    self.mcduC = psx.MCDU("C", side, row, text, self.mcduEvent)
+                self.mcduC.plugin_to(self.psx)
+                self.active_mcdus.append(self.mcduC)
 
         try:
             self.logger.debug("Starting %s", inspect.currentframe().f_code.co_name)
@@ -967,6 +974,21 @@ class Script():  # pylint: disable=too-many-instance-attributes
             '--psx-main-server-port',
             type=int, action='store', default=None,
             help=argparse.SUPPRESS,
+        )
+        parser.add_argument(
+            '--cdus',
+            type=str, action='store', default='LR',
+            help="Which CDUs to set up (any combination of L, R, C).",
+        )
+        parser.add_argument(
+            '--menu-side',
+            type=str, action='store', default='L', choices=['L', 'R'],
+            help="Which side of the CDU menu to place the TANK entry on.",
+        )
+        parser.add_argument(
+            '--menu-row',
+            type=int, action='store', default=4,
+            help="Row (1-6) of the CDU menu to place the TANK entry on.",
         )
         parser.add_argument(
             '--hook-min-height',
