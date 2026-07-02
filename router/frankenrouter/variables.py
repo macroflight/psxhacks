@@ -32,6 +32,8 @@ SIMEVENTS_QH_IGNORE = frozenset({
     # LCP dimmer controls (Max=4713)
     'Qh84', 'Qh85', 'Qh86', 'Qh87', 'Qh88', 'Qh89', 'Qh90',
     'Qh95', 'Qh96', 'Qh97', 'Qh98', 'Qh99', 'Qh100', 'Qh101',
+    # CDU keyboard key presses (per-keypress events, not useful as sim events)
+    'Qh401', 'Qh402', 'Qh403',
     # EICAS and CDU brightness
     'Qh139', 'Qh140', 'Qh141', 'Qh404', 'Qh405', 'Qh406',
     # ECP baro/mins rotary encoders (DELTA mode, continuous)
@@ -47,6 +49,15 @@ SIMEVENTS_QH_IGNORE = frozenset({
 # Qs/Qi/Qd variables to INCLUDE for sim event logging (empty whitelist by default;
 # add specific keywords here as needed).
 SIMEVENTS_QSI_INCLUDE = frozenset({
+})
+
+# MCP window value variables tracked with a 5-second stability debounce — an event
+# is only generated when the previous value has been unchanged for more than 5 seconds.
+SIMEVENTS_MCP_WINDOW_KEYS = frozenset({
+    'Qi32',  # McpWdoSpd - IAS/MACH window
+    'Qi33',  # McpWdoHdg - heading window
+    'Qi34',  # McpWdoVs  - vertical speed window
+    'Qi35',  # McpWdoAlt - altitude window
 })
 
 ADDITIONAL_MODES = {

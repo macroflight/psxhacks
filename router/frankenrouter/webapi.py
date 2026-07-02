@@ -1730,6 +1730,13 @@ def _evt_describe(evt, get_var_name):  # pylint: disable=too-many-return-stateme
         src_str = f' (from {source})' if source else ''
         prev_str = f', was: {prev}' if prev is not None else ''
         return f'{name}{src_str}: {value}{prev_str}', f'{key}={value}'
+    if etype == 'mcp_window':
+        key = evt.get('key', '?')
+        value = evt.get('value', '?')
+        prev = evt.get('prev')
+        name = get_var_name(key)
+        prev_str = f', was: {prev}' if prev is not None else ''
+        return f'MCP window — {name}: {value}{prev_str}', f'{key}={value}'
     if etype in ('bang', 'start', 'load1', 'load2', 'load3'):
         source = evt.get('source', '')
         src_str = f' from {source}' if source else ''

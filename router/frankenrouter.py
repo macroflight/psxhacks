@@ -225,6 +225,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self._simevents_last_sent = 0.0
         self._sim_events_clients_recorded = set()
         self._simevents_keywords = frozenset()  # set in main() after variables are loaded
+        self._mcp_window_stable_since = {}  # {key: perf_counter when current value was set}
 
         # IRS alignment fix: timestamp when all three IRSes first reached ≥60000,
         # and whether we have already sent the fix for this alignment cycle.
@@ -1637,6 +1638,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             prev_str = f' (was: {prev})' if prev is not None else ''
             src_str = f' from {source}' if source else ''
             return f"{prefix} var_change: {name} ({key})={value}{prev_str}{src_str}"
+        if etype == 'mcp_window':
+            key = event.get('key', '?')
+            value = event.get('value', '?')
+            prev = event.get('prev')
+            name = self.variables.get_variable_name(key) if self.variables else key
+            prev_str = f' (was: {prev})' if prev is not None else ''
+            return f"{prefix} mcp_window: {name} ({key})={value}{prev_str}"
         if etype in ('bang', 'start', 'load1', 'load2', 'load3'):
             source = event.get('source', '')
             src_str = f' from {source}' if source else ''
@@ -2514,21 +2522,31 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # detect changes for sim event logging.
         _simevent_key = None
         _simevent_prev = None
-        if not sender.upstream and not sender.is_frankenrouter and '=' in line:
-            _simevent_key = line.split('=', 1)[0]
-            if _simevent_key in self._simevents_keywords:
+        _mcp_key = None
+        _mcp_prev = None
+        if '=' in line:
+            _line_key = line.split('=', 1)[0]
+            if not sender.upstream and not sender.is_frankenrouter:
+                if _line_key in self._simevents_keywords:
+                    _simevent_key = _line_key
+                    try:
+                        _simevent_prev = self.cache.get_value(_simevent_key)
+                    except routercache.RouterCacheException:
+                        pass  # first time seeing this key — prev stays None
+            if _line_key in variables.SIMEVENTS_MCP_WINDOW_KEYS:
+                _mcp_key = _line_key
                 try:
-                    _simevent_prev = self.cache.get_value(_simevent_key)
+                    _mcp_prev = self.cache.get_value(_mcp_key)
                 except routercache.RouterCacheException:
-                    pass  # first time seeing this key — prev stays None
-            else:
-                _simevent_key = None
+                    pass
 
         (action, code, message, extra_data) = self.rules.route(line, sender)
 
-        # Record a var_change event if a monitored key changed from a downstream client.
-        if _simevent_key is not None and action not in (
-                RulesAction.DROP, RulesAction.DISCONNECT):
+        # Record a var_change event if a monitored key changed from a downstream client,
+        # but not during a situ load (last_load1 more recent than last_load3).
+        if (_simevent_key is not None and
+                action not in (RulesAction.DROP, RulesAction.DISCONNECT) and
+                self.last_load1 <= self.last_load3):
             _simevent_new = line.split('=', 1)[1]
             if str(_simevent_prev) != _simevent_new:
                 self.record_sim_event(
@@ -2538,6 +2556,25 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     prev=str(_simevent_prev) if _simevent_prev is not None else None,
                     source=sender.display_name,
                 )
+
+        # Record MCP window value changes (master/standalone only — upstream sends these),
+        # but only if the previous value was stable for more than 5 seconds.
+        if (_mcp_key is not None and
+                action not in (RulesAction.DROP, RulesAction.DISCONNECT) and
+                self.last_load1 <= self.last_load3 and
+                self.config.identity.type in ('master', 'standalone')):
+            _mcp_new = line.split('=', 1)[1]
+            if str(_mcp_prev) != _mcp_new:
+                _now = time.perf_counter()
+                _stable = _now - self._mcp_window_stable_since.get(_mcp_key, 0.0)
+                self._mcp_window_stable_since[_mcp_key] = _now
+                if _stable > 5.0:
+                    self.record_sim_event(
+                        'mcp_window',
+                        key=_mcp_key,
+                        value=_mcp_new,
+                        prev=str(_mcp_prev) if _mcp_prev is not None else None,
+                    )
 
         # Take actions based on RulesCode
         if code == RulesCode.FRDP_PING:
