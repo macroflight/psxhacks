@@ -1677,7 +1677,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             prev = event.get('prev', 0)
             labels = variables.pnf_mode_labels(value)
             prev_labels = variables.pnf_mode_labels(prev)
-            return f"{prefix} pnf_mode_change: {prev_labels} → {labels}"
+            return f"{prefix} pnf_mode_change: {prev_labels} -> {labels}"
         if etype in ('bang', 'start', 'load1', 'load2', 'load3'):
             source = event.get('source', '')
             src_str = f' from {source}' if source else ''
@@ -1687,7 +1687,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             value = event.get('value', '?')
             prev = event.get('prev', '?')
             reason = event.get('reason', '')
-            return (f"{prefix} sharedinfo_change: {field}: {prev} → {value}"
+            return (f"{prefix} sharedinfo_change: {field}: {prev} -> {value}"
                     f"{' (' + reason + ')' if reason else ''}")
         if etype in ('ingress_filtered', 'egress_filtered'):
             key = event.get('key', '?')
