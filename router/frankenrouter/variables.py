@@ -60,6 +60,21 @@ SIMEVENTS_MCP_WINDOW_KEYS = frozenset({
     'Qi35',  # McpWdoAlt - altitude window
 })
 
+# PnfMode (Qi217) bitmask — known bit positions and their meaning.
+PNF_MODE_BITS = {
+    0: 'right seat',     # mask 1
+    1: 'left seat',      # mask 2
+    2: 'callouts',       # mask 4
+    4: 'silent tasks',   # mask 16
+    8: 'S/C alt',        # mask 256
+}
+
+
+def pnf_mode_labels(value):
+    """Return sorted list of active PNF mode feature labels for an integer bitmask."""
+    return [label for bit, label in sorted(PNF_MODE_BITS.items()) if value & (1 << bit)]
+
+
 # AFDS (Qs434) FMA mode number → display name.
 # Field 2 (pitch) can be negative when pitchFault is set; abs() is applied before lookup.
 # -29 appears in armed fields when VNAV is unavailable.

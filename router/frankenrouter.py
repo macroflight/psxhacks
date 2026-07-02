@@ -1672,6 +1672,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             armed_str = (f' (armed ROL:{roll_armed or "-"} PTH:{pitch_armed or "-"})'
                          if roll_armed or pitch_armed else '')
             return f"{prefix} fma_change: A/T:{thr} ROL:{roll} PTH:{pitch}{armed_str}"
+        if etype == 'pnf_mode_change':
+            value = event.get('value', 0)
+            prev = event.get('prev', 0)
+            labels = variables.pnf_mode_labels(value)
+            prev_labels = variables.pnf_mode_labels(prev)
+            return f"{prefix} pnf_mode_change: {prev_labels} → {labels}"
         if etype in ('bang', 'start', 'load1', 'load2', 'load3'):
             source = event.get('source', '')
             src_str = f' from {source}' if source else ''
@@ -2579,6 +2585,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         _mcp_key = None
         _mcp_prev = None
         _afds_prev_fma = None
+        _pnf_mode_prev = None
         if '=' in line:
             _line_key = line.split('=', 1)[0]
             if not sender.upstream and not sender.is_frankenrouter:
@@ -2599,6 +2606,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     _afds_prev_fma = variables.parse_afds_fma(
                         self.cache.get_value('Qs434'))
                 except routercache.RouterCacheException:
+                    pass
+            if _line_key == 'Qi217':
+                try:
+                    _pnf_mode_prev = int(self.cache.get_value('Qi217'))
+                except (routercache.RouterCacheException, ValueError):
                     pass
 
         (action, code, message, extra_data) = self.rules.route(line, sender)
@@ -2649,6 +2661,19 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     prev_pitch=_afds_prev_fma[2], prev_roll_armed=_afds_prev_fma[3],
                     prev_pitch_armed=_afds_prev_fma[4],
                 )
+
+        # Record PNF mode changes from Qi217 (master/standalone only, not during situ load).
+        if (_pnf_mode_prev is not None and
+                action not in (RulesAction.DROP, RulesAction.DISCONNECT) and
+                self.last_load1 <= self.last_load3 and
+                self.config.identity.type in ('master', 'standalone')):
+            try:
+                _pnf_mode_new = int(line.split('=', 1)[1])
+                if _pnf_mode_new != _pnf_mode_prev:
+                    self.record_sim_event('pnf_mode_change',
+                                          value=_pnf_mode_new, prev=_pnf_mode_prev)
+            except (ValueError, IndexError):
+                pass
 
         # Take actions based on RulesCode
         if code == RulesCode.FRDP_PING:

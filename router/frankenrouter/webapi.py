@@ -15,6 +15,8 @@ import time
 
 from aiohttp import web  # pylint: disable=import-error
 
+from . import variables as _variables
+
 
 _STATIC_DIR = pathlib.Path(__file__).parent / 'static'
 
@@ -1762,6 +1764,13 @@ def _evt_describe(evt, get_var_name):  # pylint: disable=too-many-return-stateme
         armed_str = (f' (armed: {roll_armed or "—"} / {pitch_armed or "—"})'
                      if roll_armed or pitch_armed else '')
         return f'FMA — A/T: {thr} | ROL: {roll} | PTH: {pitch}{armed_str}', ''
+    if etype == 'pnf_mode_change':
+        value = evt.get('value', 0)
+        prev = evt.get('prev', 0)
+        labels_new = _variables.pnf_mode_labels(value)
+        labels_prev = _variables.pnf_mode_labels(prev)
+        detail = f'{labels_prev or ["(none)"]} → {labels_new or ["(none)"]}'
+        return 'PNF mode changed', detail
     if etype in ('bang', 'start', 'load1', 'load2', 'load3'):
         source = evt.get('source', '')
         src_str = f' from {source}' if source else ''
