@@ -1718,7 +1718,7 @@ def _evt_fmt_ts(ts, now):
         return '?', '?'
 
 
-def _evt_describe(evt, get_var_name):  # pylint: disable=too-many-return-statements,too-many-locals
+def _evt_describe(evt, get_var_name):  # pylint: disable=too-many-return-statements,too-many-locals,too-many-statements
     """Return (description, raw_str) for a sim event dict."""
     etype = evt.get('type', '?')
     if etype == 'var_change':
@@ -1735,8 +1735,33 @@ def _evt_describe(evt, get_var_name):  # pylint: disable=too-many-return-stateme
         value = evt.get('value', '?')
         prev = evt.get('prev')
         name = get_var_name(key)
-        prev_str = f', was: {prev}' if prev is not None else ''
-        return f'MCP window — {name}: {value}{prev_str}', f'{key}={value}'
+
+        def _spd_disp(v):
+            if key == 'Qi32' and v is not None:
+                try:
+                    n = int(v)
+                    if n > 950:
+                        return '---'
+                    if n >= 400:
+                        return f'M{n / 1000:.3f}'
+                    return f'{n} kt'
+                except (ValueError, TypeError):
+                    pass
+            return str(v) if v is not None else None
+
+        disp_value = _spd_disp(value)
+        disp_prev = _spd_disp(prev)
+        prev_str = f', was: {disp_prev}' if prev is not None else ''
+        return f'MCP window — {name}: {disp_value}{prev_str}', f'{key}={disp_value}'
+    if etype == 'fma_change':
+        thr = evt.get('thr') or '—'
+        roll = evt.get('roll') or '—'
+        pitch = evt.get('pitch') or '—'
+        roll_armed = evt.get('roll_armed', '')
+        pitch_armed = evt.get('pitch_armed', '')
+        armed_str = (f' (armed: {roll_armed or "—"} / {pitch_armed or "—"})'
+                     if roll_armed or pitch_armed else '')
+        return f'FMA — A/T: {thr} | ROL: {roll} | PTH: {pitch}{armed_str}', ''
     if etype in ('bang', 'start', 'load1', 'load2', 'load3'):
         source = evt.get('source', '')
         src_str = f' from {source}' if source else ''

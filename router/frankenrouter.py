@@ -80,7 +80,7 @@ IRS_ALIGN_FIX_DELAY = 5.0
 IRS_ALIGN_FIX_VALUE = 'Qs355=102000;102000;102000'
 
 # Sim event batching: how often to send SIMEVENTS to the network (seconds)
-_SIMEVENTS_BATCH_INTERVAL = 30.0
+_SIMEVENTS_BATCH_INTERVAL = 10.0
 # Maximum number of events to keep in the in-memory log (all routers combined)
 _SIMEVENTS_MAX_ALL = 2000
 
@@ -225,7 +225,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self._simevents_last_sent = 0.0
         self._sim_events_clients_recorded = set()
         self._simevents_keywords = frozenset()  # set in main() after variables are loaded
-        self._mcp_window_stable_since = {}  # {key: perf_counter when current value was set}
+        # {key: {'value': str, 'prev': str|None, 'since': perf_counter}}
+        # Populated on every MCP window change; housekeeping logs after 5s of stability.
+        self._mcp_window_pending = {}
 
         # IRS alignment fix: timestamp when all three IRSes first reached ≥60000,
         # and whether we have already sent the fix for this alignment cycle.
@@ -1625,7 +1627,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             return
         # End of traffic_logging_task()
 
-    def _simevents_log_line(self, event):  # pylint: disable=too-many-return-statements
+    def _simevents_log_line(self, event):  # pylint: disable=too-many-return-statements,too-many-locals
         """Format a sim event as a human-readable log line."""
         etype = event.get('type', '?')
         prefix = f"[{event.get('sim', '?')}/{event.get('router', '?')}]"
@@ -1643,8 +1645,33 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             value = event.get('value', '?')
             prev = event.get('prev')
             name = self.variables.get_variable_name(key) if self.variables else key
-            prev_str = f' (was: {prev})' if prev is not None else ''
-            return f"{prefix} mcp_window: {name} ({key})={value}{prev_str}"
+
+            def _spd_disp(v):
+                if key == 'Qi32' and v is not None:
+                    try:
+                        n = int(v)
+                        if n > 950:
+                            return '---'         # SPD window blanked by AFDS
+                        if n >= 400:
+                            return f'M{n / 1000:.3f}'  # Mach mode: 780 → M0.780
+                        return f'{n} kt'         # IAS mode
+                    except (ValueError, TypeError):
+                        pass
+                return str(v) if v is not None else None
+
+            disp_value = _spd_disp(value)
+            disp_prev = _spd_disp(prev)
+            prev_str = f' (was: {disp_prev})' if prev is not None else ''
+            return f"{prefix} mcp_window: {name} ({key})={disp_value}{prev_str}"
+        if etype == 'fma_change':
+            thr = event.get('thr') or '-'
+            roll = event.get('roll') or '-'
+            pitch = event.get('pitch') or '-'
+            roll_armed = event.get('roll_armed', '')
+            pitch_armed = event.get('pitch_armed', '')
+            armed_str = (f' (armed ROL:{roll_armed or "-"} PTH:{pitch_armed or "-"})'
+                         if roll_armed or pitch_armed else '')
+            return f"{prefix} fma_change: A/T:{thr} ROL:{roll} PTH:{pitch}{armed_str}"
         if etype in ('bang', 'start', 'load1', 'load2', 'load3'):
             source = event.get('source', '')
             src_str = f' from {source}' if source else ''
@@ -2318,6 +2345,32 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.record_sim_event('client_connected', ts=conn_ts,
                                   client_name=client.peername)
 
+    def _housekeeping_mcp_window(self):
+        """Log pending MCP window values that have been stable for more than 5 seconds."""
+        if self.config.identity.type not in ('master', 'standalone'):
+            return
+        if self.last_load1 > self.last_load3:
+            return
+        now = time.perf_counter()
+        logged = [k for k, p in self._mcp_window_pending.items() if now - p['since'] > 5.0]
+        for key in logged:
+            pending = self._mcp_window_pending.pop(key)
+            if pending['value'] == pending['prev']:
+                continue  # knob returned to its original value — no net change
+            if key == 'Qi32':
+                # McpWdoSpd > 950 means the SPD window is blanked (AFDS controls speed).
+                # Suppress oscillations that stay within the blanked range.
+                try:
+                    val = int(pending['value'])
+                    prev_val = int(pending['prev']) if pending['prev'] is not None else val
+                    if val > 950 and prev_val > 950:
+                        continue
+                except (ValueError, TypeError):
+                    pass
+            self.record_sim_event(
+                'mcp_window', key=key,
+                value=pending['value'], prev=pending['prev'])
+
     async def _housekeeping_refresh_qs121(self):
         """Re-broadcast Qs121 when PSX stops sending it (aircraft stationary).
 
@@ -2409,6 +2462,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 await self._housekeeping_refresh_qs121()
                 await self._housekeeping_check_write_buffers()
                 await self._housekeeping_irs_align_fix()
+                self._housekeeping_mcp_window()
                 if time.perf_counter() - last_run > self.args.housekeeping_interval:
                     last_run = time.perf_counter()
                     self.logger.debug("Performing housekeeping")
@@ -2524,6 +2578,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         _simevent_prev = None
         _mcp_key = None
         _mcp_prev = None
+        _afds_prev_fma = None
         if '=' in line:
             _line_key = line.split('=', 1)[0]
             if not sender.upstream and not sender.is_frankenrouter:
@@ -2537,6 +2592,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 _mcp_key = _line_key
                 try:
                     _mcp_prev = self.cache.get_value(_mcp_key)
+                except routercache.RouterCacheException:
+                    pass
+            if _line_key == 'Qs434':
+                try:
+                    _afds_prev_fma = variables.parse_afds_fma(
+                        self.cache.get_value('Qs434'))
                 except routercache.RouterCacheException:
                     pass
 
@@ -2557,24 +2618,37 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     source=sender.display_name,
                 )
 
-        # Record MCP window value changes (master/standalone only — upstream sends these),
-        # but only if the previous value was stable for more than 5 seconds.
+        # Track MCP window value changes (master/standalone only, not during situ load).
+        # A pending entry is kept and logged by _housekeeping_mcp_window() after 5s of
+        # stability, so rapid knob-turns are debounced and only the final value is logged.
         if (_mcp_key is not None and
                 action not in (RulesAction.DROP, RulesAction.DISCONNECT) and
                 self.last_load1 <= self.last_load3 and
                 self.config.identity.type in ('master', 'standalone')):
             _mcp_new = line.split('=', 1)[1]
             if str(_mcp_prev) != _mcp_new:
-                _now = time.perf_counter()
-                _stable = _now - self._mcp_window_stable_since.get(_mcp_key, 0.0)
-                self._mcp_window_stable_since[_mcp_key] = _now
-                if _stable > 5.0:
-                    self.record_sim_event(
-                        'mcp_window',
-                        key=_mcp_key,
-                        value=_mcp_new,
-                        prev=str(_mcp_prev) if _mcp_prev is not None else None,
-                    )
+                _existing = self._mcp_window_pending.get(_mcp_key)
+                _orig_prev = (_existing['prev'] if _existing
+                              else (str(_mcp_prev) if _mcp_prev is not None else None))
+                self._mcp_window_pending[_mcp_key] = {
+                    'value': _mcp_new, 'prev': _orig_prev, 'since': time.perf_counter()
+                }
+
+        # Record FMA mode changes from Qs434 (master/standalone only, not during situ load).
+        if (_afds_prev_fma is not None and
+                action not in (RulesAction.DROP, RulesAction.DISCONNECT) and
+                self.last_load1 <= self.last_load3 and
+                self.config.identity.type in ('master', 'standalone')):
+            _new_fma = variables.parse_afds_fma(line.split('=', 1)[1])
+            if _new_fma is not None and _new_fma != _afds_prev_fma:
+                self.record_sim_event(
+                    'fma_change',
+                    thr=_new_fma[0], roll=_new_fma[1], pitch=_new_fma[2],
+                    roll_armed=_new_fma[3], pitch_armed=_new_fma[4],
+                    prev_thr=_afds_prev_fma[0], prev_roll=_afds_prev_fma[1],
+                    prev_pitch=_afds_prev_fma[2], prev_roll_armed=_afds_prev_fma[3],
+                    prev_pitch_armed=_afds_prev_fma[4],
+                )
 
         # Take actions based on RulesCode
         if code == RulesCode.FRDP_PING:
@@ -2672,6 +2746,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.connection_state_changed()
         elif code == RulesCode.LOAD1:
             self.logger.info("Got load1 message from %s", sender_hr)
+            self._mcp_window_pending.clear()
             if not sender.upstream and not sender.is_frankenrouter:
                 self.record_sim_event('load1', source=sender.display_name)
         elif code == RulesCode.LOAD2:

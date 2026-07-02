@@ -60,6 +60,69 @@ SIMEVENTS_MCP_WINDOW_KEYS = frozenset({
     'Qi35',  # McpWdoAlt - altitude window
 })
 
+# AFDS (Qs434) FMA mode number → display name.
+# Field 2 (pitch) can be negative when pitchFault is set; abs() is applied before lookup.
+# -29 appears in armed fields when VNAV is unavailable.
+AFDS_MODE_NAMES = {
+    -29: '',
+    0: '',
+    1: 'ATT',
+    2: 'HDG HOLD',
+    3: 'HDG SEL',
+    4: 'LNAV',
+    5: 'LOC',
+    6: 'ROLLOUT',
+    7: 'TO/GA',
+    8: 'TO/GA',
+    9: 'ALT',
+    10: 'FLARE',
+    11: 'FLCH SPD',
+    12: 'G/S',
+    13: 'V/S',
+    14: 'VNAV ALT',
+    15: 'VNAV PTH',
+    16: 'VNAV SPD',
+    17: 'VNAV',
+    18: 'IDLE',
+    19: 'SPD',
+    20: 'THR',
+    21: 'THR HOLD',
+    22: 'THR REF',
+    23: 'NO AUTOLAND',
+    24: 'LAND 2',
+    25: 'LAND 3',
+    26: 'CMD',
+    27: 'F/D',
+    28: 'TEST',
+    29: 'VNAV FAIL',
+    30: 'VNAV OFF',
+}
+
+
+def parse_afds_fma(afds_value):
+    """Return (thr, roll, pitch, roll_armed, pitch_armed) mode name strings from Qs434.
+
+    Returns None if the value cannot be parsed.
+    Negative field 2 (pitchFault) is resolved via abs() before lookup.
+    """
+    try:
+        fields = afds_value.split(';')
+
+        def _name(raw):
+            n = int(raw)
+            return AFDS_MODE_NAMES.get(n, AFDS_MODE_NAMES.get(abs(n), str(n)))
+
+        return (
+            _name(fields[0]),   # throttleMode
+            _name(fields[1]),   # rollEngaged
+            _name(fields[2]),   # pitchEngaged (may be negative on fault)
+            _name(fields[3]),   # rollArmed
+            _name(fields[4]),   # pitchArmed
+        )
+    except (ValueError, IndexError):
+        return None
+
+
 ADDITIONAL_MODES = {
     # https://aerowinx.com/board/index.php/topic,7751.0.html - Qs493 and Qi208
     # also behave as ECON, i.e they are sent to the network when changed.
