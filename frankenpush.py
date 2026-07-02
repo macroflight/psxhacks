@@ -1,4 +1,4 @@
-# pylint: disable=invalid-name
+# pylint: disable=invalid-name,too-many-lines
 """FrankenPush - PSCC Flight Centre push connector.
 
 Connects to a local PSX main server (or frankenrouter), reads live flight
@@ -61,6 +61,33 @@ PUSH_PROTOCOL_VERSION = 1
 # Logon code cache — written next to this script so the user doesn't have to
 # re-enter the code on every run.
 _CACHE_FILE = pathlib.Path.home() / '.frankenpush_cache.json'
+
+# AFDS (Qs434) FMA mode number → display name. Mirrors variables.py AFDS_MODE_NAMES.
+_AFDS_MODE_NAMES = {
+    -29: '', 0: '', 1: 'ATT', 2: 'HDG HOLD', 3: 'HDG SEL', 4: 'LNAV',
+    5: 'LOC', 6: 'ROLLOUT', 7: 'TO/GA', 8: 'TO/GA', 9: 'ALT',
+    10: 'FLARE', 11: 'FLCH SPD', 12: 'G/S', 13: 'V/S', 14: 'VNAV ALT',
+    15: 'VNAV PTH', 16: 'VNAV SPD', 17: 'VNAV', 18: 'IDLE', 19: 'SPD',
+    20: 'THR', 21: 'THR HOLD', 22: 'THR REF', 23: 'NO AUTOLAND',
+    24: 'LAND 2', 25: 'LAND 3', 26: 'CMD', 27: 'F/D', 28: 'TEST',
+    29: 'VNAV FAIL', 30: 'VNAV OFF',
+}
+
+
+def _afds_mode_name(raw):
+    """Return display name for an AFDS mode integer (handles negative pitchFault values)."""
+    n = int(raw)
+    return _AFDS_MODE_NAMES.get(n, _AFDS_MODE_NAMES.get(abs(n), str(n)))
+
+
+def _parse_afds_fma(value):
+    """Return (thr, roll, pitch, roll_armed, pitch_armed) strings from Qs434, or None."""
+    try:
+        f = value.split(';')
+        return (_afds_mode_name(f[0]), _afds_mode_name(f[1]), _afds_mode_name(f[2]),
+                _afds_mode_name(f[3]), _afds_mode_name(f[4]))
+    except (ValueError, IndexError):
+        return None
 
 
 def _load_cached_logon_code():
@@ -195,6 +222,30 @@ class Script():  # pylint: disable=too-many-instance-attributes
         # FRDP peer connection state
         self._flightinfo = None             # latest FLIGHTINFO dict
         self._routerinfos: dict = {}        # {uuid: routerinfo_dict}
+        self._sharedinfo: dict = {}         # latest SHAREDINFO from master router
+        self._pending_simevents: list = []  # events received since last portal send
+
+        # Live flight state derived or received separately from position
+        self._ias_kt = None
+        self._vs_fpm = None
+        self._left_pfd_alt_raw = None       # raw LeftPfdAlt string from PSX (demand)
+        self._prev_alt_ft_for_vs = None     # previous altitude for VS computation
+        self._prev_ts_for_vs = None         # timestamp of previous altitude sample
+
+        # MCP window values (Qi32-35, ECON — updated by callbacks)
+        self._mcp_spd = None    # McpWdoSpd raw integer
+        self._mcp_hdg = None    # McpWdoHdg degrees
+        self._mcp_vs = None     # McpWdoVs converted to fpm (raw × 100)
+        self._mcp_alt = None    # McpWdoAlt converted to ft (raw × 100)
+        self._mcp_psh_vs = None  # McpPshVs MCPMOM: bit 3 set = VS window visible
+
+        # AFDS FMA modes (Qs434, ECON — parsed tuple or None)
+        self._fma = None
+
+        # Control surface levers (ECON)
+        self._flap_lever = None     # Qh389 FlapLever 0-6
+        self._gear_lever = None     # Qh170 GearLever 1=up 2=off 3=down
+        self._spd_brk_lever = None  # Qh388 SpdBrkLever 0-800
 
         # Autosave situ monitoring — set when a file changes, consumed by _build_update
         self._pending_autosave_situ = None
@@ -204,6 +255,16 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self._sent_state: dict = {}
 
     # --- PSX callbacks ---
+
+    @staticmethod
+    def _tas_to_ias(tas_kt, alt_ft):
+        """Derive IAS from TAS using ISA density model (troposphere + stratosphere)."""
+        alt_m = alt_ft * 0.3048
+        if alt_ft < 36089:
+            density_ratio = max(1.0 - 2.2558e-5 * alt_m, 0.0) ** 4.2561
+        else:
+            density_ratio = 0.2971 * math.exp(-1.5769e-4 * (alt_m - 11000.0))
+        return tas_kt * math.sqrt(max(density_ratio, 1e-9))
 
     def _on_position(self, _key, value):
         """Parse PiBaHeAlTas (pitch;bank;heading_rad;alt_ft*1e3;tas_kt*1e3;lat_rad;lon_rad)."""
@@ -221,6 +282,82 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self._lat = math.degrees(lat_rad)
             self._lon = math.degrees(lon_rad)
         except (ValueError, IndexError):
+            return
+
+        self._ias_kt = self._tas_to_ias(self._tas_kt, self._alt_ft)
+
+        now = time.monotonic()
+        if self._prev_alt_ft_for_vs is not None and self._prev_ts_for_vs is not None:
+            dt = now - self._prev_ts_for_vs
+            if dt > 0:
+                raw_vs = (self._alt_ft - self._prev_alt_ft_for_vs) / dt * 60
+                alpha = min(dt / 5.0, 1.0)
+                self._vs_fpm = (raw_vs if self._vs_fpm is None
+                                else (1 - alpha) * self._vs_fpm + alpha * raw_vs)
+        self._prev_alt_ft_for_vs = self._alt_ft
+        self._prev_ts_for_vs = now
+
+    def _on_mcp_spd(self, _key, value):
+        # McpWdoSpd encoding: >950 = blanked (AFDS controls speed),
+        # 400-950 = Mach mode (value/1000 gives Mach, e.g. 780 → 0.780),
+        # 0-399 = IAS mode (direct knots).
+        try:
+            n = int(value)
+            if n > 950:
+                self._mcp_spd = None
+            elif n >= 400:
+                self._mcp_spd = round(n / 1000, 3)  # Mach float e.g. 0.780
+            else:
+                self._mcp_spd = n  # IAS in kt
+        except ValueError:
+            pass
+
+    def _on_mcp_hdg(self, _key, value):
+        try:
+            self._mcp_hdg = int(value)
+        except ValueError:
+            pass
+
+    def _on_mcp_vs(self, _key, value):
+        try:
+            self._mcp_vs = int(value) * 100
+        except ValueError:
+            pass
+
+    def _on_mcp_psh_vs(self, _key, value):
+        try:
+            self._mcp_psh_vs = int(value)
+        except ValueError:
+            pass
+
+    def _on_mcp_alt(self, _key, value):
+        try:
+            self._mcp_alt = int(value) * 100
+        except ValueError:
+            pass
+
+    def _on_afds(self, _key, value):
+        self._fma = _parse_afds_fma(value)
+
+    def _on_left_pfd_alt(self, _key, value):
+        self._left_pfd_alt_raw = value or None
+
+    def _on_flap_lever(self, _key, value):
+        try:
+            self._flap_lever = int(value)
+        except ValueError:
+            pass
+
+    def _on_gear_lever(self, _key, value):
+        try:
+            self._gear_lever = int(value)
+        except ValueError:
+            pass
+
+    def _on_spd_brk_lever(self, _key, value):
+        try:
+            self._spd_brk_lever = int(value)
+        except ValueError:
             pass
 
     def _on_tail_number(self, _key, value):
@@ -242,6 +379,26 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self._eta = value or None
 
     # --- helpers ---
+
+    def _parse_capt_baro(self):
+        """Return (mode_str, hpa_float) from LeftPfdAlt, or (None, None) if unavailable.
+
+        LeftPfdAlt format: first char 's'=STD, else QNH; then alt_qnh_ft;alt_std_ft;...
+        QNH hPa approximated from the difference between QNH and std altitudes.
+        """
+        raw = self._left_pfd_alt_raw
+        if not raw or len(raw) < 2:
+            return None, None
+        if raw[0] == 's':
+            return 'STD', None
+        try:
+            parts = raw[1:].split(';')
+            alt_qnh = float(parts[0])
+            alt_std = float(parts[1])
+            hpa = round(1013.25 + (alt_qnh - alt_std) / 27.0, 1)
+            return 'QNH', hpa
+        except (ValueError, IndexError):
+            return None, None
 
     @property
     def _connected_sim_names(self):
@@ -276,7 +433,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self.logger.debug("ROUTERINFO: master=%r  clients=%r", master_sim_name, names)
         return names
 
-    def _build_update(self, full):
+    def _build_update(self, full):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
         """Build the JSON payload to send to Flight Centre.
 
         If full=True every field is included. Otherwise only fields whose
@@ -287,13 +444,15 @@ class Script():  # pylint: disable=too-many-instance-attributes
         """
         update = {"protocol_version": PUSH_PROTOCOL_VERSION}
 
-        # Position — always include when we have a fix.
+        # Position and derived real-time values — always include when we have a fix.
         if self._lat is not None:
             update.update({
                 "lat": self._lat, "lon": self._lon,
                 "alt_ft": self._alt_ft, "heading_deg": self._heading_deg,
                 "tas_kt": self._tas_kt, "pitch_deg": self._pitch_deg,
                 "bank_deg": self._bank_deg,
+                "ias_kt": round(self._ias_kt, 1) if self._ias_kt is not None else None,
+                "vs_fpm": round(self._vs_fpm) if self._vs_fpm is not None else None,
             })
 
         # Scalar fields — only when changed or full.
@@ -322,10 +481,66 @@ class Script():  # pylint: disable=too-many-instance-attributes
         if full or self._sent_state.get("names") != names:
             update["connected_sim_names"] = names
 
+        # SHAREDINFO fields — delta-tracked.
+        pilot_flying = self._sharedinfo.get("pilot_flying_simulator")
+        elev_master = self._sharedinfo.get("elevation_source_simulator")
+        traffic_master = self._sharedinfo.get("traffic_source_simulator")
+        sharedinfo_now = (pilot_flying, elev_master, traffic_master)
+        if full or self._sent_state.get("sharedinfo") != sharedinfo_now:
+            update["pilot_flying_sim"] = pilot_flying
+            update["elevation_master_sim"] = elev_master
+            update["traffic_master_sim"] = traffic_master
+
+        # MCP window values — delta-tracked.
+        # V/S window is blank when McpPshVs bit 3 is not set.
+        vs_visible = self._mcp_psh_vs is not None and (self._mcp_psh_vs & 8) != 0
+        mcp_vs_out = self._mcp_vs if vs_visible else None
+        mcp_now = (self._mcp_spd, self._mcp_hdg, mcp_vs_out, self._mcp_alt, self._mcp_psh_vs)
+        if full or self._sent_state.get("mcp") != mcp_now:
+            update["mcp_spd"] = self._mcp_spd
+            update["mcp_hdg"] = self._mcp_hdg
+            update["mcp_vs"] = mcp_vs_out
+            update["mcp_alt"] = self._mcp_alt
+
+        # AFDS FMA modes — delta-tracked.
+        fma = self._fma
+        if full or self._sent_state.get("fma") != fma:
+            if fma is not None:
+                update["fma_thr"] = fma[0]
+                update["fma_roll"] = fma[1]
+                update["fma_pitch"] = fma[2]
+                update["fma_roll_armed"] = fma[3]
+                update["fma_pitch_armed"] = fma[4]
+            else:
+                update.update({"fma_thr": None, "fma_roll": None, "fma_pitch": None,
+                               "fma_roll_armed": None, "fma_pitch_armed": None})
+
+        # Control surface levers — delta-tracked.
+        _gear_labels = {1: "up", 2: "off", 3: "down"}
+        gear_str = _gear_labels.get(self._gear_lever) if self._gear_lever is not None else None
+        spd_brk_out = (self._spd_brk_lever > 0) if self._spd_brk_lever is not None else None
+        controls_now = (self._flap_lever, self._gear_lever, self._spd_brk_lever)
+        if full or self._sent_state.get("controls") != controls_now:
+            update["flap_lever"] = self._flap_lever
+            update["gear_lever"] = gear_str
+            update["spd_brk_out"] = spd_brk_out
+
+        # Captain's barometric setting — delta-tracked.
+        capt_baro_mode, capt_baro_hpa = self._parse_capt_baro()
+        capt_baro_now = (capt_baro_mode, capt_baro_hpa)
+        if full or self._sent_state.get("capt_baro") != capt_baro_now:
+            update["capt_baro_mode"] = capt_baro_mode
+            update["capt_baro_hpa"] = capt_baro_hpa
+
         # Autosave situ — always include when pending (one-shot delivery).
         if self._pending_autosave_situ is not None:
             update["autosave_situ"] = self._pending_autosave_situ
             self._pending_autosave_situ = None
+
+        # Sim events — always include when pending (one-shot delivery).
+        if self._pending_simevents:
+            update["simevents"] = self._pending_simevents
+            self._pending_simevents = []
 
         return update
 
@@ -342,6 +557,22 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self._sent_state["flightinfo"] = update["flightinfo"]
         if "connected_sim_names" in update:
             self._sent_state["names"] = update["connected_sim_names"]
+        if "pilot_flying_sim" in update:
+            self._sent_state["sharedinfo"] = (
+                update["pilot_flying_sim"],
+                update["elevation_master_sim"],
+                update["traffic_master_sim"])
+        if "mcp_spd" in update:
+            self._sent_state["mcp"] = (
+                update["mcp_spd"], update["mcp_hdg"],
+                update["mcp_vs"], update["mcp_alt"], self._mcp_psh_vs)
+        if "fma_thr" in update:
+            self._sent_state["fma"] = self._fma
+        if "capt_baro_mode" in update:
+            self._sent_state["capt_baro"] = (update["capt_baro_mode"], update["capt_baro_hpa"])
+        if "flap_lever" in update:
+            self._sent_state["controls"] = (
+                self._flap_lever, self._gear_lever, self._spd_brk_lever)
 
     # --- coroutines ---
 
@@ -355,7 +586,11 @@ class Script():  # pylint: disable=too-many-instance-attributes
         def disconnected():
             self.logger.info("PSX DISCONNECTED")
             self.psx_connected = False
-            self._lat = None  # clear position so stale data isn't sent
+            self._lat = None
+            self._ias_kt = None
+            self._vs_fpm = None
+            self._prev_alt_ft_for_vs = None
+            self._prev_ts_for_vs = None
 
         try:
             self.logger.debug("Starting %s", inspect.currentframe().f_code.co_name)
@@ -363,13 +598,14 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.psx.onConnect = connected
             self.psx.onDisconnect = disconnected
             self.psx.onPause = lambda: None
-            self.psx.onResume = lambda: None
+            self.psx.onResume = lambda: self.psx.send("demand", "LeftPfdAlt")
 
             # PSX lexicon names (confirmed from session captures):
             #   Qs0 = CfgRego (confirmed) a.k.a. AcTailNo,
             #   PiBaHeAlTas = Qs121, FmcFltNo = Qs401,
             #   FmcRteViAcMo = Qs373, FmcRte1 = Qs376, FmcRte2 = Qs377,
-            #   ActDestEta = Qi247
+            #   ActDestEta = Qi247, LeftPfdAlt = Qs562 (DEMAND),
+            #   Afds = Qs434 (ECON), McpWdo* = Qi32-35 (ECON)
             self.psx.subscribe("AcTailNo", self._on_tail_number)
             self.psx.subscribe("CfgRego", self._on_tail_number)
             self.psx.subscribe("PiBaHeAlTas", self._on_position)
@@ -378,6 +614,16 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.psx.subscribe("FmcRte1", self._on_route1)
             self.psx.subscribe("FmcRte2", self._on_route2)
             self.psx.subscribe("ActDestEta", self._on_eta)
+            self.psx.subscribe("McpWdoSpd", self._on_mcp_spd)
+            self.psx.subscribe("McpWdoHdg", self._on_mcp_hdg)
+            self.psx.subscribe("McpWdoVs", self._on_mcp_vs)
+            self.psx.subscribe("McpWdoAlt", self._on_mcp_alt)
+            self.psx.subscribe("McpPshVs", self._on_mcp_psh_vs)
+            self.psx.subscribe("Afds", self._on_afds)
+            self.psx.subscribe("LeftPfdAlt", self._on_left_pfd_alt)
+            self.psx.subscribe("FlapLever", self._on_flap_lever)
+            self.psx.subscribe("GearLever", self._on_gear_lever)
+            self.psx.subscribe("SpdBrkLever", self._on_spd_brk_lever)
 
             self.psx.logger = self.logger.debug
 
@@ -416,6 +662,25 @@ class Script():  # pylint: disable=too-many-instance-attributes
                     self._routerinfos[ri_uuid] = ri
                     self.logger.debug("FRDP: ROUTERINFO from %s (%s)",
                                       ri_uuid, ri.get('simulator_name', '?'))
+            except json.JSONDecodeError:
+                pass
+        elif msg_type == 'SHAREDINFO':
+            try:
+                self._sharedinfo = json.loads(payload)
+                self.logger.debug("FRDP: received SHAREDINFO")
+            except json.JSONDecodeError:
+                pass
+        elif msg_type == 'SIMEVENTS' and self.args.simevents:
+            try:
+                data = json.loads(payload)
+                # Payload is {"sim": ..., "router": ..., "events": [...]}
+                events = data.get('events') if isinstance(data, dict) else data
+                if isinstance(events, list):
+                    self._pending_simevents.extend(events)
+                    self.logger.debug("FRDP: queued %d SIMEVENTS from %s/%s",
+                                      len(events),
+                                      data.get('sim', '?') if isinstance(data, dict) else '?',
+                                      data.get('router', '?') if isinstance(data, dict) else '?')
             except json.JSONDecodeError:
                 pass
 
@@ -459,6 +724,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
                     finally:
                         self._flightinfo = None
                         self._routerinfos.clear()
+                        self._sharedinfo = {}
                         writer.close()
                         self.logger.info("FRDP: peer connection closed")
                 except (OSError, asyncio.IncompleteReadError) as exc:
@@ -481,6 +747,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         """
         self._sent_state = {}   # clear so the first send is always a full snapshot
         last_full_at = 0.0
+        send_count = 0
         while True:
             if self.psx_connected and self._lat is not None:
                 now = asyncio.get_running_loop().time()
@@ -490,8 +757,15 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 self._record_sent_state(update)
                 if full:
                     last_full_at = now
+                send_count += 1
+                if send_count % 5 == 0:
+                    self.psx.send("demand", "LeftPfdAlt")
+                n_events = len(update.get("simevents") or [])
                 if self.args.show_sent_to_fc:
                     self.logger.info("Sent to FC: %s", json.dumps(update, indent=2))
+                elif n_events:
+                    self.logger.info("Sent %s update to FC with %d sim event(s)",
+                                     "full" if full else "delta", n_events)
                 else:
                     self.logger.debug("Sent %s update", "full" if full else "delta")
             await asyncio.sleep(_SEND_INTERVAL)
@@ -686,6 +960,11 @@ class Script():  # pylint: disable=too-many-instance-attributes
             help="Path to the PSX Situations directory. Monitors -Autosaved[A].situ "
                  "and -Autosaved[B].situ and uploads them to Flight Centre when they "
                  "change (PSX saves every ~3.5 minutes).",
+        )
+        parser.add_argument(
+            '--simevents',
+            action='store_true',
+            help="Forward SIMEVENTS from the router to Flight Centre.",
         )
         parser.add_argument(
             '--show-sent-to-fc',
