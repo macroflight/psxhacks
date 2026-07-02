@@ -79,6 +79,11 @@ IRS_ALIGN_FIX_DELAY = 5.0
 # Value broadcast to upstream and all clients once IRSes are confirmed aligned
 IRS_ALIGN_FIX_VALUE = 'Qs355=102000;102000;102000'
 
+# Sim event batching: how often to send SIMEVENTS to the network (seconds)
+_SIMEVENTS_BATCH_INTERVAL = 30.0
+# Maximum number of events to keep in the in-memory log (all routers combined)
+_SIMEVENTS_MAX_ALL = 2000
+
 # Addon client patterns checked on the master router.
 # More than one match is always a critical error.
 MASTER_ADDON_PATTERNS = [
@@ -113,6 +118,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.config = None
         self.logger = None
         self.traffic_logger = None
+        self.simevents_logger = None
         self.variables = None
         self.cache = None
         self.messagequeue_from_upstream = asyncio.Queue(maxsize=0)
@@ -212,6 +218,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.observer_session_password = None
         self.observer_mode = False
 
+        # Sim event log: all_sim_events holds events from this and all remote routers.
+        # _simevents_pending accumulates local events not yet broadcast to the network.
+        self.all_sim_events = collections.deque(maxlen=_SIMEVENTS_MAX_ALL)
+        self._simevents_pending = []
+        self._simevents_last_sent = 0.0
+        self._sim_events_clients_recorded = set()
+        self._simevents_keywords = frozenset()  # set in main() after variables are loaded
+
         # IRS alignment fix: timestamp when all three IRSes first reached ≥60000,
         # and whether we have already sent the fix for this alignment cycle.
         self._irs_all_aligned_since = None
@@ -295,6 +309,42 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.frdp_routerinfo_requested = asyncio.current_task().get_name()
         self.frdp_sharedinfo_requested = asyncio.current_task().get_name()
         self.frdp_flightinfo_requested = asyncio.current_task().get_name()
+
+    def record_sim_event(self, event_type, ts=None, **kwargs):
+        """Append a sim event to the local log and the pending broadcast list."""
+        if self.config is None:
+            return
+        event = {
+            'ts': ts if ts is not None else time.time(),
+            'type': event_type,
+            'sim': self.config.identity.simulator,
+            'router': self.config.identity.router,
+        }
+        event.update(kwargs)
+        self.all_sim_events.append(event)
+        self._simevents_pending.append(event)
+        if self.simevents_logger is not None:
+            self.simevents_logger.info(self._simevents_log_line(event))
+
+    async def _send_simevents_if_due(self):
+        """Broadcast pending sim events to the network if the batch interval has elapsed."""
+        if not self._simevents_pending:
+            return
+        if time.perf_counter() - self._simevents_last_sent < _SIMEVENTS_BATCH_INTERVAL:
+            return
+        payload = {
+            'sim': self.config.identity.simulator,
+            'router': self.config.identity.router,
+            'events': self._simevents_pending,
+        }
+        self._simevents_pending = []
+        self._simevents_last_sent = time.perf_counter()
+        msg = (f"addon=FRANKENROUTER:{self.frdp_version}"
+               f":SIMEVENTS:{json.dumps(payload)}")
+        if self.upstream and self.upstream.is_frankenrouter:
+            await self.send_to_upstream(msg)
+        await self.client_broadcast(msg, exclude_non_frankenrouter=True)
+        self.logger.debug("Sent SIMEVENTS batch to network")
 
     def handle_args(self):  # pylint: disable=too-many-statements
         """Handle command line arguments."""
@@ -1174,6 +1224,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 reconnect_delay = 1.0
                 self.logger.info("Connected to upstream: %s", self.upstream.peername)
                 await self.log_connect_evt(self.upstream.peername)
+                self.record_sim_event(
+                    'upstream_connected',
+                    upstream_host=self.config.upstream.host,
+                    upstream_port=self.config.upstream.port,
+                )
 
                 # Remove some information that might have come from another upstream
                 self.reset_after_upstream_connect()
@@ -1568,6 +1623,98 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.critical(traceback.format_exc())
             return
         # End of traffic_logging_task()
+
+    def _simevents_log_line(self, event):  # pylint: disable=too-many-return-statements
+        """Format a sim event as a human-readable log line."""
+        etype = event.get('type', '?')
+        prefix = f"[{event.get('sim', '?')}/{event.get('router', '?')}]"
+        if etype == 'var_change':
+            key = event.get('key', '?')
+            value = event.get('value', '?')
+            prev = event.get('prev')
+            name = self.variables.get_variable_name(key) if self.variables else key
+            source = event.get('source', '')
+            prev_str = f' (was: {prev})' if prev is not None else ''
+            src_str = f' from {source}' if source else ''
+            return f"{prefix} var_change: {name} ({key})={value}{prev_str}{src_str}"
+        if etype in ('bang', 'start', 'load1', 'load2', 'load3'):
+            source = event.get('source', '')
+            src_str = f' from {source}' if source else ''
+            return f"{prefix} {etype}{src_str}"
+        if etype == 'sharedinfo_change':
+            field = event.get('field', '?')
+            value = event.get('value', '?')
+            prev = event.get('prev', '?')
+            reason = event.get('reason', '')
+            return (f"{prefix} sharedinfo_change: {field}: {prev} → {value}"
+                    f"{' (' + reason + ')' if reason else ''}")
+        if etype in ('ingress_filtered', 'egress_filtered'):
+            key = event.get('key', '?')
+            value = event.get('value', '?')
+            name = self.variables.get_variable_name(key) if self.variables else key
+            source = event.get('source', '')
+            reason = event.get('reason', '')
+            src_str = f' from {source}' if source else ''
+            return (f"{prefix} {etype}: {name} ({key})={value}{src_str}"
+                    f"{': ' + reason if reason else ''}")
+        if etype == 'client_connected':
+            client_name = event.get('client_name', '?')
+            extra = (f" [{event.get('client_sim', '')}]"
+                     if event.get('is_frankenrouter', False) else '')
+            return f"{prefix} client_connected: {client_name}{extra}"
+        if etype == 'upstream_connected':
+            return (f"{prefix} upstream_connected: "
+                    f"{event.get('upstream_host', '?')}:{event.get('upstream_port', '?')}")
+        return f"{prefix} {etype}: {event}"
+
+    async def simevents_logging_task(self, name):
+        """Handle sim events logging to a rotating file."""
+        try:
+            simevents_log_file = os.path.join(
+                self.config.log.directory,
+                f"{self.config.identity.router}-simevents.log"
+            )
+
+            self.simevents_logger = logging.getLogger(f"{__MYNAME__}-simevents")
+
+            log_queue = queue.Queue(maxsize=0)
+
+            queue_handler = logging.handlers.QueueHandler(log_queue)
+            self.simevents_logger.addHandler(queue_handler)
+
+            file_formatter = logging.Formatter("%(asctime)s %(message)s")
+            file_formatter.converter = time.gmtime
+
+            file_handler = logging.handlers.RotatingFileHandler(
+                simevents_log_file,
+                maxBytes=self.config.log.output_max_size,
+                backupCount=self.config.log.output_keep_versions,
+            )
+            file_handler.setFormatter(file_formatter)
+
+            self.simevents_logger.setLevel(logging.INFO)
+
+            listener = logging.handlers.QueueListener(log_queue, file_handler)
+
+            try:
+                print('Starting simevents logger')
+                listener.start()
+                self.logger.debug("Task %s has initialized simevents logging to %s",
+                                  name, simevents_log_file)
+                while True:
+                    await asyncio.sleep(60)
+            finally:
+                self.logger.debug("Task %s has stopped simevents logging", name)
+                listener.stop()
+        except asyncio.exceptions.CancelledError:
+            self.logger.info("Task %s was cancelled, cleanup and exit", name)
+            raise
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in %s, shutting down",
+                                 exc, name)
+            self.logger.critical(traceback.format_exc())
+            return
+        # End of simevents_logging_task()
 
     async def frdp_send_task(self, name):  # pylint: disable=too-many-branches
         """Handle sending FRDP messages."""
@@ -2128,6 +2275,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                                  self.sharedinfo['elevation_source_simulator'])
                 self.sharedinfo['elevation_source_simulator'] = "NOSIM"
                 self.frdp_sharedinfo_requested = True
+                self.record_sim_event(
+                    'sharedinfo_change',
+                    field='elevation_source_simulator',
+                    value="NOSIM", prev=elevation_master,
+                    reason='stale master removed')
 
         traffic_master = self.sharedinfo['traffic_source_simulator']
         if traffic_master != "NOSIM":
@@ -2140,6 +2292,23 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                                  self.sharedinfo['traffic_source_simulator'])
                 self.sharedinfo['traffic_source_simulator'] = "NOSIM"
                 self.frdp_sharedinfo_requested = True
+                self.record_sim_event(
+                    'sharedinfo_change',
+                    field='traffic_source_simulator',
+                    value="NOSIM", prev=traffic_master,
+                    reason='stale master removed')
+
+    def _housekeeping_log_unnamed_clients(self):
+        """Record client_connected for clients that haven't sent a name within 30 seconds."""
+        for client in list(self.clients.values()):
+            if client.client_id in self._sim_events_clients_recorded:
+                continue
+            if time.perf_counter() - client.connected_at < 30.0:
+                continue
+            self._sim_events_clients_recorded.add(client.client_id)
+            conn_ts = time.time() - (time.perf_counter() - client.connected_at)
+            self.record_sim_event('client_connected', ts=conn_ts,
+                                  client_name=client.peername)
 
     async def _housekeeping_refresh_qs121(self):
         """Re-broadcast Qs121 when PSX stops sending it (aircraft stationary).
@@ -2253,6 +2422,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     await self._housekeeping_enable_psx_elevation_database()
                     await self._housekeeping_enable_master_caution()
                     self._housekeeping_remove_stale_masters()
+                    self._housekeeping_log_unnamed_clients()
+                    await self._send_simevents_if_due()
 
                     # Do some minor housekeeping that does not need separate functions
 
@@ -2339,7 +2510,34 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             })
         self.message_counter[0]['count'] += 1
 
+        # Capture the cached value BEFORE rules.route() updates the cache, so we can
+        # detect changes for sim event logging.
+        _simevent_key = None
+        _simevent_prev = None
+        if not sender.upstream and not sender.is_frankenrouter and '=' in line:
+            _simevent_key = line.split('=', 1)[0]
+            if _simevent_key in self._simevents_keywords:
+                try:
+                    _simevent_prev = self.cache.get_value(_simevent_key)
+                except routercache.RouterCacheException:
+                    pass  # first time seeing this key — prev stays None
+            else:
+                _simevent_key = None
+
         (action, code, message, extra_data) = self.rules.route(line, sender)
+
+        # Record a var_change event if a monitored key changed from a downstream client.
+        if _simevent_key is not None and action not in (
+                RulesAction.DROP, RulesAction.DISCONNECT):
+            _simevent_new = line.split('=', 1)[1]
+            if str(_simevent_prev) != _simevent_new:
+                self.record_sim_event(
+                    'var_change',
+                    key=_simevent_key,
+                    value=_simevent_new,
+                    prev=str(_simevent_prev) if _simevent_prev is not None else None,
+                    source=sender.display_name,
+                )
 
         # Take actions based on RulesCode
         if code == RulesCode.FRDP_PING:
@@ -2415,6 +2613,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.debug(
                 "Got FRDP IDENT message from %s: %s",
                 sender_hr, line)
+            if (sender.is_frankenrouter and
+                    sender.client_id not in self._sim_events_clients_recorded):
+                self._sim_events_clients_recorded.add(sender.client_id)
+                conn_ts = time.time() - (time.perf_counter() - sender.connected_at)
+                self.record_sim_event('client_connected', ts=conn_ts,
+                                      client_name=sender.display_name,
+                                      is_frankenrouter=True,
+                                      client_sim=sender.simulator_name)
             # If IDENT received from client, send FRDP JOIN to network and include our own UUID
             if not sender.upstream:
                 message = f"addon=FRANKENROUTER:{self.frdp_version}:JOIN"
@@ -2429,15 +2635,23 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.connection_state_changed()
         elif code == RulesCode.LOAD1:
             self.logger.info("Got load1 message from %s", sender_hr)
+            if not sender.upstream and not sender.is_frankenrouter:
+                self.record_sim_event('load1', source=sender.display_name)
         elif code == RulesCode.LOAD2:
             self.logger.info("Got load2 message from %s", sender_hr)
+            if not sender.upstream and not sender.is_frankenrouter:
+                self.record_sim_event('load2', source=sender.display_name)
         elif code == RulesCode.LOAD3:
             self.logger.info("Got load3 message from %s", sender_hr)
             if sender.upstream and not self.upstream_ever_welcomed:
                 self.upstream_ever_welcomed = True
                 self.logger.info("Upstream welcome complete; client listener may start")
+            if not sender.upstream and not sender.is_frankenrouter:
+                self.record_sim_event('load3', source=sender.display_name)
         elif code == RulesCode.START:
             self.logger.info("Got start message from %s", sender_hr)
+            if not sender.upstream and not sender.is_frankenrouter:
+                self.record_sim_event('start', source=sender.display_name)
         elif code == RulesCode.PBSKAQ:
             self.logger.info("Got pleaseBeSoKindAndQuit message from %s", sender_hr)
         elif code == RulesCode.EXIT:
@@ -2452,6 +2666,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.info(
                 "Keyword update from %s dropped due to ingress filter (%s): %s",
                 sender_hr, message, line)
+            if not sender.upstream and not sender.is_frankenrouter and '=' in line:
+                _fi_key, _fi_val = line.split('=', 1)
+                self.record_sim_event(
+                    'ingress_filtered',
+                    key=_fi_key, value=_fi_val,
+                    reason=message,
+                    source=sender.display_name,
+                )
         elif code == RulesCode.KEYVALUE_FILTERED_INGRESS_SILENT:
             self.logger.debug(
                 "Keyword update from %s dropped silently due to ingress filter (%s): %s",
@@ -2498,8 +2720,22 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 "Upstream access level: '%s'", sender.access_level)
         elif code == RulesCode.NAME_FROM_FRANKENROUTER:
             self.logger.info("Client %s is a frankenrouter: %s", sender_hr, line)
+            if (sender.client_id not in self._sim_events_clients_recorded and
+                    sender.simulator_name != 'unknown sim'):
+                self._sim_events_clients_recorded.add(sender.client_id)
+                conn_ts = time.time() - (time.perf_counter() - sender.connected_at)
+                self.record_sim_event('client_connected', ts=conn_ts,
+                                      client_name=sender.display_name,
+                                      is_frankenrouter=True,
+                                      client_sim=sender.simulator_name)
+            # else: defer until FRDP_IDENT arrives with the actual simulator name
         elif code == RulesCode.NAME_LEARNED:
             self.logger.info("Client name learned: %s: %s", sender_hr, line)
+            if sender.client_id not in self._sim_events_clients_recorded:
+                self._sim_events_clients_recorded.add(sender.client_id)
+                conn_ts = time.time() - (time.perf_counter() - sender.connected_at)
+                self.record_sim_event('client_connected', ts=conn_ts,
+                                      client_name=sender.display_name)
         elif code == RulesCode.NAME_REJECTED:
             self.logger.warning("Ignoring name change from frankenrouter %s: %s", sender_hr, line)
         elif code == RulesCode.NONPSX:
@@ -2521,6 +2757,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         elif code == RulesCode.BANG:
             self.logger.info("Sending synthetic bang reply to %s", sender_hr)
             await self.client_add_to_network(sender, bang_reply=True)
+            if not sender.upstream and not sender.is_frankenrouter:
+                self.record_sim_event('bang', source=sender.display_name)
         elif code == RulesCode.PARKING_BRAKE_FORCE_RELEASE:
             self.logger.info("Forcing parking brake release due to %s (%s)",
                              sender_hr, message)
@@ -2535,6 +2773,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         elif code == RulesCode.OBSERVER_MODE:
             self.logger.debug(
                 "Observer mode: dropped key-value from %s: %s", sender_hr, line)
+        elif code == RulesCode.FRDP_SIMEVENTS:
+            self.logger.debug("Got FRDP SIMEVENTS from %s", sender_hr)
 
         # Take action
         if action == RulesAction.DROP:
@@ -2952,6 +3192,7 @@ shared cockpit master sim.
 
         # Get information from Variables.txt
         self.variables = variables.Variables(self.config, vfilepath=self.config.psx.variables)
+        self._simevents_keywords = self.variables.keywords_for_simevents()
 
         # Initialize the router cache
         self.cache = routercache.RouterCache(
@@ -3007,6 +3248,13 @@ shared cockpit master sim.
                             name="Traffic Logging"), name="Traffic Logging")
                     self.tasks.add(task)
                     await asyncio.sleep(0)
+
+                # Initialize sim events logging (always active)
+                task = self.taskgroup.create_task(
+                    self.simevents_logging_task(
+                        name="SimEvents Logging"), name="SimEvents Logging")
+                self.tasks.add(task)
+                await asyncio.sleep(0)
 
                 # Start the Monitor task
                 task = self.taskgroup.create_task(

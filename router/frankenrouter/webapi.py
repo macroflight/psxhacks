@@ -176,6 +176,7 @@ _UTILS_PAGE = (
     '</div>'
     '</div>\n'
     '<a href="/utils/windimport" class="btn btn-blue">DLH wind import</a>\n'
+    '<a href="/utils/events" class="btn btn-gray">Event log</a>\n'
     '<form method="post" action="/api/utils/towing/direction" style="display:inline">'
     '<button class="btn btn-gray">Toggle towing direction{towing_direction}</button></form>\n'
     '<form method="post" action="/api/utils/printer/reset" style="display:inline">'
@@ -1701,6 +1702,169 @@ def _build_weather_turb_page(router, color_scheme):  # pylint: disable=too-many-
     return _page(body)
 
 
+def _evt_fmt_ts(ts, now):
+    """Format a unix timestamp as (HH:MM:SS, age_string) in UTC."""
+    try:
+        t = datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc)
+        age_s = now - ts
+        if age_s < 60:
+            age = f'{int(age_s)}s ago'
+        elif age_s < 3600:
+            age = f'{int(age_s / 60)}m ago'
+        else:
+            age = f'{int(age_s / 3600)}h ago'
+        return t.strftime('%H:%M:%S'), age
+    except (TypeError, ValueError, OSError):
+        return '?', '?'
+
+
+def _evt_describe(evt, get_var_name):  # pylint: disable=too-many-return-statements,too-many-locals
+    """Return (description, raw_str) for a sim event dict."""
+    etype = evt.get('type', '?')
+    if etype == 'var_change':
+        key = evt.get('key', '?')
+        value = evt.get('value', '?')
+        prev = evt.get('prev')
+        name = get_var_name(key)
+        source = evt.get('source', '')
+        src_str = f' (from {source})' if source else ''
+        prev_str = f', was: {prev}' if prev is not None else ''
+        return f'{name}{src_str}: {value}{prev_str}', f'{key}={value}'
+    if etype in ('bang', 'start', 'load1', 'load2', 'load3'):
+        source = evt.get('source', '')
+        src_str = f' from {source}' if source else ''
+        labels = {
+            'bang': 'Client reconnect (bang)',
+            'start': 'Client start',
+            'load1': 'Situation load started',
+            'load2': 'Situation loading',
+            'load3': 'Situation load complete',
+        }
+        return f'{labels.get(etype, etype)}{src_str}', ''
+    if etype == 'sharedinfo_change':
+        field = evt.get('field', '?')
+        value = evt.get('value', '?')
+        prev = evt.get('prev', '?')
+        reason = evt.get('reason', '')
+        reason_str = f' ({reason})' if reason else ''
+        labels = {
+            'pilot_flying_simulator': 'Flight controls',
+            'elevation_source_simulator': 'Elevation master',
+            'traffic_source_simulator': 'Traffic master',
+        }
+        label = labels.get(field, field)
+        return f'{label}: {prev} → {value}{reason_str}', ''
+    if etype in ('ingress_filtered', 'egress_filtered'):
+        key = evt.get('key', '?')
+        value = evt.get('value', '?')
+        name = get_var_name(key)
+        source = evt.get('source', '')
+        reason = evt.get('reason', '')
+        src_str = f' (from {source})' if source else ''
+        ftype = 'Ingress' if etype == 'ingress_filtered' else 'Egress'
+        return (
+            f'{ftype} filtered — {name}{src_str}{": " + reason if reason else ""}',
+            f'{key}={value}')
+    if etype == 'client_connected':
+        client_name = evt.get('client_name', '?')
+        if evt.get('is_frankenrouter'):
+            return f'Frankenrouter connected: {client_name} ({evt.get("client_sim", "")})', ''
+        return f'Client connected: {client_name}', ''
+    if etype == 'upstream_connected':
+        host = evt.get('upstream_host', '?')
+        port = evt.get('upstream_port', '?')
+        return f'Connected to upstream {host}:{port}', ''
+    return etype, ''
+
+
+def _evt_row_html(evt, own_sim, own_router, now, get_var_name):  # pylint: disable=too-many-locals
+    """Return an HTML <tr> string for one event row."""
+    ts = evt.get('ts', 0)
+    sim = evt.get('sim', '?')
+    rtr = evt.get('router', '?')
+    received_at = evt.get('received_at')
+    ts_str, age_str = _evt_fmt_ts(ts, now)
+    desc, raw = _evt_describe(evt, get_var_name)
+    is_own = sim == own_sim and rtr == own_router
+    src_color = '#94a3b8' if is_own else '#60a5fa'
+    star = '★ ' if is_own else ''
+    recv_note = ''
+    if received_at is not None and abs(received_at - ts) > 5:
+        recv_note = (
+            f' <span style="color:#64748b;font-size:0.82em">'
+            f'(rcvd {received_at - ts:+.0f}s)</span>')
+    raw_cell = (
+        f'<td style="font-family:monospace;font-size:0.82em;color:#64748b">{raw}</td>'
+        if raw else '<td></td>')
+    return (
+        f'<tr>'
+        f'<td style="white-space:nowrap">'
+        f'<span style="font-family:monospace">{ts_str}</span>'
+        f'<br><span style="color:#64748b;font-size:0.82em">{age_str}{recv_note}</span>'
+        f'</td>'
+        f'<td style="color:{src_color};font-size:0.88em;white-space:nowrap">'
+        f'{star}{sim}<br><span style="color:#475569">{rtr}</span></td>'
+        f'<td>{desc}</td>'
+        f'{raw_cell}'
+        f'</tr>\n'
+    )
+
+
+def _build_events_page(router, color_scheme):
+    """Build the HTML event log page."""
+    now = time.time()
+    events = sorted(router.all_sim_events, key=lambda e: e.get('ts', 0), reverse=True)
+    own_sim = router.config.identity.simulator
+    own_router = router.config.identity.router
+    get_var_name = router.variables.get_variable_name
+    rows = [_evt_row_html(e, own_sim, own_router, now, get_var_name) for e in events]
+    if not rows:
+        body = (
+            '<div class="card">'
+            '<p style="margin:0;color:#64748b">No events recorded yet.</p>'
+            '</div>\n')
+    else:
+        body = (
+            '<div class="card" style="padding:0;overflow-x:auto">\n'
+            '<table style="font-size:0.9em">\n'
+            '<thead><tr style="color:#94a3b8;font-size:0.82em">'
+            '<th style="padding:0.5em 0.75em;text-align:left;white-space:nowrap">'
+            'Time (UTC)</th>'
+            '<th style="padding:0.5em 0.75em;text-align:left">Sim/Router</th>'
+            '<th style="padding:0.5em 0.75em;text-align:left">Event</th>'
+            '<th style="padding:0.5em 0.75em;text-align:left">Raw</th>'
+            '</tr></thead>\n'
+            '<tbody>\n' + ''.join(rows) + '</tbody></table></div>\n'
+        )
+
+    return (
+        '<!DOCTYPE html>\n<html>\n<head>\n'
+        f'<meta name="color-scheme" content="{color_scheme}" />\n'
+        '<meta http-equiv="refresh" content="30">\n' +
+        _COMMON_CSS.format() +
+        '\n<style>'
+        'body { max-width: none; }'
+        'table { font-size: 0.9em; }'
+        'th, td { padding: 0.4em 0.75em; border-bottom: 1px solid #2a2f45; }'
+        'th { background: #161929; }'
+        'tr:last-child td { border-bottom: none; }'
+        'td:first-child { width: 6em; }'
+        '</style>\n'
+        '</head>\n<body>\n'
+        '<div class="page-title">'
+        '<a href="/"><img src="/static/paib.png" alt="Home"></a>'
+        '<h1>Event log</h1>'
+        '<div style="margin-left:auto">'
+        '<a href="/utils" class="btn btn-gray btn-sm">Back</a>'
+        '</div>'
+        '</div>\n'
+        f'<p class="note">{len(events)} event(s) — auto-refreshes every 30 s'
+        f' — ★ = this router</p>\n' +
+        body +
+        '</body>\n</html>\n'
+    )
+
+
 class RouterWebAPI:  # pylint: disable=too-few-public-methods
     """Owns the aiohttp application and all REST/HTML route handlers."""
 
@@ -2527,6 +2691,13 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     text=_UTILS_PAGE.format(
                         rest_api_color_scheme=cs,
                         towing_direction=tow_dir),
+                    content_type='text/html')
+
+            @routes.get('/utils/events')
+            async def handle_events_get(_):
+                cs = router.config.listen.rest_api_color_scheme
+                return web.Response(
+                    text=_build_events_page(router, cs),
                     content_type='text/html')
 
             @routes.get('/utils/windimport')

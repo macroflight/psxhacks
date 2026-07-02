@@ -155,6 +155,7 @@ class RulesCode(enum.Enum):
     SPEEDBRAKE_OVERRIDE = enum.auto()
     PARKING_BRAKE_FORCE_RELEASE = enum.auto()
     OBSERVER_MODE = enum.auto()
+    FRDP_SIMEVENTS = enum.auto()
 
 
 class Rules():  # pylint: disable=too-many-public-methods
@@ -280,10 +281,16 @@ class Rules():  # pylint: disable=too-many-public-methods
         Otherwise forward upstream toward the master.
         """
         if self.router.is_sharedinfo_authority():
+            prev = self.router.sharedinfo['elevation_source_simulator']
             self.router.sharedinfo['elevation_source_simulator'] = payload
             self.logger.info("SET elevation_source_simulator to %s",
                              self.router.sharedinfo['elevation_source_simulator'])
             self.router.frdp_sharedinfo_requested = True
+            if payload != prev:
+                self.router.record_sim_event(
+                    'sharedinfo_change',
+                    field='elevation_source_simulator',
+                    value=payload, prev=prev)
             return self.myreturn(RulesAction.DROP, RulesCode.FRDP_ELEVATION_SOURCE)
         return self.myreturn(RulesAction.UPSTREAM_ONLY, RulesCode.FRDP_ELEVATION_SOURCE)
 
@@ -298,8 +305,14 @@ class Rules():  # pylint: disable=too-many-public-methods
         Otherwise forward upstream toward the master.
         """
         if self.router.is_sharedinfo_authority():
+            prev = self.router.sharedinfo['traffic_source_simulator']
             self.router.sharedinfo['traffic_source_simulator'] = payload
             self.router.frdp_sharedinfo_requested = True
+            if payload != prev:
+                self.router.record_sim_event(
+                    'sharedinfo_change',
+                    field='traffic_source_simulator',
+                    value=payload, prev=prev)
             return self.myreturn(RulesAction.DROP, RulesCode.FRDP_TRAFFIC_SOURCE)
         return self.myreturn(RulesAction.UPSTREAM_ONLY, RulesCode.FRDP_TRAFFIC_SOURCE)
 
@@ -316,6 +329,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         Qs421=PF: ALL
         Qs421=PF: NONE
         """
+        prev = self.router.sharedinfo['pilot_flying_simulator']
         # Update sharedinfo
         if payload == 'NO_CONTROL_LOCKS':
             self.router.sharedinfo['pilot_flying_simulator'] = "NO_CONTROL_LOCKS"
@@ -329,6 +343,12 @@ class Rules():  # pylint: disable=too-many-public-methods
             ident = self.router.sharedinfo['pilot_flying_simulator'][:11].upper()
             message = f"Qs421=PF: {ident}"
         self.router.frdp_sharedinfo_requested = True
+        new_val = self.router.sharedinfo['pilot_flying_simulator']
+        if self.router.is_sharedinfo_authority() and new_val != prev:
+            self.router.record_sim_event(
+                'sharedinfo_change',
+                field='pilot_flying_simulator',
+                value=new_val, prev=prev)
 
         return self.myreturn(RulesAction.DROP, RulesCode.FRDP_FLIGHTCONTROLS,
                              extra_data={'message': message})
@@ -510,6 +530,31 @@ class Rules():  # pylint: disable=too-many-public-methods
             RulesCode.FRDP_FLIGHTINFO,
             extra_data={'exclude_non_frankenrouter': True})
 
+    def handle_addon_frankenrouter_simevents(self, payload):
+        """Handle a FRDP SIMEVENTS message.
+
+        Format:
+        addon=FRANKENROUTER:<protocol version>:SIMEVENTS:<JSON data>
+
+        Stores received events in all_sim_events and forwards to other frankenrouters.
+        """
+        try:
+            data = json.loads(payload)
+        except json.decoder.JSONDecodeError:
+            return self.myreturn(
+                RulesAction.DROP, RulesCode.MESSAGE_INVALID,
+                message=f"Invalid JSON in FRDP SIMEVENTS: {self.line}")
+        received_at = time.time()
+        for event in data.get('events', []):
+            event['received_at'] = received_at
+            self.router.all_sim_events.append(event)
+            if self.router.simevents_logger is not None:
+                self.router.simevents_logger.info(
+                    self.router._simevents_log_line(event))  # pylint: disable=protected-access
+        return self.myreturn(
+            RulesAction.FILTER, RulesCode.FRDP_SIMEVENTS,
+            extra_data={'exclude_non_frankenrouter': True})
+
     def handle_addon_frankenrouter_auth_challenge(self, nonce):
         """Handle FRDP AUTH_CHALLENGE message received from upstream.
 
@@ -635,6 +680,8 @@ class Rules():  # pylint: disable=too-many-public-methods
             return self.handle_addon_frankenrouter_sharedinfo(payload)
         if message_type == 'FLIGHTINFO':
             return self.handle_addon_frankenrouter_flightinfo(payload)
+        if message_type == 'SIMEVENTS':
+            return self.handle_addon_frankenrouter_simevents(payload)
         if message_type == 'CLIENTINFO':
             return self.handle_addon_frankenrouter_clientinfo(payload)
         if message_type == 'AUTH':

@@ -22,6 +22,33 @@ NETWORK_MODES = [
     'MIXED',
 ]
 
+# Qh variables to NOT log as sim events (noisy rotary encoders and brightness dimmers).
+# All other Qh variables are logged when they change from a downstream client.
+SIMEVENTS_QH_IGNORE = frozenset({
+    # XDELTA-mode continuous IAS bug encoders
+    'Qh0', 'Qh1', 'Qh2',
+    # Overhead and glareshield brightness dimmers (Max=4713)
+    'Qh7', 'Qh8', 'Qh9', 'Qh10', 'Qh11', 'Qh12',
+    # LCP dimmer controls (Max=4713)
+    'Qh84', 'Qh85', 'Qh86', 'Qh87', 'Qh88', 'Qh89', 'Qh90',
+    'Qh95', 'Qh96', 'Qh97', 'Qh98', 'Qh99', 'Qh100', 'Qh101',
+    # EICAS and CDU brightness
+    'Qh139', 'Qh140', 'Qh141', 'Qh404', 'Qh405', 'Qh406',
+    # ECP baro/mins rotary encoders (DELTA mode, continuous)
+    'Qh28', 'Qh30', 'Qh49', 'Qh51',
+    # Standby baro rotary encoder
+    'Qh136',
+    # MCP speed/heading/VS/altitude knob increments (DELTA mode, very frequent)
+    'Qh77', 'Qh78', 'Qh79', 'Qh80',
+    # Rudder trim encoder
+    'Qh416',
+})
+
+# Qs/Qi/Qd variables to INCLUDE for sim event logging (empty whitelist by default;
+# add specific keywords here as needed).
+SIMEVENTS_QSI_INCLUDE = frozenset({
+})
+
 ADDITIONAL_MODES = {
     # https://aerowinx.com/board/index.php/topic,7751.0.html - Qs493 and Qi208
     # also behave as ECON, i.e they are sent to the network when changed.
@@ -199,6 +226,24 @@ class Variables():  # pylint: disable=too-few-public-methods
             if props.get('name') == name:
                 return keyword
         return None
+
+    def keywords_for_simevents(self):
+        """Return frozenset of keywords to monitor for sim event logging.
+
+        Includes all Qh variables not in SIMEVENTS_QH_IGNORE, plus any
+        Qs/Qi/Qd keywords listed in SIMEVENTS_QSI_INCLUDE.
+        """
+        result = set()
+        for key in self.variables:
+            if key.startswith('Qh') and key not in SIMEVENTS_QH_IGNORE:
+                result.add(key)
+            elif key in SIMEVENTS_QSI_INCLUDE:
+                result.add(key)
+        return frozenset(result)
+
+    def get_variable_name(self, keyword):
+        """Return human-readable name for a keyword, or the keyword itself."""
+        return self.variables.get(keyword, {}).get('name', keyword)
 
     def sort_psx_keywords(self, input_list):
         """Sort PSX keywords numerically in the order PSX outputs them."""
