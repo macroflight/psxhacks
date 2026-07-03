@@ -200,6 +200,7 @@ class FrankenPrint:
             'user': self.args.pushover_user,
             'title': title,
             'message': message,
+            'monospace': 1,
         }
         if self.args.pushover_device:
             payload['device'] = self.args.pushover_device
