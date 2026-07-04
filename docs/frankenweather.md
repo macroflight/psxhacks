@@ -24,11 +24,10 @@ Features:
   SHRA, GR, LTG, FC, CB sky groups) are also used and can override or
   refine the Open-Meteo prediction.
 
-- Zone placement adapts to flight phase: in cruise (above
-  `--cruise-alt`, default 18 000 ft) stale zones behind the aircraft
-  are relocated ahead; at low altitude all zones are kept within a
-  tighter radius. The FMC departure and destination airports always get
-  their own dedicated zone.
+- Zone placement adapts to flight phase: in cruise (above 18 000 ft)
+  stale zones behind the aircraft are relocated ahead; at low altitude
+  all zones are kept within a tighter radius. The FMC departure and
+  destination airports always get their own dedicated zone.
 
 - Terrain turbulence (from the `frankenturb` engine, now integrated):
   fetches real-time wind from Open-Meteo and terrain elevation from
@@ -38,29 +37,35 @@ Features:
   regions. The MCDU C (observer panel CDU) shows a live status display
   and allows tuning of intensity per turbulence type. DEM tiles (~26 MB
   each, 1°×1°) are downloaded on demand and cached at
-  `~/.cache/frankenturb/terrain/` (up to 9 tiles ≈ 235 MB). Use
-  `--no-turbulence` to disable the subsystem entirely.
+  `~/.cache/frankenturb/terrain/` (up to 9 tiles ≈ 235 MB).
 
-- Optional MSFS in-cloud sync (`--msfs-in-cloud-sync`): reads the MSFS
-  in-cloud state and adjusts the active PSX weather zone's cloud layers
-  so that PSX shows the aircraft as in-cloud when MSFS does. This keeps
-  PSX icing in sync with MSFS conditions.
+- MSFS in-cloud sync: reads the MSFS in-cloud state and adjusts the
+  active PSX weather zone's cloud layers so that PSX shows the aircraft
+  as in-cloud when MSFS does. This keeps PSX icing in sync with MSFS
+  conditions. Enabled by default; toggleable from the web UI.
 
-- Optional MSFS QNH sync (`--msfs-qnh-check CHECK|USE`): compares the
-  MSFS sea-level pressure with the active PSX zone QNH. `CHECK` logs a
-  warning when they differ by more than `--msfs-qnh-check-maxdiff` hPa
-  (default 2 hPa); `USE` also updates the PSX QNH and METAR to match.
-  QNH is never updated for zones whose weather comes from a real METAR
-  (the METAR is authoritative for those zones).
+- MSFS QNH sync: compares the MSFS sea-level pressure with the active
+  PSX zone QNH. In **CHECK** mode (default) a warning is logged when
+  they differ by more than 1 hPa. In **SYNC** mode the PSX QNH and
+  METAR are also updated to match MSFS. QNH is never updated for zones
+  whose weather comes from a real METAR (the METAR is authoritative for
+  those zones). Toggleable between CHECK and SYNC from the web UI.
 
-- Optional MSFS wind corridor sync (`--msfs-wind-sync`): reads the MSFS
-  wind direction, speed and OAT at the current aircraft altitude and
-  injects them into the PSX wind corridor as a synthetic `FWIND` waypoint
-  near the aircraft position. Supports PSX wind corridor Formats A and E;
-  Formats B, C and D are left unchanged.
+- MSFS wind corridor sync: reads the MSFS wind direction, speed and OAT
+  at the current aircraft altitude and injects them into the PSX wind
+  corridor as a synthetic `FWIND` waypoint near the aircraft position.
+  Supports PSX wind corridor Formats A and E; Formats B, C and D are
+  left unchanged. Off by default; toggleable from the web UI.
 
-- The MSFS in-cloud, QNH and wind data is provided by `frankenmsfsbridge.py`
-  running on the MSFS slave sim.
+- The MSFS in-cloud, QNH and wind data is provided by
+  `frankenmsfsbridge.py` that fetches MSFS weather data via
+  SimConnect. The MSFS sync features have no effect unless the bridge
+  is connected.
+
+- Web UI: pass `--web-port PORT` to start a standalone HTTP server. The
+  same UI is also available through the frankenrouter web interface.
+  The web UI provides a live weather map, zone details, manual weather
+  entry, turbulence tuning, and the MSFS bridge settings toggles.
 
 Requires `aiohttp`, `pyproj`, `numpy`, `rasterio`, and `requests`:
 
@@ -71,20 +76,10 @@ pip install aiohttp pyproj numpy rasterio requests
 Key options:
 
 ```
---psx-host HOST                PSX server hostname (default: 127.0.0.1)
---psx-port PORT                PSX server port (default: 10747)
---msfs-in-cloud-sync           Sync PSX in-cloud state with MSFS (via frankenmsfsbridge)
---msfs-qnh-check CHECK|USE     Warn or correct QNH mismatch vs MSFS (via frankenmsfsbridge)
---msfs-qnh-check-maxdiff HPA   Threshold in hPa (default: 2)
---msfs-wind-sync               Inject MSFS wind into the PSX wind corridor as FWIND waypoint
---cruise-alt FT                Altitude above which cruise zone rules apply (default: 18000)
---arpt-zone-dist NM            Snap dep/dst airport zone within this range (default: 200)
---disable-psx-weather-updates  Dry run: fetch and log but do not write to PSX
---no-turbulence                Disable the turbulence subsystem entirely
---turb-rate 0-100              Scale turbulence injection frequency (100 = normal, up to 5 Hz)
---turb-intensity-bias 0-999    Global turbulence intensity bias percentage (100 = normal)
---turb-config-file PATH        JSON file for persisting turbulence settings
---debug                        Verbose logging
+--psx-host HOST   PSX server hostname (default: 127.0.0.1)
+--psx-port PORT   PSX server port (default: 10747)
+--web-port PORT   Enable standalone web UI on this port (e.g. 8085)
+--debug           Verbose logging
 ```
 
 ## frankenmsfsbridge.py

@@ -7,6 +7,7 @@ import json
 import logging
 import math
 import os
+import pathlib
 import random
 import re
 import sys
@@ -50,6 +51,7 @@ from fw_cb import (
     apply_om_cb as _apply_om_cb,
     apply_fake_cb as _apply_fake_cb,
 )
+import fw_webui as _fw_webui  # pylint: disable=wrong-import-order
 
 
 __MYNAME__ = 'frankenweather'
@@ -757,6 +759,60 @@ def _pick_burst(state, intensity):
 
 
 # ---------------------------------------------------------------------------
+# Standalone web UI context (adapts Script to fw_webui protocol)
+# ---------------------------------------------------------------------------
+
+class StandaloneFWContext:
+    """Adapts a Script instance to the fw_webui context protocol."""
+
+    def __init__(self, fw, color_scheme='dark'):
+        """Store frankenweather instance and color scheme."""
+        self._fw = fw
+        self.color_scheme = color_scheme
+
+    @property
+    def fw_state(self):
+        """Return the last-broadcast FrankenWeather STATE dict."""
+        return self._fw._web_state  # pylint: disable=protected-access
+
+    @property
+    def fw_turbstate(self):
+        """Return the last-broadcast TURBSTATE dict."""
+        return self._fw._web_turbstate  # pylint: disable=protected-access
+
+    @property
+    def fw_state_received_at(self):
+        """Return epoch of last STATE broadcast."""
+        return self._fw._web_state_received_at  # pylint: disable=protected-access
+
+    @property
+    def fw_turbstate_received_at(self):
+        """Return epoch of last TURBSTATE broadcast."""
+        return self._fw._web_turbstate_received_at  # pylint: disable=protected-access
+
+    def cache_get(self, name):
+        """Return a PSX-variable-like value from local frankenweather state."""
+        return self._fw._web_cache_get(name)  # pylint: disable=protected-access
+
+    async def send_manualwx_cmd(self, cmd):
+        """Apply a manual wx command directly to the running frankenweather instance."""
+        self._fw._handle_manual_wx_command(json.dumps(cmd))  # pylint: disable=protected-access
+
+    async def send_turb_cmd(self, cmd):
+        """Apply a turbulence command directly to the running frankenweather instance."""
+        self._fw._handle_turb_command(json.dumps(cmd))  # pylint: disable=protected-access
+
+    async def send_mode_cmd(self, mode):
+        """Apply a mode change directly to the running frankenweather instance."""
+        self._fw._handle_fw_command(json.dumps({"mode": mode}))  # pylint: disable=protected-access
+        await asyncio.sleep(3)
+
+    async def send_fw_settings_cmd(self, cmd):
+        """Apply MSFS settings toggles directly to the running frankenweather instance."""
+        self._fw._handle_fw_command(json.dumps(cmd))  # pylint: disable=protected-access
+
+
+# ---------------------------------------------------------------------------
 # Main script class
 # ---------------------------------------------------------------------------
 
@@ -805,13 +861,17 @@ class Script:  # pylint: disable=too-many-instance-attributes
         # Parsed TS SIGMETs used to lift WMO/showers CB suppression when CAPE agrees
         self.ts_sigmets: list = []
 
-        # MSFS bridge state (--msfs-in-cloud-sync / --msfs-qnh-check via frankenmsfsbridge)
+        # MSFS bridge state (via frankenmsfsbridge)
         self.msfs_in_cloud: Optional[bool] = None
         self.msfs_qnh_hpa: Optional[float] = None
         self.msfs_cloud_density: Optional[float] = None   # 0–9
         self.msfs_wind_vert: Optional[float] = None       # kt, positive = up
         self.msfs_precip_state: Optional[int] = None      # 2=none, 4=rain, 8=snow
         self._msfs_bridge_last_seen: Optional[float] = None
+        # Runtime toggles for MSFS sync features
+        self._msfs_in_cloud_sync: bool = True
+        self._msfs_qnh_check: str = "CHECK"   # "CHECK" or "SYNC"
+        self._msfs_wind_sync: bool = False
         self.focused_zone: int = 0          # 0 = WxBasic, 1-7 = Wx1-Wx7
         self.cloud_sync_last_alt_ft: float = 0.0
 
@@ -837,7 +897,9 @@ class Script:  # pylint: disable=too-many-instance-attributes
 
         # API state broadcast
         self._instance_uuid: str = str(uuid.uuid4())
-        self.zone_reason: dict = {}               # zone_num → human-readable reason string
+        self.zone_reason: dict = {}               # zone_num → short reason string
+        self.zone_placement_reason: dict = {}     # zone_num → placement description
+        self.zone_weather_detail: dict = {}       # zone_num → detailed weather source explanation
         self._state_changed_event: asyncio.Event = asyncio.Event()
 
         # Conflict detection — suspend PSX changes when a higher-UUID instance is present
@@ -869,6 +931,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
         # Turbulence subsystem (merged from frankenturb)
         # -------------------------------------------------------------------
         self._turb_enabled: bool = True
+        self._turb_low_speed: bool = True
         self._turb_manual_turb_enabled: bool = False
         self._turb_manual_turb_kind: str = "mechanical"
         self._turb_manual_turb_intensity: float = 0.3
@@ -891,6 +954,12 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self._turb_pirep_fetcher = None
         self._turb_cape_fetcher = None
         self._turb_gairmet_fetcher = None
+
+        # Standalone web UI state cache (populated by broadcast coroutines)
+        self._web_state: Optional[dict] = None
+        self._web_turbstate: Optional[dict] = None
+        self._web_state_received_at: float = 0.0
+        self._web_turbstate_received_at: float = 0.0
 
     # ------------------------------------------------------------------
     # PSX helpers
@@ -938,8 +1007,6 @@ class Script:  # pylint: disable=too-many-instance-attributes
         if elapsed < _PUSH_COOLDOWN_S:
             self.logger.debug("  within cooldown — ignoring echo")
             return
-        if self.args.disable_psx_weather_updates:
-            return
         if key == "WxBasic":
             zone_num = 0
         elif key.startswith("Wx") and key[2:].isdigit():
@@ -960,6 +1027,20 @@ class Script:  # pylint: disable=too-many-instance-attributes
         """Track the PSX focused weather zone and re-apply MSFS sync."""
         self.focused_zone = int(value)
         self._apply_msfs_sync()
+
+    def _web_cache_get(self, name: str) -> Optional[str]:
+        """Provide PSX variable lookups for the standalone web UI."""
+        if name == 'FocussedWxZone':
+            return str(self.focused_zone)
+        m = __import__('re').match(r'^Wx(\d+)$', name)
+        if m:
+            zone_num = int(m.group(1))
+            return self.zone_wx.get(zone_num)
+        if self.psx and __import__('re').match(r'^Metar\d+$', name):
+            return self.psx.get(name)
+        if self.psx:
+            return self.psx.get(name)
+        return None
 
     def _update_fmc_arpts(self) -> None:
         """Refresh fmc_dep_icao/fmc_dst_icao from the current PSX FMC route state."""
@@ -1035,7 +1116,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self._msfs_bridge_last_seen = time.monotonic()
         if changed:
             self._apply_msfs_sync()
-        if self.args.msfs_wind_sync:
+        if self._msfs_wind_sync:
             self._apply_wind_injection()
 
     def _handle_fw_addon(self, value: str) -> None:
@@ -1070,19 +1151,40 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self._conflict_uuid = recv_uuid
             self._conflict_last_seen = time.monotonic()
 
-    def _handle_fw_command(self, json_str: str) -> None:
+    def _handle_fw_command(self, json_str: str) -> None:  # pylint: disable=too-many-branches
         """Apply a FRANKENWEATHER:COMMAND message received via PSX addon."""
         try:
             cmd = json.loads(json_str)
         except ValueError:
             self.logger.warning("Malformed FRANKENWEATHER COMMAND: %s", json_str[:80])
             return
+        settings_changed = False
+        if "msfs_in_cloud_sync" in cmd:
+            self._msfs_in_cloud_sync = bool(cmd["msfs_in_cloud_sync"])
+            self.logger.info("msfs_in_cloud_sync → %s", self._msfs_in_cloud_sync)
+            settings_changed = True
+        if "msfs_qnh_check" in cmd:
+            val = str(cmd["msfs_qnh_check"])
+            if val in ("CHECK", "SYNC"):
+                self._msfs_qnh_check = val
+                self.logger.info("msfs_qnh_check → %s", val)
+                settings_changed = True
+        if "msfs_wind_sync" in cmd:
+            self._msfs_wind_sync = bool(cmd["msfs_wind_sync"])
+            self.logger.info("msfs_wind_sync → %s", self._msfs_wind_sync)
+            settings_changed = True
         new_mode = cmd.get("mode")
+        if new_mode is None:
+            if settings_changed:
+                self._state_changed_event.set()
+            return
         if new_mode not in ("enabled", "paused", "disabled", "manual"):
             self.logger.warning("FRANKENWEATHER COMMAND: unknown mode %r", new_mode)
             return
         old_mode = self._fw_mode
         if new_mode == old_mode:
+            if settings_changed:
+                self._state_changed_event.set()
             return
         self._fw_mode = new_mode
         self.logger.info("FRANKENWEATHER mode: %s → %s (via COMMAND)", old_mode, new_mode)
@@ -1166,9 +1268,6 @@ class Script:  # pylint: disable=too-many-instance-attributes
 
     async def _update_zones_manual(self) -> None:
         """Write the same manual Wx string to all 7 PSX weather zones."""
-        if self.args.disable_psx_weather_updates:
-            self.logger.info("PSX updates disabled — manual mode dry run")
-            return
         wx_str = self._build_manual_wx_string()
         now = datetime.now(timezone.utc)
         self.psx_send_and_set("WxAutoSet", "0")
@@ -1240,7 +1339,6 @@ class Script:  # pylint: disable=too-many-instance-attributes
 
     def _turb_load_config(self, path: str) -> None:
         """Load turbulence settings from JSON config file."""
-        import pathlib  # pylint: disable=import-outside-toplevel
         try:
             with open(path, encoding="utf-8") as fh:
                 cfg = json.load(fh)
@@ -1402,8 +1500,6 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 self._turb_msfs_magnitude = v
                 changed = True
         if changed:
-            if self.args.turb_config_file:
-                self._turb_save_config(self.args.turb_config_file)
             self._turb_state_changed_event.set()
 
     def _get_nearest_cb(self, lat: float, lon: float):
@@ -1476,6 +1572,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
                     src_lon = None
                 payload = {
                     "enabled": self._turb_enabled,
+                    "low_speed": self._turb_low_speed,
                     "manual_turb_enabled": self._turb_manual_turb_enabled,
                     "manual_turb_kind": self._turb_manual_turb_kind,
                     "manual_turb_intensity": self._turb_manual_turb_intensity,
@@ -1505,7 +1602,11 @@ class Script:  # pylint: disable=too-many-instance-attributes
                     "msfs_precip_state": self.msfs_precip_state,
                     "msfs_turb_factor": round(self._turb_msfs_factor, 3),
                     "msfs_turb_magnitude": self._turb_msfs_magnitude,
+                    "msfs_qnh_hpa": (round(self.msfs_qnh_hpa, 1)
+                                     if self.msfs_qnh_hpa is not None else None),
                 }
+                self._web_turbstate = payload
+                self._web_turbstate_received_at = time.time()
                 msg = (f"addon=FRANKENWEATHER:TURBSTATE:{self._instance_uuid}:"
                        f"{json.dumps(payload)}")
                 if self.psx_connected:
@@ -1537,8 +1638,10 @@ class Script:  # pylint: disable=too-many-instance-attributes
                     self.logger.warning("Bad PiBaHeAlTas: %s", exc)
                     continue
 
-                if tas_kt < 30.0:
-                    continue
+                low_speed = tas_kt < 30.0
+                if low_speed != self._turb_low_speed:
+                    self._turb_low_speed = low_speed
+                    self._turb_state_changed_event.set()
 
                 if self._turb_engine is None:
                     continue
@@ -1550,7 +1653,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
                         reason="Manual",
                     )
                     eff = self._turb_manual_turb_intensity
-                    if eff >= 0.01:
+                    if eff >= 0.01 and not low_speed:
                         inject_prob = (eff ** 1.5) * (self._turb_rate / 100.0)
                         if random.random() < inject_prob:
                             base, direction, _ = _pick_burst(manual_state, eff)
@@ -1617,7 +1720,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
                     state.intensity * self._turb_intensity_bias *
                     self._turb_type_effective_bias(state.kind) / 10000.0 * msfs_factor,
                 )
-                if self._turb_enabled and effective_intensity >= 0.01:
+                if self._turb_enabled and effective_intensity >= 0.01 and not low_speed:
                     inject_prob = (effective_intensity ** 1.5) * (self._turb_rate / 100.0)
                     if random.random() < inject_prob:
                         base, direction, label = _pick_burst(state, effective_intensity)
@@ -1707,7 +1810,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
 
     def _apply_wind_injection(self) -> None:
         """Inject MSFS wind into the PSX wind corridor as a FWIND waypoint."""
-        if not self.args.msfs_wind_sync:
+        if not self._msfs_wind_sync:
             return
         corridor = getattr(self, '_corridor_txt', None)
         if not corridor:
@@ -1775,8 +1878,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
 
     def _apply_msfs_sync(self) -> None:  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
         """Apply MSFS→PSX sync for the focused zone: clouds and/or QNH."""
-        need_cloud = self.args.msfs_in_cloud_sync and self.msfs_in_cloud is not None
-        need_qnh = bool(self.args.msfs_qnh_check)
+        need_cloud = self._msfs_in_cloud_sync and self.msfs_in_cloud is not None
+        need_qnh = True
         if not need_cloud and not need_qnh:
             return
         if self.ac_alt_ft is None:
@@ -1804,8 +1907,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
         if need_qnh and self.msfs_qnh_hpa is not None:
             psx_qnh_hpa = int(data[23]) / 2.953
             diff = self.msfs_qnh_hpa - psx_qnh_hpa
-            if abs(diff) > self.args.msfs_qnh_check_maxdiff:
-                if self.args.msfs_qnh_check == "USE":
+            if abs(diff) > 1.0:
+                if self._msfs_qnh_check == "SYNC":
                     data[23] = str(_hpa_to_psx_qnh(self.msfs_qnh_hpa))
                     self.logger.info(
                         "QNH sync [%s]: %.1f → %.1f hPa",
@@ -2000,6 +2103,38 @@ class Script:  # pylint: disable=too-many-instance-attributes
             return fwd_max
         return fwd_max - factor * (fwd_max - min_fwd)
 
+    def _placement_desc(self, lat: float, lon: float, icao: str,
+                        is_arpt: bool = False) -> str:
+        """Return a human-readable placement description for a zone at (lat, lon)."""
+        if self.ac_lat is None or self.ac_hdg is None:
+            return ""
+        az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
+        dist_nm = dist_m / _NM_TO_M
+
+        if is_arpt:
+            label = "Dep" if icao == self.fmc_dep_icao else "Dst"
+            return f"{label} airport {icao}, {dist_nm:.0f}nm from aircraft"
+
+        rel_rad = math.radians((az % 360 - self.ac_hdg + 360) % 360)
+        fwd_nm = dist_nm * math.cos(rel_rad)
+        right_nm = dist_nm * math.sin(rel_rad)
+
+        if abs(fwd_nm) < 5:
+            pos = [f"{dist_nm:.0f}nm abeam"]
+        elif fwd_nm >= 0:
+            pos = [f"{fwd_nm:.0f}nm ahead"]
+        else:
+            pos = [f"{abs(fwd_nm):.0f}nm behind"]
+
+        if abs(right_nm) >= 5:
+            pos.append(f"{abs(right_nm):.0f}nm {'right' if right_nm > 0 else 'left'} of track")
+
+        is_fake = len(icao) == 4 and icao[0] == 'X' and icao[1:].isdigit()
+        if not is_fake:
+            pos.append(f"at {icao}")
+
+        return ", ".join(pos)
+
     def _pick_position(  # pylint: disable=too-many-locals
             self, exclude_zone: int = None, initial: bool = False) -> tuple:
         """Pick a zone placement and return (lat, lon, icao).
@@ -2072,6 +2207,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 break
             az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
             self.zone_positions[next_zone] = (lat, lon, icao)
+            self.zone_placement_reason[next_zone] = self._placement_desc(
+                lat, lon, icao, is_arpt=True)
             self.logger.info(
                 "Zone %d: initial placement at %s @ %.3f/%.3f  %.0f°/%.0fnm (dep/dst arpt)",
                 next_zone, icao, lat, lon, az % 360, dist_m / _NM_TO_M)
@@ -2079,6 +2216,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
         for zone_num in range(next_zone, 8):
             lat, lon, icao = self._pick_position(initial=True)
             self.zone_positions[zone_num] = (lat, lon, icao)
+            self.zone_placement_reason[zone_num] = self._placement_desc(lat, lon, icao)
             az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
             self.logger.info(
                 "Zone %d: initial placement at %s @ %.3f/%.3f  %.0f°/%.0fnm",
@@ -2093,7 +2231,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
         Returns True if any zone was moved.
         """
         in_cruise = (self.ac_alt_ft is not None and
-                     self.ac_alt_ft >= self.args.cruise_alt)
+                     self.ac_alt_ft >= 18000.0)
         arpt_icaos = {icao for icao, _, _ in self._arpt_coverage_needed()}
         any_moved = False
         now = time.time()
@@ -2119,6 +2257,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 reason = f"{dist_nm:.0f}nm away (limit {self.args.low_alt_dist:.0f}nm)"
             new_lat, new_lon, new_icao = self._pick_position(exclude_zone=zone_num)
             self.zone_positions[zone_num] = (new_lat, new_lon, new_icao)
+            self.zone_placement_reason[zone_num] = self._placement_desc(
+                new_lat, new_lon, new_icao)
             self.zone_relocated_time[zone_num] = now
             new_az, _, new_dist_m = self.geod.inv(
                 self.ac_lon, self.ac_lat, new_lon, new_lat)
@@ -2132,7 +2272,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
 
     def _arpt_coverage_needed(self) -> list:
         """Return (icao, lat, lon) for dep/dst airports within arpt_zone_dist of aircraft."""
-        if self.ac_lat is None or not getattr(self.args, 'arpt_zone_dist', 0):
+        _ARPT_ZONE_DIST_NM = 200.0
+        if self.ac_lat is None:
             return []
         result = []
         seen: set = set()
@@ -2146,11 +2287,11 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 continue
             lat, lon = self.airports[icao]
             dist = self._dist_nm(self.ac_lat, self.ac_lon, lat, lon)
-            if dist <= self.args.arpt_zone_dist:
+            if dist <= _ARPT_ZONE_DIST_NM:
                 result.append((icao, lat, lon))
             else:
                 self.logger.debug("FMC arpt %s too far (%.0fnm > %.0fnm limit)",
-                                  icao, dist, self.args.arpt_zone_dist)
+                                  icao, dist, _ARPT_ZONE_DIST_NM)
         return result
 
     def _most_expendable_zone(self, exclude_icaos: set) -> Optional[int]:
@@ -2184,6 +2325,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 continue
             old_pos = self.zone_positions[best_zn]
             self.zone_positions[best_zn] = (lat, lon, icao)
+            self.zone_placement_reason[best_zn] = self._placement_desc(
+                lat, lon, icao, is_arpt=True)
             self.zone_relocated_time[best_zn] = time.time()
             old_az, _, old_dm = self.geod.inv(
                 self.ac_lon, self.ac_lat, old_pos[1], old_pos[0])
@@ -2454,15 +2597,13 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 self._om_unavailable = True
                 self.logger.warning(
                     "Open-Meteo unavailable — reverting to PSX default weather")
-                if not self.args.disable_psx_weather_updates:
-                    self.psx_send_and_set("WxAutoSet", "1")
+                self.psx_send_and_set("WxAutoSet", "1")
                 self._state_changed_event.set()
             return
         if self._om_unavailable:
             self._om_unavailable = False
             self.logger.info("Open-Meteo available again — resuming FrankenWeather")
-            if not self.args.disable_psx_weather_updates:
-                self.psx_send_and_set("WxAutoSet", "0")
+            self.psx_send_and_set("WxAutoSet", "0")
             self._state_changed_event.set()
         om_by_zone: dict = {i: om_batch[i] for i in range(min(len(om_batch), 7))}
 
@@ -2477,23 +2618,26 @@ class Script:  # pylint: disable=too-many-instance-attributes
         new_modes: list = []
         new_wxs: list = []
         new_metars: list = []
+        _per_zone: list = []   # per-zone CB trigger info for weather detail generation
         for i in range(7):
             lat, lon = snap_positions[i]
             icao = snap_icaos[i]
             om = om_by_zone.get(i, {})
             radar_echo = self._rv_echo_at(lat, lon)
             has_lightning = self._bz_near(lat, lon)
+            ts_oktas = 0
+            has_showers_metar = False
             if raw_metars[i] is not None:
                 parsed = _parse_metar(raw_metars[i])
                 new_modes.append(build_wxmode_string(lat, lon, 0.0, month, icao))
                 wx = metar_to_wx_string(parsed)
                 ts_oktas = parsed.get('ts_oktas', 0)
-                has_showers = parsed.get('showers', False)
-                need_cb = ts_oktas > 0 or has_showers or radar_echo >= 2 or has_lightning
+                has_showers_metar = parsed.get('showers', False)
+                need_cb = ts_oktas > 0 or has_showers_metar or radar_echo >= 2 or has_lightning
                 if om and need_cb:
                     refined = _apply_om_cb(
                         wx, om,
-                        metar_showers=has_showers,
+                        metar_showers=has_showers_metar,
                         metar_ts=ts_oktas > 0,
                         radar_echo=radar_echo,
                         lightning=has_lightning)
@@ -2510,7 +2654,17 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 wx = (om_to_wx_string(om, radar_echo=radar_echo, lightning=has_lightning)
                       if om else ";".join(_WX_DEFAULTS))
                 new_metars.append(_gen_metar(icao, om, now) if om else None)
-            new_wxs.append(self._sigmet_cb_override(wx, (lat, lon), om, f"Zone {i + 1} {icao}"))
+            wx_before_sigmet = wx
+            final_wx = self._sigmet_cb_override(wx, (lat, lon), om, f"Zone {i + 1} {icao}")
+            new_wxs.append(final_wx)
+            _per_zone.append({
+                'radar_echo': radar_echo,
+                'lightning': has_lightning,
+                'ts_oktas': ts_oktas,
+                'showers_metar': has_showers_metar,
+                'sigmet_override': (final_wx.split(';')[9] != '0' and
+                                    wx_before_sigmet.split(';')[9] == '0'),
+            })
 
         if self.args.fake_cb:
             oktas, base_ft, top_ft = self.args.fake_cb
@@ -2545,7 +2699,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 cb_part = ""
             cb_suffixes.append(f"  CAPE={cape:.0f} J/kg{cb_part}")
 
-            # Build zone reason for API broadcast
+            # Build zone reason (short) and weather_detail (long) for API broadcast
             src = "VATSIM" if raw_metars[i] else "OM"
             stored_icao = self.zone_positions.get(i + 1, (None, None, ""))[2]
             reason = f"{src} {snap_icaos[i]}"
@@ -2557,42 +2711,93 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 reason += f" CAPE={cape:.0f}J/kg suppressed"
             self.zone_reason[i + 1] = reason[:100]
 
-        if self.args.disable_psx_weather_updates:
-            self.logger.info("PSX updates disabled — logging zones only")
-            for i in range(7):
-                src = "VATSIM" if raw_metars[i] else "Open-Meteo"
-                self.logger.info("Zone %d (dry-run) [%s]: %s @ %.3f/%.3f%s  wx=%s",
-                                 i + 1, src, snap_icaos[i],
-                                 snap_positions[i][0], snap_positions[i][1],
-                                 cb_suffixes[i], new_wxs[i])
-        else:
-            self.psx_send_and_set("WxAutoSet", "0")
+            pz = _per_zone[i]
+            snap_icao = snap_icaos[i]
+            is_metar = raw_metars[i] is not None
+            _snap_fake = (len(snap_icao) == 4 and snap_icao[0] == 'X' and
+                          snap_icao[1:].isdigit())
+            if stored_icao in arpt_set:
+                _role = ("departure" if stored_icao == self.fmc_dep_icao
+                         else "destination")
+                base = f"{_role} airport {snap_icao}"
+                base += "; VATSIM METAR" if is_metar else "; OpenMeteo"
+            elif is_metar:
+                base = f"VATSIM METAR {snap_icao}"
+                if snap_icao != stored_icao and stored_icao:
+                    base += f" (nearest METAR to {stored_icao})"
+            else:
+                base = "OpenMeteo"
+                if snap_icao and not _snap_fake:
+                    base += f" at {snap_icao}"
+                    if stored_icao and stored_icao != snap_icao and not (
+                            len(stored_icao) == 4 and stored_icao[0] == 'X' and
+                            stored_icao[1:].isdigit()):
+                        base += f" (nearest to {stored_icao})"
+            cb_sources = []
+            if pz['ts_oktas'] > 0:
+                cb_sources.append(f"METAR TS ({pz['ts_oktas']}oktas)")
+            if pz['showers_metar']:
+                cb_sources.append("METAR showers")
+            if cb_oktas > 0 and (cape > 0 or not is_metar):
+                if showers_mm >= 0.5:
+                    cb_sources.append(f"CAPE {cape:.0f} J/kg + showers {showers_mm:.2f} mm/h")
+                elif cape > 0:
+                    cb_sources.append(f"CAPE {cape:.0f} J/kg (WMO {wmo_code})")
+            if pz['radar_echo'] >= 2:
+                cb_sources.append(f"radar echo {pz['radar_echo']}")
+            if pz['lightning']:
+                cb_sources.append("Blitzortung lightning")
+            if pz['sigmet_override']:
+                cb_sources.append("TS SIGMET override")
+            if cb_oktas > 0:
+                detail = base + f"; CBs {cb_oktas}oktas {parts[11]}-{parts[10]}ft"
+                if cb_sources:
+                    detail += " from " + " + ".join(cb_sources)
+            elif _cape_to_cb_oktas(cape, cin) > 0 and showers_mm < 0.5:
+                detail = base + (f"; no CBs — CAPE {cape:.0f} J/kg suppressed"
+                                 f" (showers {showers_mm:.2f} mm/h, WMO {wmo_code})")
+                if pz['lightning']:
+                    detail += "; lightning present but CAPE suppressed"
+            else:
+                detail = base
+                reasons_no_cb = []
+                if cape > 0:
+                    reasons_no_cb.append(f"CAPE {cape:.0f} J/kg")
+                if wmo_code:
+                    reasons_no_cb.append(f"WMO {wmo_code}")
+                if reasons_no_cb:
+                    detail += "; no CBs (" + ", ".join(reasons_no_cb) + ")"
+                elif not is_metar:
+                    detail += "; no CBs"
+            self.zone_weather_detail[i + 1] = detail
 
-            for i, wxmode in enumerate(new_modes):
-                zone_num = i + 1
-                self.zone_mode[zone_num] = wxmode
-                self.zone_is_metar[zone_num] = raw_metars[i] is not None
-                src = "VATSIM" if raw_metars[i] else "OM"
-                self.psx_send_and_set(f"WxMode{zone_num}", wxmode)
-                self.logger.info("Zone %d [%s]: %s @ %.3f/%.3f%s",
-                                 zone_num, src, snap_icaos[i],
-                                 snap_positions[i][0], snap_positions[i][1],
-                                 cb_suffixes[i])
+        self.psx_send_and_set("WxAutoSet", "0")
 
-            await asyncio.sleep(1.0)
+        for i, wxmode in enumerate(new_modes):
+            zone_num = i + 1
+            self.zone_mode[zone_num] = wxmode
+            self.zone_is_metar[zone_num] = raw_metars[i] is not None
+            src = "VATSIM" if raw_metars[i] else "OM"
+            self.psx_send_and_set(f"WxMode{zone_num}", wxmode)
+            self.logger.info("Zone %d [%s]: %s @ %.3f/%.3f%s",
+                             zone_num, src, snap_icaos[i],
+                             snap_positions[i][0], snap_positions[i][1],
+                             cb_suffixes[i])
 
-            self.last_write_time = time.time()
-            # WxBasic (planet fallback) mirrors zone 1's weather data
-            self.zone_wx[0] = new_wxs[0]
-            self.psx_send_and_set("WxBasic", new_wxs[0])
-            for i, wx in enumerate(new_wxs):
-                zone_num = i + 1
-                self.zone_wx[zone_num] = wx
-                self.psx_send_and_set(f"Wx{zone_num}", wx)
+        await asyncio.sleep(1.0)
 
-            for i, metar in enumerate(new_metars):
-                if metar:
-                    self.psx_send_and_set(f"Metar{i + 1}", metar)
+        self.last_write_time = time.time()
+        # WxBasic (planet fallback) mirrors zone 1's weather data
+        self.zone_wx[0] = new_wxs[0]
+        self.psx_send_and_set("WxBasic", new_wxs[0])
+        for i, wx in enumerate(new_wxs):
+            zone_num = i + 1
+            self.zone_wx[zone_num] = wx
+            self.psx_send_and_set(f"Wx{zone_num}", wx)
+
+        for i, metar in enumerate(new_metars):
+            if metar:
+                self.psx_send_and_set(f"Metar{i + 1}", metar)
 
         self._state_changed_event.set()
         self._apply_msfs_sync()
@@ -2606,22 +2811,19 @@ class Script:  # pylint: disable=too-many-instance-attributes
         """Build the FRANKENWEATHER:<uuid>:<json> addon message payload."""
         cfg = self.args
         config = {
-            "cruise_alt": cfg.cruise_alt,
             "cruise_behind_dist": cfg.cruise_behind_dist,
             "low_alt_dist": cfg.low_alt_dist,
             "new_zone_infront_range": list(cfg.new_zone_infront_range),
             "new_zone_leftright_range": list(cfg.new_zone_leftright_range),
             "new_zone_notnear": cfg.new_zone_notnear,
             "cape_squeeze": list(cfg.cape_squeeze) if cfg.cape_squeeze else None,
-            "arpt_zone_dist": cfg.arpt_zone_dist,
             "fake_cb": list(cfg.fake_cb) if cfg.fake_cb else None,
-            "disable_psx_weather_updates": cfg.disable_psx_weather_updates,
-            "msfs_in_cloud_sync": cfg.msfs_in_cloud_sync,
-            "msfs_qnh_check": cfg.msfs_qnh_check,
-            "msfs_qnh_check_maxdiff": cfg.msfs_qnh_check_maxdiff,
-            "msfs_wind_sync": cfg.msfs_wind_sync,
+            "msfs_in_cloud_sync": self._msfs_in_cloud_sync,
+            "msfs_qnh_check": self._msfs_qnh_check,
+            "msfs_wind_sync": self._msfs_wind_sync,
         }
         wx_auto = self._fw_mode == "disabled" or self._om_unavailable
+        arpt_icaos = {self.fmc_dep_icao, self.fmc_dst_icao} - {None}
         zones = []
         for zone_num in range(1, 8):
             raw_mode = self.psx.get(f"WxMode{zone_num}") if self.psx else None
@@ -2648,12 +2850,28 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 "lon": round(lon, 4),
                 "source": source,
                 "reason": reason,
+                "placement": self._placement_desc(lat, lon, icao,
+                                                  is_arpt=icao in arpt_icaos),
+                "weather_detail": self.zone_weather_detail.get(zone_num, ""),
             })
-        sigmets = [
-            {"polygon": [[round(la, 4), round(lo, 4)] for la, lo in s["polygon"]],
-             "top_ft": s["top_ft"]}
-            for s in self.ts_sigmets
-        ]
+        zone_positions = [(z["lat"], z["lon"]) for z in zones]
+        _SIGMET_MAX_NM = 100.0
+        sigmets = []
+        for s in self.ts_sigmets:
+            poly = s["polygon"]
+            relevant = any(
+                self._dist_nm(zlat, zlon, vlat, vlon) <= _SIGMET_MAX_NM
+                for zlat, zlon in zone_positions
+                for vlat, vlon in poly
+            ) or any(
+                _point_in_polygon(zlat, zlon, poly)
+                for zlat, zlon in zone_positions
+            )
+            if relevant:
+                sigmets.append({
+                    "polygon": [[round(la, 4), round(lo, 4)] for la, lo in poly],
+                    "top_ft": s["top_ft"],
+                })
         state = {
             "fw_mode": self._fw_mode,
             "om_unavailable": self._om_unavailable,
@@ -2667,6 +2885,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
             "sigmets": sigmets,
             "manual_wx_params": dict(self._manual_wx_params),
         }
+        self._web_state = state
+        self._web_state_received_at = time.time()
         payload = json.dumps(state, separators=(',', ':'))
         return f"FRANKENWEATHER:STATE:{self._instance_uuid}:{payload}"
 
@@ -2780,8 +3000,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 self.psx_connected = True
                 self.psx.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
                 self._state_changed_event.set()
-                if not self.args.no_turbulence:
-                    self._turb_state_changed_event.set()
+                self._turb_state_changed_event.set()
                 if self._fw_mode == "disabled":
                     self.psx_send_and_set("WxAutoSet", "1")
                 else:
@@ -2795,8 +3014,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 self.logger.info("PSX RESUMED")
                 self.psx_connected = True
                 self.psx_paused = False
-                if not self.args.no_turbulence:
-                    self._turb_state_changed_event.set()
+                self._turb_state_changed_event.set()
 
             self.psx = psx.Client()
             self.psx.onPause = lambda: setattr(self, 'psx_paused', True)
@@ -2821,10 +3039,9 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 self.psx.subscribe(f"WxMode{i}")
 
             # Turbulence subsystem subscriptions
-            if not self.args.no_turbulence:
-                self.psx.subscribe("TimeEarth")
-                self.psx.subscribe("WxClust")
-                self.psx.subscribe("AcftHeight")
+            self.psx.subscribe("TimeEarth")
+            self.psx.subscribe("WxClust")
+            self.psx.subscribe("AcftHeight")
 
             await self.psx.connect(self.args.psx_host, self.args.psx_port)
             self.logger.warning("psx.connect() returned — this should not happen")
@@ -2859,12 +3076,11 @@ class Script:  # pylint: disable=too-many-instance-attributes
                     ("WeatherUpdate", self.weather_update_coro),
                     ("StateBroadcast", self.state_broadcast_coro),
                 ]
-                if not self.args.no_turbulence:
-                    coros += [
-                        ("TurbulenceTask", self.turbulence_coro),
-                        ("PSXWind", self.psx_wind_coro),
-                        ("TurbBroadcast", self.turb_state_broadcast_coro),
-                    ]
+                coros += [
+                    ("TurbulenceTask", self.turbulence_coro),
+                    ("PSXWind", self.psx_wind_coro),
+                    ("TurbBroadcast", self.turb_state_broadcast_coro),
+                ]
                 for name, coro_fn in coros:
                     if name not in running:
                         self.logger.info("Starting %s...", name)
@@ -2898,9 +3114,6 @@ class Script:  # pylint: disable=too-many-instance-attributes
             '--stations', type=str, default=None,
             help="UCAR stations.txt file (downloads from UCAR if not given).")
         parser.add_argument(
-            '--cruise-alt', type=float, default=18000.0, metavar='FT',
-            help="Altitude in feet above which cruise relocation rules apply.")
-        parser.add_argument(
             '--cruise-behind-dist', type=float, default=50.0, metavar='NM',
             help="In cruise: relocate a zone more than this many nm behind the aircraft.")
         parser.add_argument(
@@ -2923,33 +3136,9 @@ class Script:  # pylint: disable=too-many-instance-attributes
             help="Squeeze zone spacing when CAPE is high: at avg CAPE >= CAPE J/kg "
                  "shrink fwd_max to MIN_FWD nm (default: 500:50).")
         parser.add_argument(
-            '--arpt-zone-dist', type=float, default=200.0, metavar='NM',
-            help="Always assign a weather zone to the FMC dep/dst airport "
-                 "if within this distance (0 to disable).")
-        parser.add_argument(
-            '--msfs-in-cloud-sync', action='store_true',
-            help="Adjust PSX cloud layers to match MSFS in-cloud state "
-                 "(data supplied by frankenmsfsbridge).")
-        parser.add_argument(
-            '--msfs-qnh-check', choices=('CHECK', 'USE'), default=None,
-            metavar='CHECK|USE',
-            help="CHECK: warn when MSFS QNH (from frankenmsfsbridge) differs from the "
-                 "active PSX zone by more than --msfs-qnh-check-maxdiff. "
-                 "USE: also update the PSX QNH and METAR to match.")
-        parser.add_argument(
-            '--msfs-qnh-check-maxdiff', type=float, default=2.0, metavar='HPA',
-            help="QNH difference threshold in hPa for --msfs-qnh-check.")
-        parser.add_argument(
-            '--msfs-wind-sync', action='store_true',
-            help="Inject MSFS wind at current altitude into the PSX wind corridor as "
-                 "a FWIND waypoint (via frankenmsfsbridge).")
-        parser.add_argument(
             '--fake-cb', type=_parse_cb_arg, default=None, metavar='O:B:T',
             help="Override CB in all zones: O=oktas (0-8), B=base ft, T=top ft "
                  "(e.g. --fake-cb=6:3000:45000).")
-        parser.add_argument(
-            '--disable-psx-weather-updates', action='store_true',
-            help="Fetch and log weather data but do not write anything to PSX.")
         parser.add_argument(
             '--om-proxy', type=str, default=None, metavar='URL',
             help="Proxy URL for all Open-Meteo requests, e.g. socks5h://localhost:1080."
@@ -2957,18 +3146,13 @@ class Script:  # pylint: disable=too-many-instance-attributes
         parser.add_argument(
             '--debug', action='store_true',
             help="Log PSX weather changes, every value sent to PSX, and all PSX traffic.")
-        parser.add_argument(
-            '--no-turbulence', action='store_true',
-            help="Disable the turbulence subsystem entirely.")
-        parser.add_argument(
-            '--turb-rate', type=int, default=100, metavar='0-100',
-            help="Scale turbulence injection frequency (100=normal up to 5 Hz).")
-        parser.add_argument(
-            '--turb-intensity-bias', type=int, default=100, metavar='0-999',
-            help="Global turbulence intensity bias percentage (100=normal).")
+
         parser.add_argument(
             '--turb-config-file', type=str, default=None, metavar='PATH',
-            help="JSON file for persisting turbulence settings.")
+            help="[DEPRECATED] No longer used; turbulence settings are not persisted.")
+        parser.add_argument(
+            '--web-port', type=int, default=None, metavar='PORT',
+            help="Enable standalone web UI on this TCP port (e.g. 8085).")
         self.args = parser.parse_args()
 
     async def run(self) -> None:
@@ -2992,24 +3176,64 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self.airports, source = get_airports(_UCAR_STATIONS_URL, _STATIONS_CACHE)
             self.logger.info("Loaded %d airports from %s", len(self.airports), source)
 
-        if not self.args.no_turbulence:
-            self._turb_rate = max(0, min(100, self.args.turb_rate))
-            self._turb_intensity_bias = max(0, min(999, self.args.turb_intensity_bias))
-            if self.args.turb_config_file:
-                self._turb_load_config(self.args.turb_config_file)
-            self._turb_engine = TurbulenceEngine(om_proxy=self.args.om_proxy)
-            self._turb_pirep_fetcher = PirepFetcher()
-            self._turb_cape_fetcher = CapeFetcher(proxy=self.args.om_proxy)
-            self._turb_gairmet_fetcher = GairmetFetcher()
-            self.logger.info("Turbulence engine initialized")
-            # Trigger initial TURBSTATE broadcast so the router has config data immediately.
-            self._turb_state_changed_event.set()
+        if self.args.turb_config_file:
+            self.logger.warning(
+                "--turb-config-file is deprecated and no longer used; "
+                "turbulence settings are not persisted across restarts")
+        self._turb_engine = TurbulenceEngine(om_proxy=self.args.om_proxy)
+        self._turb_pirep_fetcher = PirepFetcher()
+        self._turb_cape_fetcher = CapeFetcher(proxy=self.args.om_proxy)
+        self._turb_gairmet_fetcher = GairmetFetcher()
+        self.logger.info("Turbulence engine initialized")
+        # Trigger initial TURBSTATE broadcast so the router has config data immediately.
+        self._turb_state_changed_event.set()
 
         async with asyncio.TaskGroup() as self.taskgroup:
             task = self.taskgroup.create_task(self.monitor_coro(), name="Monitor")
             self.tasks.add(task)
+            if self.args.web_port:
+                task = self.taskgroup.create_task(
+                    self.run_web_ui_coro(), name="WebUI")
+                self.tasks.add(task)
             print("All tasks created")
         print("All tasks completed")
+
+    async def run_web_ui_coro(self) -> None:
+        """Run a standalone aiohttp web server exposing the FrankenWeather UI."""
+        from aiohttp import web as _web  # pylint: disable=import-outside-toplevel
+        port = self.args.web_port
+        ctx = StandaloneFWContext(self)
+        routes = _web.RouteTableDef()
+
+        @routes.get('/')
+        async def _home(_):
+            raise _web.HTTPFound('/weather')
+
+        _fw_webui.register_weather_routes(routes, ctx)
+
+        static_path = pathlib.Path(__file__).parent / 'router' / 'frankenrouter' / 'static'
+
+        @_web.middleware
+        async def _cors(request, handler):
+            response = await handler(request)
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            return response
+
+        app = _web.Application(middlewares=[_cors])
+        app.add_routes(routes)
+        if static_path.is_dir():
+            app.router.add_static('/static', static_path)
+        runner = _web.AppRunner(app)
+        await runner.setup()
+        site = _web.TCPSite(runner, '0.0.0.0', port)
+        await site.start()
+        self.logger.info("Standalone web UI running on http://0.0.0.0:%d/", port)
+        try:
+            while True:
+                await asyncio.sleep(3600.0)
+        except asyncio.CancelledError:
+            await runner.cleanup()
+            raise
 
 
 if __name__ == '__main__':
