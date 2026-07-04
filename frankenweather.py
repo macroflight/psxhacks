@@ -844,17 +844,34 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self._conflict_uuid: Optional[str] = None
         self._conflict_last_seen: float = 0.0
 
-        # Operational mode: "enabled" | "paused" | "disabled"
+        # Operational mode: "enabled" | "paused" | "disabled" | "manual"
         # paused  = stop updating PSX weather; keep WxAutoSet=0 (existing zones remain)
         # disabled = stop updating; set WxAutoSet=1 (PSX resumes its own auto-weather)
+        # manual  = all zones get the same manually-configured weather
         self._fw_mode: str = "enabled"
         # True when OM is temporarily unavailable; WxAutoSet=1 until it recovers.
         self._om_unavailable: bool = False
+        # Manual weather parameters (used when _fw_mode == "manual")
+        self._manual_wx_force_update: bool = False
+        self._manual_wx_params: dict = {
+            "hi_oktas": 0, "hi_top": 45000, "hi_base": 45000,
+            "lo_oktas": 0, "lo_top": 45000, "lo_base": 45000,
+            "cb_oktas": 0, "cb_top": 35000, "cb_base": 3000,
+            "turb_severity": 0, "turb_top": 5000, "turb_base": 0,
+            "mb_mode": 0, "mb_chance": 0, "mb_outflow": 400,
+            "inv_on": False, "inv_top": 2320, "inv_tmp": 5,
+            "wind_dir": 0, "wind_spd": 0, "wind_gust": 0, "wind_var": 0,
+            "precip": 0, "vis_m": 9999,
+            "surf_temp": 15, "qnh_hpa": 1013.25,
+        }
 
         # -------------------------------------------------------------------
         # Turbulence subsystem (merged from frankenturb)
         # -------------------------------------------------------------------
         self._turb_enabled: bool = True
+        self._turb_manual_turb_enabled: bool = False
+        self._turb_manual_turb_kind: str = "mechanical"
+        self._turb_manual_turb_intensity: float = 0.3
         self._turb_intensity_bias: int = 100   # 0-999 %
         self._turb_wind_mode: str = "live"     # "live", "psx", or "manual"
         self._turb_manual_wind_dir: int = 0
@@ -1030,6 +1047,9 @@ class Script:  # pylint: disable=too-many-instance-attributes
         if rest.startswith("TURBCOMMAND:"):
             self._handle_turb_command(rest[len("TURBCOMMAND:"):])
             return
+        if rest.startswith("MANUALWXCOMMAND:"):
+            self._handle_manual_wx_command(rest[len("MANUALWXCOMMAND:"):])
+            return
         if not rest.startswith("STATE:"):
             return
         # State broadcast — UUID conflict detection.
@@ -1058,7 +1078,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self.logger.warning("Malformed FRANKENWEATHER COMMAND: %s", json_str[:80])
             return
         new_mode = cmd.get("mode")
-        if new_mode not in ("enabled", "paused", "disabled"):
+        if new_mode not in ("enabled", "paused", "disabled", "manual"):
             self.logger.warning("FRANKENWEATHER COMMAND: unknown mode %r", new_mode)
             return
         old_mode = self._fw_mode
@@ -1072,7 +1092,100 @@ class Script:  # pylint: disable=too-many-instance-attributes
             elif old_mode == "disabled":
                 self.psx_send_and_set("WxAutoSet", "0")
                 self._sync_psx_clock()
+        if new_mode == "manual":
+            self._manual_wx_force_update = True
+            self.fmc_changed_event.set()
         self._state_changed_event.set()
+
+    def _handle_manual_wx_command(self, json_str: str) -> None:
+        """Apply a FRANKENWEATHER:MANUALWXCOMMAND message."""
+        try:
+            cmd = json.loads(json_str)
+        except ValueError:
+            self.logger.warning("Malformed MANUALWXCOMMAND: %s", json_str[:80])
+            return
+        int_fields = (
+            "hi_oktas", "hi_top", "hi_base",
+            "lo_oktas", "lo_top", "lo_base",
+            "cb_oktas", "cb_top", "cb_base",
+            "turb_severity", "turb_top", "turb_base",
+            "mb_mode", "mb_chance", "mb_outflow",
+            "inv_top", "inv_tmp",
+            "wind_dir", "wind_spd", "wind_gust", "wind_var",
+            "precip", "vis_m", "surf_temp",
+        )
+        for field in int_fields:
+            if field in cmd:
+                self._manual_wx_params[field] = int(cmd[field])
+        if "qnh_hpa" in cmd:
+            self._manual_wx_params["qnh_hpa"] = float(cmd["qnh_hpa"])
+        if "inv_on" in cmd:
+            self._manual_wx_params["inv_on"] = bool(cmd["inv_on"])
+        self.logger.info("Manual wx params updated")
+        if self._fw_mode == "manual":
+            self._manual_wx_force_update = True
+            self.fmc_changed_event.set()
+        self._state_changed_event.set()
+
+    def _build_manual_wx_string(self) -> str:
+        """Build a 24-field PSX Wx string from _manual_wx_params."""
+        p = self._manual_wx_params
+        wind_var = int(p.get("wind_var", 0))
+        wind_dir = int(p.get("wind_dir", 0))
+        wind_spd = int(p.get("wind_spd", 0))
+        wind_enc = f"{wind_var:03d}{wind_dir:03d}{wind_spd:02d}"
+        qnh_psx = int(round(float(p.get("qnh_hpa", 1013.25)) * 2.953))
+        inv_on = 1 if p.get("inv_on") else 0
+        inv_tmp = int(round(float(p.get("inv_tmp", 5)) * 10))
+        return ";".join([
+            str(int(p.get("hi_oktas", 0))),      # [0]  hiCloudCov
+            str(int(p.get("hi_top", 45000))),     # [1]  hiCloudTop
+            str(int(p.get("hi_base", 45000))),    # [2]  hiCloudBase
+            str(int(p.get("lo_oktas", 0))),       # [3]  loCloudCov
+            str(int(p.get("lo_top", 45000))),     # [4]  loCloudTop
+            str(int(p.get("lo_base", 45000))),    # [5]  loCloudBase
+            str(int(p.get("turb_severity", 0))),  # [6]  turbIntensity
+            str(int(p.get("turb_top", 5000))),    # [7]  turbTop
+            str(int(p.get("turb_base", 0))),      # [8]  turbBase
+            str(int(p.get("cb_oktas", 0))),       # [9]  cbCloudCov
+            str(int(p.get("cb_top", 35000))),     # [10] cbCloudTop
+            str(int(p.get("cb_base", 3000))),     # [11] cbCloudBase
+            str(int(p.get("mb_mode", 0))),        # [12] microburstMode
+            str(int(p.get("mb_chance", 0))),      # [13] microburstRandom (% chance)
+            str(int(p.get("mb_outflow", 400))),   # [14] microburstOutflow
+            str(inv_on),                           # [15] inversionOn
+            str(int(p.get("inv_top", 2320))),     # [16] inversionTop
+            str(inv_tmp),                          # [17] inversionTmp (tenths °C)
+            wind_enc,                              # [18] arptWindVarDirSpd
+            str(int(p.get("wind_gust", 0))),      # [19] arptWindGust
+            str(int(p.get("vis_m", 9999))),       # [20] visibMtrs
+            str(int(p.get("precip", 0))),         # [21] precipLevel
+            str(int(p.get("surf_temp", 15))),     # [22] surfaceTmp
+            str(qnh_psx),                          # [23] QNH (inHg×100)
+        ])
+
+    async def _update_zones_manual(self) -> None:
+        """Write the same manual Wx string to all 7 PSX weather zones."""
+        if self.args.disable_psx_weather_updates:
+            self.logger.info("PSX updates disabled — manual mode dry run")
+            return
+        wx_str = self._build_manual_wx_string()
+        now = datetime.now(timezone.utc)
+        self.psx_send_and_set("WxAutoSet", "0")
+        for zone_num, (lat, lon, icao) in self.zone_positions.items():
+            wxmode = build_wxmode_string(lat, lon, 0.0, now.month, icao)
+            self.zone_mode[zone_num] = wxmode
+            self.zone_is_metar[zone_num] = False
+            self.zone_reason[zone_num] = "Manual"
+            self.psx_send_and_set(f"WxMode{zone_num}", wxmode)
+        await asyncio.sleep(1.0)
+        self.last_write_time = time.time()
+        self.psx_send_and_set("WxBasic", wx_str)
+        for zone_num in range(1, 8):
+            self.zone_wx[zone_num] = wx_str
+            self.psx_send_and_set(f"Wx{zone_num}", wx_str)
+        self._state_changed_event.set()
+        self.logger.info("Manual mode zone update complete — wx=%s", wx_str[:60])
 
     # ------------------------------------------------------------------
     # Turbulence subsystem
@@ -1215,6 +1328,19 @@ class Script:  # pylint: disable=too-many-instance-attributes
         if "enabled" in cmd:
             self._turb_enabled = bool(cmd["enabled"])
             changed = True
+        if "manual_turb_enabled" in cmd:
+            self._turb_manual_turb_enabled = bool(cmd["manual_turb_enabled"])
+            changed = True
+        if "manual_turb_kind" in cmd:
+            kind = str(cmd["manual_turb_kind"])
+            if kind in _TURB_TYPES:
+                self._turb_manual_turb_kind = kind
+                changed = True
+        if "manual_turb_intensity" in cmd:
+            v = float(cmd["manual_turb_intensity"])
+            if 0.0 <= v <= 1.0:
+                self._turb_manual_turb_intensity = v
+                changed = True
         if "intensity_bias" in cmd:
             v = int(cmd["intensity_bias"])
             if 0 <= v <= 999:
@@ -1350,6 +1476,9 @@ class Script:  # pylint: disable=too-many-instance-attributes
                     src_lon = None
                 payload = {
                     "enabled": self._turb_enabled,
+                    "manual_turb_enabled": self._turb_manual_turb_enabled,
+                    "manual_turb_kind": self._turb_manual_turb_kind,
+                    "manual_turb_intensity": self._turb_manual_turb_intensity,
                     "intensity_bias": self._turb_intensity_bias,
                     "lateral_size_bias": self._turb_lateral_size_bias,
                     "wind_mode": self._turb_wind_mode,
@@ -1412,6 +1541,30 @@ class Script:  # pylint: disable=too-many-instance-attributes
                     continue
 
                 if self._turb_engine is None:
+                    continue
+
+                if self._turb_manual_turb_enabled:
+                    manual_state = TurbulenceState(
+                        kind=self._turb_manual_turb_kind,
+                        intensity=self._turb_manual_turb_intensity,
+                        reason="Manual",
+                    )
+                    eff = self._turb_manual_turb_intensity
+                    if eff >= 0.01:
+                        inject_prob = (eff ** 1.5) * (self._turb_rate / 100.0)
+                        if random.random() < inject_prob:
+                            base, direction, _ = _pick_burst(manual_state, eff)
+                            magnitude = min(99, random.randint(1, max(1, int(eff * 99))))
+                            self.psx_send_and_set("WxBurst", str(direction * (base + magnitude)))
+                    state_changed = (
+                        self._turb_state is None or
+                        self._turb_state.kind != manual_state.kind or
+                        abs((self._turb_state.intensity or 0.0) - manual_state.intensity) > 0.05
+                    )
+                    self._turb_state = manual_state
+                    self._turb_sources = [(eff, manual_state)] if eff >= 0.01 else []
+                    if state_changed:
+                        self._turb_state_changed_event.set()
                     continue
 
                 if self._om_unavailable:
@@ -2482,6 +2635,9 @@ class Script:  # pylint: disable=too-many-instance-attributes
             if wx_auto:
                 source = "PSX"
                 reason = "Set by PSX"
+            elif self._fw_mode == "manual":
+                source = "MANUAL"
+                reason = "Manual weather"
             else:
                 source = "VATSIM" if self.zone_is_metar.get(zone_num) else "OM"
                 reason = self.zone_reason.get(zone_num, "")
@@ -2509,6 +2665,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
             "zones": zones,
             "config": config,
             "sigmets": sigmets,
+            "manual_wx_params": dict(self._manual_wx_params),
         }
         payload = json.dumps(state, separators=(',', ':'))
         return f"FRANKENWEATHER:STATE:{self._instance_uuid}:{payload}"
@@ -2557,7 +2714,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self._conflict_uuid = None
         return False
 
-    async def weather_update_coro(self) -> None:
+    async def weather_update_coro(self) -> None:  # pylint: disable=too-many-branches
         """Periodically update PSX weather zones from Open-Meteo."""
         myname = inspect.currentframe().f_code.co_name
         last_update_time = 0.0
@@ -2597,11 +2754,16 @@ class Script:  # pylint: disable=too-many-instance-attributes
                         any_relocated = self._check_and_relocate()
                         any_relocated = self._ensure_arpt_zones() or any_relocated
                     elapsed = time.time() - last_update_time
-                    if not any_relocated and elapsed < _REFRESH_MAX_S:
+                    force = self._manual_wx_force_update
+                    self._manual_wx_force_update = False
+                    if not any_relocated and not force and elapsed < _REFRESH_MAX_S:
                         continue
                     if self._should_skip_wx_update():
                         continue
-                    await self._update_zones(session)
+                    if self._fw_mode == "manual":
+                        await self._update_zones_manual()
+                    else:
+                        await self._update_zones(session)
                     last_update_time = time.time()
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)

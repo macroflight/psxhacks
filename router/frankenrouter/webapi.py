@@ -1244,6 +1244,7 @@ def _build_weather_settings_page(router, color_scheme):  # pylint: disable=too-m
             '<h1>Weather settings</h1>'
             '<div style="margin-left:auto;display:flex;gap:0.5em">'
             '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
+            '<a href="/weather/manual" class="btn btn-gray btn-sm">Manual weather</a>'
             '<a href="/weather/settings" class="btn btn-gray btn-sm">Refresh</a>'
             '</div>'
             '</div>\n' +
@@ -1284,9 +1285,15 @@ def _build_weather_settings_page(router, color_scheme):  # pylint: disable=too-m
     # -- Mode control --
     fw_mode = state.get('fw_mode', 'enabled')
     fw_mode_class = 'ok' if fw_mode == 'enabled' else 'warn'
-    _MODE_BTN = {'enabled': 'btn-green', 'paused': 'btn-amber', 'disabled': 'btn-red'}
-    _MODE_LABEL = {'enabled': 'Enable', 'paused': 'Pause', 'disabled': 'Disable'}
-    other_modes = [m for m in ('enabled', 'paused', 'disabled') if m != fw_mode]
+    _MODE_BTN = {
+        'enabled': 'btn-green', 'paused': 'btn-amber',
+        'disabled': 'btn-red', 'manual': 'btn-blue',
+    }
+    _MODE_LABEL = {
+        'enabled': 'Enable', 'paused': 'Pause',
+        'disabled': 'Disable', 'manual': 'Manual',
+    }
+    other_modes = [m for m in ('enabled', 'paused', 'disabled', 'manual') if m != fw_mode]
     body += (
         '<h2>Mode control</h2>\n'
         '<div class="card ok">\n<table>\n'
@@ -1425,6 +1432,410 @@ def _build_weather_settings_page(router, color_scheme):  # pylint: disable=too-m
     return _page(body)
 
 
+def _wx_string_to_manual_params(wx_str):  # pylint: disable=too-many-locals
+    """Parse a PSX 24-field Wx string into a manual_wx_params dict."""
+    parts = wx_str.strip().split(';')
+    if len(parts) < 24:
+        return None
+    try:
+        wind_enc = parts[18]
+        wind_var = int(wind_enc[0:3]) if len(wind_enc) >= 8 else 0
+        wind_dir = int(wind_enc[3:6]) if len(wind_enc) >= 8 else 0
+        wind_spd = int(wind_enc[6:8]) if len(wind_enc) >= 8 else 0
+        qnh_psx = int(parts[23])
+        qnh_hpa = round(qnh_psx / 2.953, 1)
+        inv_tmp_raw = int(parts[17])
+        inv_tmp_c = round(inv_tmp_raw / 10.0)
+        return {
+            "hi_oktas": int(parts[0]), "hi_top": int(parts[1]), "hi_base": int(parts[2]),
+            "lo_oktas": int(parts[3]), "lo_top": int(parts[4]), "lo_base": int(parts[5]),
+            "turb_severity": int(parts[6]),
+            "turb_top": int(parts[7]), "turb_base": int(parts[8]),
+            "cb_oktas": int(parts[9]), "cb_top": int(parts[10]), "cb_base": int(parts[11]),
+            "mb_mode": int(parts[12]), "mb_chance": int(parts[13]),
+            "mb_outflow": int(parts[14]),
+            "inv_on": int(parts[15]) != 0, "inv_top": int(parts[16]),
+            "inv_tmp": inv_tmp_c,
+            "wind_dir": wind_dir, "wind_spd": wind_spd,
+            "wind_gust": int(parts[19]), "wind_var": wind_var,
+            "vis_m": int(parts[20]), "precip": int(parts[21]),
+            "surf_temp": int(parts[22]), "qnh_hpa": qnh_hpa,
+        }
+    except (ValueError, IndexError):
+        return None
+
+
+def _manual_metar(p, icao="ZZZZ", now=None):  # pylint: disable=too-many-locals,too-many-statements,too-many-branches
+    """Generate a METAR-like string from manual wx params dict."""
+    if now is None:
+        now = datetime.datetime.now(datetime.timezone.utc)
+    wind_dir = int(p.get("wind_dir", 0))
+    wind_spd = int(p.get("wind_spd", 0))
+    wind_gust = int(p.get("wind_gust", 0))
+    wind_var = int(p.get("wind_var", 0))
+    vis_m = int(p.get("vis_m", 9999))
+    lo_oktas = int(p.get("lo_oktas", 0))
+    lo_base = int(p.get("lo_base", 45000))
+    hi_oktas = int(p.get("hi_oktas", 0))
+    hi_base = int(p.get("hi_base", 45000))
+    cb_oktas = int(p.get("cb_oktas", 0))
+    cb_base = int(p.get("cb_base", 3000))
+    temp = int(p.get("surf_temp", 15))
+    qnh_hpa = int(round(float(p.get("qnh_hpa", 1013.25))))
+    precip = int(p.get("precip", 0))
+
+    if wind_var > 0 and wind_spd < 6:
+        wind_token = "VRB"
+    elif wind_var > 0:
+        left = (wind_dir - wind_var // 2) % 360
+        right = (wind_dir + wind_var // 2) % 360
+        wind_token = f"{wind_dir:03d}{wind_spd:02d}"
+        if wind_gust > wind_spd + 5:
+            wind_token += f"G{wind_gust:02d}"
+        wind_token += f"KT {left:03d}V{right:03d}"
+    else:
+        wind_token = f"{wind_dir:03d}{wind_spd:02d}"
+        if wind_gust > wind_spd + 5:
+            wind_token += f"G{wind_gust:02d}"
+        wind_token += "KT"
+
+    vis_token = "9999" if vis_m >= 9999 else f"{min(vis_m, 9000):04d}"
+    precip_tokens = {1: "RA", 2: "-RASN", 3: "+RA"}.get(precip, "")
+
+    _OKTAS_COVER = {0: None, 1: "FEW", 2: "FEW", 3: "SCT", 4: "SCT",
+                    5: "BKN", 6: "BKN", 7: "OVC", 8: "OVC"}
+
+    sky_tokens = []
+    lo_cover = _OKTAS_COVER.get(lo_oktas)
+    if lo_cover and lo_base < 45000:
+        sky_tokens.append(f"{lo_cover}{lo_base // 100:03d}")
+    hi_cover = _OKTAS_COVER.get(hi_oktas)
+    if hi_cover and hi_base < 45000:
+        sky_tokens.append(f"{hi_cover}{hi_base // 100:03d}")
+    cb_cover = _OKTAS_COVER.get(cb_oktas)
+    if cb_cover and cb_oktas > 0:
+        sky_tokens.append(f"{cb_cover}{cb_base // 100:03d}CB")
+    if not sky_tokens:
+        sky_tokens = ["SKC"]
+
+    temp_str = (f"M{abs(temp):02d}" if temp < 0 else f"{temp:02d}")
+    dp_str = "00"
+
+    tokens = [icao, now.strftime('%d%H%MZ'), wind_token, vis_token]
+    if precip_tokens:
+        tokens.append(precip_tokens)
+    tokens += sky_tokens
+    tokens += [f"{temp_str}/{dp_str}", f"Q{qnh_hpa:04d}"]
+    return " ".join(tokens)
+
+
+def _build_weather_manual_page(router, color_scheme):  # pylint: disable=too-many-locals,too-many-statements
+    """Render the /weather/manual HTML page for manual weather configuration."""
+    from frankenrouter import routercache  # pylint: disable=import-outside-toplevel
+
+    state = router.frankenweather_state
+    params = {}
+    if state:
+        params = state.get("manual_wx_params", {})
+    fw_mode = (state or {}).get("fw_mode", "unknown")
+
+    def _cache_get_s(name):
+        key = router.variables.get_keyword_for_name(name) or name
+        try:
+            return router.cache.get_value(key)
+        except routercache.RouterCacheException:
+            return None
+
+    focused_zone = None
+    try:
+        fz_val = _cache_get_s('FocussedWxZone')
+        if fz_val is not None:
+            focused_zone = int(fz_val)
+    except (ValueError, TypeError):
+        pass
+
+    def _page(body):
+        return (
+            '<!DOCTYPE html>\n<html>\n<head>\n'
+            f'<meta name="color-scheme" content="{color_scheme}" />\n' +
+            _COMMON_CSS.format() +
+            '\n<style>body { max-width: 56em; }'
+            '.form-grid { display:grid;grid-template-columns:1fr 1fr;gap:1em; }'
+            '.form-section { background:#1c2033;border:1px solid #2a2f45;'
+            'border-radius:6px;padding:1em; }'
+            '.form-section h3 { margin:0 0 0.75em;font-size:0.95em;color:#94a3b8;'
+            'text-transform:uppercase;letter-spacing:0.05em; }'
+            '.field-row { display:flex;align-items:center;gap:0.5em;'
+            'margin-bottom:0.5em;flex-wrap:wrap; }'
+            '.field-label { flex:0 0 7em;font-size:0.88em;color:#94a3b8; }'
+            '.field-input { flex:1;min-width:4em; }'
+            'input[type=number],input[type=text],select { '
+            'background:#0f1117;border:1px solid #2a2f45;border-radius:4px;'
+            'color:#e2e8f0;padding:3px 6px;font-size:0.88em; }'
+            '.metar-box { font-family:monospace;font-size:0.9em;padding:0.75em;'
+            'background:#0f1117;border:1px solid #2a2f45;border-radius:4px;'
+            'color:#4ade80;word-break:break-all;margin-bottom:1em; }'
+            '.mode-badge-manual { color:#60a5fa; }'
+            '.mode-badge-enabled { color:#4ade80; }'
+            '</style>\n</head>\n<body>\n'
+            '<div class="page-title">'
+            '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
+            '<h1>Manual weather</h1>'
+            '<div style="margin-left:auto;display:flex;gap:0.5em">'
+            '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
+            '<a href="/weather/settings" class="btn btn-gray btn-sm">Zone settings</a>'
+            '<a href="/weather/turbulence" class="btn btn-gray btn-sm">Turbulence</a>'
+            '<a href="/weather/manual" class="btn btn-gray btn-sm">Refresh</a>'
+            '</div>'
+            '</div>\n' +
+            body +
+            '</body>\n</html>\n'
+        )
+
+    mode_color = 'mode-badge-manual' if fw_mode == 'manual' else 'mode-badge-enabled'
+    zones = (state or {}).get("zones", [])
+    focused_icao = next(
+        (z.get("icao", "ZZZZ") for z in zones if z.get("zone") == focused_zone),
+        "ZZZZ"
+    )
+    metar_str = _manual_metar(params, icao=focused_icao) if params else 'No data'
+    body = (
+        '<div class="card ok" style="margin-bottom:1em">'
+        f'<div style="display:flex;align-items:center;gap:1.5em;flex-wrap:wrap">'
+        f'<div><span style="color:#94a3b8;font-size:0.85em">FW mode</span><br>'
+        f'<b class="{mode_color}">{fw_mode}</b></div>'
+        f'<div style="flex:1">'
+        f'<span style="color:#94a3b8;font-size:0.85em">METAR preview</span><br>'
+        f'<span class="metar-box" style="display:block;margin:0;padding:0.3em 0.5em">'
+        f'{metar_str}</span></div>'
+    )
+    if focused_zone is not None:
+        body += (
+            f'<form action="/api/weather/manual/copy_zone" method="post">'
+            f'<input type="hidden" name="zone" value="{focused_zone}">'
+            f'<button type="submit" class="btn btn-amber btn-sm">'
+            f'Copy zone {focused_zone} weather</button>'
+            f'</form>'
+        )
+    if fw_mode != 'manual':
+        body += (
+            '<form action="/api/weather/mode" method="post">'
+            '<input type="hidden" name="mode" value="manual">'
+            '<button type="submit" class="btn btn-blue btn-sm">Switch to manual mode</button>'
+            '</form>'
+        )
+    else:
+        body += (
+            '<form action="/api/weather/mode" method="post">'
+            '<input type="hidden" name="mode" value="enabled">'
+            '<button type="submit" class="btn btn-green btn-sm">Back to normal</button>'
+            '</form>'
+        )
+    body += '</div></div>\n'
+
+    def _int(key, default=0):
+        return int(params.get(key, default))
+
+    def _float(key, default=0.0):
+        return float(params.get(key, default))
+
+    def _num_input(name, value, mn, mx, step=1, width="5em"):  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        return (
+            f'<input type="number" name="{name}" value="{value}" '
+            f'min="{mn}" max="{mx}" step="{step}" style="width:{width}">'
+        )
+
+    def _select(name, options, current):
+        html = f'<select name="{name}">'
+        for val, label in options:
+            sel = ' selected' if str(val) == str(current) else ''
+            html += f'<option value="{val}"{sel}>{label}</option>'
+        html += '</select>'
+        return html
+
+    mb_mode = _int("mb_mode", 0)
+    mb_chance = _int("mb_chance", 0)
+    turb_sev = _int("turb_severity", 0)
+    inv_on = bool(params.get("inv_on", False))
+    precip = _int("precip", 0)
+
+    form_open = '<form action="/api/weather/manual" method="post" id="manual-wx-form">\n'
+    form_close = (
+        '<div style="margin-top:1.5em;text-align:right">'
+        '<button type="submit" class="btn btn-blue" id="apply-btn">Apply settings</button>'
+        '</div>\n'
+        '</form>\n'
+        '<script>\n'
+        '(function(){\n'
+        '  var form = document.getElementById("manual-wx-form");\n'
+        '  var btn  = document.getElementById("apply-btn");\n'
+        '  function serialize(){\n'
+        '    var d=new FormData(form),out=[];\n'
+        '    d.forEach(function(v,k){out.push(k+"="+v);});\n'
+        '    return out.sort().join("&");\n'
+        '  }\n'
+        '  var initial = serialize();\n'
+        '  function check(){\n'
+        '    var dirty = serialize() !== initial;\n'
+        '    btn.className = dirty ? "btn btn-amber" : "btn btn-blue";\n'
+        '    btn.textContent = dirty ? "Apply settings •" : "Apply settings";\n'
+        '  }\n'
+        '  form.addEventListener("input", check);\n'
+        '  form.addEventListener("change", check);\n'
+        '})();\n'
+        '</script>\n'
+    )
+
+    body += form_open
+
+    body += '<div class="form-grid">\n'
+
+    # Cloud layers section
+    body += (
+        '<div class="form-section">'
+        '<h3>Cloud layers</h3>'
+        '<table style="border-collapse:collapse;width:100%">'
+        '<tr><th style="color:#64748b;font-size:0.8em;text-align:left;padding:2px 4px">'
+        '</th>'
+        '<th style="color:#64748b;font-size:0.8em;text-align:center;padding:2px 4px">'
+        'Oktas</th>'
+        '<th style="color:#64748b;font-size:0.8em;text-align:center;padding:2px 4px">'
+        'Base (ft)</th>'
+        '<th style="color:#64748b;font-size:0.8em;text-align:center;padding:2px 4px">'
+        'Top (ft)</th></tr>\n'
+    )
+    for layer, prefix, def_base, def_top in [
+            ("Lo cloud", "lo", 2000, 10000),
+            ("Hi cloud", "hi", 20000, 35000),
+            ("CB", "cb", 3000, 35000),
+    ]:
+        ok = _int(f"{prefix}_oktas")
+        base = _int(f"{prefix}_base", def_base)
+        top = _int(f"{prefix}_top", def_top)
+        body += (
+            f'<tr><td style="padding:4px;color:#94a3b8;font-size:0.88em">{layer}</td>'
+            f'<td style="padding:4px;text-align:center">'
+            f'{_num_input(f"{prefix}_oktas", ok, 0, 8, 1, "3.5em")}</td>'
+            f'<td style="padding:4px;text-align:center">'
+            f'{_num_input(f"{prefix}_base", base, 0, 60000, 100, "5.5em")}</td>'
+            f'<td style="padding:4px;text-align:center">'
+            f'{_num_input(f"{prefix}_top", top, 0, 60000, 100, "5.5em")}</td>'
+            f'</tr>\n'
+        )
+    body += '</table></div>\n'
+
+    # Wind section
+    body += (
+        '<div class="form-section">'
+        '<h3>Surface wind</h3>'
+        '<table style="border-collapse:collapse;width:100%">'
+    )
+    wind_fields = [
+        ("Dir (°)", "wind_dir", _int("wind_dir"), 0, 360, 1, "4.5em"),
+        ("Speed (kt)", "wind_spd", _int("wind_spd"), 0, 150, 1, "4.5em"),
+        ("Gust (kt)", "wind_gust", _int("wind_gust"), 0, 200, 1, "4.5em"),
+        ("Variability (°)", "wind_var", _int("wind_var"), 0, 180, 1, "4.5em"),
+    ]
+    for label, name, val, mn, mx, step, width in wind_fields:
+        body += (
+            f'<tr><td style="padding:3px 4px;color:#94a3b8;font-size:0.88em">{label}</td>'
+            f'<td style="padding:3px 4px">{_num_input(name, val, mn, mx, step, width)}'
+            f'</td></tr>\n'
+        )
+    body += '</table></div>\n'
+
+    # Conditions section
+    body += (
+        '<div class="form-section">'
+        '<h3>Conditions</h3>'
+        '<table style="border-collapse:collapse;width:100%">'
+    )
+    body += (
+        '<tr><td style="padding:3px 4px;color:#94a3b8;font-size:0.88em">Surface temp (°C)</td>'
+        f'<td style="padding:3px 4px">'
+        f'{_num_input("surf_temp", _int("surf_temp", 15), -60, 50, 1, "4.5em")}</td></tr>\n'
+        '<tr><td style="padding:3px 4px;color:#94a3b8;font-size:0.88em">QNH (hPa)</td>'
+        f'<td style="padding:3px 4px">'
+        f'{_num_input("qnh_hpa", round(_float("qnh_hpa", 1013.25)), 880, 1084, 1, "5em")}'
+        '</td></tr>\n'
+        '<tr><td style="padding:3px 4px;color:#94a3b8;font-size:0.88em">Visibility (m)</td>'
+        f'<td style="padding:3px 4px">'
+        f'{_num_input("vis_m", _int("vis_m", 9999), 100, 9999, 1, "5em")}</td></tr>\n'
+        '<tr><td style="padding:3px 4px;color:#94a3b8;font-size:0.88em">Precipitation</td>'
+        '<td style="padding:3px 4px">' +
+        _select("precip",
+                [("0", "None"), ("1", "Light"), ("2", "Moderate"), ("3", "Heavy")],
+                precip) +
+        '</td></tr>\n'
+    )
+    body += '</table></div>\n'
+
+    # Turbulence section
+    body += (
+        '<div class="form-section">'
+        '<h3>Turbulence</h3>'
+        '<table style="border-collapse:collapse;width:100%">'
+        '<tr><td style="padding:3px 4px;color:#94a3b8;font-size:0.88em">Severity</td>'
+        '<td style="padding:3px 4px">' +
+        _select("turb_severity",
+                [("0", "None"), ("1", "Light"), ("2", "Moderate"), ("3", "Severe")],
+                turb_sev) +
+        '</td></tr>\n'
+        '<tr><td style="padding:3px 4px;color:#94a3b8;font-size:0.88em">Base (ft)</td>'
+        f'<td style="padding:3px 4px">'
+        f'{_num_input("turb_base", _int("turb_base", 0), 0, 60000, 100, "5.5em")}</td></tr>\n'
+        '<tr><td style="padding:3px 4px;color:#94a3b8;font-size:0.88em">Top (ft)</td>'
+        f'<td style="padding:3px 4px">'
+        f'{_num_input("turb_top", _int("turb_top", 5000), 0, 60000, 100, "5.5em")}</td></tr>\n'
+        '</table></div>\n'
+    )
+
+    # Inversion section
+    inv_checked = ' checked' if inv_on else ''
+    body += (
+        '<div class="form-section">'
+        '<h3>Inversion</h3>'
+        '<table style="border-collapse:collapse;width:100%">'
+        '<tr><td style="padding:3px 4px;color:#94a3b8;font-size:0.88em">Enable</td>'
+        f'<td style="padding:3px 4px">'
+        f'<input type="checkbox" name="inv_on" value="1"{inv_checked}></td></tr>\n'
+        '<tr><td style="padding:3px 4px;color:#94a3b8;font-size:0.88em">Altitude (ft)</td>'
+        f'<td style="padding:3px 4px">'
+        f'{_num_input("inv_top", _int("inv_top", 2320), 0, 20000, 10, "5.5em")}</td></tr>\n'
+        '<tr><td style="padding:3px 4px;color:#94a3b8;font-size:0.88em">Temp delta (°C)</td>'
+        f'<td style="padding:3px 4px">'
+        f'{_num_input("inv_tmp", _int("inv_tmp", 5), -20, 40, 1, "4.5em")}</td></tr>\n'
+        '</table></div>\n'
+    )
+
+    # Microburst section
+    _MB_OPTS = [("0", "Off / random"), ("1", "Left"), ("2", "On-track"), ("3", "Right")]
+    body += (
+        '<div class="form-section" style="grid-column:1/-1">'
+        '<h3>Microburst</h3>'
+        '<div style="display:flex;gap:2em;flex-wrap:wrap">'
+        '<table style="border-collapse:collapse">'
+        '<tr><td style="padding:3px 4px;color:#94a3b8;font-size:0.88em">Direction</td>'
+        f'<td style="padding:3px 4px">{_select("mb_mode", _MB_OPTS, mb_mode)}</td></tr>\n'
+        '<tr><td style="padding:3px 4px;color:#94a3b8;font-size:0.88em">Chance (%)</td>'
+        f'<td style="padding:3px 4px">'
+        f'{_num_input("mb_chance", mb_chance, 0, 100, 1, "4.5em")}'
+        f'<span style="color:#64748b;font-size:0.8em;margin-left:0.4em">'
+        f'(0 = off; random mode uses only this field)</span></td></tr>\n'
+        '<tr><td style="padding:3px 4px;color:#94a3b8;font-size:0.88em">Outflow (ft)</td>'
+        f'<td style="padding:3px 4px">'
+        f'{_num_input("mb_outflow", _int("mb_outflow", 400), 0, 5000, 50, "5em")}'
+        f'<span style="color:#64748b;font-size:0.8em;margin-left:0.4em">'
+        f'(ignored in random mode)</span></td></tr>\n'
+        '</table></div></div>\n'
+    )
+
+    body += '</div>\n'  # close form-grid
+    body += form_close
+
+    return _page(body)
+
+
 def _fc_buttons_html(pilot_flying, own_sim):
     """Return flight control filter button HTML for the index page."""
     if pilot_flying == own_sim:
@@ -1484,6 +1895,7 @@ def _build_weather_turb_page(router, color_scheme):  # pylint: disable=too-many-
             '<h1>Turbulence</h1>'
             '<div style="margin-left:auto;display:flex;gap:0.5em">'
             '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
+            '<a href="/weather/manual" class="btn btn-gray btn-sm">Manual weather</a>'
             '<a href="/weather/settings" class="btn btn-gray btn-sm">Weather zone settings</a>'
             '</div>'
             '</div>\n' +
@@ -1504,6 +1916,9 @@ def _build_weather_turb_page(router, color_scheme):  # pylint: disable=too-many-
         )
 
     enabled = tstate.get('enabled', True)
+    manual_turb_enabled = tstate.get('manual_turb_enabled', False)
+    manual_turb_kind = tstate.get('manual_turb_kind', 'mechanical')
+    manual_turb_intensity = float(tstate.get('manual_turb_intensity', 0.3))
     intensity_bias = tstate.get('intensity_bias', 100)
     lat_bias = tstate.get('lateral_size_bias', 50)
     wind_mode = tstate.get('wind_mode', 'live')
@@ -1580,6 +1995,52 @@ def _build_weather_turb_page(router, color_scheme):  # pylint: disable=too-many-
         f'<div style="font-size:0.75em;color:#64748b;margin-top:0.5em">Data: {age_str}</div>'
     )
     status_html += '</div>\n'
+
+    # Manual turbulence card
+    _KIND_LABELS = {
+        'wave': 'Mountain wave', 'rotor': 'Lee rotor', 'mechanical': 'Mechanical',
+        'shear': 'Wind shear', 'cb': 'CB proximity', 'pirep': 'PIREP',
+        'cape': 'CAPE convective', 'gairmet': 'G-AIRMET',
+    }
+    manual_pct = int(manual_turb_intensity * 100)
+    manual_color = '#60a5fa' if manual_turb_enabled else '#64748b'
+    manual_label = 'ON' if manual_turb_enabled else 'OFF'
+    kind_opts = ''.join(
+        f'<option value="{k}"{" selected" if k == manual_turb_kind else ""}>'
+        f'{_KIND_LABELS.get(k, k)}</option>'
+        for k in _TURB_TYPES_ORDER
+    )
+    manual_html = (
+        '<div class="card">'
+        '<h3 style="margin:0 0 0.75em">Manual turbulence</h3>'
+        f'<div style="display:flex;align-items:center;gap:1em;flex-wrap:wrap;margin-bottom:0.75em">'
+        f'<span style="color:{manual_color};font-weight:bold">{manual_label}</span>'
+        f'<span style="color:#94a3b8;font-size:0.85em">Bypasses terrain/CB/PIREP engine</span>'
+        f'</div>'
+        '<table style="border-collapse:collapse;width:auto">'
+        '<tr><td style="padding:4px 8px;color:#94a3b8">Kind</td>'
+        '<td style="padding:4px 8px">'
+        '<form method="post" action="/api/weather/turbulence"'
+        ' style="display:inline-flex;gap:0.4em;align-items:center">'
+        f'<select name="manual_turb_kind">{kind_opts}</select>'
+        '<button class="btn btn-gray btn-sm">Set</button></form>'
+        '</td></tr>'
+        '<tr><td style="padding:4px 8px;color:#94a3b8">Intensity (0–100%)</td>'
+        '<td style="padding:4px 8px">'
+        '<form method="post" action="/api/weather/turbulence"'
+        ' style="display:inline-flex;gap:0.4em;align-items:center">'
+        f'<input type="number" name="manual_turb_intensity_pct" value="{manual_pct}"'
+        ' min="0" max="100" style="width:4.5em">'
+        '<button class="btn btn-gray btn-sm">Set</button></form>'
+        '</td></tr>'
+        '</table>'
+        '<div style="margin-top:0.75em">'
+    ) + _toggle_btn(
+        'manual_turb_enabled',
+        'false' if manual_turb_enabled else 'true',
+        'Disable manual' if manual_turb_enabled else 'Enable manual',
+        'red' if manual_turb_enabled else 'blue',
+    ) + '</div></div>\n'
 
     # Global controls section
     global_html = (
@@ -1700,7 +2161,8 @@ def _build_weather_turb_page(router, color_scheme):  # pylint: disable=too-many-
         '</div>\n'
     )
 
-    body = stale_banner + status_html + global_html + msfs_html + wind_html + types_html
+    body = stale_banner + status_html + manual_html + global_html
+    body += msfs_html + wind_html + types_html
     return _page(body)
 
 
@@ -2667,12 +3129,73 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     router, router.config.listen.rest_api_color_scheme)
                 return web.json_response(text=html, content_type='text/html')
 
+            @routes.get('/weather/manual')
+            async def handle_weather_manual_get(_):
+                html = _build_weather_manual_page(
+                    router, router.config.listen.rest_api_color_scheme)
+                return web.json_response(text=html, content_type='text/html')
+
+            @routes.post('/api/weather/manual')
+            async def handle_weather_manual_post(request):
+                data = await request.post()
+                cmd = {}
+                int_fields = (
+                    "hi_oktas", "hi_top", "hi_base",
+                    "lo_oktas", "lo_top", "lo_base",
+                    "cb_oktas", "cb_top", "cb_base",
+                    "turb_severity", "turb_top", "turb_base",
+                    "mb_mode", "mb_chance", "mb_outflow",
+                    "inv_top", "inv_tmp",
+                    "wind_dir", "wind_spd", "wind_gust", "wind_var",
+                    "precip", "vis_m", "surf_temp",
+                )
+                for field in int_fields:
+                    if field in data:
+                        cmd[field] = int(data[field])
+                if "qnh_hpa" in data:
+                    cmd["qnh_hpa"] = float(data["qnh_hpa"])
+                cmd["inv_on"] = "inv_on" in data
+                if cmd:
+                    line = f"addon=FRANKENWEATHER:MANUALWXCOMMAND:{json.dumps(cmd)}"
+                    await router.send_to_upstream(line)
+                    await router.client_broadcast(line)
+                    await asyncio.sleep(1)
+                raise web.HTTPFound('/weather/manual')
+
+            @routes.post('/api/weather/manual/copy_zone')
+            async def handle_weather_manual_copy(request):
+                from frankenrouter import routercache as _rc  # pylint: disable=import-outside-toplevel,no-name-in-module
+                data = await request.post()
+                try:
+                    zone_num = int(data.get('zone', '1'))
+                except (ValueError, TypeError):
+                    zone_num = 1
+                wx_key = router.variables.get_keyword_for_name(f'Wx{zone_num}') or f'Wx{zone_num}'
+                try:
+                    wx_str = router.cache.get_value(wx_key)
+                except _rc.RouterCacheException:
+                    wx_str = None
+                if wx_str:
+                    cmd = _wx_string_to_manual_params(wx_str)
+                    if cmd:
+                        line = f"addon=FRANKENWEATHER:MANUALWXCOMMAND:{json.dumps(cmd)}"
+                        await router.send_to_upstream(line)
+                        await router.client_broadcast(line)
+                        await asyncio.sleep(1)
+                raise web.HTTPFound('/weather/manual')
+
             @routes.post('/api/weather/turbulence')
-            async def handle_weather_turb_post(request):
+            async def handle_weather_turb_post(request):  # pylint: disable=too-many-branches
                 data = await request.post()
                 cmd = {}
                 if 'enabled' in data:
                     cmd['enabled'] = data['enabled'].lower() == 'true'
+                if 'manual_turb_enabled' in data:
+                    cmd['manual_turb_enabled'] = data['manual_turb_enabled'].lower() == 'true'
+                if 'manual_turb_kind' in data:
+                    cmd['manual_turb_kind'] = str(data['manual_turb_kind'])
+                if 'manual_turb_intensity_pct' in data:
+                    cmd['manual_turb_intensity'] = int(data['manual_turb_intensity_pct']) / 100.0
                 if 'intensity_bias' in data:
                     cmd['intensity_bias'] = int(data['intensity_bias'])
                 if 'lateral_size_bias' in data:
@@ -2706,7 +3229,7 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
             async def handle_weather_mode(request):
                 data = await request.post()
                 new_mode = str(data.get('mode', ''))
-                if new_mode not in ('enabled', 'paused', 'disabled'):
+                if new_mode not in ('enabled', 'paused', 'disabled', 'manual'):
                     return web.Response(text="Invalid mode", status=400)
                 cmd = f'{{"mode":"{new_mode}"}}'
                 line = f"addon=FRANKENWEATHER:COMMAND:{cmd}"
