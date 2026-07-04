@@ -1164,6 +1164,7 @@ class Rules():  # pylint: disable=too-many-public-methods
             # unchanged means we behave more like a PSX main server.
             try:
                 if self.router.cache.get_value('Qi198') == int(value):
+                    self.router.cache.update('Qi198', value)
                     return self.myreturn(
                         RulesAction.UPSTREAM_ONLY,
                         RulesCode.KEYVALUE_FILTERED_INGRESS_SILENT,
