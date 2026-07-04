@@ -562,7 +562,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         )
         pilot_flying = self.sharedinfo.get('pilot_flying_simulator', 'unknown')
         own_sim = self.config.identity.simulator
-        fc_filter_on = pilot_flying not in ('NO_CONTROL_LOCKS', own_sim)
+        fc_filter_on = (self.config.identity.type != 'master' and
+                        pilot_flying not in ('NO_CONTROL_LOCKS', own_sim))
         self.logger.info(
             "Filters in this router: elevation=%s, traffic=%s, flight controls=%s",
             "on" if self.filter_elevation else "off",
@@ -1238,12 +1239,15 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
                 # Enable elevation and traffic filter so we don't accidentally
                 # leak data upstream. Especially the elevation injections can be
-                # troublesome (aircraft might jump when a slave sim connections
+                # troublesome (aircraft might jump when a slave sim connects
                 # if that slavesim manages to send a Qi198 to the master sim.
-                self.logger.info("Enabling elevation filter")
-                self.filter_elevation = True
-                self.logger.info("Enabling traffic filter")
-                self.filter_traffic = True
+                # Master sim routers never enable these filters since they must
+                # always be able to receive and forward elevation/traffic data.
+                if self.config.identity.type != 'master':
+                    self.logger.info("Enabling elevation filter")
+                    self.filter_elevation = True
+                    self.logger.info("Enabling traffic filter")
+                    self.filter_traffic = True
 
                 if self.config.upstream.password:
                     # assume upstream is frankenrouter if we use --password
