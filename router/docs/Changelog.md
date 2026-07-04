@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-07-04: version 1.3.8
+
+- **Event log.** The router now maintains a log of significant in-flight
+  events, written to a file alongside the router log and viewable live in
+  the web UI under *Util > Event log*. Events include changes to MCP window
+  content, PSX human pilot settings, and shared cockpit state transitions.
+- **Fix: master sim router elevation filter causing PSX to use built-in
+  elevation database.** When a slave sim was stationary the Qi198 value
+  sent by its MSFS Router did not change, causing every received Qi198 on
+  the master router to take the "send upstream only" code path in the
+  rules engine. That path forwarded the value to PSX but did not update
+  the router cache age for Qi198. After 60 seconds the housekeeping check
+  concluded no elevation was being received and sent `Qi198=-999999` to
+  PSX, switching it back to its internal elevation database. The cache is
+  now updated on every received Qi198 regardless of whether the value
+  changed, keeping the housekeeping check satisfied.
+- **Fix: master sim router incorrectly enabling elevation, traffic and
+  flight control filters on upstream connect.** All router types enabled
+  these filters on every upstream reconnect. Master sim routers must never
+  block elevation or traffic data from reaching PSX, so the filter enable
+  is now skipped for `type = master` routers. The flight control filter
+  status display also now always shows `off` for master routers.
+
 ## 2026-06-30: version 1.3.7
 
 - **Hold client connections until upstream is ready (default on).** The
