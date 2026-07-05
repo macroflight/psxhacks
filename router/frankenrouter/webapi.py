@@ -124,18 +124,13 @@ _INDEX_PAGE = (
     '{critical_errors}'
     '<div class="card {upstream_class}">\n'
     '<table>\n'
+    '<tr><td>Router type</td>'
+    '<td class="val">{router_type}</td></tr>\n'
     '<tr><td>Upstream</td>'
     '<td class="val">{upstream_label}</td></tr>\n'
     '<tr><td>Connection</td>'
     '<td class="{upstream_class}">{upstream_status}</td></tr>\n'
-    '<tr><td>Elevation master</td>'
-    '<td class="{elevation_source_class}">{elevation_source}</td></tr>\n'
-    '<tr><td>Traffic master</td>'
-    '<td class="{traffic_source_class}">{traffic_source}</td></tr>\n'
-    '<tr><td>Pilot flying</td>'
-    '<td class="{pilot_flying_class}">{pilot_flying}</td></tr>\n'
-    '<tr><td>Connected simulators</td>'
-    '<td class="val">{connected_sims}</td></tr>\n'
+    '{shared_cockpit_rows}'
     '</table>\n'
     '</div>\n'
     '{change_upstream_button}'
@@ -968,7 +963,7 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
             routes = web.RouteTableDef()
 
             @routes.get('/')
-            async def handle_web(_):
+            async def handle_web(_):  # pylint: disable=too-many-locals
                 connected = router.upstream is not None
                 host = router.config.upstream.host
                 port = router.config.upstream.port
@@ -1028,36 +1023,23 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     '</ul>\n</div>\n'
                     if errors else ''
                 )
-                data = {
-                    'rest_api_color_scheme': router.config.listen.rest_api_color_scheme,
-                    'this_sim': router.config.identity.simulator,
-                    'upstream_label': upstream_label,
-                    'upstream_status': (
-                        router.upstream.access_level.capitalize()
-                        if connected else 'Not connected'),
-                    'upstream_class': (
-                        'ok' if connected and (
-                            router.upstream.access_level == 'crew' or
-                            router.config.identity.type == 'master')
-                        else 'warn'),
-                    'elevation_source': (
-                        elevation_source + ' (this sim)'
-                        if elevation_source == own_sim else elevation_source),
-                    'elevation_source_class': (
-                        'warn' if elevation_source == 'NOSIM' else 'ok'),
-                    'traffic_source': (
-                        traffic_source + ' (this sim)'
-                        if traffic_source == own_sim else traffic_source),
-                    'traffic_source_class': (
-                        'warn' if traffic_source == 'NOSIM' else 'ok'),
-                    'pilot_flying': (
-                        pilot_flying + ' (this sim)' if pilot_flying == own_sim
-                        else pilot_flying),
-                    'pilot_flying_class': (
-                        'ok' if pilot_flying == own_sim
-                        else 'warn' if pilot_flying == 'ALL_CONTROL_LOCKS'
-                        else 'val'),
-                    'connected_sims': ', '.join(
+                identity_type = router.config.identity.type
+                is_standalone = identity_type == 'standalone'
+                if is_standalone:
+                    shared_cockpit_rows = ''
+                else:
+                    elev_disp = (elevation_source + ' (this sim)'
+                                 if elevation_source == own_sim else elevation_source)
+                    elev_cls = 'warn' if elevation_source == 'NOSIM' else 'ok'
+                    traf_disp = (traffic_source + ' (this sim)'
+                                 if traffic_source == own_sim else traffic_source)
+                    traf_cls = 'warn' if traffic_source == 'NOSIM' else 'ok'
+                    pf_disp = (pilot_flying + ' (this sim)'
+                               if pilot_flying == own_sim else pilot_flying)
+                    pf_cls = ('ok' if pilot_flying == own_sim
+                              else 'warn' if pilot_flying == 'ALL_CONTROL_LOCKS'
+                              else 'val')
+                    connected_sims = ', '.join(
                         f"{s} (observer)" if any(
                             i.get('observer_mode')
                             for i in router.routerinfo.values()
@@ -1068,7 +1050,32 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                             for i in router.routerinfo.values()
                             if 'simulator_name' in i
                         })
-                    ) or 'unknown',
+                    ) or 'unknown'
+                    shared_cockpit_rows = (
+                        f'<tr><td>Elevation master</td>'
+                        f'<td class="{elev_cls}">{elev_disp}</td></tr>\n'
+                        f'<tr><td>Traffic master</td>'
+                        f'<td class="{traf_cls}">{traf_disp}</td></tr>\n'
+                        f'<tr><td>Pilot flying</td>'
+                        f'<td class="{pf_cls}">{pf_disp}</td></tr>\n'
+                        f'<tr><td>Connected simulators</td>'
+                        f'<td class="val">{connected_sims}</td></tr>\n'
+                    )
+                data = {
+                    'rest_api_color_scheme': router.config.listen.rest_api_color_scheme,
+                    'this_sim': own_sim,
+                    'router_type': identity_type,
+                    'upstream_label': upstream_label,
+                    'upstream_status': (
+                        'Connected' if connected and identity_type in ('master', 'standalone')
+                        else router.upstream.access_level.capitalize() if connected
+                        else 'Not connected'),
+                    'upstream_class': (
+                        'ok' if connected and (
+                            router.upstream.access_level == 'crew' or
+                            identity_type in ('master', 'standalone'))
+                        else 'warn'),
+                    'shared_cockpit_rows': shared_cockpit_rows,
                     'master_buttons': master_buttons,
                     'critical_errors': errors_html,
                     'observer_mode_notice': (
@@ -1084,7 +1091,7 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                         '<a href="/api/observermode/disable" class="btn btn-green">'
                         'Disable observer mode</a>\n'
                         if router.observer_mode else
-                        '' if router.config.identity.type == 'master' else
+                        '' if identity_type != 'slave' else
                         '<a href="/api/observermode/enable" class="btn btn-amber">'
                         'Enable read-only observer mode</a>\n'
                     ),

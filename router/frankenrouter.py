@@ -1241,9 +1241,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 # leak data upstream. Especially the elevation injections can be
                 # troublesome (aircraft might jump when a slave sim connects
                 # if that slavesim manages to send a Qi198 to the master sim.
-                # Master sim routers never enable these filters since they must
-                # always be able to receive and forward elevation/traffic data.
-                if self.config.identity.type != 'master':
+                # Master and standalone routers never enable these filters since
+                # they must always be able to receive and forward elevation/traffic data.
+                if self.config.identity.type not in ('master', 'standalone'):
                     self.logger.info("Enabling elevation filter")
                     self.filter_elevation = True
                     self.logger.info("Enabling traffic filter")
@@ -2231,6 +2231,28 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.filter_traffic = False
                     self.status_display_requested = True
 
+    def _housekeeping_check_router_type(self):
+        """Enforce router type consistency once upstream identity is known.
+
+        If the upstream has identified itself as a frankenrouter, this router
+        is a slave.  Update type from 'unknown' to 'slave', or shut down if
+        the configured type is incompatible (master/standalone cannot have a
+        frankenrouter upstream).
+        """
+        if not self.is_upstream_connected() or not self.upstream.is_frankenrouter:
+            return
+        if self.config.identity.type in ('unknown', 'slave'):
+            if self.config.identity.type == 'unknown':
+                self.logger.info(
+                    "Upstream is a frankenrouter; setting identity.type to 'slave'")
+                self.config.identity.type = 'slave'
+                self.status_display_requested = True
+        else:
+            raise SystemExit(
+                f"Upstream is a frankenrouter but identity.type is "
+                f"'{self.config.identity.type}' — expected 'slave' or 'unknown'. "
+                f"Check your config file.")
+
     async def _housekeeping_enable_psx_elevation_database(self):
         """Switch back to PSX's internal elevation database.
 
@@ -2496,6 +2518,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         self.cache.write_to_file()
 
                     # Call housekeeping functions
+                    self._housekeeping_check_router_type()
                     self._housekeeping_disable_filters_if_standalone()
                     await self._housekeeping_enable_psx_elevation_database()
                     await self._housekeeping_enable_master_caution()
@@ -3357,6 +3380,11 @@ shared cockpit master sim.
         # Other things we need to set based on the config
         if self.config.listen.rest_api_port is None:
             self.subsystems['REST API']['start'] = False
+
+        # Master and standalone routers never filter elevation, traffic, or flight controls.
+        if self.config.identity.type in ('master', 'standalone'):
+            self.filter_elevation = False
+            self.filter_traffic = False
 
         # Get information from Variables.txt
         self.variables = variables.Variables(self.config, vfilepath=self.config.psx.variables)

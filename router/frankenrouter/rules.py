@@ -1080,9 +1080,9 @@ class Rules():  # pylint: disable=too-many-public-methods
         #
 
         # Ingress filter: flight controls if this is a slave sim router.
-        # Master sim routers never filter flight controls.
+        # Master and standalone routers never filter flight controls.
         if (self.router.get_router_type() == 'slave' and
-                self.router.config.identity.type != 'master'):
+                self.router.config.identity.type not in ('master', 'standalone')):
             if not self.sender.upstream and key in FLIGHT_CONTROL_INPUT_KEYWORDS:
                 self.logger.debug("FLIGHT CONTROL INPUT: %s", key)
                 flying = self.router.sharedinfo["pilot_flying_simulator"]
