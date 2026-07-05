@@ -910,6 +910,16 @@ class RouterFWContext:
         """Return epoch of last TURBSTATE receive."""
         return self._router.frankenweather_turbstate_received_at
 
+    @property
+    def fw_windstate(self):
+        """Return cached WINDSTATE dict."""
+        return self._router.frankenweather_windstate
+
+    @property
+    def fw_windstate_received_at(self):
+        """Return epoch of last WINDSTATE receive."""
+        return self._router.frankenweather_windstate_received_at
+
     def cache_get(self, name):
         """Return a PSX variable value by name, or None if absent."""
         from frankenrouter import routercache  # pylint: disable=import-outside-toplevel

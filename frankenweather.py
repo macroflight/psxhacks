@@ -65,6 +65,55 @@ _OM_VARS = (
     "wind_speed_10m,wind_direction_10m,wind_gusts_10m,visibility"
 )
 
+# Enroute wind importer: fetch Open-Meteo pressure-level wind/temperature for
+# each not-yet-passed route waypoint and inject it into WxCorridorTxt as a
+# fresh Format-A corridor, so PSX's enroute wind keeps drifting with reality
+# even if the crew never requests a new datalink wind uplink.
+_ENROUTE_FETCH_INTERVAL_S = 3600.0     # background refresh cadence ("hourly")
+# Target flight levels (ft) for the generated corridor, each mapped to the
+# nearest Open-Meteo standard pressure level below. The PSX NG FMC manual
+# titles this corridor format "Format A — 6 wind records per leg": PSX's own
+# reader expects exactly this many columns, not merely "up to" this many, so
+# this tuple's length is load-bearing, not just a starting default.
+_ENROUTE_FL_LIST_FT = (10000, 18000, 24000, 30000, 34000, 39000)
+# Bounds for a flight-level list to be considered safe to build a Format-A
+# corridor with — reusing the flight plan's captured levels is a nicety, but
+# generating a structurally valid corridor always takes precedence. Format A
+# needs *exactly* len(_ENROUTE_FL_LIST_FT) columns: a captured snapshot
+# spanning a sliding multi-level window (e.g. a Format-E flight plan with a
+# different 4-level window per climb/cruise/descent segment) unions to some
+# other count across all its waypoints, which PSX has rejected/malformed
+# (e.g. "below 1000ft minimum, 0ft" from a misparsed header; a 9-column
+# corridor built from such a union) — such lists are discarded in favor of
+# the default rather than sent as-is.
+_FL_LIST_MIN_FT = 1000
+_FL_LIST_MAX_FT = 60000
+_FL_LIST_LEN = len(_ENROUTE_FL_LIST_FT)
+
+
+def _valid_fl_list(levels: list) -> bool:
+    """Return True if a flight-level list is safe to build a Format-A corridor with."""
+    if len(levels) != _FL_LIST_LEN:
+        return False
+    return all(_FL_LIST_MIN_FT <= fl <= _FL_LIST_MAX_FT for fl in levels)
+
+
+# Open-Meteo standard pressure levels (hPa) → approximate ISA altitude (ft).
+# Used to pick, for each target flight level above, the closest hPa level to
+# request temperature/wind for.
+_OM_PRESSURE_LEVELS_FT = {
+    1000: 364, 975: 1266, 950: 1773, 925: 2299, 900: 2844, 850: 4781,
+    800: 6562, 700: 9882, 600: 13801, 500: 18289, 400: 23574, 300: 30065,
+    250: 33999, 200: 38662, 150: 44647, 100: 53083, 70: 60663, 50: 68000,
+    30: 77000,
+}
+
+
+def _nearest_om_hpa(target_ft: float) -> int:
+    """Return the Open-Meteo pressure level (hPa) whose ISA altitude is closest to target_ft."""
+    return min(_OM_PRESSURE_LEVELS_FT, key=lambda hpa: abs(_OM_PRESSURE_LEVELS_FT[hpa] - target_ft))
+
+
 _UCAR_STATIONS_URL = "https://weather.rap.ucar.edu/surface/stations.txt"
 _STATIONS_CACHE = os.path.join(os.path.expanduser("~"), ".cache", "frankenweather", "stations.txt")
 _VATSIM_ALL_URL = "https://metar.vatsim.net/all"
@@ -177,6 +226,75 @@ def get_airports(url: str, cache_path: str) -> tuple:
     with open(cache_path, "w", encoding="latin-1") as fh:
         fh.write(text)
     return _parse_airports_lines(text.splitlines()), url
+
+
+# ---------------------------------------------------------------------------
+# FMC route waypoint parsing (mirrors frankenpush.py's _parse_route_waypoints
+# and psccfc/connector/frdp.py — kept in sync by hand)
+# ---------------------------------------------------------------------------
+
+_FMC_WAYPOINT_PREFIX_LEN = 10
+_FMC_WAYPOINT_SENTINEL_LATLON = "9.0/9.0"
+
+# Field 1 of an FmcRte entry tags the waypoint with whatever it's "on": an
+# airway/track identifier for a plain enroute leg (e.g. "N261B", "P2", or a
+# North Atlantic Track "NATW"), or a SID/STAR/approach construct name for a
+# terminal-procedure leg (e.g. "CELTK7", "SIRI1H", "APPR_TRANS", "ILS_27L",
+# "MISSED_APPR"). Airway/track identifiers always lead with 1-2 letters then
+# digits (NAT tracks are the sole all-letter exception); procedure names lead
+# with a longer alphabetic fix name before any digit — that's the reliable
+# split, since plenty of legitimate enroute fixes (e.g. NAT-track waypoints)
+# would otherwise look identical to STAR fixes by name alone.
+_AIRWAY_TAG_RE = re.compile(r'[A-Z]{1,2}\d{1,4}[A-Z]?')
+_NAT_TRACK_TAG_RE = re.compile(r'NAT[A-Z]')
+
+
+def _is_airway_or_track_tag(tag: str) -> bool:
+    """Return True if an FmcRte field-1 tag looks like an airway/track id, not a procedure name."""
+    return bool(_AIRWAY_TAG_RE.fullmatch(tag) or _NAT_TRACK_TAG_RE.fullmatch(tag))
+
+
+def _parse_fmc_route_waypoints(route: str) -> list:
+    """Extract [(name, lat_deg, lon_deg), ...] entries from a PSX FmcRte string.
+
+    Waypoints tagged with a SID/STAR/approach procedure name (see
+    _is_airway_or_track_tag) are excluded — this also transparently covers
+    every "("-prefixed pseudo-waypoint (top of descent, intercepts,
+    runway-relative markers, ...), since those are always procedure-tagged,
+    and real dispatch wind corridors never cover SID/STAR/approach construct
+    fixes in the first place.
+    """
+    if not route or "#" not in route:
+        return []
+    _header, _sep, body = route.partition("#")
+    waypoints = []
+    for entry in body.split(";"):
+        if not entry:
+            continue
+        fields = entry.split("'")
+        if len(fields) < 4:
+            continue
+        if fields[1] and not _is_airway_or_track_tag(fields[1]):
+            continue  # part of a SID/STAR/approach procedure — skip
+        name = fields[0][_FMC_WAYPOINT_PREFIX_LEN:].strip().upper()
+        latlon = fields[3]
+        if not name or latlon == _FMC_WAYPOINT_SENTINEL_LATLON:
+            continue
+        lat_str, _sep2, lon_str = latlon.partition("/")
+        try:
+            lat_deg = math.degrees(float(lat_str))
+            lon_deg = math.degrees(float(lon_str))
+        except ValueError:
+            continue
+        waypoints.append((name, lat_deg, lon_deg))
+    return waypoints
+
+
+def _is_name_suffix(candidate: tuple, full: list) -> bool:
+    """Return True if `candidate` is a non-empty tail-match of the `full` name sequence."""
+    if not candidate or len(candidate) > len(full):
+        return False
+    return full[len(full) - len(candidate):] == list(candidate)
 
 
 # ---------------------------------------------------------------------------
@@ -790,6 +908,16 @@ class StandaloneFWContext:
         """Return epoch of last TURBSTATE broadcast."""
         return self._fw._web_turbstate_received_at  # pylint: disable=protected-access
 
+    @property
+    def fw_windstate(self):
+        """Return the last-broadcast WINDSTATE dict."""
+        return self._fw._web_windstate  # pylint: disable=protected-access
+
+    @property
+    def fw_windstate_received_at(self):
+        """Return epoch of last WINDSTATE broadcast."""
+        return self._fw._web_windstate_received_at  # pylint: disable=protected-access
+
     def cache_get(self, name):
         """Return a PSX-variable-like value from local frankenweather state."""
         return self._fw._web_cache_get(name)  # pylint: disable=protected-access
@@ -857,6 +985,30 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self.fmc_dep_icao: Optional[str] = None
         self.fmc_dst_icao: Optional[str] = None
         self.fmc_changed_event: asyncio.Event = asyncio.Event()
+
+        # Enroute wind importer (Open-Meteo-driven periodic WxCorridor refresh)
+        # route_waypoints mirrors PSX's live (front-trimmed) FmcRte list;
+        # _enroute_waypoints is our own persistent, index-stable superset for
+        # the whole flight (see _update_fmc_route_waypoints).
+        self.route_waypoints: list = []           # [(name, lat_deg, lon_deg), ...] in route order
+        self._enroute_waypoints: list = []        # persistent per-flight superset, same shape
+        self._enroute_wind_enabled: bool = False   # opt-in; off until enabled from the web UI
+        self._enroute_wind_deviation: int = 30     # Qs497 random wind/OAT deviation, 10-80
+        # Exact text of the last corridor we ourselves sent (MSFS wind sync or
+        # the enroute wind importer) — compared by value, not time, in
+        # _handle_corridor to tell our own echo apart from an external load.
+        self._corridor_last_own_value: Optional[str] = None
+        self._corridor_snapshot_txt: Optional[str] = None
+        self._corridor_snapshot_waypoints: dict = {}   # name → {fl_ft: (dir,spd,oat)}
+        self._waypoint_passed: set = set()             # indices into _enroute_waypoints
+        self._waypoint_om_wind: dict = {}       # _enroute_waypoints index → {fl_ft: (dir,spd,oat)}
+        self._enroute_last_fetch_time: float = 0.0     # epoch
+        self._enroute_next_fetch_time: float = 0.0     # epoch
+        self._enroute_wind_changed_event: asyncio.Event = asyncio.Event()
+        self._enroute_log_path: Optional[str] = None   # fixed per-flight --save-logs base path
+        self._enroute_last_corridor_txt: Optional[str] = None  # last corridor we generated
+        self._web_windstate: Optional[dict] = None
+        self._web_windstate_received_at: float = 0.0
 
         # Parsed TS SIGMETs used to lift WMO/showers CB suppression when CAPE agrees
         self.ts_sigmets: list = []
@@ -1068,7 +1220,191 @@ class Script:  # pylint: disable=too-many-instance-attributes
     def handle_fmc_change(self, _key: str, _value: str) -> None:
         """Update dep/dst airports when FMC route mode or route data changes."""
         self._update_fmc_arpts()
+        self._update_fmc_route_waypoints()
         self.fmc_changed_event.set()
+
+    # ------------------------------------------------------------------
+    # Enroute wind importer — route waypoint tracking
+    # ------------------------------------------------------------------
+
+    def _update_fmc_route_waypoints(self) -> None:
+        """Refresh route_waypoints [(name, lat, lon), ...] from the live FMC route state.
+
+        route_waypoints mirrors PSX's own FmcRte list exactly, which PSX
+        trims from the front as waypoints are passed. _enroute_waypoints is
+        our own persistent superset for the whole flight: waypoints already
+        trimmed by PSX stay in it (marked passed) so the enroute-wind page
+        keeps showing them, instead of disappearing the moment PSX drops them.
+        """
+        if not self.psx:
+            return
+        mode_str = self.psx.get("FmcRteViAcMo") or ""
+        if len(mode_str) < 3 or mode_str[2] not in ('1', '2'):
+            if self.route_waypoints:
+                self.logger.info("FMC: no active route — enroute wind waypoint list cleared")
+                # The FMC route just reset (flight ended) — clear the flight-plan
+                # snapshot; the next flight's first WxCorridor load will recapture
+                # one, and its first corridor update will start a fresh log file.
+                self._corridor_snapshot_txt = None
+                self._corridor_snapshot_waypoints = {}
+            self._set_route_waypoints([])
+            return
+        rte_key = "FmcRte1" if mode_str[2] == '1' else "FmcRte2"
+        rte_str = self.psx.get(rte_key) or ""
+        new_live = _parse_fmc_route_waypoints(rte_str)
+        new_live_names = tuple(w[0] for w in new_live)
+        old_live_names = tuple(w[0] for w in self.route_waypoints)
+        if new_live_names == old_live_names:
+            return
+        self.route_waypoints = new_live
+        persistent_names = [w[0] for w in self._enroute_waypoints]
+        if persistent_names and _is_name_suffix(new_live_names, persistent_names):
+            dropped = set(persistent_names) - set(new_live_names)
+            newly_passed = [
+                i for i, name in enumerate(persistent_names)
+                if name in dropped and i not in self._waypoint_passed
+            ]
+            for i in newly_passed:
+                self._waypoint_passed.add(i)
+                self.logger.info(
+                    "Enroute wind: passed %s — freezing its fetched wind",
+                    self._enroute_waypoints[i][0])
+            if newly_passed:
+                self._enroute_next_fetch_time = 0.0  # refetch the remainder right away
+                self._enroute_wind_changed_event.set()
+            return
+        self.logger.info(
+            "FMC route changed (%d → %d waypoints, not a simple pass-trim) — "
+            "resetting enroute wind fetch state",
+            len(persistent_names), len(new_live_names))
+        self._set_route_waypoints(new_live)
+
+    def _set_route_waypoints(self, waypoints: list) -> None:
+        """Replace both the live and persistent waypoint lists; refetch everything."""
+        self.route_waypoints = waypoints
+        self._enroute_waypoints = list(waypoints)
+        self._waypoint_passed = set()
+        self._waypoint_om_wind = {}
+        self._enroute_next_fetch_time = 0.0  # fetch immediately on the next cycle
+        if not waypoints:
+            self._enroute_log_path = None  # next flight starts a fresh log file
+        self._enroute_wind_changed_event.set()
+
+    def _current_fl_list_ft(self) -> list:
+        """Return the flight levels to use for the generated corridor.
+
+        If the captured flight-plan snapshot parsed successfully, reuse its
+        exact flight levels (the union of levels seen across its waypoints)
+        so the flight-plan-vs-Open-Meteo diff compares the same levels
+        instead of needing to interpolate between two different grids —
+        but only if that list is safe to build a corridor with (see
+        _valid_fl_list). Falls back to a fixed default set otherwise (no
+        snapshot yet, an unsupported/unparseable corridor format, or a
+        parsed level list that looks unsafe) — generating a structurally
+        correct corridor always takes precedence over matching the flight
+        plan's levels.
+        """
+        if self._corridor_snapshot_waypoints:
+            levels = sorted({
+                fl for lvls in self._corridor_snapshot_waypoints.values() for fl in lvls
+            })
+            if _valid_fl_list(levels):
+                return levels
+        return list(_ENROUTE_FL_LIST_FT)
+
+    @staticmethod
+    def _corridor_pretty(corridor_txt: Optional[str]) -> str:
+        """Render a '^'-delimited PSX wind corridor as one section per line, for readability."""
+        if not corridor_txt:
+            return "(none)"
+        return corridor_txt.replace('^', '\n')
+
+    @staticmethod
+    def _fmt_epoch(epoch: Optional[float]) -> str:
+        """Format a Unix epoch as a UTC timestamp string, or 'never' if falsy."""
+        if not epoch:
+            return "never"
+        return datetime.fromtimestamp(epoch, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    @staticmethod
+    def _fmt_wind(w: Optional[dict]) -> str:
+        """Format a {dir_deg, spd_kt, oat_c} dict as e.g. '260/26kt -7C', or '—' if absent."""
+        if not w:
+            return "—"
+        return f"{w['dir_deg']:03.0f}/{w['spd_kt']:.0f}kt {w['oat_c']:+.0f}C"
+
+    @staticmethod
+    def _fmt_diff(d: Optional[dict]) -> str:
+        """Format a diff {dir_deg, spd_kt, oat_c} dict as signed deltas, or '—' if absent."""
+        if not d:
+            return "—"
+        return f"dir{d['dir_deg']:+.0f} spd{d['spd_kt']:+.0f}kt oat{d['oat_c']:+.0f}C"
+
+    def _render_enroute_wind_text(self, state: dict) -> str:
+        """Render the enroute-wind windstate dict as a human-readable text report."""
+        lines = [
+            f"FrankenWeather enroute wind report — {self._fmt_epoch(time.time())}",
+            f"Enroute wind importer enabled: {state['enabled']}",
+            f"Last Open-Meteo fetch: {self._fmt_epoch(state['last_fetch_epoch'])}",
+            f"Next Open-Meteo fetch: {self._fmt_epoch(state['next_fetch_epoch'])}",
+            "",
+        ]
+        if not state["has_snapshot"]:
+            lines.append("No flight-plan wind corridor snapshot captured yet.")
+        elif not state["snapshot_parseable"]:
+            lines.append(
+                "Flight plan wind corridor could not be parsed (unsupported format) — "
+                "no flight-plan-vs-Open-Meteo comparison is available.")
+            lines.append("Raw flight-plan wind corridor:")
+            lines.append(self._corridor_pretty(state.get("snapshot_raw")))
+        else:
+            lines.append(
+                "Per-waypoint flight-plan vs. Open-Meteo wind "
+                "(diff = open-meteo minus flight-plan):")
+            for wp in state["waypoints"]:
+                status = "PASSED" if wp["passed"] else "ahead"
+                lines.append(
+                    f"  {wp['name']:6s} [{status:6s}] lat={wp['lat']:.3f} lon={wp['lon']:.3f}")
+                if not wp["levels"]:
+                    lines.append("      (no wind data yet)")
+                for lvl in wp["levels"]:
+                    lines.append(
+                        f"      FL{lvl['fl_ft'] // 100:03d}: "
+                        f"flight-plan={self._fmt_wind(lvl['flightplan']):18s} "
+                        f"open-meteo={self._fmt_wind(lvl['openmeteo']):18s} "
+                        f"diff={self._fmt_diff(lvl['diff'])}")
+        lines.append("")
+        lines.append("Flight-plan wind corridor (raw, as first captured):")
+        lines.append(self._corridor_pretty(self._corridor_snapshot_txt))
+        lines.append("")
+        lines.append("Last Open-Meteo-generated wind corridor sent to PSX:")
+        lines.append(self._corridor_pretty(self._enroute_last_corridor_txt))
+        return "\n".join(lines)
+
+    def _save_enroute_wind_log(self) -> None:
+        """If --save-logs is set, write a JSON + human-readable enroute wind log per flight.
+
+        Called after every WxCorridor refresh (not just at flight end), so the
+        files stay current throughout the flight — handy for development
+        without waiting for the flight to finish. The base filename is fixed
+        the first time this runs for a given flight and reused for every
+        subsequent write; _set_route_waypoints([]) clears it on flight end so
+        the next flight gets a fresh pair of files.
+        """
+        if not self.args or not self.args.save_logs:
+            return
+        if self._enroute_log_path is None:
+            os.makedirs(self.args.save_logs, exist_ok=True)
+            ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            self._enroute_log_path = os.path.join(self.args.save_logs, f"enroute_wind_{ts}")
+        try:
+            state = self._build_windstate_dict()
+            with open(f"{self._enroute_log_path}.json", "w", encoding="utf-8") as fh:
+                json.dump(state, fh, indent=2)
+            with open(f"{self._enroute_log_path}.txt", "w", encoding="utf-8") as fh:
+                fh.write(self._render_enroute_wind_text(state))
+        except OSError as exc:
+            self.logger.warning("Enroute wind: failed to save log: %s", exc)
 
     def handle_sigmet_change(self, _key: str, value: str) -> None:
         """Re-parse TS SIGMETs when PSX downloads updated SIGMET data."""
@@ -1151,7 +1487,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self._conflict_uuid = recv_uuid
             self._conflict_last_seen = time.monotonic()
 
-    def _handle_fw_command(self, json_str: str) -> None:  # pylint: disable=too-many-branches
+    def _handle_fw_command(self, json_str: str) -> None:  # pylint: disable=too-many-branches,too-many-statements
         """Apply a FRANKENWEATHER:COMMAND message received via PSX addon."""
         try:
             cmd = json.loads(json_str)
@@ -1172,7 +1508,40 @@ class Script:  # pylint: disable=too-many-instance-attributes
         if "msfs_wind_sync" in cmd:
             self._msfs_wind_sync = bool(cmd["msfs_wind_sync"])
             self.logger.info("msfs_wind_sync → %s", self._msfs_wind_sync)
+            if self._msfs_wind_sync and self._enroute_wind_enabled:
+                # The two features both write WxCorridorTxt — mutually exclusive.
+                self._enroute_wind_enabled = False
+                self.logger.info("enroute_wind_enabled → False (disabled by msfs_wind_sync)")
+                self._restore_corridor_snapshot()
             settings_changed = True
+        if "enroute_wind_enabled" in cmd:
+            self._enroute_wind_enabled = bool(cmd["enroute_wind_enabled"])
+            self.logger.info("enroute_wind_enabled → %s", self._enroute_wind_enabled)
+            if self._enroute_wind_enabled:
+                if self._msfs_wind_sync:
+                    self._msfs_wind_sync = False
+                    self.logger.info("msfs_wind_sync → False (disabled by enroute_wind_enabled)")
+                self._enroute_next_fetch_time = 0.0  # fetch right away on enable
+                self._enroute_wind_changed_event.set()
+                self._apply_enroute_wind_qs497()
+            else:
+                self._restore_corridor_snapshot()
+            settings_changed = True
+        if "enroute_wind_deviation" in cmd:
+            try:
+                val = int(cmd["enroute_wind_deviation"])
+            except (TypeError, ValueError):
+                val = None
+            if val in (10, 20, 30, 40, 50, 60, 70, 80):
+                self._enroute_wind_deviation = val
+                self.logger.info("enroute_wind_deviation → %s", val)
+                if self._enroute_wind_enabled:
+                    self._apply_enroute_wind_qs497()
+                settings_changed = True
+            else:
+                self.logger.warning(
+                    "enroute_wind_deviation: invalid value %r ignored",
+                    cmd["enroute_wind_deviation"])
         new_mode = cmd.get("mode")
         if new_mode is None:
             if settings_changed:
@@ -1805,12 +2174,37 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self.logger.critical(traceback.format_exc())
 
     def _handle_corridor(self, _key: str, value: str) -> None:
-        """Cache the current PSX wind corridor text for wind injection."""
+        """Cache the current PSX wind corridor text, and capture flight-plan snapshots.
+
+        Snapshot capture always runs — independent of whether the enroute
+        wind importer is actively enabled — so the flight-plan-vs-Open-Meteo
+        comparison is available as soon as a route is loaded, even before the
+        user opts in to letting FrankenWeather write the corridor. Only the
+        active Open-Meteo fetch/write (enroute_wind_coro) requires opt-in.
+
+        A change is "ours" iff its value exactly matches the last corridor we
+        sent (from MSFS wind sync or the enroute wind importer) — compared by
+        value, not by a time window, since PSX can re-broadcast an unchanged
+        variable well after we sent it (e.g. a periodic full resync), and a
+        short cooldown would then misread our own old write as a fresh
+        flight-plan load. Anything else is treated as external (a situ load
+        or flight-plan import) and captured as the flight-plan snapshot.
+        """
         self._corridor_txt = value
+        if value == self._corridor_last_own_value:
+            return
+        self.logger.info(
+            "Enroute wind: WxCorridor changed externally — capturing flight-plan snapshot")
+        self._corridor_snapshot_txt = value
+        self._corridor_snapshot_waypoints = wind_corridor.extract_waypoint_winds(value)
+        self._waypoint_passed = set()
+        self._waypoint_om_wind = {}
+        self._enroute_next_fetch_time = 0.0
+        self._enroute_wind_changed_event.set()
 
     def _apply_wind_injection(self) -> None:
         """Inject MSFS wind into the PSX wind corridor as a FWIND waypoint."""
-        if not self._msfs_wind_sync:
+        if not self._msfs_wind_sync or self._enroute_wind_enabled:
             return
         corridor = getattr(self, '_corridor_txt', None)
         if not corridor:
@@ -1839,6 +2233,63 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self.psx.send("WxCorridorTxt", new_corridor)
         self._wind_last_encoded = encoded
         self._wind_last_updated = now
+        self._corridor_last_own_value = new_corridor
+
+    def _restore_corridor_snapshot(self) -> None:
+        """Send the captured flight-plan wind corridor back to PSX.
+
+        Called whenever the enroute wind importer turns off (explicitly, or
+        because msfs_wind_sync was re-enabled), so PSX reverts to the
+        original flight-plan data instead of being left with our last
+        generated corridor. The restored value is remembered as our own
+        write so the echoed change isn't mistaken for a fresh external load.
+        """
+        if not self._corridor_snapshot_txt:
+            return
+        self.psx.send("WxCorridorTxt", self._corridor_snapshot_txt)
+        self._corridor_last_own_value = self._corridor_snapshot_txt
+        self._corridor_txt = self._corridor_snapshot_txt
+        self.logger.info("Enroute wind: restored original flight-plan wind corridor")
+
+    def _apply_enroute_wind_qs497(self) -> None:
+        """Ensure Qs497 tells PSX to use the wind corridor, with our chosen deviation level.
+
+        Qs497 is a 3-digit PSX value: the first digit must be '2' for PSX to
+        actually use the wind corridor data; the other two digits (a multiple
+        of 10, 10-80) control how much random wind/OAT deviation PSX applies
+        on top of it, simulating forecast inaccuracy. Re-sent on every corridor
+        refresh (not just once) to keep enforcing it while the importer is on.
+        """
+        if not self.psx_connected:
+            return
+        value = f"2{self._enroute_wind_deviation:02d}"
+        self.psx_send_and_set("Qs497", value)
+
+    def _apply_enroute_wind_injection(self) -> None:
+        """Build a fresh Format-A corridor from route_waypoints + fetched OM wind, and send it.
+
+        route_waypoints (PSX's live, front-trimmed list) is always a tail of
+        _enroute_waypoints (our persistent superset), so live index i maps to
+        persistent index offset+i — that's how _waypoint_om_wind (keyed by
+        persistent index) is looked up here.
+        """
+        if not self.route_waypoints:
+            return
+        offset = len(self._enroute_waypoints) - len(self.route_waypoints)
+        wind_by_live_index = {
+            i: self._waypoint_om_wind.get(offset + i, {})
+            for i in range(len(self.route_waypoints))
+        }
+        new_corridor = wind_corridor.build_corridor_a(
+            self.route_waypoints, self._current_fl_list_ft(), wind_by_live_index)
+        self.psx.send("WxCorridorTxt", new_corridor)
+        self._corridor_last_own_value = new_corridor
+        self._enroute_last_corridor_txt = new_corridor
+        self._apply_enroute_wind_qs497()
+        self.logger.info(
+            "Enroute wind: refreshed WxCorridor for %d waypoint(s) (%d passed)",
+            len(self.route_waypoints), len(self._waypoint_passed))
+        self._save_enroute_wind_log()
 
     def _sigmet_cb_override(self, wx_str: str, pos: tuple,
                             om: dict, zone_label: str) -> str:
@@ -2419,6 +2870,67 @@ class Script:  # pylint: disable=too-many-instance-attributes
             return body or []
         return []
 
+    @staticmethod
+    def _enroute_hpa_levels(fl_list_ft: list) -> list:
+        """Return the sorted unique Open-Meteo pressure levels needed for fl_list_ft."""
+        return sorted({_nearest_om_hpa(fl) for fl in fl_list_ft}, reverse=True)
+
+    async def _fetch_enroute_om_batch(self, targets: list) -> None:  # pylint: disable=too-many-locals
+        """Fetch Open-Meteo pressure-level wind/OAT for each (index, name, lat, lon) target.
+
+        Updates self._waypoint_om_wind[index] with {fl_ft: (dir_deg, spd_kt, oat_c)}
+        for every level in _current_fl_list_ft(), using the nearest Open-Meteo
+        pressure level's hourly forecast for the current UTC hour. A model is
+        pinned explicitly (gfs_seamless) since pressure-level fields are not
+        guaranteed to be populated under the default best-match model blend.
+        """
+        if not targets:
+            return
+        fl_list_ft = self._current_fl_list_ft()
+        hpa_levels = self._enroute_hpa_levels(fl_list_ft)
+        hourly_vars = ",".join(
+            f"{var}_{hpa}hPa"
+            for hpa in hpa_levels
+            for var in ("temperature", "winddirection", "windspeed"))
+        lats = ','.join(f"{t[2]:.4f}" for t in targets)
+        lons = ','.join(f"{max(-180.0, min(180.0, t[3])):.4f}" for t in targets)
+        url = (f"{_OM_URL}?latitude={lats}&longitude={lons}"
+               f"&hourly={hourly_vars}&wind_speed_unit=kn&timezone=UTC"
+               f"&models=gfs_seamless&forecast_days=1")
+        proxies = ({'http': self.args.om_proxy, 'https': self.args.om_proxy}
+                   if self.args.om_proxy else None)
+        loop = asyncio.get_running_loop()
+        try:
+            status, body = await loop.run_in_executor(None, self._om_get_sync, url, proxies)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.warning("Enroute wind: Open-Meteo fetch failed: %s", exc)
+            return
+        if status != 200 or not body:
+            self.logger.warning("Enroute wind: Open-Meteo HTTP %s", status)
+            return
+        if isinstance(body, dict):
+            body = [body]
+        hi = datetime.now(timezone.utc).hour
+        fl_to_hpa = {fl: _nearest_om_hpa(fl) for fl in fl_list_ft}
+        for (idx, name, _lat, _lon), loc in zip(targets, body):
+            hourly = loc.get("hourly") or {}
+            levels = {}
+            for fl, hpa in fl_to_hpa.items():
+                try:
+                    spd = hourly[f"windspeed_{hpa}hPa"][hi]
+                    wdir = hourly[f"winddirection_{hpa}hPa"][hi]
+                    temp = hourly[f"temperature_{hpa}hPa"][hi]
+                except (KeyError, IndexError, TypeError):
+                    continue
+                if spd is None or wdir is None or temp is None:
+                    continue
+                levels[fl] = (float(wdir), float(spd), float(temp))
+            if levels:
+                self._waypoint_om_wind[idx] = levels
+            else:
+                self.logger.warning(
+                    "Enroute wind: no Open-Meteo pressure-level data for %s", name)
+
     # ------------------------------------------------------------------
     # Radar (RainViewer) helpers
     # ------------------------------------------------------------------
@@ -2821,6 +3333,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
             "msfs_in_cloud_sync": self._msfs_in_cloud_sync,
             "msfs_qnh_check": self._msfs_qnh_check,
             "msfs_wind_sync": self._msfs_wind_sync,
+            "enroute_wind_enabled": self._enroute_wind_enabled,
+            "enroute_wind_deviation": self._enroute_wind_deviation,
         }
         wx_auto = self._fw_mode == "disabled" or self._om_unavailable
         arpt_icaos = {self.fmc_dep_icao, self.fmc_dst_icao} - {None}
@@ -2989,6 +3503,120 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
             self.logger.critical(traceback.format_exc())
 
+    @staticmethod
+    def _ang_diff(a_deg: float, b_deg: float) -> float:
+        """Return the shortest signed difference a-b in degrees, in (-180, 180]."""
+        return ((a_deg - b_deg + 180.0) % 360.0) - 180.0
+
+    def _build_windstate_dict(self) -> dict:  # pylint: disable=too-many-locals
+        """Build the enroute-wind status dict: per-waypoint flight-plan vs OM diff, fetch timers."""
+        has_snapshot = self._corridor_snapshot_txt is not None
+        snapshot_parseable = (not has_snapshot) or bool(self._corridor_snapshot_waypoints)
+        waypoints = []
+        for i, (name, lat, lon) in enumerate(self._enroute_waypoints):
+            om_levels = self._waypoint_om_wind.get(i, {})
+            snap_levels = self._corridor_snapshot_waypoints.get(name, {})
+            levels = []
+            for fl in sorted(set(om_levels) | set(snap_levels)):
+                om = om_levels.get(fl)
+                snap = snap_levels.get(fl)
+                diff = None
+                if om is not None and snap is not None:
+                    diff = {
+                        "dir_deg": round(self._ang_diff(om[0], snap[0]), 1),
+                        "spd_kt": round(om[1] - snap[1], 1),
+                        "oat_c": round(om[2] - snap[2], 1),
+                    }
+                levels.append({
+                    "fl_ft": fl,
+                    "flightplan": ({"dir_deg": snap[0], "spd_kt": snap[1], "oat_c": snap[2]}
+                                   if snap else None),
+                    "openmeteo": ({"dir_deg": om[0], "spd_kt": om[1], "oat_c": om[2]}
+                                  if om else None),
+                    "diff": diff,
+                })
+            waypoints.append({
+                "name": name,
+                "lat": round(lat, 4),
+                "lon": round(lon, 4),
+                "passed": i in self._waypoint_passed,
+                "levels": levels,
+            })
+        return {
+            "enabled": self._enroute_wind_enabled,
+            "deviation": self._enroute_wind_deviation,
+            "has_snapshot": has_snapshot,
+            "snapshot_parseable": snapshot_parseable,
+            "snapshot_raw": (self._corridor_snapshot_txt
+                             if has_snapshot and not snapshot_parseable else None),
+            "waypoints": waypoints,
+            "last_fetch_epoch": self._enroute_last_fetch_time or None,
+            "next_fetch_epoch": self._enroute_next_fetch_time or None,
+        }
+
+    def _build_windstate_message(self) -> str:
+        """Build the FRANKENWEATHER:WINDSTATE:<uuid>:<json> addon message payload."""
+        state = self._build_windstate_dict()
+        self._web_windstate = state
+        self._web_windstate_received_at = time.time()
+        payload = json.dumps(state, separators=(',', ':'))
+        return f"FRANKENWEATHER:WINDSTATE:{self._instance_uuid}:{payload}"
+
+    async def windstate_broadcast_coro(self) -> None:
+        """Broadcast WINDSTATE to the PSX network when enroute wind state changes."""
+        myname = inspect.currentframe().f_code.co_name
+        try:
+            self.logger.debug("Starting %s", myname)
+            while True:
+                try:
+                    await asyncio.wait_for(self._enroute_wind_changed_event.wait(), timeout=60.0)
+                except asyncio.TimeoutError:
+                    pass
+                self._enroute_wind_changed_event.clear()
+                if not self.psx_connected:
+                    continue
+                if not self._enroute_wind_enabled and not self.route_waypoints:
+                    continue
+                msg = self._build_windstate_message()
+                self.psx.send("addon", msg)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
+            self.logger.critical(traceback.format_exc())
+
+    async def enroute_wind_coro(self) -> None:
+        """Periodically fetch Open-Meteo enroute wind and refresh PSX's WxCorridor.
+
+        Refetches every _ENROUTE_FETCH_INTERVAL_S ("hourly" background drift),
+        plus immediately whenever the waypoint list changes or a waypoint is
+        newly passed (both set _enroute_next_fetch_time to 0). Opt-in via
+        _enroute_wind_enabled, and mutually exclusive with MSFS wind sync.
+        """
+        myname = inspect.currentframe().f_code.co_name
+        try:
+            self.logger.debug("Starting %s", myname)
+            while True:
+                await asyncio.sleep(15.0)
+                if not self._enroute_wind_enabled or not self.psx_connected:
+                    continue
+                if not self._enroute_waypoints:
+                    continue
+                if time.time() < self._enroute_next_fetch_time:
+                    continue
+                targets = [
+                    (i, name, lat, lon)
+                    for i, (name, lat, lon) in enumerate(self._enroute_waypoints)
+                    if i not in self._waypoint_passed
+                ]
+                await self._fetch_enroute_om_batch(targets)
+                self._apply_enroute_wind_injection()
+                now = time.time()
+                self._enroute_last_fetch_time = now
+                self._enroute_next_fetch_time = now + _ENROUTE_FETCH_INTERVAL_S
+                self._enroute_wind_changed_event.set()
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
+            self.logger.critical(traceback.format_exc())
+
     async def get_psx_connection_coro(self) -> None:
         """Maintain PSX connection."""
         myname = inspect.currentframe().f_code.co_name
@@ -3074,7 +3702,9 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 coros = [
                     ("PSXConnection", self.get_psx_connection_coro),
                     ("WeatherUpdate", self.weather_update_coro),
+                    ("EnrouteWind", self.enroute_wind_coro),
                     ("StateBroadcast", self.state_broadcast_coro),
+                    ("WindStateBroadcast", self.windstate_broadcast_coro),
                 ]
                 coros += [
                     ("TurbulenceTask", self.turbulence_coro),
@@ -3146,6 +3776,11 @@ class Script:  # pylint: disable=too-many-instance-attributes
         parser.add_argument(
             '--debug', action='store_true',
             help="Log PSX weather changes, every value sent to PSX, and all PSX traffic.")
+        parser.add_argument(
+            '--save-logs', type=str, default=None, metavar='DIR',
+            help="[DEVELOPMENT] Directory to save enroute-wind flight-plan-vs-Open-Meteo "
+                 "diff data to as timestamped JSON, one file per flight, updated on every "
+                 "WxCorridor refresh while the enroute wind importer is enabled.")
 
         parser.add_argument(
             '--turb-config-file', type=str, default=None, metavar='PATH',

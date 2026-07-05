@@ -6,8 +6,10 @@ The page builders accept a context object (ctx) that abstracts state and cache a
 ctx must provide:
   ctx.fw_state            : dict | None   — FrankenWeather STATE payload
   ctx.fw_turbstate        : dict | None   — TURBSTATE payload
+  ctx.fw_windstate        : dict | None   — WINDSTATE payload (enroute wind importer)
   ctx.fw_state_received_at      : float   — epoch of last STATE
   ctx.fw_turbstate_received_at  : float   — epoch of last TURBSTATE
+  ctx.fw_windstate_received_at  : float   — epoch of last WINDSTATE
   ctx.color_scheme        : str           — "dark" or "light"
   ctx.cache_get(name)     -> str | None   — PSX variable lookup by name
   ctx.send_manualwx_cmd(cmd: dict)      -> coroutine
@@ -777,6 +779,10 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
     else:
         qnh_display = None
 
+    enroute_wind_on = bool((state.get("config") or {}).get("enroute_wind_enabled"))
+    enroute_wind_color = '#22c55e' if enroute_wind_on else '#64748b'
+    enroute_wind_label = 'on' if enroute_wind_on else 'off'
+
     side_panel = (
         '<div class="card" style="font-size:0.85em">\n'
         '<table style="width:100%;border-collapse:collapse">\n'
@@ -806,10 +812,14 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
          '<td style="text-align:right">'
          '<b style="color:#64748b">none</b></td></tr>\n'
          if turbstate else '') +
+        ('<tr><td style="color:#94a3b8;padding:0.1em 0.4em 0.1em 0">Enroute wind</td>'
+         '<td style="text-align:right">'
+         f'<b style="color:{enroute_wind_color}">{enroute_wind_label}</b></td></tr>\n') +
         '</table>\n</div>\n'
         '<div style="display:flex;flex-direction:column;gap:0.5em">\n'
         '<a href="/weather/settings" class="btn btn-gray btn-sm">Weather zones</a>\n'
         '<a href="/weather/turbulence" class="btn btn-gray btn-sm">Extra turbulence</a>\n'
+        '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Enroute wind</a>\n'
         '<button class="btn btn-blue btn-sm" onclick="openFeedback()">Feedback</button>\n'
         '</div>\n'
     )
@@ -888,6 +898,7 @@ def _build_weather_settings_page(ctx):  # pylint: disable=too-many-locals,too-ma
             '<div style="margin-left:auto;display:flex;gap:0.5em">'
             '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
             '<a href="/weather/manual" class="btn btn-gray btn-sm">Manual weather</a>'
+            '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Enroute wind</a>'
             '<a href="/weather/settings" class="btn btn-gray btn-sm">Refresh</a>'
             '</div>'
             '</div>\n' +
@@ -1197,6 +1208,7 @@ def _build_weather_manual_page(ctx):  # pylint: disable=too-many-locals,too-many
             '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
             '<a href="/weather/settings" class="btn btn-gray btn-sm">Zone settings</a>'
             '<a href="/weather/turbulence" class="btn btn-gray btn-sm">Turbulence</a>'
+            '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Enroute wind</a>'
             '<a href="/weather/manual" class="btn btn-gray btn-sm">Refresh</a>'
             '</div>'
             '</div>\n' +
@@ -1474,6 +1486,7 @@ def _build_weather_turb_page(ctx):  # pylint: disable=too-many-locals,too-many-b
             '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
             '<a href="/weather/manual" class="btn btn-gray btn-sm">Manual weather</a>'
             '<a href="/weather/settings" class="btn btn-gray btn-sm">Weather zones</a>'
+            '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Enroute wind</a>'
             '</div>'
             '</div>\n' +
             body +
@@ -1791,6 +1804,161 @@ def _build_weather_turb_page(ctx):  # pylint: disable=too-many-locals,too-many-b
     return _page(body)
 
 
+def _fmt_relative_epoch(now: float, epoch) -> str:
+    """Format an epoch relative to now as e.g. '12m ago' / 'in 34m', or 'never'/'—'."""
+    if not epoch:
+        return "never"
+    delta = epoch - now
+    mins = abs(delta) // 60
+    secs = abs(delta) % 60
+    span = f'{int(mins)}m{int(secs):02d}s' if mins else f'{int(secs)}s'
+    return f'{span} ago' if delta <= 0 else f'in {span}'
+
+
+def _build_weather_enroute_wind_page(ctx):  # pylint: disable=too-many-locals,too-many-branches
+    """Render the /weather/enroute-wind page: flight-plan vs. Open-Meteo per-waypoint wind."""
+    color_scheme = ctx.color_scheme
+    windstate = ctx.fw_windstate
+    now = time.time()
+
+    def _page(body):
+        return (
+            '<!DOCTYPE html>\n<html>\n<head>\n'
+            f'<meta name="color-scheme" content="{color_scheme}" />\n' +
+            _COMMON_CSS.format() +
+            '\n<style>body { max-width: 64em; }'
+            'table.ew-table { border-collapse:collapse;width:100%;font-size:0.88em; }'
+            'table.ew-table th { text-align:left;color:#64748b;font-size:0.8em;'
+            'padding:2px 6px;border-bottom:1px solid #2a2f45; }'
+            'table.ew-table td { padding:2px 6px;border-bottom:1px solid #1c2033; }'
+            'tr.ew-passed td { color:#64748b; }'
+            'td.ew-diff-hi { color:#f59e0b;font-weight:600; }'
+            '</style>\n</head>\n<body>\n'
+            '<div class="page-title">'
+            '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
+            '<h1>Enroute wind</h1>'
+            '<div style="margin-left:auto;display:flex;gap:0.5em">'
+            '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
+            '<a href="/weather/manual" class="btn btn-gray btn-sm">Manual weather</a>'
+            '<a href="/weather/settings" class="btn btn-gray btn-sm">Weather zones</a>'
+            '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Refresh</a>'
+            '</div>'
+            '</div>\n' +
+            body +
+            '</body>\n</html>\n'
+        )
+
+    enabled = bool(windstate and windstate.get("enabled"))
+    toggle_label = "Disable" if enabled else "Enable"
+    toggle_class = "btn-red" if enabled else "btn-green"
+    body = (
+        '<p class="note">Periodically fetches Open-Meteo pressure-level wind for each '
+        "upcoming route waypoint and refreshes PSX's enroute wind corridor, so cruise winds "
+        'keep drifting with reality even if the crew never requests a new datalink wind '
+        'uplink. Opt-in, and mutually exclusive with MSFS wind sync (enabling one disables '
+        'the other).</p>\n'
+        '<div class="card" style="display:flex;align-items:center;gap:1.5em;flex-wrap:wrap">'
+        f'<div><span style="color:#94a3b8;font-size:0.85em">Importer</span><br>'
+        f'<b style="color:{"#4ade80" if enabled else "#64748b"}">'
+        f'{"ENABLED" if enabled else "disabled"}</b></div>'
+        f'<form action="/api/weather/enroute-wind/toggle" method="post">'
+        f'<input type="hidden" name="enabled" value="{0 if enabled else 1}">'
+        f'<button type="submit" class="btn {toggle_class} btn-sm">{toggle_label}</button>'
+        f'</form>'
+    )
+    if windstate:
+        last_str = _fmt_relative_epoch(now, windstate.get("last_fetch_epoch"))
+        next_str = _fmt_relative_epoch(now, windstate.get("next_fetch_epoch"))
+        body += (
+            f'<div><span style="color:#94a3b8;font-size:0.85em">Last fetch</span><br>'
+            f'<b>{last_str}</b></div>'
+            f'<div><span style="color:#94a3b8;font-size:0.85em">Next fetch</span><br>'
+            f'<b>{next_str}</b></div>'
+        )
+    body += '</div>\n'
+
+    deviation = (windstate or {}).get("deviation", 30)
+    body += (
+        '<div class="card">'
+        '<div style="display:flex;align-items:center;gap:1em;flex-wrap:wrap">'
+        '<div style="flex:1;min-width:14em">'
+        '<span style="color:#94a3b8;font-size:0.85em">Random wind/OAT deviation (Qs497)</span><br>'
+        '<span style="font-size:0.8em;color:#64748b">Simulates forecast inaccuracy PSX applies '
+        'on top of the corridor data — 10% subtle, 80% large.</span>'
+        '</div>'
+        '<form action="/api/weather/enroute-wind/deviation" method="post" '
+        'style="display:flex;align-items:center;gap:0.75em">'
+        f'<input type="range" name="deviation" min="10" max="80" step="10" value="{deviation}" '
+        'oninput="document.getElementById(\'ew-dev-label\').textContent = this.value + \'%\'">'
+        f'<b id="ew-dev-label" style="min-width:3em;text-align:right">{deviation}%</b>'
+        '<button type="submit" class="btn btn-blue btn-sm">Set</button>'
+        '</form>'
+        '</div>'
+        '</div>\n'
+    )
+
+    if not windstate or not windstate.get("waypoints"):
+        body += (
+            '<div class="card warn"><p style="margin:0">'
+            'No route waypoints yet — load a route into the FMC to begin.</p></div>\n')
+        return _page(body)
+
+    snapshot_unparseable = windstate.get("has_snapshot") and not windstate.get("snapshot_parseable")
+    if snapshot_unparseable:
+        raw_lines = (windstate.get("snapshot_raw") or "").replace('^', '\n')
+        body += (
+            '<div class="card warn">'
+            '<p><b>Flight plan wind corridor could not be parsed</b> '
+            '(unsupported format, or empty) — no per-waypoint comparison is available, '
+            'but the downloaded Open-Meteo wind below is still shown. '
+            'Raw flight-plan wind corridor:</p>'
+            f'<pre style="white-space:pre-wrap;font-size:0.85em;color:#94a3b8;margin:0">'
+            f'{raw_lines}</pre>'
+            '</div>\n')
+
+    if not windstate.get("has_snapshot"):
+        body += (
+            '<div class="card"><p style="margin:0">'
+            'No flight-plan wind corridor snapshot captured yet — this is captured '
+            'automatically the first time PSX loads wind data that FrankenWeather did not '
+            'write itself (e.g. a situ load or route import).</p></div>\n')
+
+    table = (
+        '<table class="ew-table">\n'
+        '<thead><tr><th>Waypoint</th><th>FL</th><th>Flight plan</th>'
+        '<th>Open-Meteo</th><th>Diff</th></tr></thead>\n<tbody>\n'
+    )
+    for wp in windstate["waypoints"]:
+        row_class = ' class="ew-passed"' if wp["passed"] else ''
+        levels = wp["levels"] or [None]
+        for j, lvl in enumerate(levels):
+            name_cell = (f'{wp["name"]}' + (' (passed)' if wp["passed"] else '')) if j == 0 else ''
+            if lvl is None:
+                table += (
+                    f'<tr{row_class}><td>{name_cell}</td><td colspan="4">'
+                    'no wind data yet</td></tr>\n')
+                continue
+            fp = lvl["flightplan"]
+            om = lvl["openmeteo"]
+            diff = lvl["diff"]
+            fp_str = (f'{fp["dir_deg"]:03.0f}°/{fp["spd_kt"]:.0f}kt {fp["oat_c"]:+.0f}°C'
+                      if fp else '—')
+            om_str = (f'{om["dir_deg"]:03.0f}°/{om["spd_kt"]:.0f}kt {om["oat_c"]:+.0f}°C'
+                      if om else '—')
+            if diff:
+                diff_cls = ' class="ew-diff-hi"' if abs(diff["spd_kt"]) >= 15 else ''
+                diff_str = (f'<span{diff_cls}>dir{diff["dir_deg"]:+.0f}° '
+                            f'spd{diff["spd_kt"]:+.0f}kt oat{diff["oat_c"]:+.0f}°C</span>')
+            else:
+                diff_str = '—'
+            table += (
+                f'<tr{row_class}><td>{name_cell}</td><td>FL{lvl["fl_ft"] // 100:03d}</td>'
+                f'<td>{fp_str}</td><td>{om_str}</td><td>{diff_str}</td></tr>\n')
+    table += '</tbody>\n</table>\n'
+    body += table
+    return _page(body)
+
+
 # ---------------------------------------------------------------------------
 # Route registration — call from both router and standalone server
 # ---------------------------------------------------------------------------
@@ -1814,6 +1982,28 @@ def register_weather_routes(routes, ctx):  # pylint: disable=too-many-statements
     @routes.get('/weather/manual')
     async def _weather_manual_get(_):
         return web.Response(text=_build_weather_manual_page(ctx), content_type='text/html')
+
+    @routes.get('/weather/enroute-wind')
+    async def _weather_enroute_wind_get(_):
+        return web.Response(
+            text=_build_weather_enroute_wind_page(ctx), content_type='text/html')
+
+    @routes.post('/api/weather/enroute-wind/toggle')
+    async def _weather_enroute_wind_toggle(request):
+        data = await request.post()
+        enabled = data.get('enabled') == '1'
+        await ctx.send_fw_settings_cmd({"enroute_wind_enabled": enabled})
+        raise web.HTTPFound('/weather/enroute-wind')
+
+    @routes.post('/api/weather/enroute-wind/deviation')
+    async def _weather_enroute_wind_deviation(request):
+        data = await request.post()
+        try:
+            deviation = int(data.get('deviation', 30))
+        except (TypeError, ValueError):
+            deviation = 30
+        await ctx.send_fw_settings_cmd({"enroute_wind_deviation": deviation})
+        raise web.HTTPFound('/weather/enroute-wind')
 
     @routes.post('/api/weather/manual')
     async def _weather_manual_post(request):
