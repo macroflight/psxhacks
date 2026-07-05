@@ -945,6 +945,13 @@ class RouterFWContext:
         await self._router.client_broadcast(line)
         await asyncio.sleep(3)
 
+    async def send_fw_settings_cmd(self, cmd):
+        """Send a FW settings command to PSX and all clients."""
+        line = f"addon=FRANKENWEATHER:COMMAND:{json.dumps(cmd)}"
+        await self._router.send_to_upstream(line)
+        await self._router.client_broadcast(line)
+        await asyncio.sleep(1)
+
 
 class RouterWebAPI:  # pylint: disable=too-few-public-methods
     """Owns the aiohttp application and all REST/HTML route handlers."""
