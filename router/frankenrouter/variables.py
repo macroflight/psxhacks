@@ -44,6 +44,10 @@ SIMEVENTS_QH_IGNORE = frozenset({
     'Qh77', 'Qh78', 'Qh79', 'Qh80',
     # Rudder trim encoder
     'Qh416',
+    # Tiller — continuous axis, not meaningful as a discrete event
+    'Qh426',
+    # SpdBrkLever — handled with state-based logic (see spdbrk_lever_state)
+    'Qh388',
 })
 
 # Qs/Qi/Qd variables to INCLUDE for sim event logging (empty whitelist by default;
@@ -73,6 +77,21 @@ PNF_MODE_BITS = {
 def pnf_mode_labels(value):
     """Return sorted list of active PNF mode feature labels for an integer bitmask."""
     return [label for bit, label in sorted(PNF_MODE_BITS.items()) if value & (1 << bit)]
+
+
+# SpdBrkLever (Qh388) detent positions: 0=stowed, 1-60=armed, ≥61=opened.
+# The ARM position is set to 41 by frankenusb; 61 is the start of the flight range.
+_SPDBRK_ARMED_MAX = 60
+_SPDBRK_FLIGHT_MIN = 61
+
+
+def spdbrk_lever_state(value):
+    """Return 'stowed', 'armed', or 'opened' for an integer SpdBrkLever value."""
+    if value <= 0:
+        return 'stowed'
+    if value <= _SPDBRK_ARMED_MAX:
+        return 'armed'
+    return 'opened'
 
 
 # AFDS (Qs434) FMA mode number → display name.
