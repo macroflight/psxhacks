@@ -87,6 +87,14 @@ Features:
   on the settings page. See [Configuration file](#configuration-file)
   below.
 
+- Open-Meteo responses (zone weather, enroute wind, and the terrain
+  turbulence engine's wind/CAPE fetches) are cached on disk under
+  `~/.cache/frankenweather/` and `~/.cache/frankenturb/`, in addition to
+  the existing in-memory caches. Each cache's on-disk lifetime matches
+  its own existing refresh cadence, so this never serves data staler
+  than a continuously-running instance already would — it only avoids
+  re-fetching identical data across a restart (e.g. during development).
+
 Requires `aiohttp`, `pyproj`, `numpy`, `rasterio`, and `requests`:
 
 ```

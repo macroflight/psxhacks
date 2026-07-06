@@ -1,4 +1,4 @@
-"""Open-Meteo wind profile fetcher with in-memory cache.
+"""Open-Meteo wind profile fetcher with in-memory and on-disk cache.
 
 Fetches multi-level wind (speed, direction, geopotential height) from the
 Open-Meteo free forecast API — no API key required.
@@ -13,11 +13,14 @@ Cache strategy
 A cached entry is served as long as both the position bucket and the time
 bucket match the current request.  On a mismatch the full hourly array for
 the new bucket is fetched and parsed once; subsequent calls within the same
-bucket hit the cache.
+bucket hit the cache. The same (position, time) bucket entries are also
+persisted to disk (see frankenturb.disk_cache), so a process restart within
+the same hour reuses them instead of re-fetching.
 """
 
 import logging
 import math
+import os
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -25,9 +28,21 @@ from typing import Optional
 import numpy as np  # pylint: disable=import-error
 import requests  # pylint: disable=import-error
 
+from ..disk_cache import DiskCache
 from .profile import WindProfile
 
 log = logging.getLogger(__name__)
+
+# Default on-disk cache location — persists across process restarts so a
+# dev inner loop that restarts frankenturb/frankenweather many times a day
+# doesn't re-fetch identical (position, hour) data every time. The disk
+# entry's own max age (below) is generous purely for disk hygiene: the
+# cache key already encodes the hour bucket, so a stale key is simply
+# never looked up again once the hour rolls over — this never lets served
+# data be any staler than the in-memory cache already allows.
+_DEFAULT_CACHE_PATH = os.path.join(
+    os.path.expanduser("~"), ".cache", "frankenturb", "om_wind.json")
+_DISK_CACHE_MAX_AGE_S = 6 * 3600.0
 
 # ---------------------------------------------------------------------------
 # Pressure levels to request — covers surface to above typical cruise levels.
@@ -96,13 +111,48 @@ class WindFetcher:  # pylint: disable=too-few-public-methods
 
     """
 
-    def __init__(self, models: str = "best_match", proxy: Optional[str] = None):
+    def __init__(
+        self,
+        models: str = "best_match",
+        proxy: Optional[str] = None,
+        cache_path: Optional[str] = None,
+    ):
         """Initialize the wind fetcher with the specified model."""
         self._models = models
         self._proxy = proxy
         # Cache: (pos_bucket, time_bucket) → WindProfile
         self._cache: dict[tuple, WindProfile] = {}
+        self._disk_cache = DiskCache(
+            cache_path or _DEFAULT_CACHE_PATH, max_age_s=_DISK_CACHE_MAX_AGE_S)
         self._rate_limit_until: float = 0.0
+
+    @staticmethod
+    def _encode(profile: WindProfile) -> dict:
+        """Encode a WindProfile as a JSON-serializable dict."""
+        return {
+            "lat": profile.lat,
+            "lon": profile.lon,
+            "fetched_at": profile.fetched_at.isoformat(),
+            "valid_at": profile.valid_at.isoformat(),
+            "pressures_hpa": profile.pressures_hpa.tolist(),
+            "altitudes_m": profile.altitudes_m.tolist(),
+            "speeds_kt": profile.speeds_kt.tolist(),
+            "directions_deg": profile.directions_deg.tolist(),
+        }
+
+    @staticmethod
+    def _decode(data: dict) -> WindProfile:
+        """Decode a WindProfile from its JSON-serializable dict form."""
+        return WindProfile(
+            lat=data["lat"],
+            lon=data["lon"],
+            fetched_at=datetime.fromisoformat(data["fetched_at"]),
+            valid_at=datetime.fromisoformat(data["valid_at"]),
+            pressures_hpa=np.array(data["pressures_hpa"], dtype=np.float32),
+            altitudes_m=np.array(data["altitudes_m"], dtype=np.float32),
+            speeds_kt=np.array(data["speeds_kt"], dtype=np.float32),
+            directions_deg=np.array(data["directions_deg"], dtype=np.float32),
+        )
 
     def get(
         self,
@@ -140,6 +190,14 @@ class WindFetcher:  # pylint: disable=too-few-public-methods
             log.debug("Wind cache hit for %s", cache_key)
             return self._cache[cache_key]
 
+        disk_key = f"{pos_key}|{time_key}"
+        disk_hit = self._disk_cache.get(disk_key)
+        if disk_hit is not None:
+            log.debug("Wind disk-cache hit for %s", cache_key)
+            profile = self._decode(disk_hit)
+            self._cache[cache_key] = profile
+            return profile
+
         remaining = self._rate_limit_until - time.monotonic()
         if remaining > 0:
             log.debug("Wind fetch skipped — OM rate limited (%.0fs remaining)", remaining)
@@ -152,6 +210,7 @@ class WindFetcher:  # pylint: disable=too-few-public-methods
         profile = self._fetch(lat, lon, sim_time_utc)
         if profile is not None:
             self._cache[cache_key] = profile
+            self._disk_cache.set(disk_key, self._encode(profile))
             log.info("Wind profile fetched: %s", profile)
 
         return profile

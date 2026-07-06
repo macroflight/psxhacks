@@ -4,11 +4,13 @@ Queries Open-Meteo for surface-level CAPE (J/kg) and Lifted Index (°C) and
 converts them into a TurbulenceState.  CAPE-driven instability produces
 convective turbulence even when no explicit CB is configured in PSX.
 
-Cache strategy mirrors WindFetcher: 1° position bucket, 1-hour time bucket.
+Cache strategy mirrors WindFetcher: 1° position bucket, 1-hour time bucket,
+persisted to disk (see frankenturb.disk_cache) so restarts reuse it.
 """
 
 import logging
 import math
+import os
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -16,6 +18,7 @@ from typing import Optional
 
 import requests  # pylint: disable=import-error
 
+from .disk_cache import DiskCache
 from .turbulence import TurbulenceState
 
 log = logging.getLogger(__name__)
@@ -26,6 +29,13 @@ RATE_LIMIT_BACKOFF_S = 300.0  # pause all fetches after a 429 for this long
 
 CACHE_DEG_GRID = 1.0
 CACHE_HOURS = 1
+
+# Default on-disk cache location — see frankenturb.disk_cache for why a
+# generous max age here is just disk hygiene, not a freshness change: the
+# cache key already encodes the hour bucket.
+_DEFAULT_CACHE_PATH = os.path.join(
+    os.path.expanduser("~"), ".cache", "frankenturb", "om_cape.json")
+_DISK_CACHE_MAX_AGE_S = 6 * 3600.0
 
 # CAPE (J/kg) thresholds for turbulence intensity segments.
 # Raised to avoid over-triggering in regions with moderate convective
@@ -67,12 +77,43 @@ def _time_bucket(dt: datetime) -> tuple[int, int]:
 class CapeFetcher:
     """Fetch and cache CAPE + Lifted Index from Open-Meteo."""
 
-    def __init__(self, models: str = "best_match", proxy: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        models: str = "best_match",
+        proxy: Optional[str] = None,
+        cache_path: Optional[str] = None,
+    ) -> None:
         """Initialise with an empty cache."""
         self._models = models
         self._proxy = proxy
         self._cache: dict[tuple, CapeSample] = {}
+        self._disk_cache = DiskCache(
+            cache_path or _DEFAULT_CACHE_PATH, max_age_s=_DISK_CACHE_MAX_AGE_S)
         self._rate_limit_until: float = 0.0
+
+    @staticmethod
+    def _encode(sample: CapeSample) -> dict:
+        """Encode a CapeSample as a JSON-serializable dict."""
+        return {
+            "lat": sample.lat,
+            "lon": sample.lon,
+            "cape_j_kg": sample.cape_j_kg,
+            "lifted_index_c": sample.lifted_index_c,
+            "showers_mm_h": sample.showers_mm_h,
+            "valid_at": sample.valid_at.isoformat(),
+        }
+
+    @staticmethod
+    def _decode(data: dict) -> CapeSample:
+        """Decode a CapeSample from its JSON-serializable dict form."""
+        return CapeSample(
+            lat=data["lat"],
+            lon=data["lon"],
+            cape_j_kg=data["cape_j_kg"],
+            lifted_index_c=data["lifted_index_c"],
+            showers_mm_h=data["showers_mm_h"],
+            valid_at=datetime.fromisoformat(data["valid_at"]),
+        )
 
     def get(
         self,
@@ -97,6 +138,14 @@ class CapeFetcher:
         if cache_key in self._cache:
             return self._cache[cache_key]
 
+        disk_key = f"{pos_key}|{time_key}"
+        disk_hit = self._disk_cache.get(disk_key)
+        if disk_hit is not None:
+            log.debug("CAPE disk-cache hit for %s", cache_key)
+            sample = self._decode(disk_hit)
+            self._cache[cache_key] = sample
+            return sample
+
         remaining = self._rate_limit_until - time.monotonic()
         if remaining > 0:
             log.debug("CAPE fetch skipped — OM rate limited (%.0fs remaining)", remaining)
@@ -106,6 +155,7 @@ class CapeFetcher:
         sample = self._fetch(lat, lon, sim_time_utc)
         if sample is not None:
             self._cache[cache_key] = sample
+            self._disk_cache.set(disk_key, self._encode(sample))
         return sample
 
     def clear(self) -> None:

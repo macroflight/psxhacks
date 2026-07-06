@@ -44,6 +44,7 @@ from frankenturb import (
 from frankenturb.cb import (
     find_nearest_cb, parse_wx_zone_basic, parse_wx_zone_position, parse_wx_clust,
 )
+from frankenturb.disk_cache import DiskCache
 from fw_cb import (
     WX_DEFAULTS as _WX_DEFAULTS,
     cape_to_cb_oktas as _cape_to_cb_oktas,
@@ -66,6 +67,23 @@ _OM_VARS = (
     "temperature_2m,relative_humidity_2m,weather_code,cloud_cover,pressure_msl,"
     "wind_speed_10m,wind_direction_10m,wind_gusts_10m,visibility"
 )
+
+# On-disk caches for zone-weather and enroute-wind Open-Meteo fetches, so
+# restarting frankenweather during development doesn't have to re-fetch
+# data it already had moments ago. Each cache's max age matches the
+# fetch's own existing refresh cadence (_REFRESH_MAX_S / hourly below), so
+# disk persistence never serves data staler than a continuously-running
+# instance already would — it only helps across restarts.
+_OM_ZONE_CACHE_PATH = os.path.join(
+    os.path.expanduser("~"), ".cache", "frankenweather", "om_zones.json")
+_OM_ENROUTE_CACHE_PATH = os.path.join(
+    os.path.expanduser("~"), ".cache", "frankenweather", "om_enroute.json")
+
+
+def _om_pos_key(lat: float, lon: float) -> str:
+    """Return a stable disk-cache key for an Open-Meteo fetch position."""
+    return f"{lat:.3f},{lon:.3f}"
+
 
 # Enroute wind importer: fetch Open-Meteo pressure-level wind/temperature for
 # each not-yet-passed route waypoint and inject it into WxCorridorTxt as a
@@ -1061,6 +1079,12 @@ class Script:  # pylint: disable=too-many-instance-attributes
         # VATSIM METAR cache: ICAO → raw METAR string
         self.vatsim_cache: dict = {}
         self.vatsim_cache_time = 0.0
+
+        # On-disk Open-Meteo caches — see _OM_ZONE_CACHE_PATH for why the
+        # max age matches each fetch's own existing refresh cadence.
+        self._om_zone_cache = DiskCache(_OM_ZONE_CACHE_PATH, max_age_s=_REFRESH_MAX_S)
+        self._om_enroute_cache = DiskCache(
+            _OM_ENROUTE_CACHE_PATH, max_age_s=_ENROUTE_FETCH_INTERVAL_S)
 
         # Our current desired zone values (zone_num → string)
         self.zone_wx: dict = {}
@@ -3078,7 +3102,19 @@ class Script:  # pylint: disable=too-many-instance-attributes
         return r.status_code, body
 
     async def _fetch_om_batch(self, positions: list) -> list:
-        """Fetch Open-Meteo current weather for all positions. Returns list of dicts."""
+        """Fetch Open-Meteo current weather for all positions. Returns list of dicts.
+
+        Served straight from the on-disk cache when every position already
+        has a still-fresh entry (see _OM_ZONE_CACHE_PATH) — the common case
+        right after a dev restart, when zone positions haven't moved and the
+        cache's max age (matching _REFRESH_MAX_S) hasn't elapsed yet. Any
+        cache miss falls back to fetching fresh data for the whole batch,
+        exactly as before.
+        """
+        cached = [self._om_zone_cache.get(_om_pos_key(p[0], p[1])) for p in positions]
+        if cached and all(c is not None for c in cached):
+            return cached
+
         lats = ','.join(f"{p[0]:.4f}" for p in positions)
         lons = ','.join(
             f"{max(-180.0, min(180.0, p[1])):.4f}" for p in positions)
@@ -3108,7 +3144,10 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 return []
             if isinstance(body, dict):
                 body = [body]
-            return body or []
+            body = body or []
+            for pos, entry in zip(positions, body):
+                self._om_zone_cache.set(_om_pos_key(pos[0], pos[1]), entry)
+            return body
         return []
 
     @staticmethod
@@ -3116,7 +3155,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
         """Return the sorted unique Open-Meteo pressure levels needed for fl_list_ft."""
         return sorted({_nearest_om_hpa(fl) for fl in fl_list_ft}, reverse=True)
 
-    async def _fetch_enroute_om_batch(self, targets: list) -> None:  # pylint: disable=too-many-locals
+    async def _fetch_enroute_om_batch(  # pylint: disable=too-many-locals,too-many-branches
+            self, targets: list) -> None:
         """Fetch Open-Meteo pressure-level wind/OAT for each (index, name, lat, lon) target.
 
         Updates self._waypoint_om_wind[index] with {fl_ft: (dir_deg, spd_kt, oat_c)}
@@ -3124,33 +3164,52 @@ class Script:  # pylint: disable=too-many-instance-attributes
         pressure level's hourly forecast for the current UTC hour. A model is
         pinned explicitly (gfs_seamless) since pressure-level fields are not
         guaranteed to be populated under the default best-match model blend.
+
+        Each target's raw response is served from the on-disk cache when
+        still fresh (see _OM_ENROUTE_CACHE_PATH), keyed by position and the
+        current flight-level set (since that determines which pressure
+        levels were requested) — the common case right after a dev restart.
+        Any cache miss falls back to fetching fresh data for the whole batch.
         """
         if not targets:
             return
         fl_list_ft = self._current_fl_list_ft()
         hpa_levels = self._enroute_hpa_levels(fl_list_ft)
-        hourly_vars = ",".join(
-            f"{var}_{hpa}hPa"
-            for hpa in hpa_levels
-            for var in ("temperature", "winddirection", "windspeed"))
-        lats = ','.join(f"{t[2]:.4f}" for t in targets)
-        lons = ','.join(f"{max(-180.0, min(180.0, t[3])):.4f}" for t in targets)
-        url = (f"{_OM_URL}?latitude={lats}&longitude={lons}"
-               f"&hourly={hourly_vars}&wind_speed_unit=kn&timezone=UTC"
-               f"&models=gfs_seamless&forecast_days=1")
-        proxies = ({'http': self.args.om_proxy, 'https': self.args.om_proxy}
-                   if self.args.om_proxy else None)
-        loop = asyncio.get_running_loop()
-        try:
-            status, body = await loop.run_in_executor(None, self._om_get_sync, url, proxies)
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            self.logger.warning("Enroute wind: Open-Meteo fetch failed: %s", exc)
-            return
-        if status != 200 or not body:
-            self.logger.warning("Enroute wind: Open-Meteo HTTP %s", status)
-            return
-        if isinstance(body, dict):
-            body = [body]
+        levels_sig = "-".join(str(h) for h in hpa_levels)
+
+        def _cache_key(lat: float, lon: float) -> str:
+            return f"{_om_pos_key(lat, lon)}|{levels_sig}"
+
+        cached = [self._om_enroute_cache.get(_cache_key(t[2], t[3])) for t in targets]
+        if cached and all(c is not None for c in cached):
+            body = cached
+        else:
+            hourly_vars = ",".join(
+                f"{var}_{hpa}hPa"
+                for hpa in hpa_levels
+                for var in ("temperature", "winddirection", "windspeed"))
+            lats = ','.join(f"{t[2]:.4f}" for t in targets)
+            lons = ','.join(f"{max(-180.0, min(180.0, t[3])):.4f}" for t in targets)
+            url = (f"{_OM_URL}?latitude={lats}&longitude={lons}"
+                   f"&hourly={hourly_vars}&wind_speed_unit=kn&timezone=UTC"
+                   f"&models=gfs_seamless&forecast_days=1")
+            proxies = ({'http': self.args.om_proxy, 'https': self.args.om_proxy}
+                       if self.args.om_proxy else None)
+            loop = asyncio.get_running_loop()
+            try:
+                status, body = await loop.run_in_executor(
+                    None, self._om_get_sync, url, proxies)
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                self.logger.warning("Enroute wind: Open-Meteo fetch failed: %s", exc)
+                return
+            if status != 200 or not body:
+                self.logger.warning("Enroute wind: Open-Meteo HTTP %s", status)
+                return
+            if isinstance(body, dict):
+                body = [body]
+            for t, loc in zip(targets, body):
+                self._om_enroute_cache.set(_cache_key(t[2], t[3]), loc)
+
         hi = datetime.now(timezone.utc).hour
         fl_to_hpa = {fl: _nearest_om_hpa(fl) for fl in fl_list_ft}
         for (idx, name, _lat, _lon), loc in zip(targets, body):
