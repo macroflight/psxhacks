@@ -3791,7 +3791,55 @@ class Script:  # pylint: disable=too-many-instance-attributes
         parser.add_argument(
             '--web-port', type=int, default=None, metavar='PORT',
             help="Enable standalone web UI on this TCP port (e.g. 8085).")
+
+        # Removed options, kept as accepted-but-ignored so old startup scripts still run;
+        # handle_args() logs a deprecation warning for each one actually passed.
+        parser.add_argument(
+            '--cruise-alt', type=float, default=None, metavar='FT',
+            help="[REMOVED] No longer used.")
+        parser.add_argument(
+            '--arpt-zone-dist', type=float, default=None, metavar='NM',
+            help="[REMOVED] No longer used.")
+        parser.add_argument(
+            '--msfs-in-cloud-sync', action='store_true',
+            help="[REMOVED] Now a runtime toggle on the /weather/settings web page.")
+        parser.add_argument(
+            '--msfs-qnh-check', choices=('CHECK', 'USE'), default=None,
+            help="[REMOVED] Now a runtime toggle on the /weather/settings web page.")
+        parser.add_argument(
+            '--msfs-qnh-check-maxdiff', type=float, default=None, metavar='HPA',
+            help="[REMOVED] No longer used.")
+        parser.add_argument(
+            '--msfs-wind-sync', action='store_true',
+            help="[REMOVED] Now a runtime toggle on the /weather/settings web page.")
+        parser.add_argument(
+            '--disable-psx-weather-updates', action='store_true',
+            help="[REMOVED] No longer supported.")
+        parser.add_argument(
+            '--no-turbulence', action='store_true',
+            help="[REMOVED] The turbulence subsystem can no longer be disabled entirely.")
+        parser.add_argument(
+            '--turb-rate', type=int, default=None, metavar='0-100',
+            help="[REMOVED] No longer used.")
+        parser.add_argument(
+            '--turb-intensity-bias', type=int, default=None, metavar='0-999',
+            help="[REMOVED] No longer used.")
         self.args = parser.parse_args()
+
+    _REMOVED_ARGS = (
+        'cruise_alt', 'arpt_zone_dist', 'msfs_in_cloud_sync', 'msfs_qnh_check',
+        'msfs_qnh_check_maxdiff', 'msfs_wind_sync', 'disable_psx_weather_updates',
+        'no_turbulence', 'turb_rate', 'turb_intensity_bias',
+    )
+
+    def _warn_removed_args(self) -> None:
+        """Log a deprecation warning for each removed CLI option actually passed."""
+        for name in self._REMOVED_ARGS:
+            value = getattr(self.args, name)
+            if value:
+                self.logger.warning(
+                    "--%s is deprecated and no longer has any effect; remove it "
+                    "from your startup script", name.replace('_', '-'))
 
     async def run(self) -> None:
         """Entry point."""
@@ -3805,6 +3853,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self.logger = logging.getLogger(__MYNAME__)
         if self.args.debug:
             self.logger.setLevel(logging.DEBUG)
+        self._warn_removed_args()
 
         if self.args.stations:
             self.airports = load_airports(self.args.stations)
