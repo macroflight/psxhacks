@@ -1350,7 +1350,12 @@ class Script:  # pylint: disable=too-many-instance-attributes
                     "Enroute wind: passed %s — freezing its fetched wind",
                     self._enroute_waypoints[i][0])
             if newly_passed:
-                self._enroute_next_fetch_time = 0.0  # refetch the remainder right away
+                # Just a waypoint being passed — the wind data for every
+                # remaining waypoint is unchanged, so PSX's own corridor is
+                # left in place rather than resent: PSX recalculates when it
+                # receives WxCorridorTxt, and that's pointless work when
+                # nothing about the actual wind data changed. Only update the
+                # UI (so the page can dim the passed waypoint).
                 self._enroute_wind_changed_event.set()
             return
         self.logger.info(
@@ -2432,12 +2437,17 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self.psx_send_and_set("Qs497", value)
 
     def _apply_enroute_wind_injection(self) -> None:
-        """Build a fresh Format-A corridor from route_waypoints + fetched OM wind, and send it.
+        """Build a fresh Format-A corridor from route_waypoints + fetched OM wind.
 
         route_waypoints (PSX's live, front-trimmed list) is always a tail of
         _enroute_waypoints (our persistent superset), so live index i maps to
         persistent index offset+i — that's how _waypoint_om_wind (keyed by
         persistent index) is looked up here.
+
+        Only actually sent to PSX when the built corridor differs from the
+        last one we sent: PSX recalculates on every WxCorridorTxt receipt, so
+        resending identical wind data (e.g. an hourly refetch that happens to
+        return the same forecast) would just cost PSX work for no benefit.
         """
         if not self.route_waypoints:
             return
@@ -2448,13 +2458,16 @@ class Script:  # pylint: disable=too-many-instance-attributes
         }
         new_corridor = wind_corridor.build_corridor_a(
             self.route_waypoints, self._current_fl_list_ft(), wind_by_live_index)
-        self.psx.send("WxCorridorTxt", new_corridor)
-        self._corridor_last_own_value = new_corridor
-        self._enroute_last_corridor_txt = new_corridor
+        if new_corridor != self._enroute_last_corridor_txt:
+            self.psx.send("WxCorridorTxt", new_corridor)
+            self._corridor_last_own_value = new_corridor
+            self._enroute_last_corridor_txt = new_corridor
+            self.logger.info(
+                "Enroute wind: refreshed WxCorridor for %d waypoint(s) (%d passed)",
+                len(self.route_waypoints), len(self._waypoint_passed))
+        else:
+            self.logger.debug("Enroute wind: corridor unchanged, not resending to PSX")
         self._apply_enroute_wind_qs497()
-        self.logger.info(
-            "Enroute wind: refreshed WxCorridor for %d waypoint(s) (%d passed)",
-            len(self.route_waypoints), len(self._waypoint_passed))
         self._save_enroute_wind_log()
 
     def _sigmet_cb_override(self, wx_str: str, pos: tuple,
@@ -3754,10 +3767,18 @@ class Script:  # pylint: disable=too-many-instance-attributes
     async def enroute_wind_coro(self) -> None:
         """Periodically fetch Open-Meteo enroute wind and refresh PSX's WxCorridor.
 
-        Refetches every _ENROUTE_FETCH_INTERVAL_S ("hourly" background drift),
-        plus immediately whenever the waypoint list changes or a waypoint is
-        newly passed (both set _enroute_next_fetch_time to 0). Opt-in via
-        _enroute_wind_enabled, and mutually exclusive with MSFS wind sync.
+        Contacts Open-Meteo every _ENROUTE_FETCH_INTERVAL_S ("hourly" background
+        drift), plus immediately whenever the FMC route genuinely changes — a
+        reroute, not just the aircraft passing a waypoint — since that's the
+        only case where a current, non-excluded waypoint can be missing wind
+        data (_set_route_waypoints resets _enroute_next_fetch_time to 0 for
+        that case). Passing a waypoint alone triggers neither a new OM fetch
+        nor a corridor resend: the wind data for every remaining waypoint is
+        unchanged, so PSX's corridor is simply left in place rather than
+        making PSX recalculate for nothing (_apply_enroute_wind_injection also
+        skips the resend on its own if a refetch happens to return identical
+        data). Opt-in via _enroute_wind_enabled, and mutually exclusive with MSFS
+        wind sync.
         """
         myname = inspect.currentframe().f_code.co_name
         try:

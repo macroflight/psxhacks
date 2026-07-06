@@ -128,8 +128,15 @@ default; opt-in from the `/weather/enroute-wind` web page (or the
 
 - **Fetching.** Once enabled, wind and temperature for the remaining
   waypoints are pulled from Open-Meteo's pressure-level forecast, once
-  an hour in the background and immediately whenever the route changes
-  or a waypoint is newly passed. PSX's Format A always needs exactly 6
+  an hour in the background and immediately whenever the route
+  genuinely changes (a reroute, so a current, non-excluded waypoint may
+  now be missing wind data). Just the aircraft passing a waypoint
+  neither contacts Open-Meteo nor resends the corridor to PSX — the
+  wind data for every remaining waypoint is unchanged, so PSX's
+  existing corridor is left in place rather than making PSX recalculate
+  for no reason. The same dedup applies to the hourly refetch: if it
+  happens to return identical wind data, the corridor isn't resent
+  either. PSX's Format A always needs exactly 6
   flight levels per waypoint, or it may reject the whole corridor: the
   levels used are the flight-plan snapshot's own 6 levels when that
   snapshot is a valid Format-A grid (so the diff compares like-for-like),
