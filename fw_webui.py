@@ -1169,6 +1169,41 @@ def _build_weather_settings_page(ctx):  # pylint: disable=too-many-locals,too-ma
         '</table>\n</div>\n'
     )
 
+    config_file = cfg.get("config_file")
+    config_file_exists = cfg.get("config_file_exists", False)
+    body += '<h2>Config file</h2>\n'
+    if not config_file:
+        body += (
+            '<div class="card warn"><p style="margin:0">No <code>--config-file</code> given '
+            'at startup — settings above cannot be saved or reloaded from disk. Restart '
+            'frankenweather with <code>--config-file PATH</code> to enable this.</p></div>\n'
+        )
+    else:
+        exists_color = '#22c55e' if config_file_exists else '#94a3b8'
+        exists_label = 'exists' if config_file_exists else 'not yet saved'
+        body += (
+            '<div class="card ok">\n<table>\n'
+            f'<tr><td>Path</td><td class="val" style="font-family:monospace">'
+            f'{config_file}</td></tr>\n'
+            f'<tr><td>Status</td><td class="val" style="color:{exists_color}">'
+            f'{exists_label}</td></tr>\n'
+            '</table>\n</div>\n'
+            '<div class="btn-row">\n'
+            '<form action="/api/weather/config/save" method="post" style="display:inline">'
+            '<button type="submit" class="btn btn-green btn-sm" '
+            'title="Write all current settings to the config file">'
+            'Save current settings to file</button></form>\n'
+            '<form action="/api/weather/config/load" method="post" style="display:inline">'
+            '<button type="submit" class="btn btn-blue btn-sm" '
+            'title="Reload settings from the config file, discarding unsaved changes">'
+            'Load settings from file</button></form>\n'
+            '<form action="/api/weather/config/reset" method="post" style="display:inline">'
+            '<button type="submit" class="btn btn-amber btn-sm" '
+            'title="Reset all settings to their built-in defaults (does not touch the '
+            'config file)">Reset settings to default</button></form>\n'
+            '</div>\n'
+        )
+
     body += '<hr>\n<a href="/weather" class="btn btn-gray">Back to map</a>\n'
     return _page(body)
 
@@ -1977,7 +2012,7 @@ def _build_weather_enroute_wind_page(ctx):  # pylint: disable=too-many-locals,to
 # ---------------------------------------------------------------------------
 
 
-def register_weather_routes(routes, ctx):  # pylint: disable=too-many-statements
+def register_weather_routes(routes, ctx):  # pylint: disable=too-many-statements,too-many-locals
     """Register all /weather and /api/weather/* routes onto an aiohttp RouteTableDef."""
 
     @routes.get('/weather')
@@ -2070,6 +2105,21 @@ def register_weather_routes(routes, ctx):  # pylint: disable=too-many-statements
             cmd['msfs_wind_sync'] = data['msfs_wind_sync'].lower() == 'true'
         if cmd:
             await ctx.send_fw_settings_cmd(cmd)
+        raise web.HTTPFound('/weather/settings')
+
+    @routes.post('/api/weather/config/save')
+    async def _weather_config_save(_):
+        await ctx.send_fw_settings_cmd({"config_action": "save"})
+        raise web.HTTPFound('/weather/settings')
+
+    @routes.post('/api/weather/config/load')
+    async def _weather_config_load(_):
+        await ctx.send_fw_settings_cmd({"config_action": "load"})
+        raise web.HTTPFound('/weather/settings')
+
+    @routes.post('/api/weather/config/reset')
+    async def _weather_config_reset(_):
+        await ctx.send_fw_settings_cmd({"config_action": "reset"})
         raise web.HTTPFound('/weather/settings')
 
     @routes.post('/api/weather/turbulence')

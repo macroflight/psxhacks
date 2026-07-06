@@ -2,6 +2,7 @@
 # pylint: disable=invalid-name,duplicate-code,too-many-lines
 import argparse
 import asyncio
+import copy
 import inspect
 import json
 import logging
@@ -12,6 +13,7 @@ import random
 import re
 import sys
 import time
+import tomllib
 import traceback
 import urllib.request
 import uuid
@@ -116,6 +118,10 @@ def _nearest_om_hpa(target_ft: float) -> int:
 
 _UCAR_STATIONS_URL = "https://weather.rap.ucar.edu/surface/stations.txt"
 _STATIONS_CACHE = os.path.join(os.path.expanduser("~"), ".cache", "frankenweather", "stations.txt")
+# os.path.expanduser("~") resolves to the right home dir on both Linux and Windows.
+# Only ever loaded if it actually exists (see _load_config_file) — nothing is written
+# here unless the user explicitly saves from the web UI.
+_DEFAULT_CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".frankenweather.toml")
 _VATSIM_ALL_URL = "https://metar.vatsim.net/all"
 _VATSIM_CACHE_MAX_S = 1800             # re-fetch VATSIM METARs every 30 minutes
 _AIRPORT_SNAP_NM = 25.0               # snap zone to a real airport if within this radius
@@ -829,6 +835,75 @@ _BURST_GUST = 400
 
 _TURB_TYPES = ('wave', 'rotor', 'mechanical', 'shear', 'cb', 'pirep', 'cape', 'gairmet')
 
+# ---------------------------------------------------------------------------
+# --config-file (TOML): every setting the web GUI can change, in one place.
+# Each tuple is (toml_key, attribute_name, cast); manual weather params map
+# 1:1 by key into self._manual_wx_params instead, since that's already a dict.
+# ---------------------------------------------------------------------------
+_CONFIG_MSFS_FIELDS = (
+    ("in_cloud_sync", "_msfs_in_cloud_sync", bool),
+    ("qnh_check", "_msfs_qnh_check", str),
+    ("wind_sync", "_msfs_wind_sync", bool),
+)
+_CONFIG_ENROUTE_WIND_FIELDS = (
+    ("enabled", "_enroute_wind_enabled", bool),
+    ("deviation", "_enroute_wind_deviation", int),
+)
+_CONFIG_MANUAL_WX_FIELDS = (
+    "hi_oktas", "hi_top", "hi_base", "lo_oktas", "lo_top", "lo_base",
+    "cb_oktas", "cb_top", "cb_base", "turb_severity", "turb_top", "turb_base",
+    "mb_mode", "mb_chance", "mb_outflow", "inv_on", "inv_top", "inv_tmp",
+    "wind_dir", "wind_spd", "wind_gust", "wind_var", "precip", "vis_m",
+    "surf_temp", "qnh_hpa",
+)
+_CONFIG_TURB_FIELDS = (
+    ("enabled", "_turb_enabled", bool),
+    ("manual_turb_enabled", "_turb_manual_turb_enabled", bool),
+    ("manual_turb_kind", "_turb_manual_turb_kind", str),
+    ("manual_turb_intensity", "_turb_manual_turb_intensity", float),
+    ("intensity_bias", "_turb_intensity_bias", int),
+    ("lateral_size_bias", "_turb_lateral_size_bias", int),
+    ("wind_mode", "_turb_wind_mode", str),
+    ("manual_wind_dir", "_turb_manual_wind_dir", int),
+    ("manual_wind_spd", "_turb_manual_wind_spd", int),
+    ("msfs_turb_magnitude", "_turb_msfs_magnitude", int),
+)
+
+
+def _toml_format_value(value) -> str:
+    """Format a scalar as a TOML value literal (bool/int/float/str only)."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    return '"' + str(value).replace('\\', '\\\\').replace('"', '\\"') + '"'
+
+
+def _dict_to_toml(config: dict) -> str:
+    """Serialize a {section: {key: scalar|dict}} dict to TOML text.
+
+    Purpose-built for frankenweather's own config schema (flat sections with
+    at most one level of sub-tables, scalar values only) — not a general TOML
+    writer. There's no TOML-writing library in this project's dependencies
+    (only stdlib tomllib, which is read-only), and the schema is simple
+    enough that a small hand-written serializer is clearer than adding one.
+    """
+    lines = []
+
+    def emit_table(path: list, table: dict) -> None:
+        scalars = {k: v for k, v in table.items() if not isinstance(v, dict)}
+        subtables = {k: v for k, v in table.items() if isinstance(v, dict)}
+        lines.append(f"[{'.'.join(path)}]")
+        for key, value in scalars.items():
+            lines.append(f"{key} = {_toml_format_value(value)}")
+        lines.append("")
+        for key, value in subtables.items():
+            emit_table(path + [key], value)
+
+    for section, table in config.items():
+        emit_table([section], table)
+    return "\n".join(lines).rstrip("\n") + "\n"
+
 
 def _sign(v):
     """Return +1 or -1 from a float."""
@@ -1113,6 +1188,10 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self._web_turbstate: Optional[dict] = None
         self._web_state_received_at: float = 0.0
         self._web_turbstate_received_at: float = 0.0
+
+        # Snapshot of every web-GUI-configurable setting at its built-in default,
+        # captured before any --config-file load — used by "reset to default".
+        self._default_config_dict: dict = self._build_config_dict()
 
     # ------------------------------------------------------------------
     # PSX helpers
@@ -1497,6 +1576,19 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self.logger.warning("Malformed FRANKENWEATHER COMMAND: %s", json_str[:80])
             return
         settings_changed = False
+        if "config_action" in cmd:
+            action = cmd["config_action"]
+            if action == "save":
+                self._save_config_file()
+            elif action == "load":
+                self._load_config_file()
+                settings_changed = True
+            elif action == "reset":
+                self._apply_config_dict(copy.deepcopy(self._default_config_dict))
+                self.logger.info("Settings reset to default (not saved to config file)")
+                settings_changed = True
+            else:
+                self.logger.warning("config_action: unknown action %r", action)
         if "msfs_in_cloud_sync" in cmd:
             self._msfs_in_cloud_sync = bool(cmd["msfs_in_cloud_sync"])
             self.logger.info("msfs_in_cloud_sync → %s", self._msfs_in_cloud_sync)
@@ -1708,58 +1800,129 @@ class Script:  # pylint: disable=too-many-instance-attributes
         # Scale by magnitude: 0 % = no influence, 100 % = full, 200 % = amplified
         return 1.0 + (raw - 1.0) * self._turb_msfs_magnitude / 100.0
 
-    def _turb_load_config(self, path: str) -> None:
-        """Load turbulence settings from JSON config file."""
-        try:
-            with open(path, encoding="utf-8") as fh:
-                cfg = json.load(fh)
-        except FileNotFoundError:
-            p = pathlib.Path(path)
-            if p.parent.exists():
-                p.write_text("{}\n", encoding="utf-8")
-            return
-        except Exception as exc:  # pylint: disable=broad-except
-            self.logger.warning("Turb config load failed: %s", exc)
-            return
-        for _key, _attr, _cast in (
-                ("turb_enabled", "_turb_enabled", bool),
-                ("intensity_bias", "_turb_intensity_bias", int),
-                ("lateral_size_bias", "_turb_lateral_size_bias", int),
-                ("wind_mode", "_turb_wind_mode", str),
-                ("manual_wind_dir", "_turb_manual_wind_dir", int),
-                ("manual_wind_spd", "_turb_manual_wind_spd", int),
-                ("msfs_turb_magnitude", "_turb_msfs_magnitude", int),
-        ):
-            if _key in cfg:
-                setattr(self, _attr, _cast(cfg[_key]))
-        for kind in _TURB_TYPES:
-            if "type_biases" in cfg and kind in cfg["type_biases"]:
-                self._turb_type_biases[kind] = int(cfg["type_biases"][kind])
-            if "type_enabled" in cfg and kind in cfg["type_enabled"]:
-                self._turb_type_enabled[kind] = bool(cfg["type_enabled"][kind])
-        self.logger.info("Loaded turb config from %s", path)
+    # ------------------------------------------------------------------
+    # --config-file (TOML): load/save every setting the web GUI can change
+    # ------------------------------------------------------------------
 
-    def _turb_save_config(self, path: str) -> None:
-        """Save turbulence settings to JSON config file."""
-        cfg = {
-            "turb_enabled": self._turb_enabled,
-            "intensity_bias": self._turb_intensity_bias,
-            "lateral_size_bias": self._turb_lateral_size_bias,
-            "wind_mode": self._turb_wind_mode,
-            "manual_wind_dir": self._turb_manual_wind_dir,
-            "manual_wind_spd": self._turb_manual_wind_spd,
-            "type_biases": dict(self._turb_type_biases),
-            "type_enabled": dict(self._turb_type_enabled),
-            "msfs_turb_magnitude": self._turb_msfs_magnitude,
+    def _build_config_dict(self) -> dict:
+        """Build the config-file dict mirroring every setting the web GUI can change."""
+        config = {
+            "general": {"mode": self._fw_mode},
+            "msfs": {key: getattr(self, attr) for key, attr, _cast in _CONFIG_MSFS_FIELDS},
+            "enroute_wind": {
+                key: getattr(self, attr) for key, attr, _cast in _CONFIG_ENROUTE_WIND_FIELDS},
+            "manual_weather": {
+                key: self._manual_wx_params[key] for key in _CONFIG_MANUAL_WX_FIELDS},
+            "turbulence": {key: getattr(self, attr) for key, attr, _cast in _CONFIG_TURB_FIELDS},
         }
+        config["turbulence"]["type_enabled"] = dict(self._turb_type_enabled)
+        config["turbulence"]["type_biases"] = dict(self._turb_type_biases)
+        return config
+
+    def _apply_config_dict(self, config: dict) -> None:  # pylint: disable=too-many-branches
+        """Apply a loaded config-file dict onto runtime state; reconciles side effects after."""
+        old_mode = self._fw_mode
+        general = config.get("general", {})
+        if general.get("mode") in ("enabled", "paused", "disabled", "manual"):
+            self._fw_mode = general["mode"]
+
+        msfs = config.get("msfs", {})
+        for key, attr, cast in _CONFIG_MSFS_FIELDS:
+            if key in msfs:
+                setattr(self, attr, cast(msfs[key]))
+        if self._msfs_qnh_check not in ("CHECK", "SYNC"):
+            self._msfs_qnh_check = "CHECK"
+
+        enroute = config.get("enroute_wind", {})
+        for key, attr, cast in _CONFIG_ENROUTE_WIND_FIELDS:
+            if key in enroute:
+                setattr(self, attr, cast(enroute[key]))
+        if self._enroute_wind_deviation not in (10, 20, 30, 40, 50, 60, 70, 80):
+            self._enroute_wind_deviation = 30
+
+        manual_wx = config.get("manual_weather", {})
+        for key in _CONFIG_MANUAL_WX_FIELDS:
+            if key in manual_wx:
+                self._manual_wx_params[key] = manual_wx[key]
+
+        turb = config.get("turbulence", {})
+        for key, attr, cast in _CONFIG_TURB_FIELDS:
+            if key in turb:
+                setattr(self, attr, cast(turb[key]))
+        for kind in _TURB_TYPES:
+            if kind in turb.get("type_enabled", {}):
+                self._turb_type_enabled[kind] = bool(turb["type_enabled"][kind])
+            if kind in turb.get("type_biases", {}):
+                self._turb_type_biases[kind] = int(turb["type_biases"][kind])
+
+        self._reconcile_after_config_load(old_mode)
+
+    def _reconcile_after_config_load(self, old_mode: str) -> None:
+        """Re-apply the side effects _handle_fw_command/_handle_turb_command normally do.
+
+        Needed because a config-file load can change many settings at once
+        outside those per-field command handlers (at startup, or via the
+        "Load from file" web button at runtime).
+        """
+        if self._turb_engine is not None:
+            if self._turb_wind_mode == "manual":
+                self._turb_engine.set_fixed_wind(
+                    float(self._turb_manual_wind_dir), float(self._turb_manual_wind_spd))
+            else:
+                self._turb_engine.clear_fixed_wind()
+                if self._turb_wind_mode == "psx" and self.psx_connected:
+                    self._turb_update_psx_wind()
+        if self._enroute_wind_enabled:
+            self._enroute_next_fetch_time = 0.0
+            self._apply_enroute_wind_qs497()
+        else:
+            self._restore_corridor_snapshot()
+        if self.psx_connected and self._fw_mode != old_mode:
+            if self._fw_mode == "disabled":
+                self.psx_send_and_set("WxAutoSet", "1")
+            elif old_mode == "disabled":
+                self.psx_send_and_set("WxAutoSet", "0")
+                self._sync_psx_clock()
+        if self._fw_mode == "manual":
+            self._manual_wx_force_update = True
+            self.fmc_changed_event.set()
+        self._turb_state_changed_event.set()
+        self._state_changed_event.set()
+        self._enroute_wind_changed_event.set()
+
+    def _load_config_file(self) -> None:
+        """Load settings from --config-file, if given and it exists; else keep defaults."""
+        path = self.args.config_file
+        if not path:
+            return
+        if not os.path.exists(path):
+            self.logger.info(
+                "Config file %s does not exist yet; using default settings "
+                "(save from the web UI to create it)", path)
+            return
+        try:
+            with open(path, "rb") as fh:
+                config = tomllib.load(fh)
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            self.logger.warning("Failed to load config file %s: %s", path, exc)
+            return
+        self._apply_config_dict(config)
+        self.logger.info("Loaded settings from config file %s", path)
+
+    def _save_config_file(self) -> bool:
+        """Save current settings to --config-file. Returns True on success."""
+        path = self.args.config_file
+        if not path:
+            self.logger.warning("Cannot save settings: no --config-file given at startup")
+            return False
         try:
             with open(path, "w", encoding="utf-8") as fh:
-                json.dump(cfg, fh, indent=2)
-                fh.write("\n")
-        except Exception as exc:  # pylint: disable=broad-except
-            self.logger.warning("Turb config save failed: %s", exc)
-            return
-        self.logger.info("Saved turb config to %s", path)
+                fh.write(_dict_to_toml(self._build_config_dict()))
+        except OSError as exc:
+            self.logger.warning("Failed to save config file %s: %s", path, exc)
+            return False
+        self.logger.info("Saved settings to config file %s", path)
+        return True
 
     def _turb_update_psx_wind(self) -> None:
         """Read the focused PSX weather zone and update the fixed wind profile."""
@@ -3338,6 +3501,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
             "msfs_wind_sync": self._msfs_wind_sync,
             "enroute_wind_enabled": self._enroute_wind_enabled,
             "enroute_wind_deviation": self._enroute_wind_deviation,
+            "config_file": cfg.config_file,
+            "config_file_exists": bool(cfg.config_file and os.path.exists(cfg.config_file)),
         }
         wx_auto = self._fw_mode == "disabled" or self._om_unavailable
         arpt_icaos = {self.fmc_dep_icao, self.fmc_dst_icao} - {None}
@@ -3784,16 +3949,22 @@ class Script:  # pylint: disable=too-many-instance-attributes
             help="[DEVELOPMENT] Directory to save enroute-wind flight-plan-vs-Open-Meteo "
                  "diff data to as timestamped JSON, one file per flight, updated on every "
                  "WxCorridor refresh while the enroute wind importer is enabled.")
-
         parser.add_argument(
-            '--turb-config-file', type=str, default=None, metavar='PATH',
-            help="[DEPRECATED] No longer used; turbulence settings are not persisted.")
+            '--config-file', type=str, default=_DEFAULT_CONFIG_FILE, metavar='PATH',
+            help="TOML file for every setting the web GUI can change (MSFS sync, enroute "
+                 "wind, manual weather, turbulence). Loaded at startup if it exists; "
+                 "otherwise defaults are used until you save from the web UI (nothing is "
+                 "written until then). See docs/frankenweather.md for the file format.")
+
         parser.add_argument(
             '--web-port', type=int, default=None, metavar='PORT',
             help="Enable standalone web UI on this TCP port (e.g. 8085).")
 
         # Removed options, kept as accepted-but-ignored so old startup scripts still run;
         # handle_args() logs a deprecation warning for each one actually passed.
+        parser.add_argument(
+            '--turb-config-file', type=str, default=None, metavar='PATH',
+            help="[REMOVED] Turbulence settings are now part of --config-file.")
         parser.add_argument(
             '--cruise-alt', type=float, default=None, metavar='FT',
             help="[REMOVED] No longer used.")
@@ -3826,20 +3997,30 @@ class Script:  # pylint: disable=too-many-instance-attributes
             help="[REMOVED] No longer used.")
         self.args = parser.parse_args()
 
+    # (arg_name, replacement_hint or None for the generic "just remove it" message)
     _REMOVED_ARGS = (
-        'cruise_alt', 'arpt_zone_dist', 'msfs_in_cloud_sync', 'msfs_qnh_check',
-        'msfs_qnh_check_maxdiff', 'msfs_wind_sync', 'disable_psx_weather_updates',
-        'no_turbulence', 'turb_rate', 'turb_intensity_bias',
+        ('cruise_alt', None),
+        ('arpt_zone_dist', None),
+        ('msfs_in_cloud_sync', None),
+        ('msfs_qnh_check', None),
+        ('msfs_qnh_check_maxdiff', None),
+        ('msfs_wind_sync', None),
+        ('disable_psx_weather_updates', None),
+        ('no_turbulence', None),
+        ('turb_rate', None),
+        ('turb_intensity_bias', None),
+        ('turb_config_file', 'turbulence settings are now part of --config-file'),
     )
 
     def _warn_removed_args(self) -> None:
         """Log a deprecation warning for each removed CLI option actually passed."""
-        for name in self._REMOVED_ARGS:
+        for name, hint in self._REMOVED_ARGS:
             value = getattr(self.args, name)
             if value:
+                suffix = f"; {hint}" if hint else "; remove it from your startup script"
                 self.logger.warning(
-                    "--%s is deprecated and no longer has any effect; remove it "
-                    "from your startup script", name.replace('_', '-'))
+                    "--%s is deprecated and no longer has any effect%s",
+                    name.replace('_', '-'), suffix)
 
     async def run(self) -> None:
         """Entry point."""
@@ -3863,15 +4044,12 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self.airports, source = get_airports(_UCAR_STATIONS_URL, _STATIONS_CACHE)
             self.logger.info("Loaded %d airports from %s", len(self.airports), source)
 
-        if self.args.turb_config_file:
-            self.logger.warning(
-                "--turb-config-file is deprecated and no longer used; "
-                "turbulence settings are not persisted across restarts")
         self._turb_engine = TurbulenceEngine(om_proxy=self.args.om_proxy)
         self._turb_pirep_fetcher = PirepFetcher()
         self._turb_cape_fetcher = CapeFetcher(proxy=self.args.om_proxy)
         self._turb_gairmet_fetcher = GairmetFetcher()
         self.logger.info("Turbulence engine initialized")
+        self._load_config_file()
         # Trigger initial TURBSTATE broadcast so the router has config data immediately.
         self._turb_state_changed_event.set()
 

@@ -67,6 +67,12 @@ Features:
   The web UI provides a live weather map, zone details, manual weather
   entry, turbulence tuning, and the MSFS bridge settings toggles.
 
+- Settings persistence: pass `--config-file PATH` to load every setting
+  the web UI can change from a TOML file at startup, and to enable the
+  "Save current settings to file" / "Load settings from file" buttons
+  on the settings page. See [Configuration file](#configuration-file)
+  below.
+
 Requires `aiohttp`, `pyproj`, `numpy`, `rasterio`, and `requests`:
 
 ```
@@ -76,10 +82,118 @@ pip install aiohttp pyproj numpy rasterio requests
 Key options:
 
 ```
---psx-host HOST   PSX server hostname (default: 127.0.0.1)
---psx-port PORT   PSX server port (default: 10747)
---web-port PORT   Enable standalone web UI on this port (e.g. 8085)
---debug           Verbose logging
+--psx-host HOST      PSX server hostname (default: 127.0.0.1)
+--psx-port PORT      PSX server port (default: 10747)
+--web-port PORT      Enable standalone web UI on this port (e.g. 8085)
+--config-file PATH   Load/save web-UI settings from this TOML file
+                     (default: ~/.frankenweather.toml)
+--debug              Verbose logging
+```
+
+### Configuration file
+
+`--config-file PATH` points frankenweather at a TOML file holding every
+setting that can also be changed at runtime from the web UI: MSFS sync
+toggles, the enroute wind importer, manual weather parameters, and
+turbulence tuning. It does **not** include the `--xxx` command-line
+options for zone placement, CB overrides, etc. — those remain
+command-line-only.
+
+Defaults to `~/.frankenweather.toml` (`%USERPROFILE%\.frankenweather.toml`
+on Windows), so it works out of the box on both Linux and Windows without
+passing the option at all. Pass `--config-file PATH` to use a different
+location, e.g. for multiple named configurations.
+
+Behaviour:
+
+- If the file exists at startup, it's loaded and its values replace the
+  built-in defaults. If it doesn't exist yet (the common case on first
+  run), frankenweather starts with its built-in defaults and does
+  **not** create the file — nothing is written until you explicitly
+  click "Save current settings to file" on the `/weather/settings` page
+  (or the file is created by hand).
+- The settings page also shows the file's path and whether it currently
+  exists, plus a "Load settings from file" button (re-reads the file,
+  discarding any unsaved runtime changes) and a "Reset settings to
+  default" button (resets everything below to its built-in default —
+  this never touches the config file).
+
+Every key is optional; a partial file only overrides the keys it sets,
+the rest keep their built-in default. Example, showing every key and
+its default value:
+
+```toml
+[general]
+mode = "enabled"          # enabled | paused | disabled | manual
+
+[msfs]
+in_cloud_sync = true
+qnh_check = "CHECK"       # CHECK | SYNC
+wind_sync = false
+
+[enroute_wind]
+enabled = false
+deviation = 30            # 10-80, in steps of 10
+
+[manual_weather]
+hi_oktas = 0
+hi_top = 45000
+hi_base = 45000
+lo_oktas = 0
+lo_top = 45000
+lo_base = 45000
+cb_oktas = 0
+cb_top = 35000
+cb_base = 3000
+turb_severity = 0
+turb_top = 5000
+turb_base = 0
+mb_mode = 0
+mb_chance = 0
+mb_outflow = 400
+inv_on = false
+inv_top = 2320
+inv_tmp = 5
+wind_dir = 0
+wind_spd = 0
+wind_gust = 0
+wind_var = 0
+precip = 0
+vis_m = 9999
+surf_temp = 15
+qnh_hpa = 1013.25
+
+[turbulence]
+enabled = true
+manual_turb_enabled = false
+manual_turb_kind = "mechanical"
+manual_turb_intensity = 0.3
+intensity_bias = 100
+lateral_size_bias = 50
+wind_mode = "live"        # live | psx | manual
+manual_wind_dir = 0
+manual_wind_spd = 0
+msfs_turb_magnitude = 100
+
+[turbulence.type_enabled]
+wave = true
+rotor = true
+mechanical = true
+shear = true
+cb = true
+pirep = true
+cape = true
+gairmet = true
+
+[turbulence.type_biases]
+wave = 100
+rotor = 100
+mechanical = 100
+shear = 100
+cb = 100
+pirep = 100
+cape = 100
+gairmet = 100
 ```
 
 ## frankenmsfsbridge.py
