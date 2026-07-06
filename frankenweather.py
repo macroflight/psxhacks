@@ -138,6 +138,14 @@ _REFRESH_MAX_S = 300                  # always refresh weather after this many s
 _PUSH_COOLDOWN_S = 5.0                # ignore Wx echo-backs for this long after our write
 _MSFS_BRIDGE_TIMEOUT_S = 300.0        # stop using bridge data after this silence period
 _NM_TO_M = 1852.0
+# PSX Qi243 ("WxSlowTransit"): a timing window (ms) during which any weather
+# variable write PSX receives is handled as a smooth transit instead of an
+# instant jump (per the PSX forum's own description of the variable) — once a
+# transit is smooth it stays smooth even after the window itself expires. We
+# never want an instant jump (an abrupt QNH/OAT/wind change reads on the
+# instruments as if the aircraft teleported), and never need PSX's fast-mode
+# transit either, so the window can just be generous.
+_WX_SLOW_TRANSIT_MS = 2000
 
 _HDG_WINDOW_S = 300.0                 # heading-change detection window (5 min)
 _MANEUVER_ENTER_DEG = 180.0           # total hdg change to enter maneuvering mode
@@ -1212,6 +1220,18 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self.psx.send(key, value)
         self.psx._set(key, value)  # pylint: disable=protected-access
 
+    def _inject_wx_slow_transit(self) -> None:
+        """Ask PSX to smooth-transit the weather write(s) about to follow.
+
+        Sent immediately before every zone weather, MSFS sync, or wind
+        corridor write, so a zone relocation, a new area becoming active, or
+        an MSFS QNH sync never shows up on the instruments as an abrupt jump.
+        See _WX_SLOW_TRANSIT_MS for why a fixed, generous value is always
+        safe here: nothing FrankenWeather writes ever needs PSX's fast/instant
+        transit mode.
+        """
+        self.psx_send_and_set("Qi243", str(_WX_SLOW_TRANSIT_MS))
+
     def _sync_psx_clock(self) -> None:
         """Sync PSX clocks (TimeEarth, TimeClockL, TimeClockR) to current real-world time."""
         ms = int(time.time() * 1000)
@@ -1258,6 +1278,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
         if desired and value != desired:
             self.logger.info("PSX overwrite detected on %s — re-applying", key)
             self.last_write_time = time.time()
+            self._inject_wx_slow_transit()
             self.psx_send_and_set(key, desired)
             return
         focused_key = "WxBasic" if self.focused_zone == 0 else f"Wx{self.focused_zone}"
@@ -1753,6 +1774,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
         """Write the same manual Wx string to all 7 PSX weather zones."""
         wx_str = self._build_manual_wx_string()
         now = datetime.now(timezone.utc)
+        self._inject_wx_slow_transit()
         self.psx_send_and_set("WxAutoSet", "0")
         for zone_num, (lat, lon, icao) in self.zone_positions.items():
             wxmode = build_wxmode_string(lat, lon, 0.0, now.month, icao)
@@ -2420,6 +2442,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self.logger.debug("Wind corridor: %s", msg)
             return
         self.logger.info("Wind corridor: %s", msg)
+        self._inject_wx_slow_transit()
         self.psx.send("WxCorridorTxt", new_corridor)
         self._wind_last_encoded = encoded
         self._wind_last_updated = now
@@ -2436,6 +2459,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
         """
         if not self._corridor_snapshot_txt:
             return
+        self._inject_wx_slow_transit()
         self.psx.send("WxCorridorTxt", self._corridor_snapshot_txt)
         self._corridor_last_own_value = self._corridor_snapshot_txt
         self._corridor_txt = self._corridor_snapshot_txt
@@ -2494,6 +2518,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
         new_corridor = wind_corridor.build_corridor_a(
             self.route_waypoints, self._current_fl_list_ft(), wind_by_live_index)
         if new_corridor != self._enroute_last_corridor_txt:
+            self._inject_wx_slow_transit()
             self.psx.send("WxCorridorTxt", new_corridor)
             self._corridor_last_own_value = new_corridor
             self._enroute_last_corridor_txt = new_corridor
@@ -2574,6 +2599,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
             diff = self.msfs_qnh_hpa - psx_qnh_hpa
             if abs(diff) > 1.0:
                 if self._msfs_qnh_check == "SYNC":
+                    self._inject_wx_slow_transit()
                     data[23] = str(_hpa_to_psx_qnh(self.msfs_qnh_hpa))
                     self.logger.info(
                         "QNH sync [%s]: %.1f → %.1f hPa",
@@ -2633,6 +2659,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
                     self.logger.debug("Cloud sync [%s]: MSFS clear, PSX not in cloud", zone_key)
 
         if changed:
+            self._inject_wx_slow_transit()
             self.cloud_sync_last_alt_ft = self.ac_alt_ft
             self.last_write_time = time.time()
             new_wx = ";".join(data)
@@ -3497,6 +3524,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
                     detail += "; no CBs"
             self.zone_weather_detail[i + 1] = detail
 
+        self._inject_wx_slow_transit()
         self.psx_send_and_set("WxAutoSet", "0")
 
         for i, wxmode in enumerate(new_modes):

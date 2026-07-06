@@ -69,6 +69,13 @@ Features:
   SimConnect. The MSFS sync features have no effect unless the bridge
   is connected.
 
+- Smooth weather transitions: every zone weather, MSFS sync, or wind
+  corridor write is preceded by PSX's `Qi243` ("WxSlowTransit") smooth-
+  transit hint, so a zone relocation, a new area becoming active, or an
+  MSFS QNH sync never shows up on the instruments as an abrupt jump
+  (e.g. the altimeter snapping to a new value). This does not apply to
+  turbulence `WxBurst` injections, which are deliberately abrupt.
+
 - Web UI: pass `--web-port PORT` to start a standalone HTTP server. The
   same UI is also available through the frankenrouter web interface.
   The web UI provides a live weather map, zone details, manual weather
