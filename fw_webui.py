@@ -1979,8 +1979,14 @@ def _build_weather_enroute_wind_page(ctx):  # pylint: disable=too-many-locals,to
     for wp in windstate["waypoints"]:
         row_class = ' class="ew-passed"' if wp["passed"] else ''
         levels = wp["levels"] or [None]
+        matched_note = ''
+        if wp.get("matched_name"):
+            matched_note = f' <span style="color:#64748b">(~{wp["matched_name"]})</span>'
         for j, lvl in enumerate(levels):
-            name_cell = (f'{wp["name"]}' + (' (passed)' if wp["passed"] else '')) if j == 0 else ''
+            if j == 0:
+                name_cell = wp["name"] + matched_note + (' (passed)' if wp["passed"] else '')
+            else:
+                name_cell = ''
             if lvl is None:
                 table += (
                     f'<tr{row_class}><td>{name_cell}</td><td colspan="4">'

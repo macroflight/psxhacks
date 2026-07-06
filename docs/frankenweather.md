@@ -117,6 +117,13 @@ default; opt-in from the `/weather/enroute-wind` web page (or the
   `wind_corridor.py`); if the format can't be parsed, or the corridor
   is empty, the web page falls back to showing the raw text and skips
   the diff, but still shows the downloaded Open-Meteo winds on their own.
+  Matching a live FMC waypoint to its snapshot entry is normally by name,
+  but falls back to matching by coordinates (within 5 nm) when the names
+  don't line up — this happens on NAT track points in Format D/E, where
+  PSX's own corridor entry carries a lat/lon-derived name (e.g. `48N05`)
+  that can differ from the FMC's own name for the same point (e.g.
+  `4850N`), since PSX itself only matches those formats by coordinates,
+  not name. When a coordinate match is used, the page shows both names.
 
 - **Waypoint list.** Built from the FMC's active route, but any
   waypoint that's part of a SID, STAR, or approach procedure — and any

@@ -72,6 +72,14 @@ _OM_VARS = (
 # fresh Format-A corridor, so PSX's enroute wind keeps drifting with reality
 # even if the crew never requests a new datalink wind uplink.
 _ENROUTE_FETCH_INTERVAL_S = 3600.0     # background refresh cadence ("hourly")
+# Max distance (nm) for matching a live FMC waypoint to a flight-plan snapshot
+# waypoint by coordinates when the names don't match verbatim — e.g. NAT track
+# points, where Format E only carries PSX's own lat/lon-derived name (like
+# "48N05") rather than the FMC's name for the same point (like "4850N"). Loose
+# enough for rounding in either name's coordinate encoding, tight enough to
+# stay well under real waypoint spacing (oceanic points are typically tens to
+# hundreds of nm apart).
+_ENROUTE_COORD_MATCH_NM = 5.0
 # Target flight levels (ft) for the generated corridor, each mapped to the
 # nearest Open-Meteo standard pressure level below. The PSX NG FMC manual
 # titles this corridor format "Format A — 6 wind records per leg": PSX's own
@@ -1075,6 +1083,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self._corridor_last_own_value: Optional[str] = None
         self._corridor_snapshot_txt: Optional[str] = None
         self._corridor_snapshot_waypoints: dict = {}   # name → {fl_ft: (dir,spd,oat)}
+        self._corridor_snapshot_coords: dict = {}      # name → (lat_deg, lon_deg), D/E only
         self._waypoint_passed: set = set()             # indices into _enroute_waypoints
         self._waypoint_om_wind: dict = {}       # _enroute_waypoints index → {fl_ft: (dir,spd,oat)}
         self._enroute_last_fetch_time: float = 0.0     # epoch
@@ -1327,6 +1336,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 # one, and its first corridor update will start a fresh log file.
                 self._corridor_snapshot_txt = None
                 self._corridor_snapshot_waypoints = {}
+                self._corridor_snapshot_coords = {}
             self._set_route_waypoints([])
             return
         rte_key = "FmcRte1" if mode_str[2] == '1' else "FmcRte2"
@@ -2368,6 +2378,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
             "Enroute wind: WxCorridor changed externally — capturing flight-plan snapshot")
         self._corridor_snapshot_txt = value
         self._corridor_snapshot_waypoints = wind_corridor.extract_waypoint_winds(value)
+        self._corridor_snapshot_coords = wind_corridor.extract_waypoint_coords(value)
         self._waypoint_passed = set()
         self._waypoint_om_wind = {}
         self._enroute_next_fetch_time = 0.0
@@ -3689,6 +3700,21 @@ class Script:  # pylint: disable=too-many-instance-attributes
         """Return the shortest signed difference a-b in degrees, in (-180, 180]."""
         return ((a_deg - b_deg + 180.0) % 360.0) - 180.0
 
+    def _nearest_snapshot_name(self, lat: float, lon: float) -> Optional[str]:
+        """Find the flight-plan snapshot waypoint whose coordinates are closest to (lat, lon).
+
+        Used as a fallback when a live FMC waypoint's name has no exact match
+        in the flight-plan snapshot (see _ENROUTE_COORD_MATCH_NM). PSX itself
+        only matches Format D/E waypoints by coordinates, not by name, so this
+        mirrors what PSX actually does instead of relying on name spelling.
+        """
+        best_name, best_nm = None, _ENROUTE_COORD_MATCH_NM
+        for name, (snap_lat, snap_lon) in self._corridor_snapshot_coords.items():
+            dist_nm = self._dist_nm(lat, lon, snap_lat, snap_lon)
+            if dist_nm < best_nm:
+                best_name, best_nm = name, dist_nm
+        return best_name
+
     def _build_windstate_dict(self) -> dict:  # pylint: disable=too-many-locals
         """Build the enroute-wind status dict: per-waypoint flight-plan vs OM diff, fetch timers."""
         has_snapshot = self._corridor_snapshot_txt is not None
@@ -3696,7 +3722,10 @@ class Script:  # pylint: disable=too-many-instance-attributes
         waypoints = []
         for i, (name, lat, lon) in enumerate(self._enroute_waypoints):
             om_levels = self._waypoint_om_wind.get(i, {})
-            snap_levels = self._corridor_snapshot_waypoints.get(name, {})
+            snap_name = name if name in self._corridor_snapshot_waypoints else None
+            if snap_name is None and self._corridor_snapshot_coords:
+                snap_name = self._nearest_snapshot_name(lat, lon)
+            snap_levels = self._corridor_snapshot_waypoints.get(snap_name, {})
             levels = []
             for fl in sorted(set(om_levels) | set(snap_levels)):
                 om = om_levels.get(fl)
@@ -3721,6 +3750,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 "lat": round(lat, 4),
                 "lon": round(lon, 4),
                 "passed": i in self._waypoint_passed,
+                "matched_name": snap_name if snap_name and snap_name != name else None,
                 "levels": levels,
             })
         return {

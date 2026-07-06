@@ -140,6 +140,20 @@ def _dms_to_dec(coord: str) -> Optional[tuple]:
     return lat, lon
 
 
+def _dms_component_to_dec(tok: str, is_lat: bool) -> Optional[float]:
+    """Parse one Format-D lat or lon token (e.g. 'N4309.0' or 'W06700.0') to decimal degrees."""
+    if not tok or tok[0] not in ('N', 'S', 'E', 'W'):
+        return None
+    digits = 2 if is_lat else 3
+    try:
+        deg = int(tok[1:1 + digits])
+        minutes = float(tok[1 + digits:])
+    except ValueError:
+        return None
+    val = deg + minutes / 60.0
+    return -val if tok[0] in ('S', 'W') else val
+
+
 def _dec_to_dms(lat: float, lon: float) -> str:
     """Convert decimal degrees to a Format-E combined lat/lon string (e.g. S3356.8E15110.6).
 
@@ -446,8 +460,9 @@ def update_corridor(corridor_txt: str,  # pylint: disable=too-many-arguments,too
     return prefix + "^".join(new_secs), msg
 
 
-def _extract_e_section(stripped: str, current_header_ft: Optional[list]) -> Optional[tuple]:
-    """Return (name, {fl_ft: (dir_deg, spd_kt, oat_c)}) for one Format-E waypoint section.
+def _extract_e_section(  # pylint: disable=too-many-locals
+        stripped: str, current_header_ft: Optional[list]) -> Optional[tuple]:
+    """Return (name, {fl_ft: (dir_deg, spd_kt, oat_c)}, lat_deg, lon_deg) for one Format-E section.
 
     Single-column sections use the waypoint's own FL/OAT directly. Multi-
     column sections (current_header_ft set, matching token count) decode
@@ -458,6 +473,7 @@ def _extract_e_section(stripped: str, current_header_ft: Optional[list]) -> Opti
     lm = _E_LATLON_RE.match(stripped)
     if not lm:
         return None
+    coord = _dms_to_dec(stripped[:lm.end()])
     # Fields after coord: name, ITT, DIS, FL, TMP, then W/V column(s).
     fields = stripped[lm.end():].strip().split()
     if len(fields) < 6 or fields[0].upper() == _FWIND_NAME:
@@ -480,17 +496,20 @@ def _extract_e_section(stripped: str, current_header_ft: Optional[list]) -> Opti
                 if wind is not None:
                     oat_c = own_temp_c - 1.98 * ((fl_ft - own_fl_ft) / 1000.0)
                     levels[fl_ft] = (wind[0], wind[1], oat_c)
-    return (fields[0], levels) if levels else None
+    if not levels:
+        return None
+    lat, lon = coord if coord else (None, None)
+    return fields[0], levels, lat, lon
 
 
 def _iter_bcd_blocks(secs: list) -> list:
-    """Split Format B/C/D sections into columnar blocks: [(names, data_rows), ...].
+    """Split Format B/C/D sections into columnar blocks: [(names, coords, data_rows), ...].
 
     Each block is a name-header line (one waypoint name per column), an
-    optional lat-line + lon-line pair (Format D only, skipped here since
-    extraction only needs wind data), and the data rows that follow — each
-    holding one "{fl} {ddd/sss} {±oo}" group per column, in the same
-    left-to-right order as the names.
+    optional lat-line + lon-line pair (Format D only — captured as
+    ``coords = (lat_tokens, lon_tokens)``, or None for B/C), and the data
+    rows that follow — each holding one "{fl} {ddd/sss} {±oo}" group per
+    column, in the same left-to-right order as the names.
     """
     blocks = []
     i, n = 0, len(secs)
@@ -501,27 +520,39 @@ def _iter_bcd_blocks(secs: list) -> list:
             continue
         names = sec.split()
         i += 1
+        coords = None
         if (i + 1 < n and _D_LAT_SECTION_RE.match(secs[i].strip()) and
                 _D_LON_SECTION_RE.match(secs[i + 1].strip())):
+            coords = (secs[i].strip().split(), secs[i + 1].strip().split())
             i += 2
         data_rows = []
         while i < n and _BC_DATA_ROW_RE.match(secs[i].strip()):
             data_rows.append(secs[i].strip())
             i += 1
-        blocks.append((names, data_rows))
+        blocks.append((names, coords, data_rows))
     return blocks
 
 
-def _extract_bcd(secs: list) -> dict:
-    """Extract per-waypoint wind/OAT data from a Format B/C/D corridor.
+def _extract_bcd(secs: list) -> dict:  # pylint: disable=too-many-locals
+    """Extract per-waypoint wind/OAT data (and, for Format D, coordinates) from a B/C/D corridor.
 
     Each data row holds one "{fl} {ddd/sss} {±oo}" group per waypoint column
     (unlike Format A/E, direction is the full 3-digit heading, not divided
     by 10). Rows whose group count doesn't match the block's waypoint count
-    are skipped as malformed.
+    are skipped as malformed. Returns the unified
+    ``{name: {"levels": {...}, "lat": .., "lon": ..}}`` shape (lat/lon are
+    None for Formats B and C, which carry no coordinates).
     """
     result: dict = {}
-    for names, data_rows in _iter_bcd_blocks(secs):
+    for names, coords, data_rows in _iter_bcd_blocks(secs):
+        coord_by_name = {}
+        if coords:
+            lat_toks, lon_toks = coords
+            for name, lat_tok, lon_tok in zip(names, lat_toks, lon_toks):
+                lat = _dms_component_to_dec(lat_tok, True)
+                lon = _dms_component_to_dec(lon_tok, False)
+                if lat is not None and lon is not None:
+                    coord_by_name[name] = (lat, lon)
         for row in data_rows:
             groups = _BCD_GROUP_RE.findall(row)
             if len(groups) != len(names):
@@ -530,15 +561,20 @@ def _extract_bcd(secs: list) -> dict:
                 if name.upper() == _FWIND_NAME:
                     continue
                 fl_ft = int(fl_tok) if len(fl_tok) >= 4 else int(fl_tok) * 100
-                levels = result.setdefault(name, {})
-                levels[fl_ft] = (float(int(dir_tok)), float(int(spd_tok)), float(int(oat_tok)))
+                entry = result.setdefault(name, {"levels": {}, "lat": None, "lon": None})
+                entry["levels"][fl_ft] = (
+                    float(int(dir_tok)), float(int(spd_tok)), float(int(oat_tok)))
+                if name in coord_by_name:
+                    entry["lat"], entry["lon"] = coord_by_name[name]
     return result
 
 
-def extract_waypoint_winds(corridor_txt: str) -> dict:  # pylint: disable=too-many-locals,too-many-branches
-    """Extract per-waypoint wind/OAT data from a corridor, for snapshot comparison.
+def extract_waypoint_data(corridor_txt: str) -> dict:  # pylint: disable=too-many-locals,too-many-branches
+    """Extract per-waypoint wind/OAT data and coordinates from a corridor, for snapshot comparison.
 
-    Returns ``{name: {fl_ft: (dir_deg, spd_kt, oat_c)}}``.
+    Returns ``{name: {"levels": {fl_ft: (dir, spd, oat)}, "lat": lat_deg, "lon": lon_deg}}``.
+    ``lat``/``lon`` are ``None`` for Formats A, B and C, which carry no
+    coordinates at all; Formats D and E carry them inline per waypoint.
 
     Format A yields a full multi-level grid (its shared FL header applies to
     every waypoint).  Format E yields either a single level per waypoint (its
@@ -570,7 +606,7 @@ def extract_waypoint_winds(corridor_txt: str) -> dict:  # pylint: disable=too-ma
                 if decoded:
                     levels[fl] = decoded
             if levels:
-                result[name] = levels
+                result[name] = {"levels": levels, "lat": None, "lon": None}
 
     elif fmt == FORMAT_E:
         current_header_ft = None
@@ -581,12 +617,32 @@ def extract_waypoint_winds(corridor_txt: str) -> dict:  # pylint: disable=too-ma
                 continue
             parsed = _extract_e_section(stripped, current_header_ft)
             if parsed:
-                result[parsed[0]] = parsed[1]
+                name, levels, lat, lon = parsed
+                result[name] = {"levels": levels, "lat": lat, "lon": lon}
 
     elif fmt in (FORMAT_B, FORMAT_C, FORMAT_D):
         result = _extract_bcd(secs)
 
     return result
+
+
+def extract_waypoint_winds(corridor_txt: str) -> dict:
+    """Return ``{name: {fl_ft: (dir_deg, spd_kt, oat_c)}}`` — see extract_waypoint_data()."""
+    return {name: data["levels"] for name, data in extract_waypoint_data(corridor_txt).items()}
+
+
+def extract_waypoint_coords(corridor_txt: str) -> dict:
+    """Return ``{name: (lat_deg, lon_deg)}`` for waypoints whose corridor entry has coordinates.
+
+    Only Formats D and E carry inline coordinates; waypoints from Formats A,
+    B and C (or any Format-D/E waypoint whose coordinate token failed to
+    parse) are simply absent from the result.
+    """
+    return {
+        name: (data["lat"], data["lon"])
+        for name, data in extract_waypoint_data(corridor_txt).items()
+        if data["lat"] is not None and data["lon"] is not None
+    }
 
 
 # PSX's Format-A rows are positional/fixed-width, not whitespace-tokenized:
