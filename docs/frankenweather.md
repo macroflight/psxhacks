@@ -55,7 +55,14 @@ Features:
   at the current aircraft altitude and injects them into the PSX wind
   corridor as a synthetic `FWIND` waypoint near the aircraft position.
   Supports PSX wind corridor Formats A and E; Formats B, C and D are
-  left unchanged. Off by default; toggleable from the web UI.
+  left unchanged. Off by default; toggleable from the web UI. Mutually
+  exclusive with the enroute wind importer below (both write PSX's
+  wind corridor).
+
+- Enroute wind importer: simulates requesting an updated enroute wind
+  forecast via datalink mid-flight, using Open-Meteo instead of a real
+  dispatch link. Off by default; opt-in from the `/weather/enroute-wind`
+  web page. See [Enroute wind importer](#enroute-wind-importer) below.
 
 - The MSFS in-cloud, QNH and wind data is provided by
   `frankenmsfsbridge.py` that fetches MSFS weather data via
@@ -87,8 +94,71 @@ Key options:
 --web-port PORT      Enable standalone web UI on this port (e.g. 8085)
 --config-file PATH   Load/save web-UI settings from this TOML file
                      (default: ~/.frankenweather.toml)
+--save-logs DIR      [DEVELOPMENT] Save enroute wind diff data per flight
 --debug              Verbose logging
 ```
+
+### Enroute wind importer
+
+Simulates the real-world behaviour of a crew requesting an updated
+enroute wind/temperature forecast via datalink mid-flight — except the
+forecast comes from Open-Meteo instead of a real dispatch link. Off by
+default; opt-in from the `/weather/enroute-wind` web page (or the
+`[enroute_wind]` section of the [config file](#configuration-file)).
+
+- **Flight-plan snapshot.** As soon as PSX's wind corridor (`WxCorridorTxt`)
+  changes to something FrankenWeather didn't write itself — loading a
+  route, pasting an OFP wind corridor into the Instructor station, or a
+  situ load — that corridor is captured as the "flight plan" snapshot.
+  This capture runs whether or not the importer is enabled, so the
+  comparison below is available as soon as a route is loaded. The
+  snapshot is parsed regardless of which of PSX's five documented
+  corridor formats it's written in (see the format table in
+  `wind_corridor.py`); if the format can't be parsed, or the corridor
+  is empty, the web page falls back to showing the raw text and skips
+  the diff, but still shows the downloaded Open-Meteo winds on their own.
+
+- **Waypoint list.** Built from the FMC's active route, but any
+  waypoint that's part of a SID, STAR, or approach procedure — and any
+  `(...)`-style pseudo-waypoint PSX generates for those procedures —
+  is excluded, since real dispatch wind corridors don't cover them
+  either. The list only grows or hard-resets on an actual reroute;
+  waypoints PSX itself trims from the front of the route once passed
+  stay on the page (dimmed) instead of disappearing.
+
+- **Fetching.** Once enabled, wind and temperature for the remaining
+  waypoints are pulled from Open-Meteo's pressure-level forecast, once
+  an hour in the background and immediately whenever the route changes
+  or a waypoint is newly passed. PSX's Format A always needs exactly 6
+  flight levels per waypoint, or it may reject the whole corridor: the
+  levels used are the flight-plan snapshot's own 6 levels when that
+  snapshot is a valid Format-A grid (so the diff compares like-for-like),
+  otherwise a fixed default set (10 000 / 18 000 / 24 000 / 30 000 /
+  34 000 / 39 000 ft).
+
+- **Writing to PSX.** The fetched data is written back to PSX as a
+  Format-A wind corridor, and `Qs497` (the PSX variable controlling
+  wind corridor use and simulated forecast inaccuracy) is set so its
+  first digit is always `2` (use the corridor data) and the other two
+  digits are the deviation percentage chosen on the web page (10-80 in
+  steps of 10 — simulates that a forecast is never 100% accurate).
+
+- **Turning it off.** Disabling the importer — or enabling MSFS wind
+  sync, which is mutually exclusive since both write the wind corridor
+  — restores the original flight-plan snapshot to PSX instead of
+  leaving the last generated corridor in place.
+
+- **Web page** (`/weather/enroute-wind`): enable/disable toggle,
+  deviation slider, last/next fetch time, and a per-waypoint,
+  per-flight-level table comparing the flight plan to the latest
+  Open-Meteo fetch (direction, speed, OAT, and the diff), with passed
+  waypoints dimmed.
+
+- **`--save-logs DIR`** (development use): writes one JSON and one
+  human-readable `.txt` file per flight — fixed filename, continuously
+  overwritten on every corridor refresh — containing the full enroute
+  wind state including the diff. Reset when the FMC route is cleared,
+  so the next flight starts a fresh pair of files.
 
 ### Configuration file
 
