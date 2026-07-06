@@ -44,14 +44,14 @@ done all the time when we use a shared cockpit setup.
 
 ## Quickstart - connect your PSX sim to an existing shared cockpit setup
 
-- Download the latest binary package from [here](https://drive.google.com/drive/folders/1Eu1uJCNUiLkFg9Qq8YwPCiPd9V7D5FbA)
-- Extract frankenrouter.exe from the zip file
-- Run frankenrouter.exe
+- Download the latest binary package from [here](https://drive.google.com/drive/folders/1Eu1uJCNUiLkFg9Qq8YwPCiPd9V7D5FbA).
+- Extract frankenrouter.exe from the zip file.
+- Run frankenrouter.exe.
 - Follow the instructions on screen, which tells you to:
-    - Reconfigure your PSX main server to be a main client
-    - Enter your simulator name
-    - Enter the connection details for the shared cockpit master sim (IP, port, password)
-    - Restart addons that don't automatically connect to the router
+    - Reconfigure your PSX main server to be a main client.
+    - Enter your simulator name.
+    - Enter the connection details for the shared cockpit master sim (IP, port, password).
+    - Restart addons that don't automatically connect to the router.
 - Fly shared cockpit :)
 
 ## Installing
@@ -67,11 +67,11 @@ binary to be updated. You can find the binary packages [here](https://drive.goog
 
 To run the Python version of the router:
 
-- Clone the [psxhacks Git repository](https://github.com/macroflight/psxhacks)
+- Clone the [psxhacks Git repository](https://github.com/macroflight/psxhacks).
     - Alternative if you don't have a Git client installed: download a
       ZIP of the repository usign the `Code` button's Download Zip
       option.
-- Install Python (see below)
+- Install Python (see below).
 
 ### Python
 
@@ -83,7 +83,7 @@ For Windows you probably want the [Windows installer
 
 One extra Python module is needed for the router:
 
-- aiohttp (for the REST API)
+- aiohttp (for the REST API).
 
 You can either install these modules in your main Python installation,
 or use a [Python virtual
@@ -121,7 +121,7 @@ line options.
 
 ## Starting the router
 
-- Open a terminal window
+- Open a terminal window.
 - If using a virtual environment, activate it or use the full path to
   "python" inside the virtual environment to start the router.
 
@@ -221,6 +221,26 @@ python3 frankenrouter_ident.py
 
 To start this addon, start a new terminal window and run `python
 frankenrouter_ident.py` from the psxhacks directory.
+
+## Control the router from PSX.NET.EFB
+
+Recent versions of the router can be controlled from within PSX.NET.EFB, which [can be found here](https://aerowinx.com/board/index.php?topic=7680.0). This is done through the router's web API and requires two changes:
+1. Adding a line in the PSX.NET.EFB configuration file.
+2. Configuring the `rest_api_port` parameter in [the router configuration file](docs/Configuration.md).
+
+
+You will need to add the following line to the PSX.NET.EFB configuration file, which is normally found in "This PC > Documents > PSX.NET.EFB" and called "PSX.NET.EFB.Windows.Config":
+
+``` text
+<RouterControlPageURL>http://localhost:8747/</RouterControlPageURL>
+```
+
+Save the file and (re)start PSX.NET.EFB. On the "Sim Control" tab you'll find a new button named "Router Control".
+
+Please note:
+- "localhost" refers to the same PC: use this if you have the router and PSX.NET.EFB running on the same PC. If they're not running on the same PC, you need to replace "localhost" with the IP address of the PC running the router that you wish to control. Tip: you can use your internet browser to verify the URL of the router web API.
+- "8747" is the port number of the router's web API. It needs to match the port as configured with the `rest_api_port` parameter in the router configuration file.
+- You can only add one URL. If you're running a master router and a slave router, you should opt for adding the latter.
 
 ## Planned changes/new features
 
