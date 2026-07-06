@@ -238,8 +238,8 @@ You will need to add the following line to the PSX.NET.EFB configuration file, w
 Save the file and (re)start PSX.NET.EFB. On the "Sim Control" tab you'll find a new button named "Router Control".
 
 Please note:
-- 'localhost' refers to the same PC: use this if you have the router and PSX.NET.EFB running on the same PC. If they're not running on the same PC, you need to replace "localhost" with the IP address of the PC running the router that you wish to control. Tip: you can use your internet browser to verify the URL of the router web API.
-- '8747' is the port number of the router's web API. It needs to match the port as configured with the `rest_api_port` parameter in the router configuration file.
+- "localhost" refers to the same PC: use this if you have the router and PSX.NET.EFB running on the same PC. If they're not running on the same PC, you need to replace "localhost" with the IP address of the PC running the router that you wish to control. Tip: you can use your internet browser to verify the URL of the router web API.
+- "8747" is the port number of the router's web API. It needs to match the port as configured with the `rest_api_port` parameter in the router configuration file.
 - You can only add one URL. If you're running a master router and a slave router, you should opt for adding the latter.
 
 ## Planned changes/new features
