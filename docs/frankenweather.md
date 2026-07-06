@@ -155,7 +155,13 @@ default; opt-in from the `/weather/enroute-wind` web page (or the
   wind corridor use and simulated forecast inaccuracy) is set so its
   first digit is always `2` (use the corridor data) and the other two
   digits are the deviation percentage chosen on the web page (10-80 in
-  steps of 10 — simulates that a forecast is never 100% accurate).
+  steps of 10 — simulates that a forecast is never 100% accurate). To
+  avoid making PSX recalculate for nothing, a rebuilt corridor that's
+  byte-identical to the last one actually sent is not resent — except
+  right after enabling (or re-enabling) the importer, which always
+  forces a resend even if the freshly fetched data happens to match:
+  otherwise PSX could be left showing the restored flight-plan corridor
+  (see "Turning it off" below) indefinitely, mistaken for up to date.
 
 - **Turning it off.** Disabling the importer — or enabling MSFS wind
   sync, which is mutually exclusive since both write the wind corridor

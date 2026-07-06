@@ -1630,9 +1630,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 if self._msfs_wind_sync:
                     self._msfs_wind_sync = False
                     self.logger.info("msfs_wind_sync → False (disabled by enroute_wind_enabled)")
-                self._enroute_next_fetch_time = 0.0  # fetch right away on enable
+                self._enable_enroute_wind()
                 self._enroute_wind_changed_event.set()
-                self._apply_enroute_wind_qs497()
             else:
                 self._restore_corridor_snapshot()
             settings_changed = True
@@ -1888,8 +1887,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 if self._turb_wind_mode == "psx" and self.psx_connected:
                     self._turb_update_psx_wind()
         if self._enroute_wind_enabled:
-            self._enroute_next_fetch_time = 0.0
-            self._apply_enroute_wind_qs497()
+            self._enable_enroute_wind()
         else:
             self._restore_corridor_snapshot()
         if self.psx_connected and self._fw_mode != old_mode:
@@ -2432,6 +2430,22 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self._corridor_last_own_value = self._corridor_snapshot_txt
         self._corridor_txt = self._corridor_snapshot_txt
         self.logger.info("Enroute wind: restored original flight-plan wind corridor")
+
+    def _enable_enroute_wind(self) -> None:
+        """Apply the enable/re-enable side effects for the enroute wind importer.
+
+        Forces a fresh Open-Meteo fetch on the next cycle, and — by clearing
+        _enroute_last_corridor_txt — forces _apply_enroute_wind_injection to
+        actually resend the corridor even if the freshly built one happens to
+        match a value cached from before enabling. That cache can be stale
+        proof of nothing: while disabled, PSX was showing the restored
+        flight-plan snapshot instead (or, on startup/config load, nothing has
+        been sent at all yet), so a dedup match against it must never be
+        allowed to suppress the resend.
+        """
+        self._enroute_next_fetch_time = 0.0
+        self._enroute_last_corridor_txt = None
+        self._apply_enroute_wind_qs497()
 
     def _apply_enroute_wind_qs497(self) -> None:
         """Ensure Qs497 tells PSX to use the wind corridor, with our chosen deviation level.
