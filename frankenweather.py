@@ -1019,7 +1019,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self.msfs_cloud_density: Optional[float] = None   # 0–9
         self.msfs_wind_vert: Optional[float] = None       # kt, positive = up
         self.msfs_precip_state: Optional[int] = None      # 2=none, 4=rain, 8=snow
-        self._msfs_bridge_last_seen: Optional[float] = None
+        self._msfs_bridge_last_seen: Optional[float] = None  # monotonic, for the timeout check
+        self._msfs_bridge_last_seen_epoch: Optional[float] = None  # time.time(), for web display
         # Runtime toggles for MSFS sync features
         self._msfs_in_cloud_sync: bool = True
         self._msfs_qnh_check: str = "CHECK"   # "CHECK" or "SYNC"
@@ -1450,6 +1451,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
             if _key in data:
                 setattr(self, _attr, _cast(data[_key]))
         self._msfs_bridge_last_seen = time.monotonic()
+        self._msfs_bridge_last_seen_epoch = time.time()
         if changed:
             self._apply_msfs_sync()
         if self._msfs_wind_sync:
@@ -1965,6 +1967,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
                         self._msfs_bridge_last_seen is not None and
                         time.monotonic() - self._msfs_bridge_last_seen <= _MSFS_BRIDGE_TIMEOUT_S
                     ),
+                    "msfs_last_seen_epoch": self._msfs_bridge_last_seen_epoch,
                     "msfs_in_cloud": self.msfs_in_cloud,
                     "msfs_cloud_density": self.msfs_cloud_density,
                     "msfs_wind_vert": self.msfs_wind_vert,

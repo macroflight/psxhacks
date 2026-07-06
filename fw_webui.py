@@ -273,6 +273,19 @@ def _manual_metar(p, icao="ZZZZ", now=None):  # pylint: disable=too-many-locals,
 # ---------------------------------------------------------------------------
 
 
+_DATA_STALE_TIMEOUT_S = 300.0  # matches the frankenweather-stale and MSFS-bridge-timeout thresholds
+
+
+def _fmt_data_status(now: float, epoch, timeout_s: float = _DATA_STALE_TIMEOUT_S) -> tuple:
+    """Return (color, status_label, age_label) describing a 'last received' epoch timestamp."""
+    if not epoch:
+        return '#ef4444', 'not getting data', 'never'
+    age_label = _fmt_relative_epoch(now, epoch)
+    if now - epoch > timeout_s:
+        return '#ef4444', 'not getting data', age_label
+    return '#22c55e', 'OK', age_label
+
+
 def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-statements,too-many-branches
     """Render the /weather page with a Leaflet tile map centred on the aircraft."""
     import re as _re  # pylint: disable=import-outside-toplevel
@@ -738,7 +751,9 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         turb_on_color, turb_on_label = '#f59e0b', 'suppressed'
     else:
         turb_on_color, turb_on_label = '#22c55e', 'ON'
-    age_str = f'{int(age_s)}s ago'
+    fw_status_color, fw_status_label, fw_age_label = _fmt_data_status(now, received_at)
+    msfs_status_color, msfs_status_label, msfs_age_label = _fmt_data_status(
+        now, turbstate.get('msfs_last_seen_epoch'))
 
     # Compact weather summary for the focused zone
     focused_zd = next((z for z in zone_data if z.get('is_focused')), None)
@@ -803,15 +818,13 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
          if qnh_display else '') +
         f'<tr><td style="color:#94a3b8;padding:0.4em 0.4em 0.1em 0">'
         f'FrankenWeather data</td>'
-        f'<td style="text-align:right"><b style="color:#e2e8f0">{age_str}</b></td></tr>\n' +
-        ('<tr><td style="color:#94a3b8;padding:0.1em 0.4em 0.1em 0">MSFS data</td>'
-         '<td style="text-align:right">'
-         '<b style="color:#22c55e">active</b></td></tr>\n'
-         if turbstate.get('msfs_active') else
-         '<tr><td style="color:#94a3b8;padding:0.1em 0.4em 0.1em 0">MSFS data</td>'
-         '<td style="text-align:right">'
-         '<b style="color:#64748b">none</b></td></tr>\n'
-         if turbstate else '') +
+        f'<td style="text-align:right"><b style="color:{fw_status_color}">'
+        f'{fw_status_label}</b></td></tr>\n'
+        f'<tr><td colspan="2" style="{_sub}">{fw_age_label}</td></tr>\n' +
+        f'<tr><td style="color:#94a3b8;padding:0.4em 0.4em 0.1em 0">MSFS data</td>'
+        f'<td style="text-align:right"><b style="color:{msfs_status_color}">'
+        f'{msfs_status_label}</b></td></tr>\n'
+        f'<tr><td colspan="2" style="{_sub}">{msfs_age_label}</td></tr>\n' +
         ('<tr><td style="color:#94a3b8;padding:0.1em 0.4em 0.1em 0">Enroute wind</td>'
          '<td style="text-align:right">'
          f'<b style="color:{enroute_wind_color}">{enroute_wind_label}</b></td></tr>\n') +
