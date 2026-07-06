@@ -1671,7 +1671,13 @@ class Script:  # pylint: disable=too-many-instance-attributes
             elif old_mode == "disabled":
                 self.psx_send_and_set("WxAutoSet", "0")
                 self._sync_psx_clock()
-        if new_mode == "manual":
+        if new_mode == "manual" or old_mode == "manual":
+            # Force an immediate zone update on either side of a manual-mode
+            # transition: entering needs the manual string written right away,
+            # and leaving needs the manual weather replaced with real weather
+            # right away too — otherwise the old manual data can linger in
+            # every zone for up to _REFRESH_MAX_S (5 minutes) since nothing
+            # else considers the zones stale immediately after the switch.
             self._manual_wx_force_update = True
             self.fmc_changed_event.set()
         self._state_changed_event.set()
@@ -1896,7 +1902,11 @@ class Script:  # pylint: disable=too-many-instance-attributes
             elif old_mode == "disabled":
                 self.psx_send_and_set("WxAutoSet", "0")
                 self._sync_psx_clock()
-        if self._fw_mode == "manual":
+        if self._fw_mode == "manual" or old_mode == "manual":
+            # See the matching comment in _handle_fw_command: force an
+            # immediate zone update on either side of a manual-mode
+            # transition, or stale manual weather (or stale real weather,
+            # entering manual) can linger for up to _REFRESH_MAX_S.
             self._manual_wx_force_update = True
             self.fmc_changed_event.set()
         self._turb_state_changed_event.set()
