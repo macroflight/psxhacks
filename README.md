@@ -147,14 +147,6 @@ a large fuel tank in the hold that can be emptied into the center
 tank. Who said you can't fly London to Sydney with a decent payload in
 a 744? :)
 
-### comparator.py
-
-Mostly an example script. Compares the PSX and MSFS pitch, bank,
-heading and groundspeed. Useful to detect if the PSX.NET.MSFS.WASM
-plane is not doing what PSX wants it to do. Also checks that the MSFS
-camera angles are zero/zero (I had an issue where they would drift
-slightly, and that really screwed up my landings...)
-
 ### radiosync.py
 
 Not needed anymore (bug in PSX.NET.MSFS.WASM now fixed), but maybe
