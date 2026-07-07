@@ -147,12 +147,6 @@ a large fuel tank in the hold that can be emptied into the center
 tank. Who said you can't fly London to Sydney with a decent payload in
 a 744? :)
 
-### psx_msfs_sync_checker.py
-
-Compare PSX and MSFS altitude. Also useful as an example, but written
-to detect a rare bug where the MSFS WASM plane would detatch from PSX
-in elevation and slowly sink to the ground while still moving forward.
-
 ### comparator.py
 
 Mostly an example script. Compares the PSX and MSFS pitch, bank,
