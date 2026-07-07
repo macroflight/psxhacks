@@ -10,6 +10,9 @@ ctx must provide:
   ctx.fw_state_received_at      : float   — epoch of last STATE
   ctx.fw_turbstate_received_at  : float   — epoch of last TURBSTATE
   ctx.fw_windstate_received_at  : float   — epoch of last WINDSTATE
+  ctx.fw_conflict_paused   : bool         — True while this instance is paused
+                                            because a second FRANKENWEATHER
+                                            instance is on the network
   ctx.color_scheme        : str           — "dark" or "light"
   ctx.cache_get(name)     -> str | None   — PSX variable lookup by name
   ctx.send_manualwx_cmd(cmd: dict)      -> coroutine
@@ -2013,6 +2016,36 @@ def _build_weather_enroute_wind_page(ctx):  # pylint: disable=too-many-locals,to
     return _page(body)
 
 
+def _build_conflict_paused_page(ctx):
+    """Render a prominent 'paused' page in place of any normal /weather page.
+
+    Shown instead of the map/turbulence/wind/settings pages while this
+    instance is paused because a second FRANKENWEATHER instance is active
+    on the network (see ctx.fw_conflict_paused) — deliberately no map or
+    data tables, since none of that is being updated while paused.
+    """
+    color_scheme = ctx.color_scheme
+    return (
+        '<!DOCTYPE html>\n<html>\n<head>\n'
+        f'<meta name="color-scheme" content="{color_scheme}" />\n' +
+        _COMMON_CSS.format() +
+        '<script>setTimeout(function(){location.reload();},15000);</script>\n'
+        '</head>\n<body>\n'
+        '<div class="page-title">'
+        '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
+        '<h1>FrankenWeather</h1>'
+        '</div>\n'
+        '<div class="card warn">'
+        '<p style="margin:0 0 0.5em;font-size:1.1em"><b>⏸ PAUSED</b></p>'
+        '<p style="margin:0">Another FRANKENWEATHER instance is active on the network. '
+        'This instance is doing no Open-Meteo/VATSIM downloads and sending nothing to PSX '
+        '(no zone weather, no turbulence, no wind corridor) until the other instance '
+        'goes away.</p>'
+        '</div>\n'
+        '</body>\n</html>\n'
+    )
+
+
 # ---------------------------------------------------------------------------
 # Route registration — call from both router and standalone server
 # ---------------------------------------------------------------------------
@@ -2021,26 +2054,30 @@ def _build_weather_enroute_wind_page(ctx):  # pylint: disable=too-many-locals,to
 def register_weather_routes(routes, ctx):  # pylint: disable=too-many-statements,too-many-locals
     """Register all /weather and /api/weather/* routes onto an aiohttp RouteTableDef."""
 
+    def _paused_or(build_page):
+        return _build_conflict_paused_page(ctx) if ctx.fw_conflict_paused else build_page(ctx)
+
     @routes.get('/weather')
     async def _weather_get(_):
-        return web.Response(text=_build_weather_map_page(ctx), content_type='text/html')
+        return web.Response(text=_paused_or(_build_weather_map_page), content_type='text/html')
 
     @routes.get('/weather/settings')
     async def _weather_settings_get(_):
-        return web.Response(text=_build_weather_settings_page(ctx), content_type='text/html')
+        return web.Response(
+            text=_paused_or(_build_weather_settings_page), content_type='text/html')
 
     @routes.get('/weather/turbulence')
     async def _weather_turb_get(_):
-        return web.Response(text=_build_weather_turb_page(ctx), content_type='text/html')
+        return web.Response(text=_paused_or(_build_weather_turb_page), content_type='text/html')
 
     @routes.get('/weather/manual')
     async def _weather_manual_get(_):
-        return web.Response(text=_build_weather_manual_page(ctx), content_type='text/html')
+        return web.Response(text=_paused_or(_build_weather_manual_page), content_type='text/html')
 
     @routes.get('/weather/enroute-wind')
     async def _weather_enroute_wind_get(_):
         return web.Response(
-            text=_build_weather_enroute_wind_page(ctx), content_type='text/html')
+            text=_paused_or(_build_weather_enroute_wind_page), content_type='text/html')
 
     @routes.post('/api/weather/enroute-wind/toggle')
     async def _weather_enroute_wind_toggle(request):

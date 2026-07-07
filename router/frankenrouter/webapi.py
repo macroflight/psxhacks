@@ -920,6 +920,16 @@ class RouterFWContext:
         """Return epoch of last WINDSTATE receive."""
         return self._router.frankenweather_windstate_received_at
 
+    @property
+    def fw_conflict_paused(self):
+        """Return False: the router assumes only one FRANKENWEATHER instance exists.
+
+        A paused instance stops sending zone/turbulence/wind data (see
+        frankenweather.py's _conflict_paused()), so this is never something
+        the router itself needs to detect or display.
+        """
+        return False
+
     def cache_get(self, name):
         """Return a PSX variable value by name, or None if absent."""
         from frankenrouter import routercache  # pylint: disable=import-outside-toplevel

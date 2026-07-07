@@ -1987,47 +1987,35 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # End of send_frdp_flightinfo()
 
     def cache_frankenweather_addon(self, line: str) -> None:
-        """Parse and cache FRANKENWEATHER STATE/TURBSTATE/WINDSTATE addon messages for the UI."""
+        """Parse and cache FRANKENWEATHER STATE/TURBSTATE/WINDSTATE addon messages for the UI.
+
+        Assumes only one FRANKENWEATHER instance is ever active on the
+        network — frankenweather itself detects and pauses conflicting
+        instances (see _note_conflict()/_conflict_paused() in
+        frankenweather.py), so the router doesn't need to arbitrate here.
+        """
         # line: "addon=FRANKENWEATHER:STATE:<uuid>:<json>"
         # line: "addon=FRANKENWEATHER:TURBSTATE:<uuid>:<json>"
         # line: "addon=FRANKENWEATHER:WINDSTATE:<uuid>:<json>"
         rest = line[len("addon=FRANKENWEATHER:"):]
-        if rest.startswith("TURBSTATE:"):
-            rest = rest[len("TURBSTATE:"):]
-            colon = rest.find(':')
-            if colon <= 0:
+        for prefix, data_attr, received_attr in (
+                ("STATE:", "frankenweather_state", "frankenweather_received_at"),
+                ("TURBSTATE:", "frankenweather_turbstate", "frankenweather_turbstate_received_at"),
+                ("WINDSTATE:", "frankenweather_windstate", "frankenweather_windstate_received_at"),
+        ):
+            if not rest.startswith(prefix):
+                continue
+            colon = rest.find(':', len(prefix))
+            if colon <= len(prefix):
                 return
             json_str = rest[colon + 1:]
             try:
-                self.frankenweather_turbstate = json.loads(json_str)
-                self.frankenweather_turbstate_received_at = time.time()
+                setattr(self, data_attr, json.loads(json_str))
+                setattr(self, received_attr, time.time())
             except ValueError:
-                self.logger.warning("Malformed FRANKENWEATHER TURBSTATE addon: %s", line[:80])
+                self.logger.warning(
+                    "Malformed FRANKENWEATHER %s addon: %s", prefix[:-1], line[:80])
             return
-        if rest.startswith("WINDSTATE:"):
-            rest = rest[len("WINDSTATE:"):]
-            colon = rest.find(':')
-            if colon <= 0:
-                return
-            json_str = rest[colon + 1:]
-            try:
-                self.frankenweather_windstate = json.loads(json_str)
-                self.frankenweather_windstate_received_at = time.time()
-            except ValueError:
-                self.logger.warning("Malformed FRANKENWEATHER WINDSTATE addon: %s", line[:80])
-            return
-        if not rest.startswith("STATE:"):
-            return
-        rest = rest[len("STATE:"):]
-        colon = rest.find(':')
-        if colon <= 0:
-            return
-        json_str = rest[colon + 1:]
-        try:
-            self.frankenweather_state = json.loads(json_str)
-            self.frankenweather_received_at = time.time()
-        except ValueError:
-            self.logger.warning("Malformed FRANKENWEATHER STATE addon: %s", line[:80])
 
     def _find_network_clients_matching(self, pattern):
         """Return list of (simulator_name, display_name) for matching non-router clients."""

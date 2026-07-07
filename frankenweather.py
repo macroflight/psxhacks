@@ -156,6 +156,12 @@ _REFRESH_MAX_S = 300                  # always refresh weather after this many s
 _PUSH_COOLDOWN_S = 5.0                # ignore Wx echo-backs for this long after our write
 _MSFS_BRIDGE_TIMEOUT_S = 300.0        # stop using bridge data after this silence period
 _NM_TO_M = 1852.0
+# How long a paused instance waits without hearing from the conflicting
+# (higher-UUID) FRANKENWEATHER instance before resuming — see _note_conflict()
+# and _conflict_paused().
+_CONFLICT_TIMEOUT_S = 120.0
+# How often a paused instance reminds the console that it's paused.
+_CONFLICT_LOG_INTERVAL_S = 60.0
 # PSX Qi243 ("WxSlowTransit"): a timing window (ms) during which any weather
 # variable write PSX receives is handled as a smooth transit instead of an
 # instant jump (per the PSX forum's own description of the variable) — once a
@@ -1027,6 +1033,11 @@ class StandaloneFWContext:
         """Return epoch of last WINDSTATE broadcast."""
         return self._fw._web_windstate_received_at  # pylint: disable=protected-access
 
+    @property
+    def fw_conflict_paused(self):
+        """Return True while this instance is paused for a FRANKENWEATHER conflict."""
+        return self._fw._conflict_uuid is not None  # pylint: disable=protected-access
+
     def cache_get(self, name):
         """Return a PSX-variable-like value from local frankenweather state."""
         return self._fw._web_cache_get(name)  # pylint: disable=protected-access
@@ -1174,6 +1185,11 @@ class Script:  # pylint: disable=too-many-instance-attributes
         # Conflict detection — suspend PSX changes when a higher-UUID instance is present
         self._conflict_uuid: Optional[str] = None
         self._conflict_last_seen: float = 0.0
+        self._conflict_last_logged: float = 0.0
+        # Bookkeeping for the *other* side of a conflict: we're the one
+        # staying active, but still want to log it — see _note_conflict().
+        self._conflict_peer_uuid: Optional[str] = None
+        self._conflict_peer_last_logged: float = 0.0
 
         # Operational mode: "enabled" | "paused" | "disabled" | "manual"
         # paused  = stop updating PSX weather; keep WxAutoSet=0 (existing zones remain)
@@ -1238,10 +1254,26 @@ class Script:  # pylint: disable=too-many-instance-attributes
     # PSX helpers
     # ------------------------------------------------------------------
 
-    def psx_send_and_set(self, key: str, value: str) -> None:
-        """Send a PSX key=value and update the local variable cache."""
+    def _psx_send(self, key: str, value: str) -> bool:
+        """Send key=value to PSX, unless a higher-UUID FRANKENWEATHER instance is active.
+
+        Central chokepoint for every weather-related PSX write (zone
+        weather, turbulence, wind corridor, STATE/TURBSTATE/WINDSTATE
+        broadcasts) so a conflict-paused instance (see _conflict_paused())
+        never writes to the shared PSX network no matter which subsystem is
+        calling. Returns True if actually sent.
+        """
+        if self._conflict_paused():
+            self.logger.debug("PSX send suppressed (conflict pause): %s", key)
+            return False
         self.logger.debug("→ PSX %s = %s", key, value)
         self.psx.send(key, value)
+        return True
+
+    def psx_send_and_set(self, key: str, value: str) -> None:
+        """Send a PSX key=value and update the local variable cache."""
+        if not self._psx_send(key, value):
+            return
         self.psx._set(key, value)  # pylint: disable=protected-access
 
     def _inject_wx_slow_transit(self) -> None:
@@ -1597,7 +1629,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self._apply_wind_injection()
 
     def _handle_fw_addon(self, value: str) -> None:
-        """Dispatch FRANKENWEATHER addon messages: COMMAND, TURBCOMMAND, or STATE broadcast."""
+        """Dispatch FRANKENWEATHER addon messages: commands, or a STATE/TURBSTATE/WINDSTATE msg."""
         rest = value[len("FRANKENWEATHER:"):]
         if rest.startswith("COMMAND:"):
             self._handle_fw_command(rest[len("COMMAND:"):])
@@ -1608,25 +1640,79 @@ class Script:  # pylint: disable=too-many-instance-attributes
         if rest.startswith("MANUALWXCOMMAND:"):
             self._handle_manual_wx_command(rest[len("MANUALWXCOMMAND:"):])
             return
-        if not rest.startswith("STATE:"):
+        # STATE/TURBSTATE/WINDSTATE are the three self-broadcast message types
+        # that carry a sending instance's UUID — used only for detecting
+        # another FRANKENWEATHER instance on the network, the payload itself
+        # is otherwise ignored here (frankenweather.py never consumes another
+        # instance's data, only the router UI does).
+        for prefix in ("STATE:", "TURBSTATE:", "WINDSTATE:"):
+            if not rest.startswith(prefix):
+                continue
+            body = rest[len(prefix):]
+            colon = body.find(':')
+            if colon > 0:
+                self._note_conflict(body[:colon])
             return
-        # State broadcast — UUID conflict detection.
-        # UUID v4 strings (hex+hyphens) compare correctly as plain strings.
-        rest = rest[len("STATE:"):]
-        colon = rest.find(':')
-        if colon <= 0:
-            return
-        recv_uuid = rest[:colon]
+
+    def _note_conflict(self, recv_uuid: str) -> None:
+        """Record a peer FRANKENWEATHER instance's UUID and log/react accordingly.
+
+        UUID v4 strings (hex+hyphens) compare correctly as plain strings; the
+        lexicographically larger UUID is the one that stays active, mirroring
+        whichever instance the other one would also pick (both sides see the
+        same two UUIDs and use the same tie-break, so exactly one pauses).
+        Both instances log the conflict — not just the one that pauses — so
+        it's visible on whichever console you happen to be watching.
+        """
         if recv_uuid == self._instance_uuid:
             return
+        now = time.monotonic()
         if recv_uuid > self._instance_uuid:
             if self._conflict_uuid != recv_uuid:
                 self.logger.error(
                     "CONFLICT: another FRANKENWEATHER instance detected "
-                    "(UUID %s > ours %s) — suspending PSX weather changes",
-                    recv_uuid, self._instance_uuid)
+                    "(UUID %s > ours %s) — pausing all weather/turbulence "
+                    "downloads and PSX writes", recv_uuid, self._instance_uuid)
             self._conflict_uuid = recv_uuid
-            self._conflict_last_seen = time.monotonic()
+            self._conflict_last_seen = now
+            return
+        # We win the tie-break and stay active — but still log it, throttled
+        # the same way _conflict_paused() throttles the loser's reminder.
+        if (self._conflict_peer_uuid != recv_uuid or
+                now - self._conflict_peer_last_logged >= _CONFLICT_LOG_INTERVAL_S):
+            self.logger.error(
+                "CONFLICT: another FRANKENWEATHER instance detected "
+                "(UUID %s < ours %s) — it should be pausing itself; "
+                "we continue normally", recv_uuid, self._instance_uuid)
+            self._conflict_peer_last_logged = now
+        self._conflict_peer_uuid = recv_uuid
+
+    def _conflict_paused(self) -> bool:
+        """Return True while a higher-UUID FRANKENWEATHER instance is active.
+
+        While paused, every coroutine bails out at the top of its loop (see
+        callers) and _psx_send() refuses to send — the only thing still
+        running is the addon subscription that keeps hearing from the other
+        instance. Resumes automatically once _CONFLICT_TIMEOUT_S passes
+        without hearing from it.
+        """
+        if self._conflict_uuid is None:
+            return False
+        age = time.monotonic() - self._conflict_last_seen
+        if age < _CONFLICT_TIMEOUT_S:
+            now = time.monotonic()
+            if now - self._conflict_last_logged >= _CONFLICT_LOG_INTERVAL_S:
+                self._conflict_last_logged = now
+                self.logger.warning(
+                    "*** PAUSED: FRANKENWEATHER %s is active on the network (ours: %s) — "
+                    "no downloads, no PSX writes (last seen %.0fs ago) ***",
+                    self._conflict_uuid, self._instance_uuid, age)
+            return True
+        self.logger.info(
+            "Conflict with FRANKENWEATHER %s expired (%.0fs) — resuming",
+            self._conflict_uuid, age)
+        self._conflict_uuid = None
+        return False
 
     def _handle_fw_command(self, json_str: str) -> None:  # pylint: disable=too-many-branches,too-many-statements
         """Apply a FRANKENWEATHER:COMMAND message received via PSX addon."""
@@ -2165,6 +2251,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 except asyncio.TimeoutError:
                     pass
                 self._turb_state_changed_event.clear()
+                if self._conflict_paused():
+                    continue
                 state = self._turb_state
                 sources = self._turb_sources
                 if not math.isnan(getattr(state, 'source_lat', float('nan'))):
@@ -2214,7 +2302,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 msg = (f"addon=FRANKENWEATHER:TURBSTATE:{self._instance_uuid}:"
                        f"{json.dumps(payload)}")
                 if self.psx_connected:
-                    self.psx.send("addon", msg[len("addon="):])
+                    self._psx_send("addon", msg[len("addon="):])
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s", exc, myname)
             self.logger.critical(traceback.format_exc())
@@ -2231,6 +2319,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 await asyncio.sleep(0.2)
 
                 if not self.psx_connected or self.psx_paused:
+                    continue
+                if self._conflict_paused():
                     continue
 
                 raw = self.psx.get("PiBaHeAlTas")
@@ -2467,7 +2557,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
             return
         self.logger.info("Wind corridor: %s", msg)
         self._inject_wx_slow_transit()
-        self.psx.send("WxCorridorTxt", new_corridor)
+        self._psx_send("WxCorridorTxt", new_corridor)
         self._wind_last_encoded = encoded
         self._wind_last_updated = now
         self._corridor_last_own_value = new_corridor
@@ -2484,7 +2574,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
         if not self._corridor_snapshot_txt:
             return
         self._inject_wx_slow_transit()
-        self.psx.send("WxCorridorTxt", self._corridor_snapshot_txt)
+        self._psx_send("WxCorridorTxt", self._corridor_snapshot_txt)
         self._corridor_last_own_value = self._corridor_snapshot_txt
         self._corridor_txt = self._corridor_snapshot_txt
         self.logger.info("Enroute wind: restored original flight-plan wind corridor")
@@ -2543,7 +2633,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self.route_waypoints, self._current_fl_list_ft(), wind_by_live_index)
         if new_corridor != self._enroute_last_corridor_txt:
             self._inject_wx_slow_transit()
-            self.psx.send("WxCorridorTxt", new_corridor)
+            self._psx_send("WxCorridorTxt", new_corridor)
             self._corridor_last_own_value = new_corridor
             self._enroute_last_corridor_txt = new_corridor
             self.logger.info(
@@ -3708,7 +3798,14 @@ class Script:  # pylint: disable=too-many-instance-attributes
         return f"FRANKENWEATHER:STATE:{self._instance_uuid}:{payload}"
 
     async def state_broadcast_coro(self) -> None:
-        """Broadcast current state as a PSX addon message on change or every 60 seconds."""
+        """Broadcast current state as a PSX addon message on change or every 60 seconds.
+
+        Deliberately NOT gated by _conflict_paused(): this is the minimal
+        identification heartbeat conflict detection itself depends on (see
+        _note_conflict()) — it carries no actual weather data and causes no
+        PSX recalculation, so a paused instance keeps sending it so the
+        winning instance keeps seeing (and logging) the ongoing conflict too.
+        """
         myname = inspect.currentframe().f_code.co_name
         try:
             self.logger.debug("Starting %s", myname)
@@ -3736,20 +3833,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
         if self._fw_mode in ("paused", "disabled"):
             self.logger.debug("Weather update skipped: fw_mode=%s", self._fw_mode)
             return True
-        if self._conflict_uuid is None:
-            return False
-        age = time.monotonic() - self._conflict_last_seen
-        if age < 300.0:
-            self.logger.error(
-                "CONFLICT: FRANKENWEATHER %s is primary (ours: %s) — "
-                "PSX weather changes suspended (last seen %.0fs ago)",
-                self._conflict_uuid, self._instance_uuid, age)
-            return True
-        self.logger.info(
-            "Conflict with FRANKENWEATHER %s expired (%.0fs) — resuming",
-            self._conflict_uuid, age)
-        self._conflict_uuid = None
-        return False
+        return self._conflict_paused()
 
     async def weather_update_coro(self) -> None:  # pylint: disable=too-many-branches
         """Periodically update PSX weather zones from Open-Meteo."""
@@ -3897,10 +3981,12 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 self._enroute_wind_changed_event.clear()
                 if not self.psx_connected:
                     continue
+                if self._conflict_paused():
+                    continue
                 if not self._enroute_wind_enabled and not self.route_waypoints:
                     continue
                 msg = self._build_windstate_message()
-                self.psx.send("addon", msg)
+                self._psx_send("addon", msg)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
             self.logger.critical(traceback.format_exc())
@@ -3927,6 +4013,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
             while True:
                 await asyncio.sleep(15.0)
                 if not self._enroute_wind_enabled or not self.psx_connected:
+                    continue
+                if self._conflict_paused():
                     continue
                 if not self._enroute_waypoints:
                     continue
