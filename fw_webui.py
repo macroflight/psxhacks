@@ -136,6 +136,34 @@ _TURB_KIND_LABELS = {
 # ---------------------------------------------------------------------------
 
 
+def _page_shell(color_scheme, title, nav_html, body, extra_head=''):
+    """Wrap body in the common FrankenWeather page chrome (head/title-bar/footer).
+
+    Factors out exactly the markup that used to be copy-pasted byte-for-byte
+    across every page builder's own local _page() closure: the <head> open
+    (color-scheme meta + _COMMON_CSS), and the page-title bar (home icon +
+    <h1>title</h1> + a right-aligned nav button row). extra_head is inserted
+    right before </head> for page-specific <style>/<script>/<link> content
+    (e.g. Leaflet, a refresh timer, or a page's own table CSS); nav_html is
+    the title bar's button row, which intentionally still differs per page
+    (which links appear, and which one becomes a same-page "Refresh" link).
+    """
+    return (
+        '<!DOCTYPE html>\n<html>\n<head>\n'
+        f'<meta name="color-scheme" content="{color_scheme}" />\n' +
+        _COMMON_CSS.format() +
+        extra_head +
+        '</head>\n<body>\n'
+        '<div class="page-title">'
+        '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
+        f'<h1>{title}</h1>'
+        f'<div style="margin-left:auto;display:flex;gap:0.5em">{nav_html}</div>'
+        '</div>\n' +
+        body +
+        '</body>\n</html>\n'
+    )
+
+
 def _parse_wx_brief(wx_str):  # pylint: disable=too-many-locals
     """Return a dict of human-readable weather summary fields from a PSX Wx string."""
     if not wx_str:
@@ -300,10 +328,7 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
     stale = state is None or age_s > 300.0
 
     def _page(body):
-        return (
-            '<!DOCTYPE html>\n<html>\n<head>\n'
-            f'<meta name="color-scheme" content="{color_scheme}" />\n' +
-            _COMMON_CSS.format() +
+        extra_head = (
             '\n<style>'
             'body { max-width: none; }'
             '#map { width: min(calc(100vh - 7rem), 72vw);'
@@ -313,17 +338,13 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
             '.wx-map-side { flex: 1; min-width: 180px; display: flex;'
             ' flex-direction: column; gap: 1em; }'
             '</style>\n' +
-            _LEAFLET_HEAD +
-            '</head>\n<body>\n'
-            '<div class="page-title">'
-            '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
-            '<h1>Weather</h1>'
-            '<div style="margin-left:auto;display:flex;gap:0.5em">'
+            _LEAFLET_HEAD
+        )
+        nav_html = (
             '<a href="/weather" class="btn btn-gray btn-sm">Refresh</a>'
             '<a href="/" class="btn btn-gray btn-sm">Back</a>'
-            '</div>'
-            '</div>\n' + body + '</body>\n</html>\n'
         )
+        return _page_shell(color_scheme, 'Weather', nav_html, body, extra_head)
 
     if stale:
         msg = 'No data received from frankenweather, check PSX Instructor station'
@@ -903,24 +924,15 @@ def _build_weather_settings_page(ctx):  # pylint: disable=too-many-locals,too-ma
     stale = state is None or age_s > 300.0
 
     def _page(body):
-        return (
-            '<!DOCTYPE html>\n<html>\n<head>\n'
-            f'<meta name="color-scheme" content="{color_scheme}" />\n' +
-            _COMMON_CSS.format() +
-            '\n<style>body { max-width: 64em; }</style>\n</head>\n<body>\n'
-            '<div class="page-title">'
-            '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
-            '<h1>Weather settings</h1>'
-            '<div style="margin-left:auto;display:flex;gap:0.5em">'
+        nav_html = (
             '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
             '<a href="/weather/manual" class="btn btn-gray btn-sm">Manual weather</a>'
             '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Enroute wind</a>'
             '<a href="/weather/settings" class="btn btn-gray btn-sm">Refresh</a>'
-            '</div>'
-            '</div>\n' +
-            body +
-            '</body>\n</html>\n'
         )
+        return _page_shell(
+            color_scheme, 'Weather settings', nav_html, body,
+            '\n<style>body { max-width: 64em; }</style>\n')
 
     if stale:
         msg = ('No data received from frankenweather, '
@@ -1229,10 +1241,7 @@ def _build_weather_manual_page(ctx):  # pylint: disable=too-many-locals,too-many
         pass
 
     def _page(body):
-        return (
-            '<!DOCTYPE html>\n<html>\n<head>\n'
-            f'<meta name="color-scheme" content="{color_scheme}" />\n' +
-            _COMMON_CSS.format() +
+        extra_head = (
             '\n<style>body { max-width: 56em; }'
             '.form-grid { display:grid;grid-template-columns:1fr 1fr;gap:1em; }'
             '.form-section { background:#1c2033;border:1px solid #2a2f45;'
@@ -1251,21 +1260,16 @@ def _build_weather_manual_page(ctx):  # pylint: disable=too-many-locals,too-many
             'color:#4ade80;word-break:break-all;margin-bottom:1em; }'
             '.mode-badge-manual { color:#60a5fa; }'
             '.mode-badge-enabled { color:#4ade80; }'
-            '</style>\n</head>\n<body>\n'
-            '<div class="page-title">'
-            '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
-            '<h1>Manual weather</h1>'
-            '<div style="margin-left:auto;display:flex;gap:0.5em">'
+            '</style>\n'
+        )
+        nav_html = (
             '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
             '<a href="/weather/settings" class="btn btn-gray btn-sm">Zone settings</a>'
             '<a href="/weather/turbulence" class="btn btn-gray btn-sm">Turbulence</a>'
             '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Enroute wind</a>'
             '<a href="/weather/manual" class="btn btn-gray btn-sm">Refresh</a>'
-            '</div>'
-            '</div>\n' +
-            body +
-            '</body>\n</html>\n'
         )
+        return _page_shell(color_scheme, 'Manual weather', nav_html, body, extra_head)
 
     mode_color = 'mode-badge-manual' if fw_mode == 'manual' else 'mode-badge-enabled'
     zones = (state or {}).get("zones", [])
@@ -1518,10 +1522,7 @@ def _build_weather_turb_page(ctx):  # pylint: disable=too-many-locals,too-many-b
     age_s = now - received_at if received_at else float('inf')
 
     def _page(body):
-        return (
-            '<!DOCTYPE html>\n<html>\n<head>\n'
-            f'<meta name="color-scheme" content="{color_scheme}" />\n' +
-            _COMMON_CSS.format() +
+        extra_head = (
             '\n<style>body { max-width: 56em; }'
             'table.turb-types { width:100%; border-collapse:collapse; }'
             'table.turb-types td,table.turb-types th {'
@@ -1529,20 +1530,14 @@ def _build_weather_turb_page(ctx):  # pylint: disable=too-many-locals,too-many-b
             'table.turb-types th { color:#94a3b8; font-size:0.8em; text-align:left; }'
             '</style>\n'
             '<script>setTimeout(function(){location.reload();},30000);</script>\n'
-            '</head>\n<body>\n'
-            '<div class="page-title">'
-            '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
-            '<h1>Turbulence</h1>'
-            '<div style="margin-left:auto;display:flex;gap:0.5em">'
+        )
+        nav_html = (
             '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
             '<a href="/weather/manual" class="btn btn-gray btn-sm">Manual weather</a>'
             '<a href="/weather/settings" class="btn btn-gray btn-sm">Weather zones</a>'
             '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Enroute wind</a>'
-            '</div>'
-            '</div>\n' +
-            body +
-            '</body>\n</html>\n'
         )
+        return _page_shell(color_scheme, 'Turbulence', nav_html, body, extra_head)
 
     stale_banner = ''
     if not tstate:
@@ -1648,15 +1643,10 @@ def _build_weather_turb_page(ctx):  # pylint: disable=too-many-locals,too-many-b
     )
     status_html += '</div>\n'
 
-    _KIND_LABELS = {
-        'wave': 'Mountain wave', 'rotor': 'Lee rotor', 'mechanical': 'Mechanical',
-        'shear': 'Wind shear', 'cb': 'CB proximity', 'pirep': 'PIREP',
-        'cape': 'CAPE convective', 'gairmet': 'G-AIRMET',
-    }
     manual_pct = int(manual_turb_intensity * 100)
     kind_opts = ''.join(
         f'<option value="{k}"{" selected" if k == manual_turb_kind else ""}>'
-        f'{_KIND_LABELS.get(k, k)}</option>'
+        f'{_TURB_KIND_LABELS.get(k, k)}</option>'
         for k in _TURB_TYPES_ORDER
     )
     manual_active_note = (
@@ -1866,17 +1856,14 @@ def _fmt_relative_epoch(now: float, epoch) -> str:
     return f'{span} ago' if delta <= 0 else f'in {span}'
 
 
-def _build_weather_enroute_wind_page(ctx):  # pylint: disable=too-many-locals,too-many-branches
+def _build_weather_enroute_wind_page(ctx):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     """Render the /weather/enroute-wind page: flight-plan vs. Open-Meteo per-waypoint wind."""
     color_scheme = ctx.color_scheme
     windstate = ctx.fw_windstate
     now = time.time()
 
     def _page(body):
-        return (
-            '<!DOCTYPE html>\n<html>\n<head>\n'
-            f'<meta name="color-scheme" content="{color_scheme}" />\n' +
-            _COMMON_CSS.format() +
+        extra_head = (
             '\n<style>body { max-width: 64em; }'
             'table.ew-table { border-collapse:collapse;width:100%;font-size:0.88em; }'
             'table.ew-table th { text-align:left;color:#64748b;font-size:0.8em;'
@@ -1884,20 +1871,15 @@ def _build_weather_enroute_wind_page(ctx):  # pylint: disable=too-many-locals,to
             'table.ew-table td { padding:2px 6px;border-bottom:1px solid #1c2033; }'
             'tr.ew-passed td { color:#64748b; }'
             'td.ew-diff-hi { color:#f59e0b;font-weight:600; }'
-            '</style>\n</head>\n<body>\n'
-            '<div class="page-title">'
-            '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
-            '<h1>Enroute wind</h1>'
-            '<div style="margin-left:auto;display:flex;gap:0.5em">'
+            '</style>\n'
+        )
+        nav_html = (
             '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
             '<a href="/weather/manual" class="btn btn-gray btn-sm">Manual weather</a>'
             '<a href="/weather/settings" class="btn btn-gray btn-sm">Weather zones</a>'
             '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Refresh</a>'
-            '</div>'
-            '</div>\n' +
-            body +
-            '</body>\n</html>\n'
         )
+        return _page_shell(color_scheme, 'Enroute wind', nav_html, body, extra_head)
 
     enabled = bool(windstate and windstate.get("enabled"))
     toggle_label = "Disable" if enabled else "Enable"
@@ -2024,17 +2006,7 @@ def _build_conflict_paused_page(ctx):
     on the network (see ctx.fw_conflict_paused) — deliberately no map or
     data tables, since none of that is being updated while paused.
     """
-    color_scheme = ctx.color_scheme
-    return (
-        '<!DOCTYPE html>\n<html>\n<head>\n'
-        f'<meta name="color-scheme" content="{color_scheme}" />\n' +
-        _COMMON_CSS.format() +
-        '<script>setTimeout(function(){location.reload();},15000);</script>\n'
-        '</head>\n<body>\n'
-        '<div class="page-title">'
-        '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
-        '<h1>FrankenWeather</h1>'
-        '</div>\n'
+    body = (
         '<div class="card warn">'
         '<p style="margin:0 0 0.5em;font-size:1.1em"><b>⏸ PAUSED</b></p>'
         '<p style="margin:0">Another FRANKENWEATHER instance is active on the network. '
@@ -2042,8 +2014,10 @@ def _build_conflict_paused_page(ctx):
         '(no zone weather, no turbulence, no wind corridor) until the other instance '
         'goes away.</p>'
         '</div>\n'
-        '</body>\n</html>\n'
     )
+    return _page_shell(
+        ctx.color_scheme, 'FrankenWeather', '', body,
+        '<script>setTimeout(function(){location.reload();},15000);</script>\n')
 
 
 # ---------------------------------------------------------------------------
