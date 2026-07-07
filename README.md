@@ -147,12 +147,6 @@ a large fuel tank in the hold that can be emptied into the center
 tank. Who said you can't fly London to Sydney with a decent payload in
 a 744? :)
 
-### radiosync.py
-
-Not needed anymore (bug in PSX.NET.MSFS.WASM now fixed), but maybe
-useful as a simple example of how to inject PSX data into MSFS using
-SimConnect.
-
 ## What you need to run my Python scripts:
 
 - Python 3.13 or later (might work with earlier versions but not
@@ -202,14 +196,13 @@ you can install them in the same way.
 
 ### Update SimConnect.dll in Python-SimConnect (probably not needed)
 
-For at least one of my scripts (radiosync.py) I had to patch
-Python-SimConnect as it was missing some SimConnect variables (e.g
-COM_RADIO_SET_HZ).
+For at least one of my scripts I had to patch Python-SimConnect as it
+was missing some SimConnect variables (e.g COM_RADIO_SET_HZ).
 
 This is often quite easy, just edit a Python file inside
-Python-SimConnect (see radiosync.py for an example). But in the
-radiosync.py case it turned out that the SimConnect.dll file shipped
-with Python-SimConnect was too old and lacked e.g "COM RADIO SET HZ".
+Python-SimConnect. But in that case it turned out that the
+SimConnect.dll file shipped with Python-SimConnect was too old and
+lacked e.g "COM RADIO SET HZ".
 
 To solve this, I simply copied the latest SimConnect.dll file from the
 MSFS SDK ("C:\MSFS SDK\SimConnect SDK\lib\SimConnect.dll") to
