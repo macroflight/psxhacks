@@ -93,6 +93,8 @@ Quickstart Guide:
 Most of the individual scripts can be run independently, e.g
 double-click start_cpdlc.ps1 to restart the CPDLC client.
 
+[Full documentation →](start_scripts/README.md)
+
 ### frankenweather.py and frankenmsfsbridge.py
 
 Real-world weather and turbulence injection.
@@ -150,16 +152,16 @@ a 744? :)
 ## What you need to run my Python scripts:
 
 - Python 3.13 or later (might work with earlier versions but not
-  tested) from https://www.python.org/
-- The Python-SimConnect Python module (https://pypi.org/project/SimConnect/)
-- Hoppie's psx.py module from https://www.hoppie.nl/psx/python/
+  tested) from https://www.python.org/ 
+- The python modules listed in requirements.txt
 
 If you already know how to use Python, just use your favorite way to
 install packages. If not, try to follow the recipe below:
 
 ### Install Python
 - Download the Python installer from python.org. You probably want to
-  use "Windows installer (64-bit)
+  use "Windows installer (64-bit) and the latest version in the 3.13
+  series.
 - Run the installer, install into `C:\fs\python\3.13.5`. You can choose
   another path, if so - use that path below.
 
@@ -180,39 +182,14 @@ virtual environment. If so, adjust the paths below.
 ### Install Python packages into the virtual environment
 
 ```
-c:\fs\psx\psxpython\venv-1\Scripts\pip install SimConnect
-c:\fs\psx\psxpython\venv-1\Scripts\pip install pygame
-c:\fs\psx\psxpython\venv-1\Scripts\pip install aiohttp
+c:\fs\psx\psxpython\venv-1\Scripts\pip install -r c:\fs\psx\psxhacks\requirements.txt
 ```
-
-SimConnect is needed for scripts that talk to MSFS (e.g frankenmsfsbridge.py).
-
-Pygame is needed for frankenusb.py.
-
-Aiohttp is needed by frankenrouter.py.
-
-Other modules might be needed by other scripts in the future, if so
-you can install them in the same way.
-
-### Update SimConnect.dll in Python-SimConnect (probably not needed)
-
-For at least one of my scripts I had to patch Python-SimConnect as it
-was missing some SimConnect variables (e.g COM_RADIO_SET_HZ).
-
-This is often quite easy, just edit a Python file inside
-Python-SimConnect. But in that case it turned out that the
-SimConnect.dll file shipped with Python-SimConnect was too old and
-lacked e.g "COM RADIO SET HZ".
-
-To solve this, I simply copied the latest SimConnect.dll file from the
-MSFS SDK ("C:\MSFS SDK\SimConnect SDK\lib\SimConnect.dll") to
-c:\fs\python\psxpython\Lib\site-packages\SimConnect\SimConnect.dll.
 
 ### Hoppie's psx.py
 
 Most of my scripts requires Jeroen Hoppenbrouwers' `psx.py`
 module. For your convenience I'm including a copy of it in the
-repository, so you no longer need to downlo
+repository, so you no longer need to download it.
 
 The original `psx.py` is available at https://www.hoppie.nl/psx/python/
 
@@ -225,14 +202,16 @@ The original `psx.py` is available at https://www.hoppie.nl/psx/python/
 E.g
 
 ```
-cd c:\fs\psx\pschacks
-c:\fs\python\psxpython\venv-1\Scripts\python.exe frankenusb.py
+cd c:\fs\psx\psxhacks
+c:\fs\python\psxpython\venv-1\Scripts\python.exe frankenusb.py --help
 ```
+
+All of the scripts understand the `--help` command line option (which
+tells you what other command line options are available).
 
 If you want a single icon to click or run from e.g Stream Deck, you
 can create a BAT script or PowerShell script and run those lines from
 there.
-
 
 ## Binary packages
 
@@ -256,11 +235,12 @@ them in a PowerShell or CMD window.
 show_psx.exe must be run in a window since you need to tell it which
 PSX variable to monitor, e.g "show_psx.exe Tla".
 
-In order to use frankenusb.exe you probably need to edit
-frankenusb-frankensim.conf first.
+In order to use frankenusb.exe you need a config file (copy one from
+the config_examples repo to frankenusb.conf and edit to suit your
+needs).
 
-Also note that the binary packages are usually not updated unless
-someone asks for it.
+Also note that the binary packages are not updated very often. If you
+can, use the Python version instead.
 
 ## Short frankenusb tutorial if you use the binary package
 
