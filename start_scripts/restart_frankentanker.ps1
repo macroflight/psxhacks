@@ -6,6 +6,8 @@ KillPythonScript "frankentanker.py"
 $repo = Resolve-AddonRepo $FrankentankerRepo
 $env:PYTHONPATH = $repo
 
-& $PsxhacksPython "$repo\frankentanker.py" @FrankentankerOptions
+# --psx-port-override forces the correct router port for the master sim,
+# regardless of any --psx-port set in $FrankentankerOptions.
+& $PsxhacksPython "$repo\frankentanker.py" @FrankentankerOptions "--psx-port-override=$FrankenrouterMasterPort"
 
 # Read-Host -Prompt "Press Enter to exit"

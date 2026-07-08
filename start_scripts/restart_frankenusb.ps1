@@ -8,6 +8,8 @@ Set-Location $FrankenusbDir
 $repo = Resolve-AddonRepo $FrankenusbRepo
 $env:PYTHONPATH = $repo
 
-& $PsxhacksPython "$repo\frankenusb.py" @FrankenusbOptions
+# --psx-port-override forces the correct router port for the slave sim,
+# regardless of any --psx-port set in $FrankenusbOptions.
+& $PsxhacksPython "$repo\frankenusb.py" @FrankenusbOptions "--psx-port-override=$FrankenrouterSlavePort"
 
 # Read-Host -Prompt "Press Enter to exit"

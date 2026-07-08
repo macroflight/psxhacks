@@ -8,6 +8,8 @@ KillPythonScript "frankenrouter_ident.py"
 $repo = Resolve-AddonRepo $FrankenidentRepo
 $env:PYTHONPATH = $repo
 
-& $PsxhacksPython "$repo\frankenrouter_ident.py" @FrankenidentOptions
+# --psx-port-override forces the correct router port for the slave sim,
+# regardless of any --psx-port set in $FrankenidentOptions.
+& $PsxhacksPython "$repo\frankenrouter_ident.py" @FrankenidentOptions "--psx-port-override=$FrankenrouterSlavePort"
 
 # Read-Host -Prompt "Press Enter to exit"

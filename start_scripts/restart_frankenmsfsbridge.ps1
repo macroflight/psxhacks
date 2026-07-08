@@ -6,6 +6,8 @@ KillPythonScript "frankenmsfsbridge.py"
 $repo = Resolve-AddonRepo $FrankenmsfsbridgeRepo
 $env:PYTHONPATH = $repo
 
-& $PsxhacksPython "$repo\frankenmsfsbridge.py" @FrankenmsfsbridgeOptions
+# --psx-port-override forces the correct router port for the slave sim,
+# regardless of any --psx-port set in $FrankenmsfsbridgeOptions.
+& $PsxhacksPython "$repo\frankenmsfsbridge.py" @FrankenmsfsbridgeOptions "--psx-port-override=$FrankenrouterSlavePort"
 
 # Read-Host -Prompt "Press Enter to exit"
