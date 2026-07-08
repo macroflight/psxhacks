@@ -115,10 +115,10 @@
 
 # ---------------------------------------------------------------------------
 # PSX.NET settings
-# NOTE: PSX.NET is started from startsim_master.ps1. This does NOT happen
-# automatically - you must configure PSX.NET yourself (in its own
-# settings) to connect to the MASTER sim's PSX port (normally 10748),
-# otherwise it will try the slave sim's port instead.
+# NOTE: PSX.NET is started from startsim_master.ps1. restart_psx_net.ps1
+# already takes care of pointing it at the MASTER sim's PSX port for you -
+# it rewrites PsxServerIP/PsxServerPort in Settings\PSX.NET.xml on every
+# start.
 #
 # $PsxNetDir has no default in common.ps1 - it is REQUIRED if $StartPsxNet
 # is $true (checked at startup: must point at a directory containing
@@ -235,10 +235,11 @@
 
 # ---------------------------------------------------------------------------
 # HAFAP/CPDLC settings
-# NOTE: HAFAP/CPDLC is started from startsim_master.ps1. This does NOT
-# happen automatically - you must configure it yourself (via $CpdlcOptions,
-# e.g. --psx-port) to connect to the MASTER sim's PSX port (normally
-# 10748), otherwise it will try the slave sim's port instead.
+# NOTE: HAFAP/CPDLC is started from startsim_master.ps1. restart_cpdlc.ps1
+# already takes care of pointing it at the MASTER sim's PSX port for you -
+# it strips any --psx-port you set in $CpdlcOptions and forces the correct
+# one instead (HAFAP/CPDLC has no config file, so this can't be done via a
+# config file rewrite like most other addons).
 #
 # $CpdlcDir has no default in common.ps1 - it is REQUIRED if $StartCpdlc is
 # $true (checked at startup: must point at a directory containing
@@ -406,7 +407,7 @@
 # Translates L/C/R CDU keywords between the CS CDU Bridge and PSX.
 # ---------------------------------------------------------------------------
 #$StartFrankencduproxy  = $true   # FrankenCDU proxy (CS CDU Bridge <-> PSX)
-#$FrankencduproxyOptions = @("--psx-port=10747","--listen-port=10750","--cdu-map=L=L")
+#$FrankencduproxyOptions = @("--listen-port=10750","--cdu-map=L=L")
 #$FrankencduproxyRepo    = $null
 
 
@@ -414,14 +415,13 @@
 # FrankenTanker settings (master sim)
 # In-flight refuelling simulation.
 #
-# NOTE: FrankenTanker is started from startsim_master.ps1. This does NOT
-# happen automatically - you must add --psx-port=10748 to
-# $FrankentankerOptions yourself, otherwise it defaults to the slave sim's
-# port. (This applies to every franken*.py addon started from
-# startsim_master.ps1: pass --psx-port=10748 in its $Franken*Options.)
+# NOTE: FrankenTanker is started from startsim_master.ps1. restart_frankentanker.ps1
+# already takes care of pointing it at the MASTER sim's PSX port for you via
+# --psx-port-override (this applies to every franken*.py addon started from
+# start_scripts - no need to set --psx-port yourself).
 # ---------------------------------------------------------------------------
 #$StartFrankentanker  = $true   # FrankenTanker (in-flight refuelling)
-#$FrankentankerOptions = @("--psx-port=10748","--cdus=LR","--menu-row=4")
+#$FrankentankerOptions = @("--cdus=LR","--menu-row=4")
 #$FrankentankerRepo    = $null
 
 
@@ -446,12 +446,11 @@
 # ---------------------------------------------------------------------------
 # FrankenWeather settings (master sim)
 #
-# NOTE: started from startsim_master.ps1 - this does NOT happen
-# automatically, add --psx-port=10748 to $FrankenweatherOptions yourself
-# (see the FrankenTanker settings note above for details).
+# NOTE: started from startsim_master.ps1 - see the FrankenTanker settings
+# note above regarding the PSX port.
 # ---------------------------------------------------------------------------
 #$StartFrankenweather  = $true   # FrankenWeather
-#$FrankenweatherOptions = @("--psx-port=10748", "--web-port=9999", "--config-file=C:\fs\frankenweather.toml")
+#$FrankenweatherOptions = @("--web-port=9999", "--config-file=C:\fs\frankenweather.toml")
 #$FrankenweatherRepo    = $null
 
 
@@ -467,12 +466,11 @@
 # ---------------------------------------------------------------------------
 # FrankenPush settings (master sim)
 #
-# NOTE: started from startsim_master.ps1 - this does NOT happen
-# automatically, add --psx-port=10748 to $FrankenpushOptions yourself (see
-# the FrankenTanker settings note above for details).
+# NOTE: started from startsim_master.ps1 - see the FrankenTanker settings
+# note above regarding the PSX port.
 # ---------------------------------------------------------------------------
 #$StartFrankenpush  = $true   # FrankenPush
-#$FrankenpushOptions  = @("--simevents","--psx-port=10748","--logon-code=CHANGEME","--upload-autosave-from=C:\fs\psx\Aerowinx\Situations")
+#$FrankenpushOptions  = @("--simevents","--logon-code=CHANGEME","--upload-autosave-from=C:\fs\psx\Aerowinx\Situations")
 #$FrankenpushRepo    = $null
 
 
