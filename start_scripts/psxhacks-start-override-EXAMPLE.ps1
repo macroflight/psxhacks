@@ -44,7 +44,7 @@
 # is no default in common.ps1, and startup will error out until this is set.
 # Run setup_python_venv.ps1 to create one; it will print the right path.
 # ---------------------------------------------------------------------------
-#$PsxhacksPython = "C:\fs\python\psxhacks-venv-YYYY-MM-DD\Scripts\python.exe"
+#$PsxhacksPython = "$SimBase\python\psxhacks-venv-YYYY-MM-DD\Scripts\python.exe"
 
 
 # ---------------------------------------------------------------------------

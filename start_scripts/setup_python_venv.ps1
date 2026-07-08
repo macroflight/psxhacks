@@ -29,7 +29,12 @@ function Show-InstallLog([string]$logPath) {
 # ---------------------------------------------------------------------------
 Write-Host ""
 Write-Host "=== Step 1: Python install location ===" -ForegroundColor White
-$PythonBase = Prompt-WithDefault "Where should Python be installed?" "C:\fs\python"
+
+# This script runs standalone (no common.ps1/venv yet to provide $SimBase),
+# so compute the equivalent here: one directory above the psxhacks Git
+# checkout (start_scripts is always a direct subdirectory of it).
+$SimBase = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+$PythonBase = Prompt-WithDefault "Where should Python be installed?" "$SimBase\python"
 
 # ---------------------------------------------------------------------------
 # Step 2: Find latest Python 3.13.x
