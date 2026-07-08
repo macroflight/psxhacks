@@ -365,6 +365,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             help="The router config file",
         )
         parser.add_argument(
+            '--no-basic-mode',
+            action='store_true',
+            help=(
+                "Do not fall back to interactive Basic Mode if --config-file"
+                " is missing; exit with an error instead."
+            ),
+        )
+        parser.add_argument(
             '--read-buffer-size', type=int,
             action='store', default=1048576)
         parser.add_argument(
@@ -3263,6 +3271,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
         # If there is no config file, fallback to "dumb client mode"
         if not os.path.exists(self.args.config_file):
+            if self.args.no_basic_mode:
+                raise SystemExit(
+                    f"Configuration file {self.args.config_file} not found and"
+                    " --no-basic-mode was given, refusing to start in Basic Mode."
+                )
             # Use the default config
             self.config = config.RouterConfig()
             # Set sane defaults and ask the user to override them

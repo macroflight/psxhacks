@@ -1,5 +1,7 @@
 . "$PSScriptRoot\common.ps1"
 
+Test-PythonRequirement
+
 function Invoke-WindowPosition([string]$addon) {
     if ($ChangeWindowPositions) {
         $name = if ($SimAddonNames.Contains($addon)) { $SimAddonNames[$addon] } else { $addon }
@@ -9,7 +11,7 @@ function Invoke-WindowPosition([string]$addon) {
 }
 
 Write-Output "Starting PSX main server..."
-Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_main_server.ps1"
+Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_psx_main_server.ps1"
 
 Delay 1
 
@@ -19,13 +21,6 @@ Invoke-WindowPosition "frankenrouter master"
 
 Delay 5
 
-if ($StartFrankenidentMaster ) {
-    Write-Output "Starting FrankenIDENT..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenident_master.ps1"
-    Invoke-WindowPosition "frankenident_master"
-}
-
-
 if ($StartBacars ) {
     Write-Output "Starting BACARS..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_bacars.ps1"
@@ -34,7 +29,7 @@ if ($StartBacars ) {
 
 if ($StartPsxNet ) {
     Write-Output "Starting PSX.NET..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psxnet.ps1"
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net.ps1"
     Invoke-WindowPosition "PSX.NET"
 }
 

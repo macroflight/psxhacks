@@ -5,12 +5,20 @@ KillProcess "vPilot"
 
 Set-Location $VPilotDir
 
-$iniSource = if ($VpilotPlugin -eq "PSX Printer") {
-    ".\Plugins\vPilot-Pushover-TOROUTER.ini"
-} else {
-    ".\Plugins\vPilot-Pushover-TOPUSHOVER.ini"
+switch ($VpilotPlugin) {
+    "none" {
+        # Do nothing - leave vPilot-Pushover.ini as-is.
+    }
+    "PSX Printer" {
+        Copy-Item ".\Plugins\vPilot-Pushover-TOROUTER.ini" .\Plugins\vPilot-Pushover.ini -Force
+    }
+    "Pushover" {
+        Copy-Item ".\Plugins\vPilot-Pushover-TOPUSHOVER.ini" .\Plugins\vPilot-Pushover.ini -Force
+    }
+    default {
+        Write-Host "Unknown VpilotPlugin value: $VpilotPlugin" -ForegroundColor Yellow
+    }
 }
-Copy-Item $iniSource .\Plugins\vPilot-Pushover.ini -Force
 
 if ($RadioApp -ne "vPilot") {
     Start-Process .\vPilot.exe -ArgumentList "/novoice"

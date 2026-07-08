@@ -1,3 +1,4 @@
+$IsConfiguringFlavor = $true
 . "$PSScriptRoot\common.ps1"
 
 $Host.UI.RawUI.WindowTitle = "Choose Flavors"
@@ -20,8 +21,8 @@ $FlavorDefinitions = @(
     [ordered]@{
         Name        = "VpilotPlugin"
         Description = "vPilot private message plugin"
-        Options     = @("Pushover", "PSX Printer")
-        Default     = "Pushover"
+        Options     = @("none", "Pushover", "PSX Printer")
+        Default     = "none"
         Type        = "string"
     },
     [ordered]@{

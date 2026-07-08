@@ -1,5 +1,7 @@
 . "$PSScriptRoot\common.ps1"
 
+Test-PythonRequirement
+
 function Invoke-WindowPosition([string]$addon) {
     if ($ChangeWindowPositions) {
         $name = if ($SimAddonNames.Contains($addon)) { $SimAddonNames[$addon] } else { $addon }
@@ -23,7 +25,7 @@ if ($StartFrankenident ) {
 }
 
 Write-Output "Starting PSX main clients..."
-Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_psx_clients.ps1"
+Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_psx_main_clients.ps1"
 
 if ($StartPsxNetVatsim ) {
     Write-Output "Starting PSX.NET.VATSIM..."
@@ -75,7 +77,7 @@ if ($StartFrankenprint ) {
 
 if ($StartEfb ) {
     Write-Output "Starting PSX.NET.EFB..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psxnetefb.ps1"
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_efb.ps1"
     Invoke-WindowPosition "PSX.NET.EFB"
 }
 
@@ -99,13 +101,15 @@ if ($StartCsCdu ) {
 Delay 10
 Invoke-WindowPosition "PSX.NET.VATSIM"
 
-if ($StopBeforeMsfsStart) {
-    Read-Host -Prompt "Now start MSFS and enter free flight, then press Enter"
-}
+if ($StartPsxNetMsfsClient) {
+    if ($StopBeforeMsfsStart) {
+        Read-Host -Prompt "Now start MSFS and enter free flight, then press Enter"
+    }
 
-Write-Output "Starting PSX.NET.MSFS.Client..."
-Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_msfs_client.ps1"
-Invoke-WindowPosition "PSX.NET.MSFS"
+    Write-Output "Starting PSX.NET.MSFS.Client..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_msfs_client.ps1"
+    Invoke-WindowPosition "PSX.NET.MSFS"
+}
 
 if ($StartPsxNetWeatherRadar ) {
     Write-Output "Starting PSX.NET.WeatherRadar..."

@@ -42,6 +42,7 @@ try {
     $ftpPage = Invoke-WebRequest -Uri "https://www.python.org/ftp/python/" -UseBasicParsing
 } catch {
     Write-Host "ERROR: Could not reach python.org: $_" -ForegroundColor Red
+    Read-Host -Prompt "Press Enter to close" | Out-Null
     exit 1
 }
 
@@ -52,6 +53,7 @@ $latestVersion = [regex]::Matches($ftpPage.Content, 'href="(3\.13\.(\d+))/"') |
 
 if ($null -eq $latestVersion) {
     Write-Host "ERROR: Could not determine latest Python 3.13 version." -ForegroundColor Red
+    Read-Host -Prompt "Press Enter to close" | Out-Null
     exit 1
 }
 
@@ -88,6 +90,7 @@ if ($existingDir -and ($existingDir -ne $PythonDir.TrimEnd('\'))) {
     Write-Host "  $existingDir" -ForegroundColor Yellow
     Write-Host "The installer cannot move an existing installation to $PythonDir." -ForegroundColor Yellow
     Write-Host "Uninstall it first via Settings > Apps > Installed Apps, then re-run this script." -ForegroundColor Yellow
+    Read-Host -Prompt "Press Enter to close" | Out-Null
     exit 1
 }
 
@@ -99,6 +102,7 @@ if (Test-Path $PythonDir) {
     $proceed = Read-Host "Create a new virtual environment using this Python? [Y/n]"
     if ($proceed -eq 'n' -or $proceed -eq 'N') {
         Write-Host "Nothing to do."
+        Read-Host -Prompt "Press Enter to close" | Out-Null
         exit 0
     }
 } else {
@@ -121,6 +125,7 @@ if (Test-Path $PythonDir) {
             Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing
         } catch {
             Write-Host "ERROR: Download failed: $_" -ForegroundColor Red
+            Read-Host -Prompt "Press Enter to close" | Out-Null
             exit 1
         }
         Write-Host "Saved to $installerPath" -ForegroundColor Green
@@ -147,6 +152,7 @@ if (Test-Path $PythonDir) {
     if ($proc.ExitCode -ne 0) {
         Write-Host "ERROR: Installer exited with code $($proc.ExitCode)." -ForegroundColor Red
         Show-InstallLog $installerLog
+        Read-Host -Prompt "Press Enter to close" | Out-Null
         exit 1
     }
     if (-not (Test-Path $pythonExe)) {
@@ -162,6 +168,7 @@ if (Test-Path $PythonDir) {
             "$env:ProgramFiles\Python313", "$env:ProgramFiles\Python3.13"
         ) | Where-Object { Test-Path "$_\python.exe" } |
             ForEach-Object { Write-Host "  Found: $_\python.exe" -ForegroundColor Cyan }
+        Read-Host -Prompt "Press Enter to close" | Out-Null
         exit 1
     }
 
@@ -192,6 +199,7 @@ Write-Host "=== Step 6: Creating venv and installing packages ===" -ForegroundCo
 $requirementsFile = Join-Path $PSScriptRoot "..\requirements.txt"
 if (-not (Test-Path $requirementsFile)) {
     Write-Host "ERROR: requirements.txt not found at $requirementsFile" -ForegroundColor Red
+    Read-Host -Prompt "Press Enter to close" | Out-Null
     exit 1
 }
 $requirementsFile = (Resolve-Path $requirementsFile).Path
@@ -203,6 +211,7 @@ if (Test-Path (Join-Path $VenvPath "Scripts\python.exe")) {
     & $pythonExe -m venv $VenvPath
     if ($LASTEXITCODE -ne 0) {
         Write-Host "ERROR: venv creation failed." -ForegroundColor Red
+        Read-Host -Prompt "Press Enter to close" | Out-Null
         exit 1
     }
     Write-Host "Created." -ForegroundColor Green
@@ -223,6 +232,7 @@ Write-Host "(rasterio and pywin32 may take a moment to download)" -ForegroundCol
 & $venvPip install -r $requirementsFile
 if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: pip install failed. See output above." -ForegroundColor Red
+    Read-Host -Prompt "Press Enter to close" | Out-Null
     exit 1
 }
 
@@ -240,3 +250,5 @@ Write-Host "(psxhacks-start-override.ps1):" -ForegroundColor DarkGray
 Write-Host ""
 Write-Host ('  $PsxhacksPython = "' + $venvPython + '"') -ForegroundColor Yellow
 Write-Host ""
+
+Read-Host -Prompt "Press Enter to close"

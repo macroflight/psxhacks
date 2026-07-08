@@ -12,6 +12,12 @@ foreach ($node in $xml.configuration.appSettings.add) {
         "LongAirlineCode" { $node.value = $AirlineIcao }
         "CloudUserName"   { $node.value = $SimfestEmail }
         "ACARSLogonCode"  { $node.value = $HoppieLogonCode }
+        # BACARS always runs on the same host as frankenrouter and the PSX
+        # main server, so the server address is always the loopback
+        # address. The port must match the MASTER sim's PSX port, since
+        # BACARS is started from startsim_master.ps1.
+        "ServerAddress"   { $node.value = "127.0.0.1" }
+        "Port"            { $node.value = "$FrankenrouterMasterPort" }
     }
 }
 $xml.Save($configPath)
