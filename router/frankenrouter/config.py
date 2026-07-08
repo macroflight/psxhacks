@@ -461,29 +461,28 @@ I'm not TOML
         with self.assertRaises(RouterConfigError):
             RouterConfig(config_data=self.bad_data_1)
 
-    def test_crew_defaults(self):
-        """Default crew is MACRO/M and default airframe is set when no [sharedinfo] present."""
+    def test_no_deprecated_sharedinfo_keys_by_default(self):
+        """No [sharedinfo] present means nothing deprecated to warn about."""
         conf = RouterConfig(config_data="")
-        self.assertEqual(len(conf.sharedinfo.crew), 1)
-        self.assertEqual(conf.sharedinfo.crew[0].portal_name, "MACRO")
-        self.assertEqual(conf.sharedinfo.crew[0].callsign_suffix, "M")
-        self.assertEqual(conf.sharedinfo.airframes, ["G-CIVB BAW B744"])
+        self.assertEqual(conf.sharedinfo.deprecated_keys_present, [])
 
-    def test_crew_custom(self):
-        """Custom crew list is parsed correctly."""
+    def test_deprecated_sharedinfo_keys_still_parse(self):
+        """Old config files with these keys still load rather than hard-failing."""
         data = """
+[sharedinfo]
+airframes = ["G-CIVB BAW B744"]
+portal_account = ["someemail@somedomain.com"]
+airline_icao = ["BAW"]
+checklist = ["fuel ordered"]
+
 [[sharedinfo.crew]]
 portal_name = "ALPHA"
 callsign_suffix = "A"
-
-[[sharedinfo.crew]]
-portal_name = "BRAVO"
-callsign_suffix = "B"
 """
         conf = RouterConfig(config_data=data)
-        self.assertEqual(len(conf.sharedinfo.crew), 2)
-        self.assertEqual(conf.sharedinfo.crew[1].portal_name, "BRAVO")
-        self.assertEqual(conf.sharedinfo.crew[1].callsign_suffix, "B")
+        self.assertEqual(
+            set(conf.sharedinfo.deprecated_keys_present),
+            {"crew", "airframes", "portal_account", "airline_icao", "checklist"})
 
 
 if __name__ == '__main__':
