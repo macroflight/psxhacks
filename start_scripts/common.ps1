@@ -69,6 +69,11 @@ $RadioApp           = "vPilot"
 #  expect the file to be in this location, so don't override this)
 $PsxNetEfbConfigDir = "$env:USERPROFILE\Documents\PSX.NET.EFB"
 
+#  Where the PSX.NET.MSFS.Router/PSX.NET.VATSIM/PSX.NET.WeatherRadar/
+#  PSX.NET.GroundCrew config files are located (each addon controls this
+#  and expects its file in this shared location, so don't override this)
+$PsxNetConfigDir = "$env:USERPROFILE\Documents\PSX.NET"
+
 # Flavor-derived variables — overridden at runtime by psxhacks-current-flavor.ps1.
 # These defaults apply when configure_flavor.ps1 has not yet been run.
 $AirlineIcao    = "BAW"
