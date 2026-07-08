@@ -305,11 +305,10 @@
 # start either. To enable one: uncomment its BOTH lines below AND edit the
 # path to the actual SRSL-PSX installation.
 #
-# NOTE: the master instance is started from startsim_master.ps1. This does
-# NOT happen automatically - you must configure that installation yourself
-# (in its own settings, inside $SrslPsxMasterDir) to connect to the MASTER
-# sim's PSX port (normally 10748), otherwise it will try the slave sim's
-# port instead.
+# NOTE: restart_srsl_psx_master.ps1/restart_srsl_psx_slave.ps1 rewrite the
+# PORT= line in SRSL-PSX.ini (in each of these directories) on every start,
+# forcing the master instance to the MASTER sim's port and the slave
+# instance to the SLAVE sim's port - no manual configuration needed.
 # ---------------------------------------------------------------------------
 #$StartSrslPsxMaster = $true   # SRSL-PSX SmartRunway/SmartLanding (master)
 #$SrslPsxMasterDir    = "$SimBase\SRSL-PSX\2026-05-23-master"
