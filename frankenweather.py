@@ -4159,6 +4159,10 @@ class Script:  # pylint: disable=too-many-instance-attributes
             '--psx-port', type=int, default=10747,
             help="Port of the PSX server.")
         parser.add_argument(
+            '--psx-port-override', type=int, default=None, metavar='PORT',
+            help="Override --psx-port with this value (a warning is printed). "
+                 "Used by start_scripts to force connecting to the correct router port.")
+        parser.add_argument(
             '--stations', type=str, default=None,
             help="UCAR stations.txt file (downloads from UCAR if not given).")
         parser.add_argument(
@@ -4246,6 +4250,10 @@ class Script:  # pylint: disable=too-many-instance-attributes
             '--turb-intensity-bias', type=int, default=None, metavar='0-999',
             help="[REMOVED] No longer used.")
         self.args = parser.parse_args()
+        if self.args.psx_port_override is not None:
+            print(f"WARNING: --psx-port-override={self.args.psx_port_override} "
+                  f"overrides --psx-port={self.args.psx_port}", file=sys.stderr)
+            self.args.psx_port = self.args.psx_port_override
 
     # (arg_name, replacement_hint or None for the generic "just remove it" message)
     _REMOVED_ARGS = (

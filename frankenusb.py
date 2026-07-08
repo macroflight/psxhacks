@@ -215,6 +215,12 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                             action='store', default="10747", type=str,
                             help='Port number of the main PSX server',
                             )
+        parser.add_argument('--psx-port-override',
+                            action='store', default=None, type=int,
+                            help='Override --psx-port with this value (a warning is '
+                                 'printed). Used by start_scripts to force connecting '
+                                 'to the correct router port.',
+                            )
         parser.add_argument('--long-press-limit',
                             action='store', default=0.5, type=float,
                             help='button presses longer than this are considered long',
@@ -225,6 +231,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                             )
 
         self.args = parser.parse_args()
+        if self.args.psx_port_override is not None:
+            print(f"WARNING: --psx-port-override={self.args.psx_port_override} "
+                  f"overrides --psx-port={self.args.psx_port}", file=sys.stderr)
+            self.args.psx_port = str(self.args.psx_port_override)
         if self.args.psx_server is not None:
             print("WARNING: --psx-server is deprecated, use --psx-host", file=sys.stderr)
             if self.args.psx_host == "127.0.0.1":

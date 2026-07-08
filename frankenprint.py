@@ -281,6 +281,10 @@ class FrankenPrint:
             '--psx-port', type=int, default=10747, metavar='PORT',
             help="PSX server or router port.")
         parser.add_argument(
+            '--psx-port-override', type=int, default=None, metavar='PORT',
+            help="Override --psx-port with this value (a warning is printed). "
+                 "Used by start_scripts to force connecting to the correct router port.")
+        parser.add_argument(
             '--printer', default=None, metavar='NAME|COMn|HOST:PORT',
             help="Windows printer name, COM port (e.g. COM3), or TCP address "
                  "(e.g. 192.168.1.10:9100). If omitted and exactly one printer "
@@ -318,6 +322,10 @@ class FrankenPrint:
             '--debug', action='store_true',
             help="Enable debug logging.")
         self.args = parser.parse_args()
+        if self.args.psx_port_override is not None:
+            print(f"WARNING: --psx-port-override={self.args.psx_port_override} "
+                  f"overrides --psx-port={self.args.psx_port}", file=sys.stderr)
+            self.args.psx_port = self.args.psx_port_override
 
     async def run(self) -> None:
         """Parse args, open the printer or validate Pushover args, then run PSX loop."""

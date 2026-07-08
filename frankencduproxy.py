@@ -383,6 +383,11 @@ def main() -> None:
         help='PSX Main Server port (default: 10747)',
     )
     parser.add_argument(
+        '--psx-port-override', type=int, default=None, metavar='PORT',
+        help='Override --psx-port with this value (a warning is printed). '
+             'Used by start_scripts to force connecting to the correct router port.',
+    )
+    parser.add_argument(
         '--listen-port', type=int, default=10748, metavar='PORT',
         help='Port to listen on for the CDU bridge (default: 10748)',
     )
@@ -395,6 +400,10 @@ def main() -> None:
     )
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
     args = parser.parse_args()
+    if args.psx_port_override is not None:
+        print(f'WARNING: --psx-port-override={args.psx_port_override} '
+              f'overrides --psx-port={args.psx_port}', file=sys.stderr)
+        args.psx_port = args.psx_port_override
 
     logging.basicConfig(
         level=logging.DEBUG if args.debug else logging.INFO,

@@ -277,6 +277,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
             type=int, action='store', default=10747,
             help="The port of the PSX main server or router to connect to.",
         )
+        parser.add_argument(
+            '--psx-port-override',
+            type=int, action='store', default=None, metavar='PORT',
+            help="Override --psx-port with this value (a warning is printed). "
+                 "Used by start_scripts to force connecting to the correct router port.",
+        )
         parser.add_argument('--psx-main-server-host', default=None, help=argparse.SUPPRESS)
         parser.add_argument('--psx-main-server-port', default=None, help=argparse.SUPPRESS,
                             type=int)
@@ -291,6 +297,10 @@ class Script():  # pylint: disable=too-many-instance-attributes
             help="Print more debug info. Probably only useful for development.",
         )
         self.args = parser.parse_args()
+        if self.args.psx_port_override is not None:
+            print(f"WARNING: --psx-port-override={self.args.psx_port_override} "
+                  f"overrides --psx-port={self.args.psx_port}", file=sys.stderr)
+            self.args.psx_port = self.args.psx_port_override
         if self.args.psx_main_server_host is not None:
             print("WARNING: --psx-main-server-host is deprecated, use --psx-host",
                   file=sys.stderr)

@@ -938,6 +938,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
             help="Port of the PSX main server or router.",
         )
         parser.add_argument(
+            '--psx-port-override',
+            type=int, action='store', default=None, metavar='PORT',
+            help="Override --psx-port with this value (a warning is printed). "
+                 "Used by start_scripts to force connecting to the correct router port.",
+        )
+        parser.add_argument(
             '--portal-url',
             type=str, action='store', default='https://mkro.se/flightcentre',
             help="PSCC Flight Centre portal URL.",
@@ -977,6 +983,10 @@ class Script():  # pylint: disable=too-many-instance-attributes
             help="Print more debug info.",
         )
         self.args = parser.parse_args()
+        if self.args.psx_port_override is not None:
+            print(f"WARNING: --psx-port-override={self.args.psx_port_override} "
+                  f"overrides --psx-port={self.args.psx_port}", file=sys.stderr)
+            self.args.psx_port = self.args.psx_port_override
 
         if self.args.logon_code:
             # Explicitly provided — persist for future runs.

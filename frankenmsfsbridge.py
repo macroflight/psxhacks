@@ -6,6 +6,7 @@ import ctypes.wintypes as _wt
 import json
 import logging
 import os
+import sys
 import time
 from typing import Optional
 
@@ -263,6 +264,10 @@ def main() -> None:
                         help="PSX main server host (default: 127.0.0.1)")
     parser.add_argument("--psx-port", type=int, default=10747, metavar="PORT",
                         help="PSX main server port (default: 10747)")
+    parser.add_argument("--psx-port-override", type=int, default=None, metavar="PORT",
+                        help="Override --psx-port with this value (a warning is printed). "
+                             "Used by start_scripts to force connecting to the correct "
+                             "router port.")
     parser.add_argument("--interval", type=float, default=5.0, metavar="SEC",
                         help="SimConnect poll interval in seconds (default: 5)")
     parser.add_argument("--sdk-path", default=None, metavar="DIR",
@@ -271,6 +276,10 @@ def main() -> None:
     parser.add_argument("--debug", action="store_true",
                         help="Enable debug logging")
     args = parser.parse_args()
+    if args.psx_port_override is not None:
+        print(f"WARNING: --psx-port-override={args.psx_port_override} "
+              f"overrides --psx-port={args.psx_port}", file=sys.stderr)
+        args.psx_port = args.psx_port_override
     logging.basicConfig(
         level=logging.DEBUG if args.debug else logging.INFO,
         format="%(asctime)s: %(message)s",
