@@ -176,6 +176,80 @@ def _parse_route_waypoints(route):
     return waypoints
 
 
+def _flightinfo_from_flight_plan_push(data):
+    """Build a frankenrouter FLIGHTINFO dict from a "flight_plan" message.
+
+    Pushed down by Flight Centre (see CLAUDE.md's Flight Centre /
+    frankenrouter integration section). Checklist state is expressed
+    positionally against checklist_items, matching frankenrouter's existing
+    list[bool] convention (router/frankenrouter/webapi.py) — "checklist_items"
+    is included alongside it (a new key) so the router can show current
+    labels instead of its own now-superseded local TOML list.
+
+    A couple of judgement calls where Flight Centre's shape doesn't map
+    1:1 onto frankenrouter's flightinfo dict:
+      - captain_swap picks which of pilot_p1/pilot_p2 holds captain_code/
+        fo_code (P1 is captain by default, in the left seat; captain_swap
+        means the captain is the one in the right seat, i.e. P2), and also
+        sets seat_swap — both describe the same fact for two consumers.
+      - flight_notes and airline_sop have no separate frankenrouter slot;
+        folded into the single free-text comments field.
+      - observers is the departure-phase value only; frankenrouter's
+        FLIGHTINFO has no per-phase observers slot.
+    """
+    fields = data.get("fields") or {}
+    items = data.get("checklist_items") or []
+    checked_by_id = {s["id"]: s["checked"] for s in (data.get("checklist_state") or [])}
+    checklist = [bool(checked_by_id.get(item["id"], False)) for item in items]
+
+    captain_swap = bool(fields.get("captain_swap"))
+    p1, p2 = fields.get("pilot_p1"), fields.get("pilot_p2")
+    captain_code, fo_code = (p2, p1) if captain_swap else (p1, p2)
+
+    comments = "\n".join(
+        part for part in (fields.get("airline_sop"), fields.get("flight_notes")) if part)
+
+    return {
+        "source": "flightcentre",
+        "flight_plan_id": data.get("flight_plan_id"),
+        "last_updated_by": "Flight Centre",
+        "last_updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "portal_account": fields.get("simfest_portal_account") or "",
+        "airline_icao": fields.get("airline_icao") or "",
+        "airframe": fields.get("airframe") or "",
+        "captain_code": captain_code or "",
+        "fo_code": fo_code or "",
+        "seat_swap": captain_swap,
+        "p1_is_vatpri": bool(fields.get("vatpri_swap")),
+        "observers": fields.get("observers") or "",
+        "flight_number": fields.get("simfest_flight_number") or "",
+        "vatsim_callsign": fields.get("callsign") or "",
+        "dep_airport": fields.get("dep_airport") or "",
+        "arr_airport": fields.get("arr_airport") or "",
+        "route": fields.get("planned_route") or "",
+        "preflight_starts": fields.get("report_time") or "",
+        "eobt": fields.get("eobt") or "",
+        "comments": comments,
+        "scratchpad": fields.get("inflight_scratchpad") or "",
+        "checklist": checklist,
+        "checklist_items": [item.get("label") for item in items],
+    }
+
+
+def _unlinked_flightinfo():
+    """Sentinel FLIGHTINFO for when Flight Centre reports no matching plan.
+
+    ("link_status": linked=false) — the router UI shows a "check Flight
+    Centre" banner whenever flight_plan_id is None but source is set.
+    """
+    return {
+        "source": "flightcentre",
+        "flight_plan_id": None,
+        "last_updated_by": "Flight Centre",
+        "last_updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+
+
 def _print_version_mismatch_warning():
     """Print a prominent console warning that frankenpush is out of date."""
     print()
@@ -224,6 +298,17 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self._routerinfos: dict = {}        # {uuid: routerinfo_dict}
         self._sharedinfo: dict = {}         # latest SHAREDINFO from master router
         self._pending_simevents: list = []  # events received since last portal send
+        # live FRDP peer StreamWriter, for sending Flight-Centre-sourced
+        # FLIGHTINFO upstream
+        self._frdp_writer = None
+
+        # Flight Centre flight-plan push state (see CLAUDE.md's Flight
+        # Centre / frankenrouter integration section). Set from "flight_plan"/
+        # "link_status" messages received on the portal WebSocket; used to
+        # correlate local checklist/scratchpad edits back to the right plan.
+        self._active_flight_plan_id = None
+        self._active_checklist_items: list = []   # [{"id", "label"}, ...]
+        self._reverse_sync_queue: asyncio.Queue = asyncio.Queue()
 
         # Live flight state derived or received separately from position
         self._ias_kt = None
@@ -648,41 +733,128 @@ class Script():  # pylint: disable=too-many-instance-attributes
             writer.write(
                 f"addon=FRANKENROUTER:{_FRDP_VERSION}:PONG:{payload}\r\n".encode())
         elif msg_type == 'FLIGHTINFO':
-            try:
-                self._flightinfo = json.loads(payload)
-                self.logger.debug("FRDP: received FLIGHTINFO")
-            except json.JSONDecodeError:
-                pass
+            self._handle_frdp_flightinfo(payload)
         elif msg_type == 'ROUTERINFO':
-            try:
-                ri = json.loads(payload)
-                ri_uuid = ri.get('uuid')
-                if ri_uuid:
-                    ri['received'] = time.time()
-                    self._routerinfos[ri_uuid] = ri
-                    self.logger.debug("FRDP: ROUTERINFO from %s (%s)",
-                                      ri_uuid, ri.get('simulator_name', '?'))
-            except json.JSONDecodeError:
-                pass
+            self._handle_frdp_routerinfo(payload)
         elif msg_type == 'SHAREDINFO':
-            try:
-                self._sharedinfo = json.loads(payload)
-                self.logger.debug("FRDP: received SHAREDINFO")
-            except json.JSONDecodeError:
-                pass
+            self._handle_frdp_sharedinfo(payload)
         elif msg_type == 'SIMEVENTS' and self.args.simevents:
-            try:
-                data = json.loads(payload)
-                # Payload is {"sim": ..., "router": ..., "events": [...]}
-                events = data.get('events') if isinstance(data, dict) else data
-                if isinstance(events, list):
-                    self._pending_simevents.extend(events)
-                    self.logger.debug("FRDP: queued %d SIMEVENTS from %s/%s",
-                                      len(events),
-                                      data.get('sim', '?') if isinstance(data, dict) else '?',
-                                      data.get('router', '?') if isinstance(data, dict) else '?')
-            except json.JSONDecodeError:
-                pass
+            self._handle_frdp_simevents(payload)
+
+    def _handle_frdp_flightinfo(self, payload):
+        """Process a FLIGHTINFO addon message received over FRDP."""
+        try:
+            new_info = json.loads(payload)
+        except json.JSONDecodeError:
+            return
+        old_info = self._flightinfo
+        self._flightinfo = new_info
+        self.logger.debug("FRDP: received FLIGHTINFO")
+        # A FLIGHTINFO we ourselves pushed (source=flightcentre) shouldn't
+        # be echoed back as if a crew member edited it locally — only
+        # diff genuinely router-originated changes (checklist toggle /
+        # scratchpad save) for the reverse-sync path to Flight Centre.
+        if new_info.get('source') != 'flightcentre':
+            self._queue_reverse_sync_deltas(old_info, new_info)
+
+    def _handle_frdp_routerinfo(self, payload):
+        """Process a ROUTERINFO addon message received over FRDP."""
+        try:
+            ri = json.loads(payload)
+            ri_uuid = ri.get('uuid')
+            if ri_uuid:
+                ri['received'] = time.time()
+                self._routerinfos[ri_uuid] = ri
+                self.logger.debug("FRDP: ROUTERINFO from %s (%s)",
+                                  ri_uuid, ri.get('simulator_name', '?'))
+        except json.JSONDecodeError:
+            pass
+
+    def _handle_frdp_sharedinfo(self, payload):
+        """Process a SHAREDINFO addon message received over FRDP."""
+        try:
+            self._sharedinfo = json.loads(payload)
+            self.logger.debug("FRDP: received SHAREDINFO")
+        except json.JSONDecodeError:
+            pass
+
+    def _handle_frdp_simevents(self, payload):
+        """Process a SIMEVENTS addon message received over FRDP."""
+        try:
+            data = json.loads(payload)
+            # Payload is {"sim": ..., "router": ..., "events": [...]}
+            events = data.get('events') if isinstance(data, dict) else data
+            if isinstance(events, list):
+                self._pending_simevents.extend(events)
+                self.logger.debug("FRDP: queued %d SIMEVENTS from %s/%s",
+                                  len(events),
+                                  data.get('sim', '?') if isinstance(data, dict) else '?',
+                                  data.get('router', '?') if isinstance(data, dict) else '?')
+        except json.JSONDecodeError:
+            pass
+
+    def _queue_reverse_sync_deltas(self, old_info, new_info):
+        """Diff two router-originated FLIGHTINFO dicts and queue deltas.
+
+        Diffs the two fields a crew member can still edit locally
+        (checklist toggles, scratchpad), and queues a delta message per
+        change for _reverse_sync_loop to send to Flight Centre immediately
+        — see CLAUDE.md's Flight Centre / frankenrouter integration
+        section. No-op if Flight Centre hasn't told us which flight plan
+        we're linked to yet.
+        """
+        if self._active_flight_plan_id is None:
+            return
+        old_info = old_info or {}
+        new_info = new_info or {}
+
+        old_checklist = old_info.get('checklist') or []
+        new_checklist = new_info.get('checklist') or []
+        for index, item in enumerate(self._active_checklist_items):
+            old_checked = bool(old_checklist[index]) if index < len(old_checklist) else False
+            new_checked = bool(new_checklist[index]) if index < len(new_checklist) else False
+            if old_checked != new_checked:
+                self._reverse_sync_queue.put_nowait({
+                    "type": "checklist_toggle",
+                    "protocol_version": PUSH_PROTOCOL_VERSION,
+                    "flight_plan_id": self._active_flight_plan_id,
+                    "checklist_item_id": item["id"],
+                    "checked": new_checked,
+                })
+
+        old_scratchpad = old_info.get('scratchpad') or ''
+        new_scratchpad = new_info.get('scratchpad') or ''
+        if old_scratchpad != new_scratchpad:
+            self._reverse_sync_queue.put_nowait({
+                "type": "scratchpad_update",
+                "protocol_version": PUSH_PROTOCOL_VERSION,
+                "flight_plan_id": self._active_flight_plan_id,
+                "text": new_scratchpad,
+            })
+
+    async def _send_frdp_flightinfo(self, flightinfo):
+        """Send a FLIGHTINFO addon message upstream over the FRDP peer connection.
+
+        This is the "frankenpush sends it to the routers via addon
+        messages" leg of the Flight Centre -> sim push (see CLAUDE.md).
+        Returns True if actually sent (a live FRDP connection is required;
+        there's no queueing/retry — the next Flight Centre sync tick will
+        naturally resend once the connection is back).
+        """
+        if self._frdp_writer is None:
+            return False
+        line = f"addon=FRANKENROUTER:{_FRDP_VERSION}:FLIGHTINFO:{json.dumps(flightinfo)}\r\n"
+        try:
+            self._frdp_writer.write(line.encode())
+            await self._frdp_writer.drain()
+        except (OSError, ConnectionError) as exc:
+            self.logger.warning("FRDP: failed to send FLIGHTINFO: %s", exc)
+            return False
+        # frankenrouter floods a FLIGHTINFO to other peers but not back to
+        # its origin connection, so update our own cache immediately rather
+        # than waiting for an echo that will never arrive.
+        self._flightinfo = flightinfo
+        return True
 
     async def _run_frdp_session(self, reader, writer):
         """Read loop for a single FRDP peer session."""
@@ -719,12 +891,14 @@ class Script():  # pylint: disable=too-many-instance-attributes
                     try:
                         writer.write(handshake)
                         backoff = 2.0
+                        self._frdp_writer = writer
                         self.logger.info("FRDP: peer connection established")
                         await self._run_frdp_session(reader, writer)
                     finally:
                         self._flightinfo = None
                         self._routerinfos.clear()
                         self._sharedinfo = {}
+                        self._frdp_writer = None
                         writer.close()
                         self.logger.info("FRDP: peer connection closed")
                 except (OSError, asyncio.IncompleteReadError) as exc:
@@ -786,13 +960,22 @@ class Script():  # pylint: disable=too-many-instance-attributes
                                 ws_url, headers=headers, heartbeat=30) as ws:
                             self.logger.info("Connected to portal")
                             backoff = 2.0  # reset on successful connection
+                            # Reset per-connection so a stale plan from a
+                            # previous portal session isn't assumed linked.
+                            self._active_flight_plan_id = None
+                            self._active_checklist_items = []
+                            while not self._reverse_sync_queue.empty():
+                                self._reverse_sync_queue.get_nowait()
+
                             send_task = asyncio.ensure_future(
                                 self._portal_send_loop(ws))
                             drain_task = asyncio.ensure_future(
                                 self._drain_ws(ws))
+                            reverse_sync_task = asyncio.ensure_future(
+                                self._reverse_sync_loop(ws))
                             try:
                                 await asyncio.wait(
-                                    [send_task, drain_task],
+                                    [send_task, drain_task, reverse_sync_task],
                                     return_when=asyncio.FIRST_COMPLETED)
                                 close_code = ws.close_code
                                 if close_code == 4001:
@@ -811,8 +994,10 @@ class Script():  # pylint: disable=too-many-instance-attributes
                             finally:
                                 send_task.cancel()
                                 drain_task.cancel()
-                                await asyncio.gather(send_task, drain_task,
-                                                     return_exceptions=True)
+                                reverse_sync_task.cancel()
+                                await asyncio.gather(
+                                    send_task, drain_task, reverse_sync_task,
+                                    return_exceptions=True)
 
                 except aiohttp.ClientResponseError as exc:
                     self.logger.warning("Portal HTTP error %s: %s", exc.status, exc.message)
@@ -831,11 +1016,62 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 exc, inspect.currentframe().f_code.co_name)
             self.logger.critical(traceback.format_exc())
 
-    @staticmethod
-    async def _drain_ws(ws):
-        """Discard server messages; exits when server closes the connection."""
-        async for _ in ws:
-            pass
+    async def _drain_ws(self, ws):
+        """Handle messages the portal sends back down the push WebSocket.
+
+        Currently just the "flight_plan"/"link_status" pushes from Flight
+        Centre (see CLAUDE.md's Flight Centre / frankenrouter integration
+        section). Exits when the server closes the connection.
+        """
+        async for msg in ws:
+            if msg.type != aiohttp.WSMsgType.TEXT:
+                continue
+            try:
+                data = json.loads(msg.data)
+            except (json.JSONDecodeError, ValueError, TypeError):
+                continue
+            try:
+                await self._handle_portal_message(data)
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                self.logger.warning("Error handling portal message: %s", exc)
+
+    async def _handle_portal_message(self, data):
+        """Apply one "flight_plan"/"link_status" message from Flight Centre.
+
+        Pushes the resulting FLIGHTINFO to the router mesh over the
+        existing FRDP peer connection.
+        """
+        msg_type = data.get("type")
+        if msg_type == "flight_plan":
+            self._active_flight_plan_id = data.get("flight_plan_id")
+            self._active_checklist_items = data.get("checklist_items") or []
+            sent = await self._send_frdp_flightinfo(_flightinfo_from_flight_plan_push(data))
+            if sent:
+                self.logger.info(
+                    "Flight Centre: pushed flight plan %s to router",
+                    self._active_flight_plan_id)
+            else:
+                self.logger.warning(
+                    "Flight Centre: received flight plan %s but no FRDP peer "
+                    "connection to push it to", self._active_flight_plan_id)
+        elif msg_type == "link_status" and not data.get("linked"):
+            self._active_flight_plan_id = None
+            self._active_checklist_items = []
+            await self._send_frdp_flightinfo(_unlinked_flightinfo())
+
+    async def _reverse_sync_loop(self, ws):
+        """Send reverse-sync deltas to Flight Centre as soon as they arrive.
+
+        Sends checklist_toggle/scratchpad_update deltas (queued by
+        _queue_reverse_sync_deltas as they're received over FRDP),
+        independent of the regular telemetry send interval — the
+        user-facing requirement is that a checklist toggle goes out
+        immediately, not on the next periodic tick.
+        """
+        while True:
+            message = await self._reverse_sync_queue.get()
+            await ws.send_json(message)
+            self.logger.debug("Sent reverse-sync message to FC: %s", message.get("type"))
 
     async def _monitor_autosave_coro(self):
         """Poll PSX autosave situ files and queue changed ones for upload.
