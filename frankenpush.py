@@ -109,6 +109,18 @@ def _save_cached_logon_code(code):
 # Matches the portal's WS broadcast rate (web/ws.py _BROADCAST_INTERVAL).
 _SEND_INTERVAL = 2.0
 
+# While stationary on the ground, back off to this interval instead — well
+# under psccfc's connector/state.py REMOVE_AFTER_SECONDS (300s, drops the sim
+# from the feed) and its web/ws.py _STALE_AFTER_SECONDS (120s, fades the icon),
+# so a parked aircraft stays fully "live" on the map with far less traffic.
+_STATIONARY_SEND_INTERVAL = 60.0
+
+# Below this ground speed the aircraft is considered stationary. Sleeps in
+# _SEND_INTERVAL steps even while backed off, so movement resuming (e.g. a
+# takeoff roll) is picked up within one normal tick rather than waiting out
+# the full stationary interval.
+_STATIONARY_SPEED_THRESHOLD_KT = 5.0
+
 # How often to send a full snapshot regardless of what changed.
 # Between full sends only changed fields are sent to reduce bandwidth.
 _FULL_SEND_INTERVAL = 300.0
@@ -942,7 +954,23 @@ class Script():  # pylint: disable=too-many-instance-attributes
                                      "full" if full else "delta", n_events)
                 else:
                     self.logger.debug("Sent %s update", "full" if full else "delta")
-            await asyncio.sleep(_SEND_INTERVAL)
+            await self._sleep_until_next_send()
+
+    async def _sleep_until_next_send(self):
+        """Sleep for _SEND_INTERVAL, or _STATIONARY_SEND_INTERVAL while
+        parked, whichever applies right now — but in _SEND_INTERVAL steps,
+        re-checking ground speed each step, so movement resuming (e.g. a
+        takeoff roll) is picked up within one normal tick rather than
+        waiting out the rest of the longer stationary interval."""
+        stationary = (self._tas_kt or 0) < _STATIONARY_SPEED_THRESHOLD_KT
+        target = _STATIONARY_SEND_INTERVAL if stationary else _SEND_INTERVAL
+        elapsed = 0.0
+        while elapsed < target:
+            step = min(_SEND_INTERVAL, target - elapsed)
+            await asyncio.sleep(step)
+            elapsed += step
+            if stationary and (self._tas_kt or 0) >= _STATIONARY_SPEED_THRESHOLD_KT:
+                return
 
     async def push_loop_coro(self):
         """Maintain a WebSocket connection to the portal and send position updates."""
