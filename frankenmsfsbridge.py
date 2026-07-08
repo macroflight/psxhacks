@@ -277,8 +277,9 @@ def main() -> None:
                         help="Enable debug logging")
     args = parser.parse_args()
     if args.psx_port_override is not None:
-        print(f"WARNING: --psx-port-override={args.psx_port_override} "
-              f"overrides --psx-port={args.psx_port}", file=sys.stderr)
+        if args.psx_port_override != args.psx_port:
+            print(f"WARNING: --psx-port-override={args.psx_port_override} "
+                  f"overrides --psx-port={args.psx_port}", file=sys.stderr)
         args.psx_port = args.psx_port_override
     logging.basicConfig(
         level=logging.DEBUG if args.debug else logging.INFO,

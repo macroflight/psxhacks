@@ -24,7 +24,8 @@ if __name__ == "__main__":
              "Used by start_scripts to force connecting to the correct router port.")
     args = parser.parse_args()
     if args.psx_port_override is not None:
-        print(f"WARNING: --psx-port-override={args.psx_port_override} "
-              f"overrides --psx-port={args.psx_port}", file=sys.stderr)
+        if args.psx_port_override != args.psx_port:
+            print(f"WARNING: --psx-port-override={args.psx_port_override} "
+                  f"overrides --psx-port={args.psx_port}", file=sys.stderr)
         args.psx_port = args.psx_port_override
     asyncio.run(main(args.psx_host, args.psx_port))

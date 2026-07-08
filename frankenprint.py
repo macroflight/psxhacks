@@ -323,8 +323,9 @@ class FrankenPrint:
             help="Enable debug logging.")
         self.args = parser.parse_args()
         if self.args.psx_port_override is not None:
-            print(f"WARNING: --psx-port-override={self.args.psx_port_override} "
-                  f"overrides --psx-port={self.args.psx_port}", file=sys.stderr)
+            if self.args.psx_port_override != self.args.psx_port:
+                print(f"WARNING: --psx-port-override={self.args.psx_port_override} "
+                      f"overrides --psx-port={self.args.psx_port}", file=sys.stderr)
             self.args.psx_port = self.args.psx_port_override
 
     async def run(self) -> None:

@@ -11,19 +11,21 @@ KillPythonScript "psx-acars.py"
 # and force the MASTER sim's router port instead, since HAFAP/CPDLC is
 # started from startsim_master.ps1.
 $cpdlcOptionsFiltered = @()
-$skipNext = $false
-foreach ($opt in $CpdlcOptions) {
-    if ($skipNext) {
-        $skipNext = $false
-        continue
-    }
+for ($i = 0; $i -lt $CpdlcOptions.Count; $i++) {
+    $opt = $CpdlcOptions[$i]
     if ($opt -eq "--psx-port") {
-        $skipNext = $true
-        Show-WarningAndContinue "--psx-port is set in `$CpdlcOptions in $OverrideFile.`nRemoving it and forcing --psx-port=$FrankenrouterMasterPort instead, since HAFAP/CPDLC is started from startsim_master.ps1 and must connect to the MASTER sim's router port."
+        $existingValue = $CpdlcOptions[$i + 1]
+        $i++
+        if ($existingValue -ne "$FrankenrouterMasterPort") {
+            Show-WarningAndContinue "--psx-port is set in `$CpdlcOptions in $OverrideFile.`nRemoving it and forcing --psx-port=$FrankenrouterMasterPort instead, since HAFAP/CPDLC is started from startsim_master.ps1 and must connect to the MASTER sim's router port."
+        }
         continue
     }
     if ($opt -like "--psx-port=*") {
-        Show-WarningAndContinue "--psx-port is set in `$CpdlcOptions in $OverrideFile.`nRemoving it and forcing --psx-port=$FrankenrouterMasterPort instead, since HAFAP/CPDLC is started from startsim_master.ps1 and must connect to the MASTER sim's router port."
+        $existingValue = $opt.Substring("--psx-port=".Length)
+        if ($existingValue -ne "$FrankenrouterMasterPort") {
+            Show-WarningAndContinue "--psx-port is set in `$CpdlcOptions in $OverrideFile.`nRemoving it and forcing --psx-port=$FrankenrouterMasterPort instead, since HAFAP/CPDLC is started from startsim_master.ps1 and must connect to the MASTER sim's router port."
+        }
         continue
     }
     $cpdlcOptionsFiltered += $opt

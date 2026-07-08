@@ -1257,8 +1257,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
         )
         self.args = parser.parse_args()
         if self.args.psx_port_override is not None:
-            print(f"WARNING: --psx-port-override={self.args.psx_port_override} "
-                  f"overrides --psx-port={self.args.psx_port}", file=sys.stderr)
+            if self.args.psx_port_override != self.args.psx_port:
+                print(f"WARNING: --psx-port-override={self.args.psx_port_override} "
+                      f"overrides --psx-port={self.args.psx_port}", file=sys.stderr)
             self.args.psx_port = self.args.psx_port_override
 
         if self.args.logon_code:
