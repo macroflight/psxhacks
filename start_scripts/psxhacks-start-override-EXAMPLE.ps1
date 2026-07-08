@@ -30,7 +30,10 @@
 #                                run start_scripts\setup_python_venv.ps1 to
 #                                create one, it will print the exact path)
 #       - $AerowinxDir          (your Aerowinx PSX installation directory)
-#       - $AerowinxPrefFiles    (the PSX main client .pref files to start)
+#     A few more are required, but only for one of the two sim roles:
+#       - $AerowinxPrefFiles         - only if you start a slave sim
+#       - $AerowinxMainServerPrefFile - only if you start a master sim
+#                                       (already has a sensible default)
 #     $HoppieLogonCodes (or the legacy singular $HoppieLogonCode) is also
 #     required, but only if you enable BACARS or HAFAP/CPDLC.
 #     See each setting's own section below for details.
@@ -50,16 +53,18 @@
 # ---------------------------------------------------------------------------
 # Aerowinx PSX settings
 # PSX itself is always started (both the main server on the master and the
-# main client instances on the slave), so both settings below are REQUIRED
-# - there is no default in common.ps1, and startup will error out until
-# they are set.
+# main client instances on the slave). $AerowinxDir has no default in
+# common.ps1 and is REQUIRED regardless of role - startup will error out
+# until it is set.
 #
 # $AerowinxDir must point at your Aerowinx PSX installation directory
 # (checked at startup: must contain AerowinxStart.jar).
 #
 # $AerowinxPrefFiles is the list of .pref files for the PSX main client
 # instances to start in the slave sim (start_psx_main_clients.ps1) - one per
-# cockpit position/window you want opened.
+# cockpit position/window you want opened. It has no default and is only
+# REQUIRED (checked in start_psx_main_clients.ps1, not common.ps1) if you
+# actually start a slave sim.
 #
 # NOTE: start_scripts does not control PSX window position or size (unlike
 # $ChangeWindowPositions further down, which only applies to addon
@@ -73,7 +78,9 @@
 # Name of the .pref file used to start the PSX main server
 # (start_psx_main_server.ps1). This ships with AerowinxStart and is the same
 # for everyone, so it already has a sensible default ("main-server.pref")
-# in common.ps1 - only override it if your setup uses a different one.
+# in common.ps1 - only override it if your setup uses a different one. It is
+# only REQUIRED to be non-empty (checked in start_psx_main_server.ps1, not
+# common.ps1) if you actually start a master sim.
 #
 # This preferences file should be configured to:
 #   - be a main server

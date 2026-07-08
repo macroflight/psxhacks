@@ -292,24 +292,20 @@ if ([string]::IsNullOrWhiteSpace($PsxhacksPython)) {
 
 # $AerowinxDir has no default - it must be set in the override file (see
 # psxhacks-start-override-EXAMPLE.ps1) and point at a real Aerowinx PSX
-# install. Unlike the addons below, PSX itself is always started (both
-# start_psx_main_server.ps1 on the master and start_psx_main_clients.ps1 on
-# the slave), so this check is unconditional.
+# install. Needed by both the master (start_psx_main_server.ps1) and the
+# slave (start_psx_main_clients.ps1), so this check is unconditional.
+#
+# $AerowinxPrefFiles (needed only on the slave) and
+# $AerowinxMainServerPrefFile (needed only on the master) are instead
+# checked in start_psx_main_clients.ps1/start_psx_main_server.ps1
+# themselves - not here, since this file is dot-sourced by every script,
+# including ones that run on only one of the two roles.
 if ([string]::IsNullOrWhiteSpace($AerowinxDir)) {
     Show-ErrorAndExit "`$AerowinxDir is not set.`nEdit $OverrideFile and set `$AerowinxDir to your Aerowinx PSX installation directory."
 } elseif (-not (Test-Path $AerowinxDir -PathType Container)) {
     Show-ErrorAndExit "`$AerowinxDir not found: $AerowinxDir`nEdit $OverrideFile and set `$AerowinxDir to your Aerowinx PSX installation directory."
 } elseif (-not (Test-Path (Join-Path $AerowinxDir "AerowinxStart.jar"))) {
     Show-ErrorAndExit "`$AerowinxDir does not look like an Aerowinx PSX installation (no AerowinxStart.jar found): $AerowinxDir`nEdit $OverrideFile and set `$AerowinxDir to your Aerowinx PSX installation directory."
-}
-
-# $AerowinxPrefFiles has no default - it must be set in the override file
-# (see psxhacks-start-override-EXAMPLE.ps1) to the list of .pref files for
-# the PSX main client instances to start in the slave sim
-# (start_psx_main_clients.ps1). Unconditional for the same reason as $AerowinxDir
-# above.
-if (-not $AerowinxPrefFiles -or $AerowinxPrefFiles.Count -eq 0) {
-    Show-ErrorAndExit "`$AerowinxPrefFiles is not set.`nEdit $OverrideFile and set `$AerowinxPrefFiles to the list of .pref files for your PSX main client instances."
 }
 
 # $BacarsDir has no default - it must be set in the override file (see
