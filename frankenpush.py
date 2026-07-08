@@ -957,12 +957,21 @@ class Script():  # pylint: disable=too-many-instance-attributes
             await self._sleep_until_next_send()
 
     async def _sleep_until_next_send(self):
-        """Sleep for _SEND_INTERVAL, or _STATIONARY_SEND_INTERVAL while
-        parked, whichever applies right now — but in _SEND_INTERVAL steps,
+        """Sleep for _SEND_INTERVAL, or _STATIONARY_SEND_INTERVAL while parked.
+
+        Whichever applies right now — but in _SEND_INTERVAL steps,
         re-checking ground speed each step, so movement resuming (e.g. a
         takeoff roll) is picked up within one normal tick rather than
-        waiting out the rest of the longer stationary interval."""
-        stationary = (self._tas_kt or 0) < _STATIONARY_SPEED_THRESHOLD_KT
+        waiting out the rest of the longer stationary interval.
+
+        Requires self._lat to already be known: before PSX has reported a
+        first position, self._tas_kt is also still None, which would
+        otherwise read as "stationary" (0 < threshold) and delay that very
+        first send — an unrelated startup gap, not real ground-parked
+        throttling — by up to _STATIONARY_SEND_INTERVAL.
+        """
+        stationary = (self._lat is not None and
+                      (self._tas_kt or 0) < _STATIONARY_SPEED_THRESHOLD_KT)
         target = _STATIONARY_SEND_INTERVAL if stationary else _SEND_INTERVAL
         elapsed = 0.0
         while elapsed < target:
