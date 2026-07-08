@@ -413,14 +413,14 @@
 
 # ---------------------------------------------------------------------------
 # FrankenTanker settings (master sim)
-# In-flight refuelling simulation.
+# Fire retardant loading/dropping simulation (e.g. CL-415/AT-802 water bombers).
 #
 # NOTE: FrankenTanker is started from startsim_master.ps1. restart_frankentanker.ps1
 # already takes care of pointing it at the MASTER sim's PSX port for you via
 # --psx-port-override (this applies to every franken*.py addon started from
 # start_scripts - no need to set --psx-port yourself).
 # ---------------------------------------------------------------------------
-#$StartFrankentanker  = $true   # FrankenTanker (in-flight refuelling)
+#$StartFrankentanker  = $true   # FrankenTanker (fire retardant load/drop)
 #$FrankentankerOptions = @("--cdus=LR","--menu-row=4")
 #$FrankentankerRepo    = $null
 
