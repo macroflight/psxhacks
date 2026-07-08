@@ -506,9 +506,9 @@ _FLIGHTINFO_PAGE = (
     '  if (vatpri) vatpri.textContent = data.p1_is_vatpri ? "Yes" : "No";\n'
     '  var linked = !!data.flight_plan_id;\n'
     '  var banner = document.getElementById("unlinked_banner");\n'
-    '  var briefing = document.getElementById("briefing_block");\n'
+    '  var content = document.getElementById("linked_content");\n'
     '  if (banner) banner.style.display = linked ? "none" : "";\n'
-    '  if (briefing) briefing.style.display = linked ? "" : "none";\n'
+    '  if (content) content.style.display = linked ? "" : "none";\n'
     '  if (data.checklist) {{\n'
     '    data.checklist.forEach(function(checked, i) {{\n'
     '      var el = document.getElementById("chk_" + i);\n'
@@ -574,27 +574,28 @@ _FLIGHTINFO_PAGE = (
     '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
     '<h1>Flight information</h1>'
     '</div>\n'
-    '<p id="last_updated_note" class="note" style="margin:0 0 0.4em">'
-    'Last updated by: {last_updated_by} {last_updated_at}</p>\n'
     '<div class="btn-row">\n'
     '<a href="/" class="btn btn-gray">Back</a>\n'
     '<a href="/flightinfo" class="btn btn-gray">Refresh</a>\n'
     '</div>\n'
-    '{readonly_notice}'
     '<div id="unlinked_banner" class="card warn" style="display:{unlinked_display}">'
-    '<p style="margin:0">No planned flight found in Flight Centre for this sim'
-    ' &mdash; check Flight Centre.</p>'
+    '<p style="margin:0">Sim is not linked to a planned flight in Flight Centre.'
+    ' Plan a flight in Flight Centre with the same tail number and callsign'
+    ' and it will show up here.</p>'
     '</div>\n'
-    '<div id="briefing_block" style="display:{linked_display}">\n'
+    '<div id="linked_content" style="display:{linked_display}">\n'
+    '<p id="last_updated_note" class="note" style="margin:0 0 0.4em">'
+    'Last updated by: {last_updated_by} {last_updated_at}</p>\n'
+    '{readonly_notice}'
     '<div class="rb-grid">\n'
     '{briefing_html}'
-    '</div>\n'
     '</div>\n'
     '{checklist_html}'
     '<label for="scratchpad">Inflight scratchpad</label>\n'
     '<textarea id="scratchpad" name="scratchpad"{scratchpad_disabled}>{scratchpad}</textarea>\n'
     '<button type="button" id="scratchpad_save" class="btn btn-blue"{scratchpad_save_disabled}>'
     'Save</button>\n'
+    '</div>\n'
     '</body>\n</html>\n'
 )
 
@@ -1026,12 +1027,11 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                         f'<tr><td>Connected simulators</td>'
                         f'<td class="val">{connected_sims}</td></tr>\n'
                     )
-                # Flight Centre owns the checklist item list once linked (see
-                # CLAUDE.md's Flight Centre / frankenrouter integration
-                # section); fall back to the old locally-configured TOML list
-                # before a plan has ever been pushed down.
-                cl_items = (router.flightinfo.get('checklist_items') or
-                            router.config.sharedinfo.checklist)
+                # checklist_items comes from Flight Centre (see CLAUDE.md's
+                # Flight Centre / frankenrouter integration section); an
+                # empty/missing list (including "not linked") just means no
+                # warning below, matching /flightinfo's own display.
+                cl_items = router.flightinfo.get('checklist_items') or []
                 data = {
                     'rest_api_color_scheme': router.config.listen.rest_api_color_scheme,
                     'this_sim': own_sim,
@@ -1545,11 +1545,12 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 )
 
                 # checklist_items comes from Flight Centre (see CLAUDE.md's
-                # Flight Centre / frankenrouter integration section) once
-                # linked; the old locally-configured [sharedinfo].checklist
-                # TOML list is only a pre-link fallback so the page isn't
-                # blank before a plan has ever been pushed down.
-                cl_items = flightinfo.get('checklist_items') or router.config.sharedinfo.checklist
+                # Flight Centre / frankenrouter integration section); an
+                # empty/missing list means "no checklist configured" and the
+                # section below simply doesn't render. When unlinked this is
+                # moot anyway — linked_content (see _FLIGHTINFO_PAGE) is
+                # hidden entirely in favor of the unlinked_banner message.
+                cl_items = flightinfo.get('checklist_items') or []
                 cl_state = flightinfo.get('checklist', [])
                 cl_disabled = ' disabled' if is_observer else ''
                 checklist_html = (
@@ -1597,8 +1598,7 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 if upstream is not None and upstream.access_level == 'observer':
                     return web.json_response({'error': 'observer'}, status=403)
                 post = await request.post()
-                items = (router.flightinfo.get('checklist_items') or
-                         router.config.sharedinfo.checklist)
+                items = router.flightinfo.get('checklist_items') or []
                 try:
                     index = int(post.get('index', ''))
                 except (TypeError, ValueError):

@@ -118,49 +118,20 @@ class _RouterConfigPsx:  # pylint: disable=missing-class-docstring,too-few-publi
             raise RouterConfigError("psx filter_to_other_sim entries must be strings")
 
 
-class _RouterConfigCrewMember:  # pylint: disable=missing-class-docstring,too-few-public-methods
-    def __init__(self, data):
-        self.portal_name = data.get('portal_name')
-        if not isinstance(self.portal_name, str):
-            raise RouterConfigError("sharedinfo crew portal_name must be a string")
-        self.callsign_suffix = data.get('callsign_suffix')
-        if not isinstance(self.callsign_suffix, str):
-            raise RouterConfigError("sharedinfo crew callsign_suffix must be a string")
+# crew/airframes/portal_account/airline_icao/checklist used to be configured
+# here; Flight Centre now owns all of this data (see CLAUDE.md's Flight
+# Centre / frankenrouter integration section) and nothing in this codebase
+# reads these anymore. Kept as a presence check only (RouterConfig.__init__
+# logs a deprecation warning) so old config files that still set them don't
+# hard-fail on startup.
+_DEPRECATED_SHAREDINFO_KEYS = ('crew', 'airframes', 'portal_account', 'airline_icao', 'checklist')
 
 
 class _RouterConfigSharedinfo:  # pylint: disable=missing-class-docstring,too-few-public-methods
     def __init__(self, data):
         self.master = data.get('master', False)
-        crew_data = data.get('crew', [{"portal_name": "MACRO", "callsign_suffix": "M"}])
-        if not isinstance(crew_data, list):
-            raise RouterConfigError("sharedinfo crew must be a list")
-        self.crew = [_RouterConfigCrewMember(m) for m in crew_data]
-        self.airframes = data.get('airframes', ["G-CIVB BAW B744"])
-        if not isinstance(self.airframes, list):
-            raise RouterConfigError("sharedinfo airframes must be a list")
-        if not all(isinstance(a, str) for a in self.airframes):
-            raise RouterConfigError("sharedinfo airframes entries must be strings")
-        self.portal_accounts = data.get('portal_account', ["someemail@somedomain.com"])
-        if not isinstance(self.portal_accounts, list):
-            raise RouterConfigError("sharedinfo portal_account must be a list")
-        if not all(isinstance(a, str) for a in self.portal_accounts):
-            raise RouterConfigError("sharedinfo portal_account entries must be strings")
-        self.airline_icao = data.get(
-            'airline_icao', ["BAW", "BAN", "GST", "DLH", "GTI", "ACX", "CLX"])
-        if not isinstance(self.airline_icao, list):
-            raise RouterConfigError("sharedinfo airline_icao must be a list")
-        if not all(isinstance(a, str) for a in self.airline_icao):
-            raise RouterConfigError("sharedinfo airline_icao entries must be strings")
-        self.checklist = data.get('checklist', [
-            "fuel ordered",
-            "VATPRI is elevation master",
-            "VATSIM flight plan filed with correct callsign",
-            "Correct Simbrief account used for plan",
-        ])
-        if not isinstance(self.checklist, list):
-            raise RouterConfigError("sharedinfo checklist must be a list")
-        if not all(isinstance(a, str) for a in self.checklist):
-            raise RouterConfigError("sharedinfo checklist entries must be strings")
+        self.deprecated_keys_present = [
+            key for key in _DEPRECATED_SHAREDINFO_KEYS if key in data]
 
 
 class _RouterConfigFiltering:  # pylint: disable=missing-class-docstring,too-few-public-methods
@@ -314,6 +285,11 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
         self.psx = _RouterConfigPsx(config.get('psx', {}))
         self.performance = _RouterConfigPerformance(config.get('performance', {}))
         self.sharedinfo = _RouterConfigSharedinfo(config.get('sharedinfo', {}))
+        if self.sharedinfo.deprecated_keys_present:
+            self.logger.warning(
+                "Config: [sharedinfo] %s no longer used (Flight Centre now owns "
+                "this data) and can be removed from the config file",
+                ", ".join(self.sharedinfo.deprecated_keys_present))
         if self.sharedinfo.master:
             if self.identity.type == 'master':
                 raise RouterConfigError(
