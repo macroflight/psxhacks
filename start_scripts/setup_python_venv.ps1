@@ -24,23 +24,70 @@ function Show-InstallLog([string]$logPath) {
     Write-Host "Install log not found (checked: $($candidates -join ', '))" -ForegroundColor DarkGray
 }
 
-# ---------------------------------------------------------------------------
-# Step 1: Python base directory
-# ---------------------------------------------------------------------------
-Write-Host ""
-Write-Host "=== Step 1: Python install location ===" -ForegroundColor White
+function Find-ExistingPython313 {
+    # Try the py launcher first - it can pinpoint a specific version even
+    # when several are installed side by side.
+    try {
+        $exe = & py -3.13 -c "import sys; print(sys.executable)" 2>$null
+        if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
+    } catch {
+        # py launcher not present - fall through to the PATH lookup below.
+        Write-Verbose "py launcher unavailable: $_"
+    }
+    # Fall back to whatever "python" resolves to on PATH.
+    $cmd = Get-Command python -ErrorAction SilentlyContinue
+    if ($cmd -and $cmd.Source) { return $cmd.Source }
+    return ""
+}
 
 # This script runs standalone (no common.ps1/venv yet to provide $SimBase),
 # so compute the equivalent here: one directory above the psxhacks Git
 # checkout (start_scripts is always a direct subdirectory of it).
 $SimBase = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+
+# ---------------------------------------------------------------------------
+# Step 1: Python source
+# ---------------------------------------------------------------------------
+Write-Host ""
+Write-Host "=== Step 1: Python source ===" -ForegroundColor White
+Write-Host "This script can download and install its own Python 3.13, or use"
+Write-Host "an existing Python 3.13 installation already on your system (one"
+Write-Host "not installed/managed by this script)."
+$useExisting = Read-Host "Use an existing Python 3.13 installation instead of installing one? [y/N]"
+
+if ($useExisting -eq 'y' -or $useExisting -eq 'Y') {
+    $defaultExisting = Find-ExistingPython313
+    $pythonExe = Prompt-WithDefault "Path to existing python.exe" $defaultExisting
+    if (-not (Test-Path $pythonExe)) {
+        Write-Host "ERROR: $pythonExe not found." -ForegroundColor Red
+        Read-Host -Prompt "Press Enter to close" | Out-Null
+        exit 1
+    }
+    $versionOutput = (& $pythonExe --version 2>&1 | Out-String).Trim()
+    if ($versionOutput -notmatch '^Python 3\.13\.') {
+        Write-Host "ERROR: $pythonExe reports '$versionOutput', not Python 3.13.x." -ForegroundColor Red
+        Read-Host -Prompt "Press Enter to close" | Out-Null
+        exit 1
+    }
+    Write-Host "Using existing Python: $pythonExe ($versionOutput)" -ForegroundColor Green
+    # Only used below as a default for the venv path - the Python itself
+    # already lives wherever the user pointed us.
+    $PythonBase = "$SimBase\python"
+} else {
+
+# ---------------------------------------------------------------------------
+# Step 2: Python install location
+# ---------------------------------------------------------------------------
+Write-Host ""
+Write-Host "=== Step 2: Python install location ===" -ForegroundColor White
+
 $PythonBase = Prompt-WithDefault "Where should Python be installed?" "$SimBase\python"
 
 # ---------------------------------------------------------------------------
-# Step 2: Find latest Python 3.13.x
+# Step 3: Find latest Python 3.13.x
 # ---------------------------------------------------------------------------
 Write-Host ""
-Write-Host "=== Step 2: Finding latest Python 3.13 release ===" -ForegroundColor White
+Write-Host "=== Step 3: Finding latest Python 3.13 release ===" -ForegroundColor White
 Write-Host "Fetching release list from python.org..."
 
 try {
@@ -69,7 +116,7 @@ $PythonDir = Join-Path $PythonBase "$latestVersion"
 $pythonExe = Join-Path $PythonDir "python.exe"
 
 # ---------------------------------------------------------------------------
-# Steps 3 & 4: Download and install Python
+# Steps 4 & 5: Download and install Python
 # Skipped with a prompt if $PythonDir already exists.
 # ---------------------------------------------------------------------------
 
@@ -101,7 +148,7 @@ if ($existingDir -and ($existingDir -ne $PythonDir.TrimEnd('\'))) {
 
 if (Test-Path $PythonDir) {
     Write-Host ""
-    Write-Host "=== Steps 3 & 4: Python already installed ===" -ForegroundColor White
+    Write-Host "=== Steps 4 & 5: Python already installed ===" -ForegroundColor White
     Write-Host "Found: $PythonDir" -ForegroundColor DarkGray
     if (Test-Path $pythonExe) { & $pythonExe --version }
     $proceed = Read-Host "Create a new virtual environment using this Python? [Y/n]"
@@ -112,10 +159,10 @@ if (Test-Path $PythonDir) {
     }
 } else {
     # -------------------------------------------------------------------------
-    # Step 3: Download installer
+    # Step 4: Download installer
     # -------------------------------------------------------------------------
     Write-Host ""
-    Write-Host "=== Step 3: Downloading installer ===" -ForegroundColor White
+    Write-Host "=== Step 4: Downloading installer ===" -ForegroundColor White
 
     $installerName = "python-$latestVersion-amd64.exe"
     $installerUrl  = "https://www.python.org/ftp/python/$latestVersion/$installerName"
@@ -137,10 +184,10 @@ if (Test-Path $PythonDir) {
     }
 
     # -------------------------------------------------------------------------
-    # Step 4: Install Python
+    # Step 5: Install Python
     # -------------------------------------------------------------------------
     Write-Host ""
-    Write-Host "=== Step 4: Installing Python ===" -ForegroundColor White
+    Write-Host "=== Step 5: Installing Python ===" -ForegroundColor White
 
     # The target directory must exist before the installer runs, otherwise
     # the Python installer silently falls back to its default location.
@@ -185,21 +232,23 @@ if (Test-Path $PythonDir) {
     Remove-Item $installerLog  -Force -ErrorAction SilentlyContinue
 }
 
+} # end of "install a new Python" branch
+
 # ---------------------------------------------------------------------------
-# Step 5: Virtual environment path
+# Step 6: Virtual environment path
 # ---------------------------------------------------------------------------
 Write-Host ""
-Write-Host "=== Step 5: Virtual environment ===" -ForegroundColor White
+Write-Host "=== Step 6: Virtual environment ===" -ForegroundColor White
 
 $today       = Get-Date -Format "yyyy-MM-dd"
 $defaultVenv = "$PythonBase\psxhacks-venv-$today"
 $VenvPath    = Prompt-WithDefault "Virtual environment path?" $defaultVenv
 
 # ---------------------------------------------------------------------------
-# Step 6: Create venv and install requirements
+# Step 7: Create venv and install requirements
 # ---------------------------------------------------------------------------
 Write-Host ""
-Write-Host "=== Step 6: Creating venv and installing packages ===" -ForegroundColor White
+Write-Host "=== Step 7: Creating venv and installing packages ===" -ForegroundColor White
 
 $requirementsFile = Join-Path $PSScriptRoot "..\requirements.txt"
 if (-not (Test-Path $requirementsFile)) {

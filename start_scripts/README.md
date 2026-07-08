@@ -126,7 +126,7 @@ Any overrides of settings in `common.ps1` go in your own override file. It does 
 Run this once (and again whenever you want to change these values) to interactively set a handful of sim-specific values - airline code, Hoppie logon code(s), Simfest email(s), vPilot plugin, etc. - that are saved to `psxhacks-current-flavor.ps1`, next to your override file. Some settings (like `$HoppieLogonCodes`/`$SimfestEmails`, both hashtables of named entries) are picked from by name here rather than being set directly in the override file.
 
 ### setup_python_venv.ps1
-Run this once on a new machine to install Python and create the virtual environment that all the `franken*.py` addons and `frankenrouter.py` run in. It prints the path to use for `$PsxhacksPython` in your override file.
+Run this once on a new machine to install Python and create the virtual environment that all the `franken*.py` addons and `frankenrouter.py` run in. It prints the path to use for `$PsxhacksPython` in your override file. If you already have Python 3.13 installed some other way (not installed by this script), you can point the script at it instead of downloading a fresh copy - it will still create the virtual environment for you.
 
 The next two scripts are `startsim_master.ps1` and `startsim_slave.ps1`.  As their names suggest, these scripts have different scopes and start different programs and scripts.
 
