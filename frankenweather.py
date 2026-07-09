@@ -142,6 +142,18 @@ def _nearest_om_hpa(target_ft: float) -> int:
     return min(_OM_PRESSURE_LEVELS_FT, key=lambda hpa: abs(_OM_PRESSURE_LEVELS_FT[hpa] - target_ft))
 
 
+def _om_hval(hourly: dict, key: str, hour: int, default: float) -> float:
+    """Return hourly[key][hour] as a float, falling back to default.
+
+    Open-Meteo's hourly arrays can hold None for hours it has no data
+    for (not just be short), so an index that exists is not enough —
+    the value at that index must also be checked before float()'ing it.
+    """
+    lst = hourly.get(key) or []
+    val = lst[hour] if hour < len(lst) else None
+    return float(val) if val is not None else float(default)
+
+
 _UCAR_STATIONS_URL = "https://weather.rap.ucar.edu/surface/stations.txt"
 _STATIONS_CACHE = os.path.join(os.path.expanduser("~"), ".cache", "frankenweather", "stations.txt")
 # os.path.expanduser("~") resolves to the right home dir on both Linux and Windows.
@@ -2662,10 +2674,10 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 continue
             hourly = om.get("hourly", {})
             hi = datetime.now(timezone.utc).hour
-            cape = float((hourly.get("cape") or [0])[hi])
-            cin = float((hourly.get("convective_inhibition") or [0])[hi])
-            h_temp = float((hourly.get("temperature_2m") or [15.0])[hi])
-            h_dp = float((hourly.get("dewpoint_2m") or [10.0])[hi])
+            cape = _om_hval(hourly, "cape", hi, 0)
+            cin = _om_hval(hourly, "convective_inhibition", hi, 0)
+            h_temp = _om_hval(hourly, "temperature_2m", hi, 15.0)
+            h_dp = _om_hval(hourly, "dewpoint_2m", hi, 10.0)
             cb_oktas = max(_cape_to_cb_oktas(cape, cin), 4)
             cb_tops = max(_cb_tops_ft(cape), sig['top_ft'])
             fields[9] = str(cb_oktas)
@@ -3582,13 +3594,9 @@ class Script:  # pylint: disable=too-many-instance-attributes
             om = om_by_zone.get(i, {})
             hourly = om.get("hourly", {})
 
-            def _hval(key, default, _h=now.hour, _hr=hourly):
-                lst = _hr.get(key) or []
-                return float(lst[_h]) if _h < len(lst) else float(default)
-
-            cape = _hval("cape", 0)
-            cin = _hval("convective_inhibition", 0)
-            showers_mm = _hval("showers", 0)
+            cape = _om_hval(hourly, "cape", now.hour, 0)
+            cin = _om_hval(hourly, "convective_inhibition", now.hour, 0)
+            showers_mm = _om_hval(hourly, "showers", now.hour, 0)
             wmo_code = int((om.get("current") or {}).get("weather_code", 0))
             if cb_oktas > 0:
                 cb_part = (f"  CB {cb_oktas} oktas"
