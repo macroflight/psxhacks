@@ -79,6 +79,10 @@ IRS_ALIGN_FIX_DELAY = 5.0
 # Value broadcast to upstream and all clients once IRSes are confirmed aligned
 IRS_ALIGN_FIX_VALUE = 'Qs355=102000;102000;102000'
 
+# Display name a client must use to receive the spoofed (rather than true)
+# GPS position in outgoing Qs121 messages, when gps_spoofing_egress is enabled.
+GPS_SPOOFED_CLIENT_NAME = "PSX SimLink Bridge"
+
 # Sim event batching: how often to send SIMEVENTS to the network (seconds)
 _SIMEVENTS_BATCH_INTERVAL = 10.0
 # Maximum number of events to keep in the in-memory log (all routers combined)
@@ -286,6 +290,15 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # Set to True the first time the upstream sends load3 (welcome complete).
         # Never reset after that; used by listener_task to gate client connections.
         self.upstream_ever_welcomed = False
+
+        # GPS spoofing egress feature state (see _update_gps_spoof_state()).
+        # Only meaningful/updated while config.psx.gps_spoofing_egress is set.
+        self.gps_spoof_active = False
+        self.gps_spoofed_lat = None
+        self.gps_spoofed_lon = None
+        self.gps_spoofed_alt_ft = None
+        self.gps_spoof_bearing_deg = None
+        self.gps_spoof_distance_nm = None
 
     def reset_after_upstream_connect(self):
         """Re-initialize certain variables after upstream connection."""
@@ -580,6 +593,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             "on" if self.filter_traffic else "off",
             "on" if fc_filter_on else "off",
         )
+        if self.config.psx.gps_spoofing_egress and self.gps_spoof_active:
+            self.logger.info(
+                "GPS SPOOFING ACTIVE: drift bearing=%.0f° distance=%.1fnm,"
+                " spoofed position lat=%.5f lon=%.5f alt=%.0fft",
+                self.gps_spoof_bearing_deg, self.gps_spoof_distance_nm,
+                self.gps_spoofed_lat, self.gps_spoofed_lon, self.gps_spoofed_alt_ft,
+            )
         if self.log_traffic_filename:
             self.logger.info("Logging traffic to %s", self.log_traffic_filename)
         upstreaminfo = "[NO UPSTREAM CONNECTION]"
@@ -2025,6 +2045,79 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     "Malformed FRANKENWEATHER %s addon: %s", prefix[:-1], line[:80])
             return
 
+    def _update_gps_spoof_state(self):
+        """Recompute the FMC's possibly-spoofed lat/lon/altitude from cached PSX state.
+
+        Called whenever Qs121 (true position), Qs572 (SpoofingPage), Qs573
+        (GpsDrift) or Qi277 (SpoofStatus) changes while gps_spoofing_egress is
+        enabled. Qi277==2 means the scenario is actively spoofing GPS; any
+        other value means there is no current spoofed position to report.
+        """
+        try:
+            status = int(self.cache.get_value('Qi277'))
+        except (routercache.RouterCacheException, ValueError, TypeError):
+            status = 0
+        self.gps_spoof_active = status == 2
+
+        if not self.gps_spoof_active:
+            self.gps_spoofed_lat = None
+            self.gps_spoofed_lon = None
+            self.gps_spoofed_alt_ft = None
+            self.gps_spoof_bearing_deg = None
+            self.gps_spoof_distance_nm = None
+            return
+
+        try:
+            piba = self.cache.get_value('Qs121').split(';')
+            true_lat_deg = math.degrees(float(piba[5]))
+            true_lon_deg = math.degrees(float(piba[6]))
+            true_alt_ft = float(piba[3]) / 1000.0
+
+            spage = self.cache.get_value('Qs572').split(';')
+            spoof_to_lat_deg = math.degrees(float(spage[5]))
+            spoof_to_lon_deg = math.degrees(float(spage[6]))
+
+            drift = self.cache.get_value('Qs573').split(';')
+            dist_nm = float(drift[0])
+            alt_dev_ft = float(drift[1])
+        except (routercache.RouterCacheException, ValueError, TypeError, IndexError):
+            return
+
+        lat, lon, bearing = variables.gps_spoof_erroneous_position(
+            true_lat_deg, true_lon_deg, spoof_to_lat_deg, spoof_to_lon_deg, dist_nm)
+        self.gps_spoofed_lat = lat
+        self.gps_spoofed_lon = lon
+        # GpsDrift's altitude field is signed opposite of (spoofed - true): confirmed live
+        # with "spoof to altitude"=8000ft and true altitude=157ft giving alt_dev_ft=-7843,
+        # so the erroneous altitude is true_alt_ft MINUS alt_dev_ft (157 - (-7843) = 8000).
+        self.gps_spoofed_alt_ft = true_alt_ft - alt_dev_ft
+        self.gps_spoof_bearing_deg = bearing
+        self.gps_spoof_distance_nm = dist_nm
+
+    async def _broadcast_qs121_with_spoofing(self, value):
+        """Broadcast a Qs121 value, substituting the spoofed GPS position for spoofed clients.
+
+        value is the part after "Qs121=" (semicolon-delimited PiBaHeAlTas
+        fields). Clients named GPS_SPOOFED_CLIENT_NAME get a modified copy
+        with lat/lon/altitude replaced by the FMC's currently-believed
+        (spoofed) position; all other clients get the true value unchanged.
+        """
+        spoofed_targets = []
+        if self.config.psx.gps_spoofing_egress and self.gps_spoof_active:
+            spoofed_targets = [
+                client.peername for client in self.clients.values()
+                if client.display_name == GPS_SPOOFED_CLIENT_NAME
+            ]
+        if not spoofed_targets:
+            await self.client_broadcast(f"Qs121={value}")
+            return
+        modified_value = variables.build_spoofed_qs121(
+            value, self.gps_spoofed_lat, self.gps_spoofed_lon, self.gps_spoofed_alt_ft)
+        await asyncio.gather(
+            self.client_broadcast(f"Qs121={value}", exclude=spoofed_targets),
+            self.client_broadcast(f"Qs121={modified_value}", include=spoofed_targets),
+        )
+
     def _find_network_clients_matching(self, pattern):
         """Return list of (simulator_name, display_name) for matching non-router clients."""
         matches = []
@@ -2451,7 +2544,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 "No Qs121 seen in %.1fs, re-sending keepalive (normal when stationary)",
                 age)
             self.qs121_keepalive_last_warning = time.perf_counter()
-        await self.client_broadcast(f"Qs121={value}")
+        await self._broadcast_qs121_with_spoofing(value)
 
     async def _housekeeping_check_write_buffers(self):
         """Disconnect clients whose write buffer exceeds 50% of the high water mark."""
@@ -2665,6 +2758,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     pass
 
         (action, code, message, extra_data) = self.rules.route(line, sender)
+
+        if (self.config.psx.gps_spoofing_egress and '=' in line and
+                line.split('=', 1)[0] in ('Qs121', 'Qs572', 'Qs573', 'Qi277')):
+            self._update_gps_spoof_state()
 
         # Record a var_change event if a monitored key changed from a downstream client,
         # but not during a situ load (last_load1 more recent than last_load3).
@@ -2997,7 +3094,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         elif action == RulesAction.NORMAL:
             self.logger.debug("sending normally: %s", line)
             if sender.upstream:
-                await self.client_broadcast(line)
+                if line.startswith('Qs121='):
+                    await self._broadcast_qs121_with_spoofing(line.split('=', 1)[1])
+                else:
+                    await self.client_broadcast(line)
             else:
                 await asyncio.gather(
                     self.send_to_upstream(line, sender.peername),

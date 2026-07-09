@@ -1,9 +1,13 @@
 """Read the PSX Variables.txt definition format."""
 import logging
+import math
 import re
 import traceback
 import unittest
 import urllib.request
+
+# 1 radian of great-circle arc, in nautical miles.
+NM_PER_RADIAN = 60.0 * 180.0 / math.pi
 
 NETWORK_MODES = [
     'ECON',
@@ -155,6 +159,54 @@ def parse_afds_fma(afds_value):
         )
     except (ValueError, IndexError):
         return None
+
+
+def gps_spoof_erroneous_position(
+        true_lat_deg, true_lon_deg, spoofed_to_lat_deg, spoofed_to_lon_deg, distance_nm):
+    """Return (lat_deg, lon_deg, bearing_deg) of the FMC's currently-believed GPS position.
+
+    PSX's GpsDrift (Qs573) only exposes how far (in nm) the GPS-derived
+    position has drifted from the true aircraft position, moving along a
+    straight great-circle track towards the Instructor Station's configured
+    spoofed-to position (SpoofingPage/Qs572). This reconstructs the actual
+    current erroneous lat/lon by placing a point at that bearing/distance
+    from the true position. Verified live against PSX's own POS REF CDU page
+    display (see frankenrouter's gps_spoofing_egress config option).
+    """
+    true_lat = math.radians(true_lat_deg)
+    true_lon = math.radians(true_lon_deg)
+    target_lat = math.radians(spoofed_to_lat_deg)
+    target_lon = math.radians(spoofed_to_lon_deg)
+
+    dlon = target_lon - true_lon
+    bearing = math.atan2(
+        math.sin(dlon) * math.cos(target_lat),
+        (math.cos(true_lat) * math.sin(target_lat) -
+         math.sin(true_lat) * math.cos(target_lat) * math.cos(dlon)),
+    )
+    dist_rad = distance_nm / NM_PER_RADIAN
+    lat2 = math.asin(
+        math.sin(true_lat) * math.cos(dist_rad) +
+        math.cos(true_lat) * math.sin(dist_rad) * math.cos(bearing)
+    )
+    lon2 = true_lon + math.atan2(
+        math.sin(bearing) * math.sin(dist_rad) * math.cos(true_lat),
+        math.cos(dist_rad) - math.sin(true_lat) * math.sin(lat2),
+    )
+    return math.degrees(lat2), math.degrees(lon2), math.degrees(bearing)
+
+
+def build_spoofed_qs121(value, spoofed_lat_deg, spoofed_lon_deg, spoofed_alt_ft):
+    """Return a Qs121 (PiBaHeAlTas) value with lat/lon/altitude replaced.
+
+    Pitch, bank, heading and TAS are left untouched; only the fields an FMC
+    position source would actually report differently are replaced.
+    """
+    fields = value.split(';')
+    fields[3] = str(round(spoofed_alt_ft * 1000))
+    fields[5] = str(math.radians(spoofed_lat_deg))
+    fields[6] = str(math.radians(spoofed_lon_deg))
+    return ';'.join(fields)
 
 
 ADDITIONAL_MODES = {
@@ -445,6 +497,38 @@ Qs411="CduRteCa"; Mode=ECON; Min=15; Max=50000;
         self.assertEqual(
             me.sort_psx_keywords(["Qs1", "Qs100", "Qs999", "Qs42"]),
             ["Qs1", "Qs42", "Qs100", "Qs999"])
+
+
+class TestGpsSpoof(unittest.TestCase):
+    """Tests for the GPS spoofing egress helpers."""
+
+    def test_erroneous_position_matches_live_observation(self):
+        """Pin the formula against values sampled from a live PSX spoofing scenario.
+
+        The expected lat/lon come from the CDU's own POS REF FMC POS display
+        at the moment these Qs121/Qs572/Qs573 values were sampled, so this
+        checks the formula against ground truth, not just internal consistency.
+        """
+        lat, lon, _bearing = gps_spoof_erroneous_position(
+            true_lat_deg=58.40927, true_lon_deg=15.67394,
+            spoofed_to_lat_deg=59.41001, spoofed_to_lon_deg=16.67333,
+            distance_nm=22.7,
+        )
+        self.assertAlmostEqual(lat, 58.74667, delta=0.01)
+        self.assertAlmostEqual(lon, 16.00333, delta=0.01)
+
+    def test_build_spoofed_qs121(self):
+        """Only altitude/lat/lon fields change; other fields pass through untouched."""
+        original = "0;1;1.775;2792;500000;1.0194468;0.2740167"
+        modified = build_spoofed_qs121(original, 58.74667, 16.00333, 500.0)
+        fields = modified.split(';')
+        self.assertEqual(fields[0], "0")
+        self.assertEqual(fields[1], "1")
+        self.assertEqual(fields[2], "1.775")
+        self.assertEqual(fields[3], "500000")
+        self.assertEqual(fields[4], "500000")
+        self.assertAlmostEqual(math.degrees(float(fields[5])), 58.74667, places=4)
+        self.assertAlmostEqual(math.degrees(float(fields[6])), 16.00333, places=4)
 
 
 if __name__ == '__main__':

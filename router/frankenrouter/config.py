@@ -77,7 +77,7 @@ class _RouterConfigLog:  # pylint: disable=missing-class-docstring,too-few-publi
             raise RouterConfigError(f"Log directory {self.directory} does not exist")
 
 
-class _RouterConfigPsx:  # pylint: disable=missing-class-docstring,too-few-public-methods
+class _RouterConfigPsx:  # pylint: disable=missing-class-docstring,too-few-public-methods,too-many-instance-attributes
     def __init__(self, data):  # pylint: disable=too-many-branches
         self.variables = data.get('variables', 'Variables.txt')
         if not isinstance(self.variables, str):
@@ -116,6 +116,13 @@ class _RouterConfigPsx:  # pylint: disable=missing-class-docstring,too-few-publi
             raise RouterConfigError("psx filter_to_other_sim must be a list")
         if not all(isinstance(k, str) for k in self.filter_to_other_sim):
             raise RouterConfigError("psx filter_to_other_sim entries must be strings")
+        # Opt-in: when the PSX Instructor Station GPS spoofing scenario is
+        # active, track the FMC's resulting (possibly-erroneous) lat/lon/altitude
+        # and rewrite outgoing Qs121 (PiBaHeAlTas) messages sent to any client
+        # named "spoofed" so it sees that position instead of the true one.
+        self.gps_spoofing_egress = data.get('gps_spoofing_egress', False)
+        if not isinstance(self.gps_spoofing_egress, bool):
+            raise RouterConfigError("psx gps_spoofing_egress must be true or false")
 
 
 # crew/airframes/portal_account/airline_icao/checklist used to be configured
@@ -443,6 +450,16 @@ I'm not TOML
         self.assertEqual(conf.psx.variables, r'C:\PSX\Variables.txt')
         self.assertEqual(conf.performance.write_buffer_critical_limit, 100000)
         self.assertEqual(conf.access[0].level, 'full')
+        self.assertEqual(conf.psx.gps_spoofing_egress, False)
+
+    def test_gps_spoofing_egress(self):
+        """gps_spoofing_egress defaults to off and can be enabled in [psx]."""
+        conf = RouterConfig(config_data="")
+        self.assertEqual(conf.psx.gps_spoofing_egress, False)
+        conf = RouterConfig(config_data="[psx]\ngps_spoofing_egress = true\n")
+        self.assertEqual(conf.psx.gps_spoofing_egress, True)
+        with self.assertRaises(RouterConfigError):
+            RouterConfig(config_data="[psx]\ngps_spoofing_egress = 'yes'\n")
 
     def test_file_input(self):
         """Test reading from one of the example files."""
