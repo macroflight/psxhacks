@@ -458,13 +458,14 @@ _OBSERVER_SESSION_PASSWORD_UNSET_SECTION = (
 # linked this sim to a planned flight — everything here (plus seat_swap/
 # p1_is_vatpri, handled separately) is now sourced from Flight Centre, not
 # editable locally. See CLAUDE.md's Flight Centre / frankenrouter
-# integration section.
+# integration section. captain_code/fo_code are the PSCC crew code
+# (e.g. "MKRO"), not a full name.
 _BRIEFING_FIELD_LABELS = {
     'portal_account': 'Portal account',
     'airline_icao': 'Airline ICAO',
     'airframe': 'Airframe',
-    'captain_code': 'Captain (P1) / callsign suffix',
-    'fo_code': 'First Officer (P2) / callsign suffix',
+    'captain_code': 'Captain/P1',
+    'fo_code': 'First Officer/P2',
     'dep_airport': 'Departure (ICAO)',
     'arr_airport': 'Arrival (ICAO)',
     'flight_number': 'Portal flight number',
@@ -474,6 +475,22 @@ _BRIEFING_FIELD_LABELS = {
     'observers': 'Observers',
     'route': 'Planned route',
     'comments': 'Comments (SOP to use, etc.)',
+}
+
+# Cruise/arrival crew overrides — only shown when Flight Centre reports a
+# value that actually differs from the departure crew above (see
+# frankenpush.py's _flightinfo_from_flight_plan_push, which leaves these
+# blank whenever a phase is unchanged from departure). Kept separate from
+# _BRIEFING_FIELD_LABELS since that dict always renders a row (with "—" as
+# a placeholder for "not set") — these rows must disappear entirely rather
+# than show "—" for the common case of an unchanged crew.
+_BRIEFING_OVERRIDE_FIELD_LABELS = {
+    'captain_code_cruise': 'Captain/P1 — cruise',
+    'fo_code_cruise': 'First Officer/P2 — cruise',
+    'observers_cruise': 'Observers — cruise',
+    'captain_code_arrival': 'Captain/P1 — arrival',
+    'fo_code_arrival': 'First Officer/P2 — arrival',
+    'observers_arrival': 'Observers — arrival',
 }
 
 _FLIGHTINFO_PAGE = (
@@ -495,10 +512,19 @@ _FLIGHTINFO_PAGE = (
     'var READONLY_FIELDS = ["portal_account","airline_icao","airframe","captain_code",'
     '"fo_code","dep_airport","arr_airport","flight_number","vatsim_callsign",'
     '"preflight_starts","eobt","observers","route","comments"];\n'
+    'var OVERRIDE_FIELDS = ["captain_code_cruise","fo_code_cruise","observers_cruise",'
+    '"captain_code_arrival","fo_code_arrival","observers_arrival"];\n'
     'function applyBriefing(data) {{\n'
     '  READONLY_FIELDS.forEach(function(id) {{\n'
     '    var el = document.getElementById("rb_" + id);\n'
     '    if (el) el.textContent = data[id] || "—";\n'
+    '  }});\n'
+    '  OVERRIDE_FIELDS.forEach(function(id) {{\n'
+    '    var row = document.getElementById("rbrow_" + id);\n'
+    '    var el = document.getElementById("rb_" + id);\n'
+    '    if (!row || !el) return;\n'
+    '    if (data[id]) {{ el.textContent = data[id]; row.style.display = ""; }}\n'
+    '    else {{ row.style.display = "none"; }}\n'
     '  }});\n'
     '  var seat = document.getElementById("rb_seat_swap");\n'
     '  if (seat) seat.textContent = data.seat_swap ? "Yes" : "No";\n'
@@ -1534,6 +1560,21 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     f'<span class="rb-value" id="rb_{key}">'
                     f'{flightinfo.get(key) or "—"}</span></div>\n'
                     for key, label in _BRIEFING_FIELD_LABELS.items()
+                )
+                # Only shown when Flight Centre reports a cruise/arrival
+                # crew value that differs from departure — see
+                # _BRIEFING_OVERRIDE_FIELD_LABELS. Rendered (display:none
+                # when not applicable) rather than omitted outright so the
+                # 5s /api/briefing poll (applyBriefing's OVERRIDE_FIELDS
+                # handling) can toggle them live if a flight plan is edited
+                # while this page is open, not just on next page load.
+                briefing_html += ''.join(
+                    f'<div id="rbrow_{key}" style="display:'
+                    f'{"" if flightinfo.get(key) else "none"}">'
+                    f'<span class="rb-label">{label}</span>'
+                    f'<span class="rb-value" id="rb_{key}">{flightinfo.get(key) or ""}</span>'
+                    f'</div>\n'
+                    for key, label in _BRIEFING_OVERRIDE_FIELD_LABELS.items()
                 )
                 briefing_html += (
                     f'<div><span class="rb-label">Seat swap (Captain in right seat)</span>'

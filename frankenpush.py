@@ -188,6 +188,21 @@ def _parse_route_waypoints(route):
     return waypoints
 
 
+def _seat_codes(fields, suffix, captain_swap):
+    """(captain_code, fo_code) for one phase ("", "_cruise", or "_arrival").
+
+    Blank pilot_p1{suffix}/pilot_p2{suffix} means "unchanged from
+    departure" (Flight Centre's own leave-blank convention for these
+    per-phase override fields), so falls back to the departure pilot_p1/
+    pilot_p2 when the phase-specific field is empty. captain_swap is a
+    single flag for the whole flight (not per phase), so it's applied the
+    same way to every phase.
+    """
+    p1 = fields.get(f"pilot_p1{suffix}") or fields.get("pilot_p1")
+    p2 = fields.get(f"pilot_p2{suffix}") or fields.get("pilot_p2")
+    return (p2, p1) if captain_swap else (p1, p2)
+
+
 def _flightinfo_from_flight_plan_push(data):
     """Build a frankenrouter FLIGHTINFO dict from a "flight_plan" message.
 
@@ -206,8 +221,14 @@ def _flightinfo_from_flight_plan_push(data):
         sets seat_swap — both describe the same fact for two consumers.
       - flight_notes and airline_sop have no separate frankenrouter slot;
         folded into the single free-text comments field.
-      - observers is the departure-phase value only; frankenrouter's
-        FLIGHTINFO has no per-phase observers slot.
+      - captain_code/fo_code/observers are the departure-phase values;
+        *_cruise/*_arrival counterparts are only included when they
+        actually differ from departure (Flight Centre already resolves a
+        blank per-phase field to "same as departure" — see _seat_codes —
+        so this only needs a plain string comparison), so the router page
+        can show/hide the override rows entirely rather than repeat an
+        unchanged value under three headings. pilot_p1/pilot_p2 are the
+        PSCC crew code (users.pscc_id), not a full name.
     """
     fields = data.get("fields") or {}
     items = data.get("checklist_items") or []
@@ -215,8 +236,16 @@ def _flightinfo_from_flight_plan_push(data):
     checklist = [bool(checked_by_id.get(item["id"], False)) for item in items]
 
     captain_swap = bool(fields.get("captain_swap"))
-    p1, p2 = fields.get("pilot_p1"), fields.get("pilot_p2")
-    captain_code, fo_code = (p2, p1) if captain_swap else (p1, p2)
+    captain_code, fo_code = _seat_codes(fields, "", captain_swap)
+    observers = fields.get("observers") or ""
+
+    phase_overrides = {}
+    for phase in ("cruise", "arrival"):
+        p_captain, p_fo = _seat_codes(fields, f"_{phase}", captain_swap)
+        p_observers = fields.get(f"observers_{phase}") or observers
+        phase_overrides[f"captain_code_{phase}"] = p_captain if p_captain != captain_code else ""
+        phase_overrides[f"fo_code_{phase}"] = p_fo if p_fo != fo_code else ""
+        phase_overrides[f"observers_{phase}"] = p_observers if p_observers != observers else ""
 
     comments = "\n".join(
         part for part in (fields.get("airline_sop"), fields.get("flight_notes")) if part)
@@ -231,9 +260,10 @@ def _flightinfo_from_flight_plan_push(data):
         "airframe": fields.get("airframe") or "",
         "captain_code": captain_code or "",
         "fo_code": fo_code or "",
+        **phase_overrides,
         "seat_swap": captain_swap,
         "p1_is_vatpri": bool(fields.get("vatpri_swap")),
-        "observers": fields.get("observers") or "",
+        "observers": observers,
         "flight_number": fields.get("simfest_flight_number") or "",
         "vatsim_callsign": fields.get("callsign") or "",
         "dep_airport": fields.get("dep_airport") or "",
