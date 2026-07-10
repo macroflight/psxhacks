@@ -34,6 +34,13 @@ from frankenrouter import routercache
 from frankenrouter.rules import RulesAction, RulesCode, Rules
 from frankenrouter.webapi import RouterWebAPI
 
+# Add psxhacks root to sys.path so fw_webui (first-party, at the root) can be imported.
+_PSXHACKS = str(pathlib.Path(__file__).parent.parent)
+if _PSXHACKS not in sys.path:
+    sys.path.insert(0, _PSXHACKS)
+
+import fw_webui as _fw_webui  # noqa: E402  pylint: disable=wrong-import-position
+
 
 __MYNAME__ = 'frankenrouter'
 __MY_DESCRIPTION__ = 'A PSX Router'
@@ -2028,25 +2035,28 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         """
         # line: "addon=FRANKENWEATHER:STATE:<uuid>:<json>"
         # line: "addon=FRANKENWEATHER:TURBSTATE:<uuid>:<json>"
-        # line: "addon=FRANKENWEATHER:WINDSTATE:<uuid>:<json>"
+        # line: "addon=FRANKENWEATHER:WINDSTATE:<uuid>:<payload>" (gzip+base64, see fw_webui)
         rest = line[len("addon=FRANKENWEATHER:"):]
-        for prefix, data_attr, received_attr in (
-                ("STATE:", "frankenweather_state", "frankenweather_received_at"),
-                ("TURBSTATE:", "frankenweather_turbstate", "frankenweather_turbstate_received_at"),
-                ("WINDSTATE:", "frankenweather_windstate", "frankenweather_windstate_received_at"),
+        for prefix, data_attr, received_attr, decode in (
+                ("STATE:", "frankenweather_state",
+                 "frankenweather_received_at", json.loads),
+                ("TURBSTATE:", "frankenweather_turbstate",
+                 "frankenweather_turbstate_received_at", json.loads),
+                ("WINDSTATE:", "frankenweather_windstate",
+                 "frankenweather_windstate_received_at", _fw_webui.decode_windstate_payload),
         ):
             if not rest.startswith(prefix):
                 continue
             colon = rest.find(':', len(prefix))
             if colon <= len(prefix):
                 return
-            json_str = rest[colon + 1:]
+            payload_str = rest[colon + 1:]
             try:
-                setattr(self, data_attr, json.loads(json_str))
+                setattr(self, data_attr, decode(payload_str))
                 setattr(self, received_attr, time.time())
-            except ValueError:
+            except (ValueError, OSError, EOFError) as exc:
                 self.logger.warning(
-                    "Malformed FRANKENWEATHER %s addon: %s", prefix[:-1], line[:80])
+                    "Malformed FRANKENWEATHER %s addon: %s (%s)", prefix[:-1], line[:80], exc)
             return
 
     def _update_gps_spoof_state(self):

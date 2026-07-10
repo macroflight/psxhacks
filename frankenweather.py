@@ -4037,11 +4037,16 @@ class Script:  # pylint: disable=too-many-instance-attributes
         }
 
     def _build_windstate_message(self) -> str:
-        """Build the FRANKENWEATHER:WINDSTATE:<uuid>:<json> addon message payload."""
+        """Build the FRANKENWEATHER:WINDSTATE:<uuid>:<payload> addon message.
+
+        <payload> is gzip+base64-encoded JSON (see fw_webui.encode_windstate_payload())
+        -- a long-haul route's plain JSON can reach ~200 KB, which compresses much
+        smaller thanks to its heavily repeated key names.
+        """
         state = self._build_windstate_dict()
         self._web_windstate = state
         self._web_windstate_received_at = time.time()
-        payload = json.dumps(state, separators=(',', ':'))
+        payload = _fw_webui.encode_windstate_payload(state)
         return f"FRANKENWEATHER:WINDSTATE:{self._instance_uuid}:{payload}"
 
     async def windstate_broadcast_coro(self) -> None:

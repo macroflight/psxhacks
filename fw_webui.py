@@ -21,12 +21,33 @@ ctx must provide:
   ctx.send_fw_settings_cmd(cmd: dict)   -> coroutine
 """
 # pylint: disable=invalid-name,too-many-lines
+import base64
 import datetime
+import gzip
 import json
 import math
 import time
 
 from aiohttp import web  # pylint: disable=import-error
+
+
+def encode_windstate_payload(state: dict) -> str:
+    """Gzip-compress and base64-encode a WINDSTATE dict for the wire.
+
+    A long-haul route's per-waypoint/per-level wind comparison can reach
+    ~200 KB as plain JSON (dominated by repeated key names like
+    "flightplan"/"openmeteo"/"diff"/"dir_deg" etc, once per waypoint/level
+    combination) -- large enough that some downstream addons choke on the
+    single addon line. That key repetition compresses very well, typically
+    down to 15-20% of the original size.
+    """
+    raw = json.dumps(state, separators=(',', ':')).encode('utf-8')
+    return base64.b64encode(gzip.compress(raw, 9)).decode('ascii')
+
+
+def decode_windstate_payload(encoded: str) -> dict:
+    """Reverse encode_windstate_payload()."""
+    return json.loads(gzip.decompress(base64.b64decode(encoded)))
 
 
 _COMMON_CSS = '''\
