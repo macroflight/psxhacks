@@ -1635,9 +1635,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             listener.start()
             # report the logger is ready
             self.logger.debug("Task %s has initialized logging", name)
-            # wait forever
+            # Periodically flush so a log copied off disk mid-session (e.g. for
+            # troubleshooting while the router keeps running) is never more
+            # than this far behind, rather than sitting in a buffer.
             while True:
                 await asyncio.sleep(60)
+                file_handler.flush()
 
         # Keep logger alive until all other tasks have ended (or max
         # 10s), otherwise we won't see the logs from their shutdown.
@@ -1716,9 +1719,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 listener.start()
                 # report the logger is ready
                 self.logger.debug("Task %s has initialized traffic logging", name)
-                # wait forever
+                # Periodically flush so a log copied off disk mid-session (e.g. for
+                # troubleshooting while the router keeps running) is never more
+                # than this far behind, rather than sitting in a buffer.
                 while True:
                     await asyncio.sleep(60)
+                    file_handler.flush()
             finally:
                 # report the logger is done
                 self.logger.debug("Task %s has stopped traffic logging", name)
