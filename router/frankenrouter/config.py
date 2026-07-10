@@ -116,10 +116,12 @@ class _RouterConfigPsx:  # pylint: disable=missing-class-docstring,too-few-publi
             raise RouterConfigError("psx filter_to_other_sim must be a list")
         if not all(isinstance(k, str) for k in self.filter_to_other_sim):
             raise RouterConfigError("psx filter_to_other_sim entries must be strings")
-        # Opt-in: when the PSX Instructor Station GPS spoofing scenario is
-        # active, track the FMC's resulting (possibly-erroneous) lat/lon/altitude
-        # and rewrite outgoing Qs121 (PiBaHeAlTas) messages sent to any client
-        # named "spoofed" so it sees that position instead of the true one.
+        # Opt-in: when the PSX Instructor Station GPS jamming/spoofing scenario is
+        # active, adjust outgoing Qs121 (PiBaHeAlTas) messages sent to the client
+        # named GPS_SPOOFED_CLIENT_NAME. While spoofing, track the FMC's resulting
+        # (possibly-erroneous) lat/lon/altitude and send that instead of the true
+        # position. While jamming, withhold Qs121 from that client entirely (a jammed
+        # GPS gives the FMC no fix at all).
         self.gps_spoofing_egress = data.get('gps_spoofing_egress', False)
         if not isinstance(self.gps_spoofing_egress, bool):
             raise RouterConfigError("psx gps_spoofing_egress must be true or false")

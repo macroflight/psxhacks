@@ -294,6 +294,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # GPS spoofing egress feature state (see _update_gps_spoof_state()).
         # Only meaningful/updated while config.psx.gps_spoofing_egress is set.
         self.gps_spoof_active = False
+        self.gps_jam_active = False
         self.gps_spoofed_lat = None
         self.gps_spoofed_lon = None
         self.gps_spoofed_alt_ft = None
@@ -593,6 +594,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             "on" if self.filter_traffic else "off",
             "on" if fc_filter_on else "off",
         )
+        if self.config.psx.gps_spoofing_egress and self.gps_jam_active:
+            self.logger.info(
+                "GPS JAMMING ACTIVE: Qs121 withheld from %s", GPS_SPOOFED_CLIENT_NAME)
         if self.config.psx.gps_spoofing_egress and self.gps_spoof_active:
             self.logger.info(
                 "GPS SPOOFING ACTIVE: drift bearing=%.0f° distance=%.1fnm,"
@@ -2050,13 +2054,18 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
         Called whenever Qs121 (true position), Qs572 (SpoofingPage), Qs573
         (GpsDrift) or Qi277 (SpoofStatus) changes while gps_spoofing_egress is
-        enabled. Qi277==2 means the scenario is actively spoofing GPS; any
-        other value means there is no current spoofed position to report.
+        enabled. Qi277==1 means GPS is being jammed: no fix at all reaches the
+        FMC, so there is no spoofed position to compute (Qs121 is withheld
+        entirely for the spoofed client instead — see
+        _broadcast_qs121_with_spoofing()). Qi277==2 means the scenario is
+        actively spoofing GPS with a coherent false position. Any other value
+        means GPS is unaffected.
         """
         try:
             status = int(self.cache.get_value('Qi277'))
         except (routercache.RouterCacheException, ValueError, TypeError):
             status = 0
+        self.gps_jam_active = status == 1
         self.gps_spoof_active = status == 2
 
         if not self.gps_spoof_active:
@@ -2095,27 +2104,34 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.gps_spoof_distance_nm = dist_nm
 
     async def _broadcast_qs121_with_spoofing(self, value):
-        """Broadcast a Qs121 value, substituting the spoofed GPS position for spoofed clients.
+        """Broadcast a Qs121 value, adjusting what GPS_SPOOFED_CLIENT_NAME receives.
 
         value is the part after "Qs121=" (semicolon-delimited PiBaHeAlTas
-        fields). Clients named GPS_SPOOFED_CLIENT_NAME get a modified copy
-        with lat/lon/altitude replaced by the FMC's currently-believed
-        (spoofed) position; all other clients get the true value unchanged.
+        fields). While GPS is being jammed, no fix at all reaches a real FMC
+        (and PSX's own drift values stay at zero during jamming, so there is
+        no spoofed position to substitute), so Qs121 is withheld entirely
+        from that client. While GPS is being spoofed, that client instead
+        gets a modified copy with lat/lon/altitude replaced by the FMC's
+        currently-believed (spoofed) position. All other clients, and this
+        client at any other time, get the true value unchanged.
         """
-        spoofed_targets = []
-        if self.config.psx.gps_spoofing_egress and self.gps_spoof_active:
-            spoofed_targets = [
+        targets = []
+        if self.config.psx.gps_spoofing_egress and (self.gps_jam_active or self.gps_spoof_active):
+            targets = [
                 client.peername for client in self.clients.values()
                 if client.display_name == GPS_SPOOFED_CLIENT_NAME
             ]
-        if not spoofed_targets:
+        if not targets:
             await self.client_broadcast(f"Qs121={value}")
+            return
+        if self.gps_jam_active:
+            await self.client_broadcast(f"Qs121={value}", exclude=targets)
             return
         modified_value = variables.build_spoofed_qs121(
             value, self.gps_spoofed_lat, self.gps_spoofed_lon, self.gps_spoofed_alt_ft)
         await asyncio.gather(
-            self.client_broadcast(f"Qs121={value}", exclude=spoofed_targets),
-            self.client_broadcast(f"Qs121={modified_value}", include=spoofed_targets),
+            self.client_broadcast(f"Qs121={value}", exclude=targets),
+            self.client_broadcast(f"Qs121={modified_value}", include=targets),
         )
 
     def _find_network_clients_matching(self, pattern):
