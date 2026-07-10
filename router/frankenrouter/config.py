@@ -120,8 +120,9 @@ class _RouterConfigPsx:  # pylint: disable=missing-class-docstring,too-few-publi
         # active, adjust outgoing Qs121 (PiBaHeAlTas) messages sent to the client
         # named GPS_SPOOFED_CLIENT_NAME. While spoofing, track the FMC's resulting
         # (possibly-erroneous) lat/lon/altitude and send that instead of the true
-        # position. While jamming, withhold Qs121 from that client entirely (a jammed
-        # GPS gives the FMC no fix at all).
+        # position. While jamming (a jammed GPS gives the FMC no fix at all, so
+        # there's no erroneous position to compute), send a slowly-switching
+        # random mix of the true position and several decoys instead.
         self.gps_spoofing_egress = data.get('gps_spoofing_egress', False)
         if not isinstance(self.gps_spoofing_egress, bool):
             raise RouterConfigError("psx gps_spoofing_egress must be true or false")

@@ -90,6 +90,27 @@ IRS_ALIGN_FIX_VALUE = 'Qs355=102000;102000;102000'
 # GPS position in outgoing Qs121 messages, when gps_spoofing_egress is enabled.
 GPS_SPOOFED_CLIENT_NAME = "PSX SimLink Bridge"
 
+# Named decoy positions cycled through while GPS is jammed (see
+# _broadcast_qs121_with_spoofing()). Simply withholding Qs121 during jamming
+# would leave the spoofed client's chart position frozen in place, which is
+# itself a giveaway that something is wrong, so instead it sees a
+# slowly-changing mix of the true position and these decoys.
+GPS_JAM_DECOY_POSITIONS = [
+    ("Null Island", 0.0, 0.0),
+    ("North Pole", 90.0, 0.0),
+    ("South Pole", -90.0, 0.0),
+    ("Linkoping, Sweden", 58.4109, 15.6216),
+    ("Farnborough, UK", 51.2903, -0.7695),
+    ("Haarlem, Netherlands", 52.3874, 4.6462),
+    ("Punta Arenas, Chile", -53.1638, -70.9171),
+]
+
+# Chance, per Qs121 broadcast to the spoofed client while jammed, of jumping
+# to a different decoy (or back to the true position, or a fresh random
+# position) -- kept low so the jammed position doesn't visibly teleport on
+# every update.
+GPS_JAM_SWITCH_PROB = 0.02
+
 # Sim event batching: how often to send SIMEVENTS to the network (seconds)
 _SIMEVENTS_BATCH_INTERVAL = 10.0
 # Maximum number of events to keep in the in-memory log (all routers combined)
@@ -327,6 +348,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.gps_spoofed_alt_ft = None
         self.gps_spoof_bearing_deg = None
         self.gps_spoof_distance_nm = None
+        # GPS jamming decoy-position state (see _broadcast_qs121_with_spoofing()
+        # and _maybe_switch_gps_jam_mode()). "true" shows the real position;
+        # "random" shows a fresh random position rolled when that mode was
+        # entered (kept fixed until the next switch); any other string names
+        # an entry in GPS_JAM_DECOY_POSITIONS.
+        self.gps_jam_mode = "true"
+        self.gps_jam_random_lat = 0.0
+        self.gps_jam_random_lon = 0.0
 
     def reset_after_upstream_connect(self):
         """Re-initialize certain variables after upstream connection."""
@@ -623,7 +652,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         )
         if self.config.psx.gps_spoofing_egress and self.gps_jam_active:
             self.logger.info(
-                "GPS JAMMING ACTIVE: Qs121 withheld from %s", GPS_SPOOFED_CLIENT_NAME)
+                "GPS JAMMING ACTIVE: %s currently seeing decoy position %r",
+                GPS_SPOOFED_CLIENT_NAME, self.gps_jam_mode)
         if self.config.psx.gps_spoofing_egress and self.gps_spoof_active:
             self.logger.info(
                 "GPS SPOOFING ACTIVE: drift bearing=%.0f° distance=%.1fnm,"
@@ -2090,11 +2120,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         Called whenever Qs121 (true position), Qs572 (SpoofingPage), Qs573
         (GpsDrift) or Qi277 (SpoofStatus) changes while gps_spoofing_egress is
         enabled. Qi277==1 means GPS is being jammed: no fix at all reaches the
-        FMC, so there is no spoofed position to compute (Qs121 is withheld
-        entirely for the spoofed client instead — see
-        _broadcast_qs121_with_spoofing()). Qi277==2 means the scenario is
-        actively spoofing GPS with a coherent false position. Any other value
-        means GPS is unaffected.
+        FMC, so there is no spoofed position to compute -- instead the spoofed
+        client gets a random mix of decoy positions, see
+        _broadcast_qs121_with_spoofing() and _maybe_switch_gps_jam_mode().
+        Qi277==2 means the scenario is actively spoofing GPS with a coherent
+        false position. Any other value means GPS is unaffected.
         """
         try:
             status = int(self.cache.get_value('Qi277'))
@@ -2102,6 +2132,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             status = 0
         self.gps_jam_active = status == 1
         self.gps_spoof_active = status == 2
+
+        if not self.gps_jam_active:
+            # Reset so the next jamming episode starts fresh at the true
+            # position instead of resuming on whatever decoy was last shown.
+            self.gps_jam_mode = "true"
 
         if not self.gps_spoof_active:
             self.gps_spoofed_lat = None
@@ -2138,17 +2173,51 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.gps_spoof_bearing_deg = bearing
         self.gps_spoof_distance_nm = dist_nm
 
+    def _maybe_switch_gps_jam_mode(self):
+        """Roll a small chance to switch the GPS jamming decoy-position mode.
+
+        See GPS_JAM_SWITCH_PROB and GPS_JAM_DECOY_POSITIONS. A "random" mode
+        gets a freshly-rolled random position only when first entered, so it
+        stays fixed (like the named decoys and the true position) until the
+        next switch rather than jittering every call.
+        """
+        if random.random() >= GPS_JAM_SWITCH_PROB:
+            return
+        modes = ["true", "random"] + [name for name, _, _ in GPS_JAM_DECOY_POSITIONS]
+        new_mode = random.choice(modes)
+        if new_mode == self.gps_jam_mode:
+            return
+        self.gps_jam_mode = new_mode
+        if new_mode == "random":
+            self.gps_jam_random_lat = random.uniform(-90.0, 90.0)
+            self.gps_jam_random_lon = random.uniform(-180.0, 180.0)
+        self.logger.info("GPS jamming: decoy position now %r", new_mode)
+
+    def _gps_jam_position(self, true_lat_deg, true_lon_deg):
+        """Return the (lat, lon) degrees to show the spoofed client for the current jam mode."""
+        if self.gps_jam_mode == "true":
+            return true_lat_deg, true_lon_deg
+        if self.gps_jam_mode == "random":
+            return self.gps_jam_random_lat, self.gps_jam_random_lon
+        for name, lat, lon in GPS_JAM_DECOY_POSITIONS:
+            if name == self.gps_jam_mode:
+                return lat, lon
+        return true_lat_deg, true_lon_deg
+
     async def _broadcast_qs121_with_spoofing(self, value):
         """Broadcast a Qs121 value, adjusting what GPS_SPOOFED_CLIENT_NAME receives.
 
         value is the part after "Qs121=" (semicolon-delimited PiBaHeAlTas
         fields). While GPS is being jammed, no fix at all reaches a real FMC
         (and PSX's own drift values stay at zero during jamming, so there is
-        no spoofed position to substitute), so Qs121 is withheld entirely
-        from that client. While GPS is being spoofed, that client instead
-        gets a modified copy with lat/lon/altitude replaced by the FMC's
-        currently-believed (spoofed) position. All other clients, and this
-        client at any other time, get the true value unchanged.
+        no spoofed position to compute) -- withholding Qs121 entirely would
+        leave that client's chart position frozen, which is its own tell, so
+        instead it sees a slowly-switching mix of the true position and
+        several decoys (see _maybe_switch_gps_jam_mode()). While GPS is being
+        spoofed, that client instead gets a modified copy with lat/lon/
+        altitude replaced by the FMC's currently-believed (spoofed) position.
+        All other clients, and this client at any other time, get the true
+        value unchanged.
         """
         targets = []
         if self.config.psx.gps_spoofing_egress and (self.gps_jam_active or self.gps_spoof_active):
@@ -2160,7 +2229,24 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             await self.client_broadcast(f"Qs121={value}")
             return
         if self.gps_jam_active:
-            await self.client_broadcast(f"Qs121={value}", exclude=targets)
+            self._maybe_switch_gps_jam_mode()
+            if self.gps_jam_mode == "true":
+                await self.client_broadcast(f"Qs121={value}")
+                return
+            try:
+                piba = value.split(';')
+                true_lat_deg = math.degrees(float(piba[5]))
+                true_lon_deg = math.degrees(float(piba[6]))
+                true_alt_ft = float(piba[3]) / 1000.0
+            except (ValueError, IndexError):
+                await self.client_broadcast(f"Qs121={value}")
+                return
+            jam_lat, jam_lon = self._gps_jam_position(true_lat_deg, true_lon_deg)
+            modified_value = variables.build_spoofed_qs121(value, jam_lat, jam_lon, true_alt_ft)
+            await asyncio.gather(
+                self.client_broadcast(f"Qs121={value}", exclude=targets),
+                self.client_broadcast(f"Qs121={modified_value}", include=targets),
+            )
             return
         modified_value = variables.build_spoofed_qs121(
             value, self.gps_spoofed_lat, self.gps_spoofed_lon, self.gps_spoofed_alt_ft)
