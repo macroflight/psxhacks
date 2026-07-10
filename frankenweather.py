@@ -2757,19 +2757,23 @@ class Script:  # pylint: disable=too-many-instance-attributes
     def _msfs_cloud_oktas(self) -> int:
         """Return oktas (1-8) for an MSFS-synced cloud layer from density and time-in-cloud.
 
-        Avoids always injecting a full 8/8 overcast layer just because MSFS
-        currently reports being inside some cloud — a low MSFS cloud density
-        (thin/fluffy, e.g. cirrus) or a low fraction of recent time spent in
-        cloud (a brief, patchy encounter) should each pull the injected
-        coverage down towards FEW/SCT rather than straight to OVC.
+        Live logs show MSFS's ENV CLOUD DENSITY rarely exceeds ~0.2 even in
+        genuinely dense-looking cloud (confirmed both from traffic-log samples
+        and a live FL370 test with manual weather set to its densest clouds),
+        so treating >0.2 as "this is real, solid cloud" and mapping it
+        straight to 8/8 overcast avoids the coverage estimate being
+        permanently starved by a ceiling MSFS itself doesn't seem to report
+        above. Below that threshold (or when density is unknown), coverage
+        instead comes purely from how much of recent flight time was spent in
+        cloud (see _msfs_time_in_cloud_fraction) — a brief, patchy encounter
+        pulls coverage down towards FEW/SCT rather than straight to OVC.
         """
+        if (self.msfs_in_cloud and self.msfs_cloud_density is not None and
+                self.msfs_cloud_density > 0.2):
+            return 8
         time_frac = self._msfs_time_in_cloud_fraction(
             _MSFS_CLOUD_TIME_WINDOW_S, _MSFS_CLOUD_ALT_BAND_FT)
-        density_norm = 1.0
-        if self.msfs_cloud_density is not None:
-            # SimConnect's ENV CLOUD DENSITY is already 0.0-1.0.
-            density_norm = max(0.0, min(1.0, self.msfs_cloud_density))
-        return max(1, round(8 * time_frac * density_norm))
+        return max(1, round(8 * time_frac))
 
     def _apply_msfs_sync(self) -> None:  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
         """Apply MSFS→PSX sync for the focused zone: clouds and/or QNH."""
