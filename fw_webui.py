@@ -306,6 +306,22 @@ def _manual_metar(p, icao="ZZZZ", now=None):  # pylint: disable=too-many-locals,
 
 _DATA_STALE_TIMEOUT_S = 300.0  # matches the frankenweather-stale and MSFS-bridge-timeout thresholds
 
+# Map side panel: PSX/MSFS QNH difference below which the display is shown in green
+# rather than orange. Independent of frankenweather's own msfs_qnh_check sync/warn threshold.
+#
+# Chosen as roughly the point where a ground-level QNH mismatch becomes RVSM-significant.
+# Above the transition altitude the altimeter reads pressure altitude off the 1013.25 hPa
+# standard setting, so a ground QNH difference only matters at cruise if it represents a
+# uniform pressure offset through the whole atmospheric column (a simplification, since real
+# weather isn't perfectly barotropic, but reasonable for two independently-modeled sim
+# atmospheres drifting apart). Under that assumption the altitude error from a given pressure
+# offset scales with dh/dP = R*T/(g*P) (hydrostatic equation) — thinner air aloft means the same
+# hPa offset produces a larger altitude error the higher you go: ~70 ft/hPa at FL290 up to
+# ~116 ft/hPa at FL410, versus ~27 ft/hPa at sea level. Against RVSM's ~200 ft altimetry-system-
+# error tolerance, that puts the RVSM-significant threshold at ~1.7-2.8 hPa across the RVSM band
+# (FL290-FL410), centering close to 2 hPa.
+_QNH_WARN_THRESHOLD_HPA = 2.0
+
 
 def _fmt_data_status(now: float, epoch, timeout_s: float = _DATA_STALE_TIMEOUT_S) -> tuple:
     """Return (color, status_label, age_label) describing a 'last received' epoch timestamp."""
@@ -808,7 +824,7 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
     if psx_qnh_str and msfs_qnh_map is not None:
         psx_qnh_hpa = round(int(psx_qnh_str.split()[0]))
         qnh_diff = abs(msfs_qnh_map - psx_qnh_hpa)
-        qnh_warn_color = '#f59e0b' if qnh_diff > 1.0 else '#e2e8f0'
+        qnh_warn_color = '#22c55e' if qnh_diff < _QNH_WARN_THRESHOLD_HPA else '#f59e0b'
         qnh_display = (
             f'<b style="color:{qnh_warn_color}">'
             f'PSX {psx_qnh_str} / MSFS {msfs_qnh_map:.0f} hPa</b>'
