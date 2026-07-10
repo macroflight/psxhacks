@@ -167,6 +167,16 @@ _REPOSITION_DIST_NM = 500.0           # zone this far away → aircraft was repo
 _REFRESH_MAX_S = 300                  # always refresh weather after this many seconds
 _PUSH_COOLDOWN_S = 5.0                # ignore Wx echo-backs for this long after our write
 _MSFS_BRIDGE_TIMEOUT_S = 300.0        # stop using bridge data after this silence period
+# Rolling window for the MSFS in-cloud duty cycle used by cloud sync (_msfs_cloud_oktas):
+# long enough to smooth out a brief punch through a wisp of cirrus, short enough to still
+# ramp up to full coverage reasonably quickly in a genuine sustained layer.
+_MSFS_CLOUD_TIME_WINDOW_S = 120.0
+# Only samples within this many feet of the current altitude count towards the duty
+# cycle above. Without this, climbing/descending into a thick layer would have its
+# oktas estimate dragged down by older clear-air samples from well above/below the
+# layer, delaying the coverage ramp-up right when icing risk starts (immediately on
+# entering a thick layer) -- altitude proximity invalidates that stale history fast.
+_MSFS_CLOUD_ALT_BAND_FT = 1500.0
 _NM_TO_M = 1852.0
 # How long a paused instance waits without hearing from the conflicting
 # (higher-UUID) FRANKENWEATHER instance before resuming — see _note_conflict()
@@ -1155,11 +1165,14 @@ class Script:  # pylint: disable=too-many-instance-attributes
         # MSFS bridge state (via frankenmsfsbridge)
         self.msfs_in_cloud: Optional[bool] = None
         self.msfs_qnh_hpa: Optional[float] = None
-        self.msfs_cloud_density: Optional[float] = None   # 0–9
+        self.msfs_cloud_density: Optional[float] = None   # 0.0-1.0 (SimConnect ENV CLOUD DENSITY)
         self.msfs_wind_vert: Optional[float] = None       # kt, positive = up
         self.msfs_precip_state: Optional[int] = None      # 2=none, 4=rain, 8=snow
         self._msfs_bridge_last_seen: Optional[float] = None  # monotonic, for the timeout check
         self._msfs_bridge_last_seen_epoch: Optional[float] = None  # time.time(), for web display
+        # Rolling (monotonic_time, in_cloud) samples, one per bridge update, used to
+        # compute a recent time-in-cloud duty cycle for cloud sync (see _msfs_cloud_oktas).
+        self._msfs_in_cloud_history: list = []
         # Runtime toggles for MSFS sync features
         self._msfs_in_cloud_sync: bool = True
         self._msfs_qnh_check: str = "CHECK"   # "CHECK" or "SYNC"
@@ -1617,6 +1630,12 @@ class Script:  # pylint: disable=too-many-instance-attributes
                                  self.msfs_in_cloud, new_cloud)
                 self.msfs_in_cloud = new_cloud
                 changed = True
+            if self.ac_alt_ft is not None:
+                now_mono = time.monotonic()
+                self._msfs_in_cloud_history.append((now_mono, new_cloud, self.ac_alt_ft))
+                cutoff = now_mono - _MSFS_CLOUD_TIME_WINDOW_S
+                self._msfs_in_cloud_history = [
+                    s for s in self._msfs_in_cloud_history if s[0] >= cutoff]
         if "qnh_hpa" in data:
             new_qnh = float(data["qnh_hpa"])
             prev = self.msfs_qnh_hpa
@@ -1944,10 +1963,10 @@ class Script:  # pylint: disable=too-many-instance-attributes
             raw = 0.8
         else:
             raw = 1.3
-            # Cloud density 0–9: up to +30 %
+            # Cloud density 0.0–1.0: up to +30 %
             if self.msfs_cloud_density is not None:
-                d = max(0.0, min(9.0, self.msfs_cloud_density))
-                raw *= 1.0 + d / 9.0 * 0.3
+                d = max(0.0, min(1.0, self.msfs_cloud_density))
+                raw *= 1.0 + d * 0.3
             # Vertical wind: up to +40 % for 10 kt; ignore noise below 3 kt
             if self.msfs_wind_vert is not None:
                 v = abs(self.msfs_wind_vert)
@@ -2692,6 +2711,52 @@ class Script:  # pylint: disable=too-many-instance-attributes
     # MSFS sync (in-cloud and QNH)
     # ------------------------------------------------------------------
 
+    def _msfs_time_in_cloud_fraction(self, window_s: float, alt_band_ft: float) -> float:
+        """Return the fraction of matching recent samples MSFS reported being in cloud.
+
+        Only samples within window_s seconds AND within alt_band_ft of the
+        current altitude count — so history from before entering (or after
+        leaving) the current altitude band, e.g. clear air above a layer
+        you're now descending through, doesn't dilute the estimate. Falls
+        back to the current in_cloud state if there isn't enough matching
+        sample history yet (e.g. just after startup, or just after a climb
+        or descent has aged out all the old-altitude samples).
+        """
+        if self.ac_alt_ft is None:
+            return 1.0 if self.msfs_in_cloud else 0.0
+        now = time.monotonic()
+        cutoff = now - window_s
+        history = [
+            (t, v) for t, v, alt in self._msfs_in_cloud_history
+            if t >= cutoff and abs(alt - self.ac_alt_ft) <= alt_band_ft
+        ]
+        if len(history) < 2:
+            return 1.0 if self.msfs_in_cloud else 0.0
+        in_cloud_time = sum(
+            t1 - t0 for (t0, v0), (t1, _v1) in zip(history, history[1:]) if v0
+        )
+        if history[-1][1]:
+            in_cloud_time += now - history[-1][0]
+        total = now - history[0][0]
+        return in_cloud_time / total if total > 0 else (1.0 if self.msfs_in_cloud else 0.0)
+
+    def _msfs_cloud_oktas(self) -> int:
+        """Return oktas (1-8) for an MSFS-synced cloud layer from density and time-in-cloud.
+
+        Avoids always injecting a full 8/8 overcast layer just because MSFS
+        currently reports being inside some cloud — a low MSFS cloud density
+        (thin/fluffy, e.g. cirrus) or a low fraction of recent time spent in
+        cloud (a brief, patchy encounter) should each pull the injected
+        coverage down towards FEW/SCT rather than straight to OVC.
+        """
+        time_frac = self._msfs_time_in_cloud_fraction(
+            _MSFS_CLOUD_TIME_WINDOW_S, _MSFS_CLOUD_ALT_BAND_FT)
+        density_norm = 1.0
+        if self.msfs_cloud_density is not None:
+            # SimConnect's ENV CLOUD DENSITY is already 0.0-1.0.
+            density_norm = max(0.0, min(1.0, self.msfs_cloud_density))
+        return max(1, round(8 * time_frac * density_norm))
+
     def _apply_msfs_sync(self) -> None:  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
         """Apply MSFS→PSX sync for the focused zone: clouds and/or QNH."""
         need_cloud = self._msfs_in_cloud_sync and self.msfs_in_cloud is not None
@@ -2754,23 +2819,26 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 if in_hi or in_lo or in_cb:
                     self.logger.debug("Cloud sync [%s]: already in cloud", zone_key)
                 elif hi_cov == 0:
-                    data[0] = "8"
+                    oktas = self._msfs_cloud_oktas()
+                    data[0] = str(oktas)
                     data[1] = str(int(alt + margin))
                     data[2] = str(int(alt - margin))
-                    self.logger.info("Cloud sync [%s]: created hi layer at %dft",
-                                     zone_key, int(alt))
+                    self.logger.info("Cloud sync [%s]: created hi layer at %dft (%d oktas)",
+                                     zone_key, int(alt), oktas)
                     changed = True
                 elif alt > hi_top - margin:
-                    data[0] = "8"
+                    oktas = self._msfs_cloud_oktas()
+                    data[0] = str(oktas)
                     data[1] = str(int(alt + margin))
-                    self.logger.info("Cloud sync [%s]: raised hi layer top to %dft",
-                                     zone_key, int(alt + margin))
+                    self.logger.info("Cloud sync [%s]: raised hi layer top to %dft (%d oktas)",
+                                     zone_key, int(alt + margin), oktas)
                     changed = True
                 else:
-                    data[0] = "8"
+                    oktas = self._msfs_cloud_oktas()
+                    data[0] = str(oktas)
                     data[2] = str(int(alt - margin))
-                    self.logger.info("Cloud sync [%s]: lowered hi layer base to %dft",
-                                     zone_key, int(alt - margin))
+                    self.logger.info("Cloud sync [%s]: lowered hi layer base to %dft (%d oktas)",
+                                     zone_key, int(alt - margin), oktas)
                     changed = True
             else:
                 if in_hi:
