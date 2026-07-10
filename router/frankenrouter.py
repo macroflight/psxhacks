@@ -105,11 +105,15 @@ GPS_JAM_DECOY_POSITIONS = [
     ("Punta Arenas, Chile", -53.1638, -70.9171),
 ]
 
-# Chance, per Qs121 broadcast to the spoofed client while jammed, of jumping
-# to a different decoy (or back to the true position, or a fresh random
-# position) -- kept low so the jammed position doesn't visibly teleport on
-# every update.
-GPS_JAM_SWITCH_PROB = 0.02
+# How long each GPS jamming decoy position (or the true position) is shown
+# before switching to a different one, randomized within this range so it
+# doesn't feel mechanical. This is real-world elapsed time (time.perf_counter()),
+# deliberately not tied to how often Qs121 happens to be broadcast -- PSX
+# sends it at up to 5Hz while moving but only ~1Hz via the keepalive in
+# _housekeeping_refresh_qs121() while stationary, so a per-broadcast
+# probability would make the dwell time swing wildly with aircraft state.
+GPS_JAM_DWELL_MIN_S = 60.0
+GPS_JAM_DWELL_MAX_S = 300.0
 
 # Sim event batching: how often to send SIMEVENTS to the network (seconds)
 _SIMEVENTS_BATCH_INTERVAL = 10.0
@@ -352,10 +356,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # and _maybe_switch_gps_jam_mode()). "true" shows the real position;
         # "random" shows a fresh random position rolled when that mode was
         # entered (kept fixed until the next switch); any other string names
-        # an entry in GPS_JAM_DECOY_POSITIONS.
+        # an entry in GPS_JAM_DECOY_POSITIONS. next_switch_at 0.0 guarantees a
+        # switch (away from the "true" default) the first time jamming starts.
         self.gps_jam_mode = "true"
         self.gps_jam_random_lat = 0.0
         self.gps_jam_random_lon = 0.0
+        self.gps_jam_next_switch_at = 0.0
 
     def reset_after_upstream_connect(self):
         """Re-initialize certain variables after upstream connection."""
@@ -651,9 +657,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             "on" if fc_filter_on else "off",
         )
         if self.config.psx.gps_spoofing_egress and self.gps_jam_active:
+            remaining = max(0.0, self.gps_jam_next_switch_at - time.perf_counter())
             self.logger.info(
-                "GPS JAMMING ACTIVE: %s currently seeing decoy position %r",
-                GPS_SPOOFED_CLIENT_NAME, self.gps_jam_mode)
+                "GPS JAMMING ACTIVE: %s currently seeing decoy position %r"
+                " (next switch in ~%.0fs)",
+                GPS_SPOOFED_CLIENT_NAME, self.gps_jam_mode, remaining)
         if self.config.psx.gps_spoofing_egress and self.gps_spoof_active:
             self.logger.info(
                 "GPS SPOOFING ACTIVE: drift bearing=%.0f° distance=%.1fnm,"
@@ -2137,6 +2145,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             # Reset so the next jamming episode starts fresh at the true
             # position instead of resuming on whatever decoy was last shown.
             self.gps_jam_mode = "true"
+            self.gps_jam_next_switch_at = 0.0
 
         if not self.gps_spoof_active:
             self.gps_spoofed_lat = None
@@ -2174,24 +2183,29 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.gps_spoof_distance_nm = dist_nm
 
     def _maybe_switch_gps_jam_mode(self):
-        """Roll a small chance to switch the GPS jamming decoy-position mode.
+        """Switch the GPS jamming decoy-position mode once its dwell time has elapsed.
 
-        See GPS_JAM_SWITCH_PROB and GPS_JAM_DECOY_POSITIONS. A "random" mode
-        gets a freshly-rolled random position only when first entered, so it
-        stays fixed (like the named decoys and the true position) until the
-        next switch rather than jittering every call.
+        Gated on real-world elapsed time (see GPS_JAM_DWELL_MIN_S/MAX_S), not
+        on how often this is called, so the dwell duration stays the same
+        whether Qs121 is arriving at 5Hz (aircraft moving) or ~1Hz (keepalive
+        while stationary). Always switches to a mode different from the
+        current one. A "random" mode gets a freshly-rolled random position
+        only when entered, so it stays fixed for the whole dwell period like
+        the named decoys and the true position do.
         """
-        if random.random() >= GPS_JAM_SWITCH_PROB:
+        now = time.perf_counter()
+        if now < self.gps_jam_next_switch_at:
             return
         modes = ["true", "random"] + [name for name, _, _ in GPS_JAM_DECOY_POSITIONS]
-        new_mode = random.choice(modes)
-        if new_mode == self.gps_jam_mode:
-            return
+        new_mode = random.choice([m for m in modes if m != self.gps_jam_mode])
         self.gps_jam_mode = new_mode
         if new_mode == "random":
             self.gps_jam_random_lat = random.uniform(-90.0, 90.0)
             self.gps_jam_random_lon = random.uniform(-180.0, 180.0)
-        self.logger.info("GPS jamming: decoy position now %r", new_mode)
+        dwell_s = random.uniform(GPS_JAM_DWELL_MIN_S, GPS_JAM_DWELL_MAX_S)
+        self.gps_jam_next_switch_at = now + dwell_s
+        self.logger.info(
+            "GPS jamming: decoy position now %r (next switch in ~%.0fs)", new_mode, dwell_s)
 
     def _gps_jam_position(self, true_lat_deg, true_lon_deg):
         """Return the (lat, lon) degrees to show the spoofed client for the current jam mode."""
