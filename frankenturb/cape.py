@@ -26,6 +26,12 @@ log = logging.getLogger(__name__)
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 REQUEST_TIMEOUT_S = 15
 RATE_LIMIT_BACKOFF_S = 300.0  # pause all fetches after a 429 for this long
+# Pause fetches after any other failure (503, timeout, connection error, bad
+# JSON) for this long. Without this, a fetch failure at a bucket that never
+# got cached leaves the next compute() tick (every 200ms, see turbulence_coro
+# in frankenweather.py) free to retry immediately, hammering Open-Meteo at up
+# to 5Hz until it succeeds -- observed live during a transient OM 503.
+GENERIC_FAILURE_BACKOFF_S = 30.0
 
 CACHE_DEG_GRID = 1.0
 CACHE_HOURS = 1
@@ -89,7 +95,7 @@ class CapeFetcher:
         self._cache: dict[tuple, CapeSample] = {}
         self._disk_cache = DiskCache(
             cache_path or _DEFAULT_CACHE_PATH, max_age_s=_DISK_CACHE_MAX_AGE_S)
-        self._rate_limit_until: float = 0.0
+        self._backoff_until: float = 0.0
 
     @staticmethod
     def _encode(sample: CapeSample) -> dict:
@@ -146,9 +152,9 @@ class CapeFetcher:
             self._cache[cache_key] = sample
             return sample
 
-        remaining = self._rate_limit_until - time.monotonic()
+        remaining = self._backoff_until - time.monotonic()
         if remaining > 0:
-            log.debug("CAPE fetch skipped — OM rate limited (%.0fs remaining)", remaining)
+            log.debug("CAPE fetch skipped — backing off (%.0fs remaining)", remaining)
             return None
 
         log.info("Fetching CAPE at (%.2f, %.2f) …", lat, lon)
@@ -181,16 +187,21 @@ class CapeFetcher:
             data = r.json()
         except requests.exceptions.HTTPError as exc:
             if exc.response is not None and exc.response.status_code == 429:
-                self._rate_limit_until = time.monotonic() + RATE_LIMIT_BACKOFF_S
+                self._backoff_until = time.monotonic() + RATE_LIMIT_BACKOFF_S
                 log.warning("CAPE fetch: OM rate limited — backing off %.0fs", RATE_LIMIT_BACKOFF_S)
             else:
-                log.error("CAPE fetch failed: %s", exc)
+                self._backoff_until = time.monotonic() + GENERIC_FAILURE_BACKOFF_S
+                log.error("CAPE fetch failed: %s — backing off %.0fs",
+                          exc, GENERIC_FAILURE_BACKOFF_S)
             return None
         except requests.RequestException as exc:
-            log.error("CAPE fetch failed: %s", exc)
+            self._backoff_until = time.monotonic() + GENERIC_FAILURE_BACKOFF_S
+            log.error("CAPE fetch failed: %s — backing off %.0fs", exc, GENERIC_FAILURE_BACKOFF_S)
             return None
         except ValueError as exc:
-            log.error("CAPE JSON parse error: %s", exc)
+            self._backoff_until = time.monotonic() + GENERIC_FAILURE_BACKOFF_S
+            log.error("CAPE JSON parse error: %s — backing off %.0fs",
+                      exc, GENERIC_FAILURE_BACKOFF_S)
             return None
         return self._parse(data, lat, lon, target_time)
 
