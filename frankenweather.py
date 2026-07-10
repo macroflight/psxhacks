@@ -1343,7 +1343,17 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self._apply_msfs_sync()
 
     def handle_wx_change(self, key: str, value: str) -> None:
-        """Re-apply our weather if PSX overwrites a zone we've set."""
+        """Re-apply our weather if PSX overwrites a zone we've set.
+
+        No-ops entirely while PSX itself is in charge of weather (WxAutoSet=1,
+        set when _fw_mode is "disabled" or during an Open-Meteo outage that's
+        made every zone stale — see _update_zones()/_zones_all_stale()):
+        otherwise every PSX-generated change would look like an "overwrite" of
+        our stale self.zone_wx and get stomped right back, fighting PSX's own
+        auto-weather engine indefinitely instead of actually handing off to it.
+        """
+        if self._fw_mode == "disabled" or self._om_unavailable:
+            return
         elapsed = time.time() - self.last_write_time
         self.logger.debug("← PSX %s changed (%.1fs since last write)", key, elapsed)
         if elapsed < _PUSH_COOLDOWN_S:
@@ -1829,8 +1839,10 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self.logger.info("FRANKENWEATHER mode: %s → %s (via COMMAND)", old_mode, new_mode)
         if self.psx_connected:
             if new_mode == "disabled":
+                self._inject_wx_slow_transit()
                 self.psx_send_and_set("WxAutoSet", "1")
             elif old_mode == "disabled":
+                self._inject_wx_slow_transit()
                 self.psx_send_and_set("WxAutoSet", "0")
                 self._sync_psx_clock()
         if new_mode == "manual" or old_mode == "manual":
@@ -2061,8 +2073,10 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self._restore_corridor_snapshot()
         if self.psx_connected and self._fw_mode != old_mode:
             if self._fw_mode == "disabled":
+                self._inject_wx_slow_transit()
                 self.psx_send_and_set("WxAutoSet", "1")
             elif old_mode == "disabled":
+                self._inject_wx_slow_transit()
                 self.psx_send_and_set("WxAutoSet", "0")
                 self._sync_psx_clock()
         if self._fw_mode == "manual" or old_mode == "manual":
@@ -3108,6 +3122,51 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 "Zone %d: initial placement at %s @ %.3f/%.3f  %.0f°/%.0fnm",
                 zone_num, icao, lat, lon, az % 360, dist_m / _NM_TO_M)
 
+    def _zone_relocate_reason(
+            self, zone_num: int, in_cruise: bool, arpt_icaos: set) -> Optional[str]:
+        """Return why zone_num is due for relocation, or None if it's still useful.
+
+        Shared distance/bearing test used by both _check_and_relocate() (which
+        actually relocates due zones) and _zones_all_stale() (which only
+        checks, to decide whether a persistent Open-Meteo outage has made
+        every zone irrelevant — see _update_zones()). Does not apply
+        _check_and_relocate()'s extra "don't relocate more than once per
+        refresh interval" throttle, since that's specific to actually moving
+        a zone, not to asking whether it geographically still matters.
+        """
+        lat, lon, icao = self.zone_positions[zone_num]
+        if icao in arpt_icaos:
+            return None  # dep/dst airport — never relocate, always relevant
+        az_to_zone, _, dist_nm = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
+        dist_nm /= _NM_TO_M
+        if in_cruise and not self._maneuvering:
+            is_behind = abs((az_to_zone - self.ac_hdg + 180) % 360 - 180) > 90.0
+            if not (is_behind and dist_nm > self.args.cruise_behind_dist):
+                return None
+            return f"{dist_nm:.0f}nm behind (limit {self.args.cruise_behind_dist:.0f}nm)"
+        if dist_nm <= self.args.low_alt_dist:
+            return None
+        return f"{dist_nm:.0f}nm away (limit {self.args.low_alt_dist:.0f}nm)"
+
+    def _zones_all_stale(self) -> bool:
+        """Return True if every current zone is now far enough to need relocation.
+
+        Used by _update_zones() to decide whether a persistent Open-Meteo
+        outage has made the existing (frozen) zone weather irrelevant. While
+        any zone is still within its normal useful range, we'd rather keep
+        serving its last-known-good weather than hand control to PSX's own
+        WxAutoSet and fight it (see handle_wx_change()).
+        """
+        if not self.zone_positions:
+            return False
+        in_cruise = self.ac_alt_ft is not None and self.ac_alt_ft >= 18000.0
+        arpt_icaos = {icao for icao, _, _ in self._arpt_coverage_needed()}
+        return all(
+            self._zone_relocate_reason(zone_num, in_cruise, arpt_icaos) is not None
+            for zone_num in range(1, 8)
+            if zone_num in self.zone_positions
+        )
+
     def _check_and_relocate(self) -> bool:  # pylint: disable=too-many-locals
         """Relocate zones that are no longer useful given aircraft position and altitude.
 
@@ -3125,22 +3184,14 @@ class Script:  # pylint: disable=too-many-instance-attributes
             if zone_num not in self.zone_positions:
                 continue
             lat, lon, icao = self.zone_positions[zone_num]
-            if icao in arpt_icaos:
-                continue  # dep/dst airport — never relocate
-            az_to_zone, _, dist_nm = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
-            dist_nm /= _NM_TO_M
-            if in_cruise and not self._maneuvering:
-                is_behind = abs((az_to_zone - self.ac_hdg + 180) % 360 - 180) > 90.0
-                if not (is_behind and dist_nm > self.args.cruise_behind_dist):
-                    continue
-                reason = (f"{dist_nm:.0f}nm behind"
-                          f" (limit {self.args.cruise_behind_dist:.0f}nm)")
-            else:
-                if dist_nm <= self.args.low_alt_dist:
-                    continue
+            reason = self._zone_relocate_reason(zone_num, in_cruise, arpt_icaos)
+            if reason is None:
+                continue
+            if not in_cruise or self._maneuvering:
                 if now - self.zone_relocated_time.get(zone_num, 0) < _REFRESH_MAX_S:
                     continue
-                reason = f"{dist_nm:.0f}nm away (limit {self.args.low_alt_dist:.0f}nm)"
+            az_to_zone, _, dist_nm = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
+            dist_nm /= _NM_TO_M
             new_lat, new_lon, new_icao = self._pick_position(exclude_zone=zone_num)
             self.zone_positions[zone_num] = (new_lat, new_lon, new_icao)
             self.zone_placement_reason[zone_num] = self._placement_desc(
@@ -3575,16 +3626,30 @@ class Script:  # pylint: disable=too-many-instance-attributes
         # Fetch Open-Meteo for all 7 zones — CB always comes from OM even for METAR zones
         om_batch = await self._fetch_om_batch(snap_positions)
         if not om_batch:
+            if not self._zones_all_stale():
+                # A temporary outage: the existing (frozen) zone weather is still
+                # geographically relevant, so keep serving it rather than handing
+                # control to PSX's WxAutoSet — that would fight handle_wx_change()'s
+                # reapply logic the moment PSX's own auto-weather diverges from our
+                # last-known values, causing exactly the kind of rapid QNH/altitude
+                # jump this was built to avoid.
+                self.logger.warning(
+                    "Open-Meteo unavailable — keeping existing zone weather"
+                    " (still within useful range)")
+                return
             if not self._om_unavailable:
                 self._om_unavailable = True
                 self.logger.warning(
-                    "Open-Meteo unavailable — reverting to PSX default weather")
+                    "Open-Meteo unavailable and all zones now stale"
+                    " — reverting to PSX default weather")
+                self._inject_wx_slow_transit()
                 self.psx_send_and_set("WxAutoSet", "1")
                 self._state_changed_event.set()
             return
         if self._om_unavailable:
             self._om_unavailable = False
             self.logger.info("Open-Meteo available again — resuming FrankenWeather")
+            self._inject_wx_slow_transit()
             self.psx_send_and_set("WxAutoSet", "0")
             self._state_changed_event.set()
         om_by_zone: dict = {i: om_batch[i] for i in range(min(len(om_batch), 7))}
