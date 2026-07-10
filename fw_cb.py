@@ -88,7 +88,9 @@ def om_cb_fields(  # pylint: disable=too-many-locals,too-many-branches
 
     def _h(key, default):
         lst = hourly.get(key) or []
-        return float(lst[hour_idx]) if hour_idx < len(lst) else float(default)
+        if hour_idx < len(lst) and lst[hour_idx] is not None:
+            return float(lst[hour_idx])
+        return float(default)
 
     wmo_code = int((om.get("current") or {}).get("weather_code", 0))
     temp_c = float((om.get("current") or {}).get("temperature_2m", 15))
