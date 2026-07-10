@@ -95,6 +95,26 @@ _SIMEVENTS_BATCH_INTERVAL = 10.0
 # Maximum number of events to keep in the in-memory log (all routers combined)
 _SIMEVENTS_MAX_ALL = 2000
 
+# addon= namespaces originated by psxhacks itself (as opposed to third-party
+# addons like vPilot or PSXNETVATSIM). These can carry large payloads (e.g.
+# FRANKENWEATHER:WINDSTATE, FRANKENROUTER:FLIGHTINFO/SHAREDINFO) that a
+# "nolong" client has explicitly said it cannot handle -- see the PSX
+# "nolong" keyword and Client.nolong -- so all addon= traffic in these
+# namespaces is withheld from such clients, regardless of a given message's
+# actual current length.
+_NOLONG_FILTERED_ADDONS = frozenset({
+    'FRANKENROUTER', 'FRANKENWEATHER', 'FRANKENCDUPROXY', 'FRANKENMSFSBRIDGE',
+})
+
+
+def _is_own_addon_message(line):
+    """Return True if line is an addon= message in one of our own namespaces."""
+    if not line.startswith('addon='):
+        return False
+    addon_name = line[len('addon='):].split(':', 1)[0]
+    return addon_name in _NOLONG_FILTERED_ADDONS
+
+
 # Addon client patterns checked on the master router.
 # More than one match is always a critical error.
 MASTER_ADDON_PATTERNS = [
@@ -1182,6 +1202,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             if islong and client.nolong:
                 self.logger.debug(
                     "Not sending long string to nolong client %s: %s",
+                    client.peername, line)
+                continue
+            if client.nolong and _is_own_addon_message(line):
+                self.logger.debug(
+                    "Not sending own addon message to nolong client %s: %s",
                     client.peername, line)
                 continue
             if isonlystart:
