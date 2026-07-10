@@ -35,4 +35,8 @@ $cpdlcOptionsFiltered += "--psx-port=$FrankenrouterMasterPort"
 Write-Output "Logon code used: $HoppieLogonCode"
 & $PsxhacksPython psx-acars.py @cpdlcOptionsFiltered $HoppieLogonCode
 
+if ($LASTEXITCODE -ne 0) {
+    Show-ErrorAndExit "CPDLC (psx-acars.py) exited with error code $LASTEXITCODE - see the output above for details."
+}
+
 # Read-Host -Prompt "Press Enter to exit"
