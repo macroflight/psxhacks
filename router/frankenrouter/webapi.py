@@ -167,6 +167,8 @@ _UTILS_PAGE = (
     '<button class="btn btn-gray">Toggle towing direction{towing_direction}</button></form>\n'
     '<form method="post" action="/api/utils/printer/reset" style="display:inline">'
     '<button class="btn btn-gray">Reset printer</button></form>\n'
+    '<form method="post" action="/api/utils/force_ground_contact" style="display:inline">'
+    '<button class="btn btn-gray">Force wheels onto ground</button></form>\n'
     '</body>\n</html>\n'
 )
 
@@ -1821,6 +1823,31 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
             async def handle_printer_reset(_):
                 router.logger.info("API: resetting printer (Qi115=1)")
                 await router.send_to_upstream("Qi115=1")
+                raise web.HTTPFound('/utils')
+
+            @routes.post('/api/utils/force_ground_contact')
+            async def handle_force_ground_contact(_):
+                # Qi198 (Elev) is in 0.01ft units, so 2000 = 20ft. Forcing it 20ft
+                # lower briefly pushes the aircraft slightly into the ground, which
+                # usually fixes the wheels-not-level-with-ground glitch once PSX
+                # settles the aircraft back down onto the real terrain.
+                from frankenrouter import routercache as _rc  # pylint: disable=import-outside-toplevel,no-name-in-module
+                try:
+                    current = int(router.cache.get_value('Qi198'))
+                except (_rc.RouterCacheException, ValueError, TypeError) as exc:
+                    router.logger.warning(
+                        "API: Qi198 (Elev) not available — cannot force ground contact")
+                    raise web.HTTPFound('/utils') from exc
+                router.logger.info("API: forcing ground contact, current Qi198=%d", current)
+                new_value = current - 2000
+                for i in range(10):
+                    router.logger.info(
+                        "API: forcing ground contact, sending Qi198=%d (%d/10)",
+                        new_value, i + 1)
+                    await router.send_to_upstream(f"Qi198={new_value}")
+                    router.cache.update("Qi198", str(new_value))
+                    await router.client_broadcast(f"Qi198={new_value}")
+                    await asyncio.sleep(0.5)
                 raise web.HTTPFound('/utils')
 
             @routes.get('/shutdown')
