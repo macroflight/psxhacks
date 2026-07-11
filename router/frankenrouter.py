@@ -2690,6 +2690,19 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         age = self.cache.get_age('Qs121')
         if age <= 1.0:
             return
+        # Qi257 (OnGround): the ±1 µrad bank wobble is imperceptible for a
+        # stationary aircraft on the ground, but the same trick applied to
+        # an airborne (but momentarily motionless, e.g. frozen/paused)
+        # aircraft is not a safe assumption. Qi257==1 means on the ground,
+        # so only proceed when that's confirmed - not just "not known to
+        # be airborne" - so an unknown/not-yet-cached Qi257 inhibits too.
+        qi257 = self.cache.get_value('Qi257') if self.cache.has_keyword('Qi257') else None
+        if qi257 != 1:
+            self.logger.warning(
+                "Qs121 keepalive inhibited: aircraft not confirmed on ground (Qi257=%s), "
+                "no Qs121 seen in %.1fs",
+                qi257, age)
+            return
         parts = self.cache.get_value('Qs121').split(';')
         delta = 1 if self.qs121_keepalive_flip else -1
         self.qs121_keepalive_flip = not self.qs121_keepalive_flip
