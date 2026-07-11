@@ -46,6 +46,12 @@ $PsxhacksDevel = Split-Path $PSScriptRoot -Parent
 # file and flavor file live, outside the Git tree.
 $SimBase       = Split-Path $PsxhacksDevel -Parent
 
+# Flag file used to tell restart_cpdlc.ps1's window (if still open) that
+# HAFAP/CPDLC (psx-acars.py) is being killed intentionally (e.g. by
+# stopsim_master.ps1) rather than having crashed on its own, so it knows
+# not to report an error and can let its window close normally.
+$CpdlcExpectedStopFlag = Join-Path $env:TEMP "psxhacks_cpdlc_expected_stop.flag"
+
 # Name of the .pref file used to start the PSX main server (start_psx_main_server.ps1).
 # This one ships with AerowinxStart and is the same for everyone, so unlike
 # $AerowinxDir/$AerowinxPrefFiles below it has a sensible default and does

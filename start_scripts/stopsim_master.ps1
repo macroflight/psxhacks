@@ -17,6 +17,9 @@ if ($answer -notmatch '^[Yy]') {
 
 Write-Host ""
 
+# Tell restart_cpdlc.ps1's window (if still open) that this stop is
+# expected, so it doesn't mistake the forced kill below for a crash.
+New-Item -Path $CpdlcExpectedStopFlag -ItemType File -Force | Out-Null
 KillPythonScript "psx-acars.py"
 KillPythonScript "frankentanker.py"
 KillPythonScript "frankenweather.py"
