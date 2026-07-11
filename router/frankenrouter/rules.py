@@ -1203,26 +1203,36 @@ class Rules():  # pylint: disable=too-many-public-methods
         # START keywords that are not also ECON (e.g Qs493 and Qi208)
         # get special handling.
 
-        # During normal router operation, we assume a START variable
-        # is sent as a response from a "start" command, and then only
-        # that router client should get the START variables.
+        # When such a variable arrives from downstream (a client),
+        # it's either a legitimate one-off startup value or a live,
+        # instructor-issued command (e.g. Qs122 from a repositioning
+        # tool) - either way it must always reach upstream and every
+        # other client normally, so it is never filtered here.
 
-        # However, during situ load START variables are sent, e.g
-        # Qs122, and then we must forward them to all clients. So we
-        # check the time since the last "load3" and if less than 5s,
-        # we forward the START variable.
-        if key in self.router.variables.keywords_with_mode('START'):
-            if key not in self.router.variables.keywords_with_mode('ECON'):
-                time_since_load3 = time.perf_counter() - self.router.last_load3
-                self.logger.debug(
-                    "START variable %s, time since load3 is %.1fs",
-                    key, time_since_load3
-                )
-                if time_since_load3 > 5.0:
-                    return self.myreturn(
-                        RulesAction.FILTER,
-                        RulesCode.KEYVALUE_FILTER_EGRESS,
-                        extra_data={'start': True, 'key': key})
+        # When such a variable arrives from upstream (the PSX Main
+        # Server or master router), it's the response to the "start"
+        # command we send when welcoming a newly-connected client
+        # (see the client welcome handling above, which also sends a
+        # "load3" to the new client). Within 5s of that load3, this
+        # is almost certainly that response and must stay private to
+        # the new client - broadcasting it would make e.g. Qs122
+        # instantly reposition every other already-connected client.
+        # Outside that window it's an unsolicited update (e.g. a real
+        # situ load, or the instructor repositioning the aircraft via
+        # Qs122) and must be forwarded to everyone normally.
+        if self.sender.upstream:
+            if key in self.router.variables.keywords_with_mode('START'):
+                if key not in self.router.variables.keywords_with_mode('ECON'):
+                    time_since_load3 = time.perf_counter() - self.router.last_load3
+                    self.logger.debug(
+                        "START variable %s from upstream, time since load3 is %.1fs",
+                        key, time_since_load3
+                    )
+                    if time_since_load3 <= 5.0:
+                        return self.myreturn(
+                            RulesAction.FILTER,
+                            RulesCode.KEYVALUE_FILTER_EGRESS,
+                            extra_data={'start': True, 'key': key})
 
         # This is not strictly a filter, but we snoop on the incoming
         # messages and if we see Qh400="ApDisc" from downstream with a
@@ -1840,21 +1850,52 @@ class TestRules(unittest.TestCase):
         }
 
         testpeer = router.clients[('127.0.0.1', 12345)]
+        upstream = router.upstream
 
         # Qs997 is START and ECON, should be handled normally
+        # regardless of sender or load3 timing.
         testpeer.display_name = "BACARS"
         (action, code, _, extra_data) = rules.route("Qs997=START and ECON", testpeer)
         self.assertEqual(action, RulesAction.NORMAL)
         self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
         self.assertIsNone(extra_data)
 
-        # Qs998 is only START, should get custom filtering
+        # Qs998 is only START. From a downstream client (e.g. a live
+        # instructor reposition command such as Qs122), it must
+        # always be forwarded normally, regardless of load3 timing.
+        router.last_load3 = 0.0
         testpeer.display_name = "BACARS"
         (action, code, _, extra_data) = rules.route("Qs998=START only", testpeer)
+        self.assertEqual(action, RulesAction.NORMAL)
+        self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
+
+        # From upstream, within 5s of the last load3 (i.e. the
+        # response to a newly-connected client's own "start"
+        # request), it must be filtered so only that client sees it.
+        router.last_load3 = time.perf_counter()
+        (action, code, _, extra_data) = rules.route("Qs998=START only", upstream)
         self.assertEqual(action, RulesAction.FILTER)
         self.assertEqual(code, RulesCode.KEYVALUE_FILTER_EGRESS)
         self.assertTrue('start' in extra_data)
         self.assertTrue('key' in extra_data)
+
+        # From upstream, outside the 5s load3 window (e.g. an
+        # unsolicited situ load or a live instructor reposition
+        # relayed from another router), it must be forwarded
+        # normally to everyone.
+        router.last_load3 = time.perf_counter() - 10.0
+        (action, code, _, extra_data) = rules.route("Qs998=START only", upstream)
+        self.assertEqual(action, RulesAction.NORMAL)
+        self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
+
+        # Qs122 is only START, but is exempt from the custom
+        # filtering since it doubles as a live, instructor-issued
+        # reposition command that must always reach every client.
+        testpeer.display_name = "BACARS"
+        (action, code, _, extra_data) = rules.route("Qs122=reposition", testpeer)
+        self.assertEqual(action, RulesAction.NORMAL)
+        self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
+        self.assertIsNone(extra_data)
 
     def test_route(self):
         """Test routing."""
