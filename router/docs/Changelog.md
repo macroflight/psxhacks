@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-07-12: version 1.4.1
+
+- **Bug fix: a new client connecting to a master router could cause
+  visible aircraft repositioning on already-connected clients of a
+  chained slave router.** The master's private "start" response
+  (e.g. `Qs122`) was forwarded unconditionally to any connected
+  frankenrouter, regardless of whether that router was actually
+  welcoming one of its own clients. The receiving router had no way
+  to tell the message was meant to stay private, and would
+  re-broadcast it locally using its own unrelated timing state. Fixed
+  by tracking, per connection, when it last relayed a `start` request
+  upstream, and only forwarding the private response to a
+  frankenrouter that has one currently in flight.
+- **Bug fix: the previous START-mode fix (1.4.0) didn't actually
+  work.** Its window check was keyed off `router.last_load3`, which
+  is only updated when a `load3` message is itself routed - but the
+  `load3` sent to a newly-welcomed client bypasses routing entirely,
+  so the check was effectively always false. Now keyed off
+  `router.start_sent_at`, which is set at the moment the router
+  actually sends `start` upstream.
+
 ## 2026-07-12: version 1.4.0
 
 - **Flight Info page now driven by Flight Centre.** A planned flight's
