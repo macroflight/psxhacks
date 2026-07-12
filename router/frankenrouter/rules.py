@@ -103,7 +103,6 @@ class RulesCode(enum.Enum):
     """
 
     MESSAGE_INVALID = enum.auto()
-    FALLBACK_RULE = enum.auto()
     FRDP_PING = enum.auto()
     FRDP_PONG = enum.auto()
     FRDP_IDENT = enum.auto()
@@ -152,7 +151,6 @@ class RulesCode(enum.Enum):
     KEYVALUE_FILTERED_INGRESS_SILENT = enum.auto()
     KEYVALUE_FILTER_EGRESS = enum.auto()
     KEYVALUE_NORMAL = enum.auto()
-    SPEEDBRAKE_OVERRIDE = enum.auto()
     PARKING_BRAKE_FORCE_RELEASE = enum.auto()
     OBSERVER_MODE = enum.auto()
     FRDP_SIMEVENTS = enum.auto()
