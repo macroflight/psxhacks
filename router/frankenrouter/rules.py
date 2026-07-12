@@ -1128,20 +1128,25 @@ class Rules():  # pylint: disable=too-many-public-methods
             if (self.router.config.psx.parking_brake_fix and
                     not self.sender.upstream and
                     self.router.get_router_type() == 'slave'):
-                if (self.router.cache.get_value('Qh397') == 1 and
-                        self.router.cache.get_age('Qh397') > 5.0):
+                try:
+                    qh397_stale = (self.router.cache.get_value('Qh397') == 1 and
+                                   self.router.cache.get_age('Qh397') > 5.0)
                     (left, right) = value.split(';', 1)
-                    if int(left) > 990 and int(right) > 990:
-                        # Brakes pressed to almost 100%, ensure release.
-                        # Drop this message but RulesCode ensures we send
-                        # Qs357=1000;1000 + Qh397=0
-                        return self.myreturn(
-                            RulesAction.DROP,
-                            RulesCode.PARKING_BRAKE_FORCE_RELEASE,
-                            message=(
-                                f"Qs357 near max ({value}), forcing parking brake release"
-                            )
+                    brakes_near_max = int(left) > 990 and int(right) > 990
+                except (RouterCacheException, ValueError, TypeError):
+                    qh397_stale = False
+                    brakes_near_max = False
+                if qh397_stale and brakes_near_max:
+                    # Brakes pressed to almost 100%, ensure release.
+                    # Drop this message but RulesCode ensures we send
+                    # Qs357=1000;1000 + Qh397=0
+                    return self.myreturn(
+                        RulesAction.DROP,
+                        RulesCode.PARKING_BRAKE_FORCE_RELEASE,
+                        message=(
+                            f"Qs357 near max ({value}), forcing parking brake release"
                         )
+                    )
 
         if not self.sender.upstream and key == 'Qs119':
             # Do not accept Qs119 from BACARS shortly after BACARS
