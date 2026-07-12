@@ -148,10 +148,6 @@ MASTER_ADDON_PATTERNS = [
     r'.*UTIL.*',
     r'.*TANKER.*',
 ]
-# Subset where zero matches is also a warning.
-MASTER_ADDON_REQUIRED_PATTERNS = [
-    r'.*(BA ACARS|BACARS).*',
-]
 
 
 def trimstring(longname, maxlen=11, sep=".."):
@@ -2411,10 +2407,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     warnings.append(f"Too few ({count}) clients matching {regexp}")
                 if check.limit_max and count > check.limit_max:
                     warnings.append(f"Too many ({count}) clients matching {regexp}")
-        if self.config.identity.type == 'master':
-            for pattern in MASTER_ADDON_REQUIRED_PATTERNS:
-                if not self._find_network_clients_matching(pattern):
-                    warnings.append(f"No client matching '{pattern}'")
         return warnings
 
     def print_client_errors(self):
