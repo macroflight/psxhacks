@@ -1324,6 +1324,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     if self.config.identity.stop_minded:
                         raise SystemExit(f"{msg}\nRouter is stop-minded so shutting down now")  # pylint: disable=raise-missing-from
                     self.logger.critical("%s\nRouter is go-minded so trying to continue", msg)
+                    await asyncio.sleep(reconnect_delay)
+                    reconnect_delay = min(reconnect_delay * 2, 60.0)
+                    continue
                 # Create the connection object (which needs our config
                 # and a reference to the log function)
                 self.upstream = connection.UpstreamConnection(
