@@ -486,14 +486,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             help="Print more debug info. Probably only useful for development.",
         )
         parser.add_argument(
-            '--forward-please-be-so-kind-and-quit-upstream',
-            action='store_true',
-            help=(
-                "Forward pleaseBeSoKindAndQuit to upstream router. Use this with"
-                " caution in shared cockpit setups."
-            ),
-        )
-        parser.add_argument(
             '--log-traffic',
             action='store_true',
             help=("Override config file setting for data logging")
