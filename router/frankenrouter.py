@@ -77,6 +77,9 @@ DEPRECATED_ARGS = [
     ('housekeeping_interval',
      "--housekeeping-interval is deprecated and has no effect."
      " The housekeeping interval is now a fixed internal value."),
+    ('upstream_interactive',
+     "--upstream-interactive is deprecated and has no effect."
+     " Edit the config file to change upstream connection details."),
 ]
 
 # Status display static config
@@ -516,6 +519,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             help=argparse.SUPPRESS,
         )
         parser.add_argument(
+            '--upstream-interactive',
+            action='store_true',
+            help=argparse.SUPPRESS,
+        )
+        parser.add_argument(
             '--debug',
             action='store_true',
             help="Print more debug info. Probably only useful for development.",
@@ -539,11 +547,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             '--disable-elevation-reset',
             action='store_true',
             help="Do not send Qi198=-9999999 to re-enable the PSX elevation database",
-        )
-        parser.add_argument(
-            '--upstream-interactive',
-            action='store_true',
-            help="Ask about upstream details before starting",
         )
         parser.add_argument(
             '--devel',
@@ -3654,25 +3657,6 @@ shared cockpit master sim.
             except config.RouterConfigError as exc:
                 raise SystemExit(
                     f"Failed to load config file {self.args.config_file}: {exc}") from exc
-
-        # In interactive mode, ask the user for upstream connection
-        # details
-        if self.args.upstream_interactive:
-            print("Interactive mode requested")
-            host = input(f"Upstream host (press Enter for {self.config.upstream.host})? ")
-            port = input(f"Upstream port (press Enter for {self.config.upstream.port})? ")
-            password = input(
-                f"Upstream password (press Enter for {self.config.upstream.password})? ")
-            if host != "":
-                self.config.upstream.host = host
-            if port != "":
-                self.config.upstream.port = int(port)
-            if password != "":
-                if not re.match(r'^[\x21-\x7e]+$', password):
-                    raise SystemExit(
-                        "\nPassword contains invalid characters. "
-                        "Only printable ASCII characters (no spaces) are allowed.")
-                self.config.upstream.password = password
 
         # Override with command line options
         if self.args.log_traffic:
