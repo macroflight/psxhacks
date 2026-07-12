@@ -45,7 +45,7 @@ import fw_webui as _fw_webui  # noqa: E402  pylint: disable=wrong-import-positio
 __MYNAME__ = 'frankenrouter'
 __MY_DESCRIPTION__ = 'A PSX Router'
 
-__VERSION__ = '1.3.8'
+__VERSION__ = '1.4.0'
 
 # If we have no upstream connection and no cached data, assume this
 # version.

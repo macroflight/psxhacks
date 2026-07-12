@@ -1,5 +1,83 @@
 # Changelog
 
+## 2026-07-12: version 1.4.0
+
+- **Flight Info page now driven by Flight Centre.** A planned flight's
+  data is sent to the router automatically from Flight Centre (via
+  frankenpush). It is no longer possible to edit planned flight
+  information (crew, airline, route, etc.) directly in the router
+  control panel; the in-flight scratchpad and checklist toggles are
+  still available there. Related config file entries that are no
+  longer needed were removed.
+- **GPS jamming/spoofing improvements.**
+  - The spoofed GPS position is now propagated to Navigraph Charts'
+    moving map via the PSX SimLink Bridge, by feeding it fake Qs121
+    data calculated from the true position plus the GPS drift.
+  - While jamming is active, the SimLink Bridge now sees a
+    slowly-changing mix of the true position and several implausible
+    decoy positions, rather than a frozen position (which was itself
+    a giveaway that something was wrong).
+  - The Qs121 keepalive that re-broadcasts stale data for a stationary
+    aircraft is now inhibited unless the aircraft is confirmed on the
+    ground, since it could otherwise interfere with gate
+    repositioning while airborne but momentarily stationary (e.g.
+    paused).
+- **MSFS weather bridge & wind corridor automation.** The router web
+  UI's weather zones page gained a live MSFS bridge status section
+  (in-cloud, QNH, wind vertical, precip) with sync toggles, and the
+  wind corridor can now be refreshed automatically from hourly
+  OpenMeteo forecast data during flight.
+- **Bug fix: Qs122 (a START mode variable) was incorrectly filtered
+  from upstream outside of an active client welcome.** This meant
+  e.g. an EFB-initiated repositioning never reached the PSX main
+  clients (one of which runs the boost server), desyncing shared
+  cockpit instances. Qs121 would normally paper over this, but PSX
+  does not send Qs121 while stationary.
+- **Router type handling made more robust.** Elevation, traffic and
+  flight control filters are now explicitly forced off for `master`
+  and `standalone` routers; those router types now shut down if they
+  end up connected to a frankenrouter upstream (which should never
+  happen); the router type is now shown in the web UI.
+- **Code review pass: several correctness bugs fixed and dead code
+  removed**, including:
+  - A missing exception guard around the parking-brake-release fix's
+    `Qh397` cache lookup that could crash the message forwarder task
+    entirely.
+  - An unbound/stale `reader`/`writer` reuse on unexpected upstream
+    connect errors.
+  - `addon=FRANKENMSFSBRIDGE` was incorrectly filtered even when
+    relayed legitimately from upstream, unlike the equivalent
+    `Qi198` filter.
+  - The FRDP SHAREDINFO "should never happen" invariant guard now
+    also covers `standalone` routers, not just `master`.
+  - An unescaped `.` in the frankenrouter self-identification regex,
+    two unused `RulesCode` enum members, and a couple of latent
+    missing-`continue` bugs in the connection retry/read loops were
+    also cleaned up.
+- **Command line option cleanup.** Removed a number of command line
+  options that were unused, redundant with the config file, or better
+  handled as fixed internal values: `--forward-please-be-so-kind-and-quit-upstream`,
+  `--read-buffer-size`, `--housekeeping-interval`, `--upstream-interactive`,
+  and the entire router state-cache-to-disk feature
+  (`--use-state-cache`, `--state-cache-file`, `--no-state-cache-file`).
+  The router's variable cache is now always in-memory only for the
+  lifetime of the process and is never read from or written to disk.
+  Removed options are still accepted but now print a deprecation
+  warning instead of failing outright.
+- **Master addon duplicate-check patterns updated:** removed the
+  little-used `TURB`/`UTIL` patterns and the separate "at least one
+  BACARS client" warning check; added a `WEATHER` pattern to match
+  frankenweather's client ID.
+- The router now flushes its log and traffic log files every 60
+  seconds, to help with mid-flight log analysis.
+- Added a button under *Util* in the web UI to force aircraft wheels
+  to ground level.
+- Own (potentially large) `addon=` messages in psxhacks' own
+  namespaces are no longer sent to `nolong` clients regardless of
+  their current length, matching how other long messages are already
+  withheld.
+- Fixed a broken EXE build.
+
 ## 2026-07-04: version 1.3.8
 
 - **Event log.** The router now maintains a log of significant in-flight
