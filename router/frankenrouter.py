@@ -1139,6 +1139,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     if self.config.identity.stop_minded:
                         raise SystemExit(f"{msg}\nRouter is stop-minded so shutting down now")  # pylint: disable=raise-missing-from
                     self.logger.critical("%s\nRouter is go-minded so trying to continue", msg)
+                    continue
 
                 if data is None:
                     continue
@@ -1401,6 +1402,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         if self.config.identity.stop_minded:
                             raise SystemExit(f"{msg}\nRouter is stop-minded so shutting down now")  # pylint: disable=raise-missing-from
                         self.logger.critical("%s\nRouter is go-minded so trying to continue", msg)
+                        continue
                     if data is None:
                         continue
                     # Intercept AUTH_FAILED before queuing: by the time
