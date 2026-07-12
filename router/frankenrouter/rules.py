@@ -776,7 +776,7 @@ class Rules():  # pylint: disable=too-many-public-methods
 
         Using the prefix "R" for frankenrouters
         """
-        if re.match(r".*:FRANKEN.PY frankenrouter", rest):
+        if re.match(r".*:FRANKEN\.PY frankenrouter", rest):
             display_name = rest.split(":")[0]
             newly_identified = not self.sender.is_frankenrouter
             self.sender.is_frankenrouter = True
