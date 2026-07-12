@@ -55,7 +55,7 @@ PSX_DEFAULT_VERSION = '10.188 NG'
 # connections)
 READ_BUFFER_SIZE = 1048576
 
-# How often to perform housekeeping tasks (writing cache to file, etc.) (s)
+# How often to perform housekeeping tasks (s)
 HOUSEKEEPING_INTERVAL = 10
 
 # Command line options that have been removed. Each is still registered
@@ -67,7 +67,13 @@ HOUSEKEEPING_INTERVAL = 10
 DEPRECATED_ARGS = [
     ('no_state_cache_file',
      "--no-state-cache-file is deprecated and has no effect."
-     " State cache is now opt-in via --use-state-cache."),
+     " The router cache is now always in-memory only and never persisted to disk."),
+    ('use_state_cache',
+     "--use-state-cache is deprecated and has no effect."
+     " The router cache is now always in-memory only and never persisted to disk."),
+    ('state_cache_file',
+     "--state-cache-file is deprecated and has no effect."
+     " The router cache is now always in-memory only and never persisted to disk."),
     ('forward_please_be_so_kind_and_quit_upstream',
      "--forward-please-be-so-kind-and-quit-upstream is deprecated and has no effect."
      " pleaseBeSoKindAndQuit is always forwarded normally."),
@@ -482,21 +488,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         )
         parser.add_argument(
             '--state-cache-file',
-            type=str, action='store', default="AUTO",
-            help=(
-                "Path to the state cache file. Only used when --use-state-cache is given."
-                " Default: AUTO (a name based on the router identity)."
-            ),
+            type=str, action='store', default=None,
+            help=argparse.SUPPRESS,
         )
         parser.add_argument(
             '--use-state-cache',
             action='store_true',
-            help=(
-                "Read the state cache file on startup (if it exists) and save the current"
-                " state to the file periodically and on shutdown. Without this option the"
-                " router will only provide a fake client ID and PSX version to clients that"
-                " connect before it has connected to the PSX main server."
-            ),
+            help=argparse.SUPPRESS,
         )
         parser.add_argument(
             '--no-state-cache-file',
@@ -2818,8 +2816,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                             "upstream welcome from %s:%s",
                             self.config.upstream.host, self.config.upstream.port)
                         self.logger.warning(_sep)
-                    if self.args.use_state_cache:
-                        self.cache.write_to_file()
 
                     # Call housekeeping functions
                     self._housekeeping_check_router_type()
@@ -3688,10 +3684,7 @@ shared cockpit master sim.
         self._simevents_keywords = self.variables.keywords_for_simevents()
 
         # Initialize the router cache
-        self.cache = routercache.RouterCache(
-            f"frankenrouter-{self.config.identity.router}.cache.json", self.config)
-        if self.args.use_state_cache:
-            self.cache.read_from_file()
+        self.cache = routercache.RouterCache()
 
         if self.args.debug:
             print(f"config: identity/simulator = {self.config.identity.simulator}")
@@ -3761,8 +3754,6 @@ shared cockpit master sim.
                 raise SystemExit(f"{msg}\nRouter is stop-minded so shutting down now")  # pylint: disable=raise-missing-from
             self.logger.critical("%s\nRouter is go-minded so trying to continue", msg)
 
-        if self.args.use_state_cache:
-            self.cache.write_to_file()
         self.logger.info("All tasks ended, shutting down")
 
 

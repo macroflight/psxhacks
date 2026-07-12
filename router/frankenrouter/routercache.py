@@ -1,8 +1,5 @@
 """A variable cache for the router."""
-import json
-import logging
 import time
-import traceback
 import unittest
 
 
@@ -15,48 +12,15 @@ class RouterCacheTypeError(Exception):
 
 
 class RouterCache():  # pylint: disable=too-few-public-methods
-    """A cache for PSX network variables."""
+    """An in-memory cache for PSX network variables.
 
-    def __init__(self, cache_file, config):
+    Lives only for the lifetime of the router process; never persisted
+    to or loaded from disk.
+    """
+
+    def __init__(self):
         """Initialize the instance."""
-        self.logger = logging.getLogger(__name__)
         self.cache = {}
-        self.cache_file = cache_file
-        self.config = config
-
-    def read_from_file(self):
-        """Read cached data from file, for use e.g before PSX main server started."""
-        try:
-            with open(self.cache_file, 'r', encoding='utf-8') as statefile:
-                self.cache = json.load(statefile)
-                if 'version' not in self.cache:
-                    # Bad data, reject cache
-                    self.logger.warning("Bad data in %s, starting with empty cache",
-                                        self.cache_file)
-                    self.cache = {}
-                elif isinstance(self.cache['version'], str):
-                    self.logger.warning("Cache file is old format, starting with empty cache")
-                    self.cache = {}
-        except (FileNotFoundError, json.decoder.JSONDecodeError):
-            self.logger.warning(
-                "Failed to load data from %s found, you might need to reconnect some clients",
-                self.cache_file)
-            self.cache = {}
-        except Exception:  # pylint: disable=broad-exception-caught
-            msg = f"Unhandled exception: {traceback.format_exc()}"
-            if self.config.identity.stop_minded:
-                raise SystemExit(f"{msg}\nRouter is stop-minded so shutting down now")  # pylint: disable=raise-missing-from
-            self.logger.critical("%s\nRouter is go-minded so trying to continue", msg)
-
-    def write_to_file(self):
-        """Write state cache from file."""
-        if self.get_size() > 0:
-            with open(self.cache_file, 'w', encoding='utf-8') as statefile:
-                statefile.write(json.dumps(self.cache))
-        else:
-            self.logger.info(
-                "Not writing empty cache to disk"
-            )
 
     def get_size(self):
         """Return the number of keywords in the cache."""
@@ -121,7 +85,7 @@ class TestVariablesParser(unittest.TestCase):
 
     def test_basic_cache(self):
         """A few tests of the cache."""
-        me = RouterCache("dummy.json", None)
+        me = RouterCache()
         self.assertEqual(me.get_size(), 0)
         me.update("Qs123", 456)
         me.update("Qs128", "somestring")

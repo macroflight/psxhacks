@@ -164,28 +164,19 @@ Both clients have full access (as opposed to read-only access)
 The last line shows some basic information about the PSX simulation
 that we get from the router's variable cache.
 
-## State cache
+## Variable cache
 
-The state cache holds a snapshot of the PSX variable state (Q-codes
-and their values). When a client connects to the router before the
-router has established an upstream connection, the router can serve
-variable values from the cache so that the client gets a valid initial
-state immediately.
+The router keeps an in-memory cache holding a snapshot of the PSX
+variable state (Q-codes and their values). When a client connects to
+the router before the router has established an upstream connection,
+the router can serve variable values from the cache so that the
+client gets a valid initial state immediately.
 
-By default the state cache is **not** used. To enable it, start the
-router with `--use-state-cache`. With this option the router will:
-
-- Read the cache file on startup (if the file exists).
-- Save the cache file periodically (every 10 s).
-- Save the cache file on clean shutdown.
-
-The cache file is named `frankenrouter-<router-name>.cache.json` and
-is written to the current working directory. Use `--state-cache-file`
-to specify a different path.
-
-Without `--use-state-cache` the router will only supply a fake client
-ID and PSX version number to clients that connect before an upstream
-connection is available.
+The cache lives only for the lifetime of the router process; it is
+never read from or written to disk. It always starts empty on
+startup, so the router will only supply a fake client ID and PSX
+version number to clients that connect before an upstream connection
+has ever been established during this run.
 
 ## REST API
 
