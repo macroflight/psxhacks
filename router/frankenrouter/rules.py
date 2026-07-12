@@ -713,8 +713,13 @@ class Rules():  # pylint: disable=too-many-public-methods
                     self.sender.simulator_name)
                 return self.myreturn(RulesAction.DROP, RulesCode.CDUPROXY)
 
-        # Drop addon=FRANKENMSFSBRIDGE from non-elevation-master sources
-        if addon == 'FRANKENMSFSBRIDGE' and self.router.filter_elevation:
+        # Drop addon=FRANKENMSFSBRIDGE from non-elevation-master sources.
+        # Only filter it coming from downstream (i.e. our own local
+        # PSX.NET.MSFS.Client/frankenmsfsbridge) - a copy arriving from
+        # upstream is from the authoritative elevation-master sim and
+        # should always be accepted.
+        if (addon == 'FRANKENMSFSBRIDGE' and not self.sender.upstream and
+                self.router.filter_elevation):
             return self.myreturn(
                 RulesAction.DROP,
                 RulesCode.KEYVALUE_FILTERED_INGRESS_SILENT,
