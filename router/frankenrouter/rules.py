@@ -469,10 +469,11 @@ class Rules():  # pylint: disable=too-many-public-methods
             # Drop message
             return self.myreturn(RulesAction.DROP, RulesCode.FRDP_SHAREDINFO)
 
-        if self.router.config.identity.type == 'master':
+        if self.router.is_sharedinfo_authority():
             raise SystemExit(
                 f"SHAREDINFO message received from {sharedinfo['master_uuid']}, "
-                f"but this router is configured as master. This should never happen.")
+                f"but this router is the SHAREDINFO authority "
+                f"({self.router.config.identity.type}). This should never happen.")
 
         # Merge data from sharedinfo package into our own variables
         self.router.sharedinfo['master_uuid'] = sharedinfo['master_uuid']
