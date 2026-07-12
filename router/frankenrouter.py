@@ -55,6 +55,9 @@ PSX_DEFAULT_VERSION = '10.187 NG'
 # connections)
 READ_BUFFER_SIZE = 1048576
 
+# How often to perform housekeeping tasks (writing cache to file, etc.) (s)
+HOUSEKEEPING_INTERVAL = 10
+
 # Command line options that have been removed. Each is still registered
 # with argparse (hidden from --help via SUPPRESS) purely so scripts/configs
 # still passing it get a deprecation warning instead of a hard argparse
@@ -71,6 +74,9 @@ DEPRECATED_ARGS = [
     ('read_buffer_size',
      "--read-buffer-size is deprecated and has no effect."
      " The read buffer size is now a fixed internal value."),
+    ('housekeeping_interval',
+     "--housekeeping-interval is deprecated and has no effect."
+     " The housekeeping interval is now a fixed internal value."),
 ]
 
 # Status display static config
@@ -472,11 +478,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             help="How often to print router status to terminal",
         )
         parser.add_argument(
-            '--housekeeping-interval',
-            type=int, action='store', default=10,
-            help="How often to perform housekeeping tasks (writing cache to file, etc.) (s)",
-        )
-        parser.add_argument(
             '--state-cache-file',
             type=str, action='store', default="AUTO",
             help=(
@@ -506,6 +507,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         )
         parser.add_argument(
             '--read-buffer-size',
+            type=int, action='store', default=None,
+            help=argparse.SUPPRESS,
+        )
+        parser.add_argument(
+            '--housekeeping-interval',
             type=int, action='store', default=None,
             help=argparse.SUPPRESS,
         )
@@ -2796,7 +2802,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 await self._housekeeping_check_write_buffers()
                 await self._housekeeping_irs_align_fix()
                 self._housekeeping_mcp_window()
-                if time.perf_counter() - last_run > self.args.housekeeping_interval:
+                if time.perf_counter() - last_run > HOUSEKEEPING_INTERVAL:
                     last_run = time.perf_counter()
                     self.logger.debug("Performing housekeeping")
                     if (self.config.upstream is not None and

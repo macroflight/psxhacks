@@ -176,8 +176,7 @@ By default the state cache is **not** used. To enable it, start the
 router with `--use-state-cache`. With this option the router will:
 
 - Read the cache file on startup (if the file exists).
-- Save the cache file periodically (every `--housekeeping-interval`
-  seconds, default 10 s).
+- Save the cache file periodically (every 10 s).
 - Save the cache file on clean shutdown.
 
 The cache file is named `frankenrouter-<router-name>.cache.json` and
