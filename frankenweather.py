@@ -58,7 +58,7 @@ import fw_webui as _fw_webui  # pylint: disable=wrong-import-order
 
 
 __MYNAME__ = 'frankenweather'
-__MY_CLIENT_ID__ = 'FWXR'
+__MY_CLIENT_ID__ = 'WEATHER'
 __MY_DISPLAY_NAME__ = 'FrankenWeather'
 __MY_DESCRIPTION__ = 'Dynamic real-world weather zones for PSX using Open-Meteo'
 
