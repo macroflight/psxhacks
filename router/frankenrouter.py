@@ -51,6 +51,10 @@ __VERSION__ = '1.3.8'
 # version.
 PSX_DEFAULT_VERSION = '10.187 NG'
 
+# Buffer size (bytes) for asyncio stream readers (both upstream and client
+# connections)
+READ_BUFFER_SIZE = 1048576
+
 # Status display static config
 HEADER_LINE_LENGTH = 126
 
@@ -444,9 +448,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 " is missing; exit with an error instead."
             ),
         )
-        parser.add_argument(
-            '--read-buffer-size', type=int,
-            action='store', default=1048576)
         parser.add_argument(
             '--status-interval',
             type=int, action='store', default=60,
@@ -1296,7 +1297,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     reader, writer = await asyncio.open_connection(
                         self.config.upstream.host,
                         self.config.upstream.port,
-                        limit=self.args.read_buffer_size,
+                        limit=READ_BUFFER_SIZE,
                     )
                 # At least on Windows we get OSError after ~30s if the
                 # upstream is down or unreachable
@@ -1470,7 +1471,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.proxy_server = await asyncio.start_server(
                     self.handle_new_connection_cb,
                     port=self.config.listen.port,
-                    limit=self.args.read_buffer_size
+                    limit=READ_BUFFER_SIZE
                 )
             except OSError as exc:
                 raise SystemExit(
