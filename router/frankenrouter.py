@@ -181,8 +181,7 @@ def _is_own_addon_message(line):
 # More than one match is always a critical error.
 MASTER_ADDON_PATTERNS = [
     r'.*(BA ACARS|BACARS).*',
-    r'.*TURB.*',
-    r'.*UTIL.*',
+    r'.*WEATHER.*',
     r'.*TANKER.*',
 ]
 
