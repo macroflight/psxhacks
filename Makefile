@@ -34,11 +34,11 @@ $(LINTVENVDIR)/bin/activate:
 
 pylint: venv
 	$(info * LINT: Running pylint on scripts)
-	. $(LINTVENVDIR)/bin/activate; pylint --rcfile=.pylintrc.toml -r n $(LINTFILES)
+	. $(LINTVENVDIR)/bin/activate; pylint --rcfile=.pylintrc.toml -j 0 -r n $(LINTFILES)
 
 configlint: venv
 	$(info * LINT: Running pylint on Python format config files)
-	. $(LINTVENVDIR)/bin/activate; pylint --rcfile=.pylintrc.toml --disable=duplicate-code -r n $(CONFIGFILES)
+	. $(LINTVENVDIR)/bin/activate; pylint --rcfile=.pylintrc.toml --disable=duplicate-code -j 0 -r n $(CONFIGFILES)
 
 pycodestyle: venv
 	$(info * LINT: Running pycodestyle)
