@@ -47,6 +47,15 @@ PTT_KEYWORDS = frozenset({'Qh82', 'Qh93', 'Qh410', 'Qh411', 'Qh412'})
 # forwarded messages are logged at debug rather than info.
 _KNOWN_ADDONS = frozenset(('FRANKENCDUPROXY', 'FRANKENMSFSBRIDGE', 'FRANKENWEATHER'))
 
+# How long a pure-START-non-ECON value from upstream is treated as the
+# private response to a "start" command, rather than an unsolicited
+# broadcast-worthy update. Used both for router.start_sent_at (see
+# route()) and for connection.last_start_relayed_at (see
+# client_broadcast() in frankenrouter.py), which must use the same
+# window so a chained frankenrouter's private welcome response isn't
+# broadcast by an intermediate hop before the window has even elapsed.
+START_PRIVATE_WINDOW_S = 5.0
+
 
 class RulesAction(enum.Enum):
     """The action the router needs to take for a message.
@@ -861,12 +870,22 @@ class Rules():  # pylint: disable=too-many-public-methods
         return self.myreturn(RulesAction.UPSTREAM_ONLY, RulesCode.AGAIN)
 
     def handle_start(self):
-        """Handle the start keyword."""
+        """Handle the start keyword.
+
+        Records when this connection last asked us to relay a "start"
+        upstream. For a chained frankenrouter this means it is
+        currently welcoming one of its own clients; client_broadcast()
+        uses this (rather than blanket-trusting is_frankenrouter) to
+        decide whether a private START response from upstream should
+        be forwarded to it - see the isonlystart handling for why
+        that distinction matters.
+        """
         if self.sender.upstream:
             return self.myreturn(
                 RulesAction.DROP, RulesCode.MESSAGE_INVALID,
                 message=f"Got start message from upstream: {self.line}"
             )
+        self.sender.last_start_relayed_at = time.perf_counter()
         return self.myreturn(RulesAction.UPSTREAM_ONLY, RulesCode.START)
 
     def handle_pbskaq(self):
@@ -1244,7 +1263,7 @@ class Rules():  # pylint: disable=too-many-public-methods
                         "START variable %s from upstream, time since start sent is %.1fs",
                         key, time_since_start_sent
                     )
-                    if time_since_start_sent <= 5.0:
+                    if time_since_start_sent <= START_PRIVATE_WINDOW_S:
                         return self.myreturn(
                             RulesAction.FILTER,
                             RulesCode.KEYVALUE_FILTER_EGRESS,
@@ -1387,6 +1406,7 @@ class TestRules(unittest.TestCase):
             self.nolong = False
             self.demands = set()
             self.peername = peername
+            self.last_start_relayed_at = 0.0
 
         def can_write(self):
             """Check if this client is allowed to write."""
@@ -1705,9 +1725,14 @@ class TestRules(unittest.TestCase):
         testpeer = router.clients[('127.0.0.1', 12345)]
 
         # start from client
+        self.assertEqual(testpeer.last_start_relayed_at, 0.0)
         (action, code, *_) = rules.route("start", testpeer)
         self.assertEqual(action, RulesAction.UPSTREAM_ONLY)
         self.assertEqual(code, RulesCode.START)
+        # Relaying "start" upstream records when we did so, so
+        # client_broadcast() can later tell this connection currently
+        # has a pending welcome (see START_PRIVATE_WINDOW_S).
+        self.assertGreater(testpeer.last_start_relayed_at, 0.0)
 
         # start from upstream
         (action, code, *_) = rules.route("start", router.upstream)

@@ -344,6 +344,15 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
         # Is the client waiting for the requested START keywords to arrive?
         self.waiting_for_start_keywords = False
 
+        # perf_counter() timestamp of the last time this connection sent us
+        # a "start" keyword to relay upstream. Used for chained
+        # frankenrouters: unlike a plain client, we don't get an explicit
+        # waiting_for_start_keywords signal for them, so client_broadcast()
+        # uses freshness of this instead to decide whether a private START
+        # response from upstream should be forwarded to it. See rules.py's
+        # handle_start() and START_PRIVATE_WINDOW_S.
+        self.last_start_relayed_at = 0.0
+
         # Queue of messages we need to send after the client has been
         # welcomed.
         self.messages_to_send_after_welcome = []

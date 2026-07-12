@@ -31,7 +31,7 @@ from frankenrouter import connection
 from frankenrouter import variables
 from frankenrouter import routercache
 
-from frankenrouter.rules import RulesAction, RulesCode, Rules
+from frankenrouter.rules import RulesAction, RulesCode, Rules, START_PRIVATE_WINDOW_S
 from frankenrouter.webapi import RouterWebAPI
 
 # Add psxhacks root to sys.path so fw_webui (first-party, at the root) can be imported.
@@ -1280,8 +1280,17 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 # situ.
                 self.logger.debug("isonlystart for %s", client.peername)
 
-                if client.is_frankenrouter:
-                    # Always send to other frankenrouters
+                if (client.is_frankenrouter and
+                        now - client.last_start_relayed_at <= START_PRIVATE_WINDOW_S):
+                    # Only forward to a frankenrouter child that has
+                    # itself recently asked us to relay a "start"
+                    # upstream, i.e. it is currently welcoming one of
+                    # its own clients and is expecting this. A
+                    # frankenrouter with no such pending request has
+                    # no way to know this is meant to stay private -
+                    # it would just re-evaluate it against its own
+                    # unrelated local state and likely broadcast it to
+                    # all of its own clients.
                     pass
                 elif client.waiting_for_start_keywords:
                     # Send to clients who are getting welcomed
