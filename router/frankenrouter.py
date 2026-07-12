@@ -55,6 +55,24 @@ PSX_DEFAULT_VERSION = '10.187 NG'
 # connections)
 READ_BUFFER_SIZE = 1048576
 
+# Command line options that have been removed. Each is still registered
+# with argparse (hidden from --help via SUPPRESS) purely so scripts/configs
+# still passing it get a deprecation warning instead of a hard argparse
+# failure, rather than being silently accepted or rejected outright.
+# When removing a command line option, add it here instead of just
+# deleting its add_argument() call.
+DEPRECATED_ARGS = [
+    ('no_state_cache_file',
+     "--no-state-cache-file is deprecated and has no effect."
+     " State cache is now opt-in via --use-state-cache."),
+    ('forward_please_be_so_kind_and_quit_upstream',
+     "--forward-please-be-so-kind-and-quit-upstream is deprecated and has no effect."
+     " pleaseBeSoKindAndQuit is always forwarded normally."),
+    ('read_buffer_size',
+     "--read-buffer-size is deprecated and has no effect."
+     " The read buffer size is now a fixed internal value."),
+]
+
 # Status display static config
 HEADER_LINE_LENGTH = 126
 
@@ -482,6 +500,16 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             help=argparse.SUPPRESS,
         )
         parser.add_argument(
+            '--forward-please-be-so-kind-and-quit-upstream',
+            action='store_true',
+            help=argparse.SUPPRESS,
+        )
+        parser.add_argument(
+            '--read-buffer-size',
+            type=int, action='store', default=None,
+            help=argparse.SUPPRESS,
+        )
+        parser.add_argument(
             '--debug',
             action='store_true',
             help="Print more debug info. Probably only useful for development.",
@@ -522,6 +550,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             help="Always include this string in the errors list (for testing).",
         )
         self.args = parser.parse_args()
+        for attr, message in DEPRECATED_ARGS:
+            if getattr(self.args, attr):
+                print(f"WARNING: {message}")
 
     def get_random_id(self, length=16):
         """Return a random string we can use for FRDP request id."""
@@ -3669,9 +3700,6 @@ shared cockpit master sim.
         # Initialize the router cache
         self.cache = routercache.RouterCache(
             f"frankenrouter-{self.config.identity.router}.cache.json", self.config)
-        if self.args.no_state_cache_file:
-            print("WARNING: --no-state-cache-file is deprecated and has no effect."
-                  " State cache is now opt-in via --use-state-cache.")
         if self.args.use_state_cache:
             self.cache.read_from_file()
 
