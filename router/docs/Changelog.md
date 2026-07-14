@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-07-14: version 1.4.2
+
+- **Bug fix: the 1.4.1 START-leak fix was still incomplete for chains
+  of three or more routers.** A router relaying a `start` request on
+  behalf of a chained child frankenrouter (rather than one it sent for
+  its own directly-connected client) never updated its own
+  `router.start_sent_at`. When the response then arrived from
+  upstream, the private-response window check on that hop compared
+  against a stale timestamp, failed, and let the value fall through to
+  a normal broadcast - leaking it to that router's own unrelated local
+  clients. `handle_start()` now refreshes `router.start_sent_at`
+  whenever it relays *any* `start` upstream, own-client or chained, so
+  every hop in the chain correctly treats the response as private.
+
 ## 2026-07-12: version 1.4.1
 
 - **Bug fix: a new client connecting to a master router could cause
