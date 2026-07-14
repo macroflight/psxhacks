@@ -126,6 +126,18 @@ class _RouterConfigPsx:  # pylint: disable=missing-class-docstring,too-few-publi
         self.gps_spoofing_egress = data.get('gps_spoofing_egress', False)
         if not isinstance(self.gps_spoofing_egress, bool):
             raise RouterConfigError("psx gps_spoofing_egress must be true or false")
+        # Opt-out: PSX recomputes some ECON variables internally as a side
+        # effect of another one changing (e.g Qh274 "JettSelSystem" when Qi25
+        # "CfgJettisonMlw" changes) without always broadcasting the result -
+        # see https://aerowinx.com/board/index.php/topic,7861.0.html. When
+        # enabled (the default), the router asks its own upstream for a
+        # "bang" to resync whenever it sees this happen. This is somewhat
+        # intrusive (a full private state resend on our upstream
+        # connection), so it can be disabled if that turns out to cause
+        # problems of its own.
+        self.jettison_resync_fix = data.get('jettison_resync_fix', True)
+        if not isinstance(self.jettison_resync_fix, bool):
+            raise RouterConfigError("psx jettison_resync_fix must be true or false")
 
 
 # crew/airframes/portal_account/airline_icao/checklist used to be configured
@@ -463,6 +475,15 @@ I'm not TOML
         self.assertEqual(conf.psx.gps_spoofing_egress, True)
         with self.assertRaises(RouterConfigError):
             RouterConfig(config_data="[psx]\ngps_spoofing_egress = 'yes'\n")
+
+    def test_jettison_resync_fix(self):
+        """jettison_resync_fix defaults to on and can be disabled in [psx]."""
+        conf = RouterConfig(config_data="")
+        self.assertEqual(conf.psx.jettison_resync_fix, True)
+        conf = RouterConfig(config_data="[psx]\njettison_resync_fix = false\n")
+        self.assertEqual(conf.psx.jettison_resync_fix, False)
+        with self.assertRaises(RouterConfigError):
+            RouterConfig(config_data="[psx]\njettison_resync_fix = 'no'\n")
 
     def test_file_input(self):
         """Test reading from one of the example files."""

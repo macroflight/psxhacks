@@ -56,6 +56,17 @@ _KNOWN_ADDONS = frozenset(('FRANKENCDUPROXY', 'FRANKENMSFSBRIDGE', 'FRANKENWEATH
 # broadcast by an intermediate hop before the window has even elapsed.
 START_PRIVATE_WINDOW_S = 5.0
 
+# How long after we ask our own upstream for a "bang" - because we
+# noticed it had recomputed one ECON variable as a side effect of
+# another one changing, without broadcasting the result (see the Qi25
+# handling in route()) - an unchanged echo from that private reply is
+# assumed to just be upstream re-confirming state we already have,
+# rather than a coincidental unrelated update. Kept short since a bang
+# round trip to a directly-connected upstream is normally near-instant;
+# anything that actually differs from our cache is forwarded normally
+# regardless of this window, so a genuine change is never lost.
+UPSTREAM_RESYNC_BANG_WINDOW_S = 2.0
+
 
 class RulesAction(enum.Enum):
     """The action the router needs to take for a message.
@@ -163,6 +174,7 @@ class RulesCode(enum.Enum):
     PARKING_BRAKE_FORCE_RELEASE = enum.auto()
     OBSERVER_MODE = enum.auto()
     FRDP_SIMEVENTS = enum.auto()
+    JETTISON_MLW_CHANGED = enum.auto()
 
 
 class Rules():  # pylint: disable=too-many-public-methods
@@ -980,7 +992,7 @@ class Rules():  # pylint: disable=too-many-public-methods
             return True
         return False
 
-    def route(self, line, sender):  # pylint: disable=too-many-return-statements,too-many-branches, too-many-statements
+    def route(self, line, sender):  # pylint: disable=too-many-return-statements,too-many-branches, too-many-statements,too-many-locals
         """Decide on routing, log, etc.
 
         line is a PSX network message string, e.g "Qi123=456"
@@ -1225,6 +1237,15 @@ class Rules():  # pylint: disable=too-many-public-methods
                         RulesCode.KEYVALUE_FILTERED_INGRESS_SILENT,
                         message=f"filtered {key} as filter_traffic is set")
 
+        # Snapshot the value we had cached for this key (if any) before
+        # we overwrite it below - used both to detect a genuine Qi25
+        # change and to recognize echoes of our own upstream "bang"
+        # replies, further down.
+        try:
+            old_cached_value = self.router.cache.get_value(key)
+        except RouterCacheException:
+            old_cached_value = None
+
         # Store key-value in router cache
         try:
             self.router.cache.update(key, value)
@@ -1232,6 +1253,51 @@ class Rules():  # pylint: disable=too-many-public-methods
             return self.myreturn(
                 RulesAction.DROP, RulesCode.MESSAGE_INVALID,
                 message=f"Wrong datatype in message, dropping it: {exc}")
+
+        new_cached_value = self.router.cache.get_value(key)  # just stored above, cannot raise
+
+        # PSX recomputes some ECON variables internally as a side
+        # effect of another one changing - e.g Qh274 ("JettSelSystem")
+        # when Qi25 ("CfgJettisonMlw") changes, to keep the jettison
+        # selector position consistent across the two different switch
+        # layouts - but does not always broadcast the recomputed value
+        # onto the network (see
+        # https://aerowinx.com/board/index.php/topic,7861.0.html).
+        # Rather than hardcode PSX's undocumented remap table
+        # ourselves (a previous attempt at exactly that for this same
+        # jettison case had the wrong values baked in - see git
+        # history), ask our own upstream to privately resend its
+        # current, authoritative state via "bang" whenever we see Qi25
+        # change, and let the dedup filter right below narrow that
+        # private reply down to just whatever actually changed. This is
+        # somewhat intrusive (see config.psx.jettison_resync_fix), so
+        # it can be disabled in the config file.
+        if (self.router.config.psx.jettison_resync_fix and
+                self.sender.upstream and key == 'Qi25' and
+                old_cached_value is not None and old_cached_value != new_cached_value):
+            return self.myreturn(RulesAction.NORMAL, RulesCode.JETTISON_MLW_CHANGED)
+
+        # If we recently asked our own upstream for a "bang" for the
+        # reason above, this key=value is very likely part of that
+        # private reply flooding back to us - and almost all of it
+        # will just echo what we already had cached (we already had
+        # this whole state; we only asked to double-check one
+        # recomputed variable we suspected might be stale). Drop those
+        # echoes silently so we don't flood our own clients with an
+        # unsolicited full resync. Anything that actually differs -
+        # the recomputed value we were after, or an unrelated real
+        # change that happens to land in this same short window - is
+        # still forwarded normally below, so nothing genuine is ever
+        # lost.
+        if (self.router.config.psx.jettison_resync_fix and
+                self.sender.upstream and old_cached_value is not None):
+            time_since_bang = time.perf_counter() - self.router.jettison_resync_sent_at
+            if (time_since_bang <= UPSTREAM_RESYNC_BANG_WINDOW_S and
+                    old_cached_value == new_cached_value):
+                return self.myreturn(
+                    RulesAction.DROP,
+                    RulesCode.KEYVALUE_FILTERED_INGRESS_SILENT,
+                    message=f"dropped unchanged {key} echoed by our own upstream resync bang")
 
         # The "nolong" keywords are only sent to clients that have
         # asked for them (using the "nolong" keyword)
@@ -1338,6 +1404,12 @@ class TestRules(unittest.TestCase):
             """Fake cache update."""
             self.cache[keyword] = value
 
+        def get_value(self, keyword):
+            """Fake cache get_value."""
+            if keyword not in self.cache:
+                raise RouterCacheException(f"{keyword} not in dummy cache")
+            return self.cache[keyword]
+
     class DummyConfigPsx():  # pylint: disable=too-few-public-methods
         """Implement small parts of the router for unit testing."""
 
@@ -1345,6 +1417,7 @@ class TestRules(unittest.TestCase):
             """Initialize the config."""
             self.filter_from_other_sim = []
             self.filter_to_other_sim = []
+            self.jettison_resync_fix = True
 
     class DummyConfigIdentity():  # pylint: disable=too-few-public-methods
         """Implement small parts of the router for unit testing."""
@@ -1373,6 +1446,7 @@ class TestRules(unittest.TestCase):
             self.last_load1 = 0.0
             self.last_load3 = 0.0
             self.start_sent_at = 0.0
+            self.jettison_resync_sent_at = 0.0
             self.frdp_version = 1
             self.config = TestRules.DummyConfig()
             self.observer_mode = False
@@ -1896,6 +1970,92 @@ class TestRules(unittest.TestCase):
         # Qs119 from BACARS more than 15s after connecting
         testpeer.connected_at = time.perf_counter() - 31.0
         (action, code, *_) = rules.route("Qs119=junk printout", testpeer)
+        self.assertEqual(action, RulesAction.NORMAL)
+        self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
+
+    def test_jettison_resync(self):
+        """Test the Qi25/Qh274 upstream resync-via-bang mechanism."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+
+        router.upstream = self.DummyUpstreamConnection()
+        router.clients = {
+            ('127.0.0.1', 12345): self.DummyClientConnection(('127.0.0.1', 12345)),
+        }
+        upstream = router.upstream
+
+        # First sighting of Qi25 (nothing cached yet): just a normal
+        # update, no resync triggered.
+        (action, code, *_) = rules.route("Qi25=0", upstream)
+        self.assertEqual(action, RulesAction.NORMAL)
+        self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
+        self.assertEqual(router.jettison_resync_sent_at, 0.0)
+
+        # Qi25 actually changing, from upstream, triggers the resync:
+        # forwarded normally (like any other ECON update) but with a
+        # distinct code so frankenrouter.py knows to bang upstream.
+        (action, code, *_) = rules.route("Qi25=1", upstream)
+        self.assertEqual(action, RulesAction.NORMAL)
+        self.assertEqual(code, RulesCode.JETTISON_MLW_CHANGED)
+
+        # Qi25 arriving from a client must never trigger this - PSX's
+        # recompute only happens once the change reaches the real main
+        # server, so banging our own upstream immediately would just
+        # race ahead of it and get a stale answer.
+        testpeer = router.clients[('127.0.0.1', 12345)]
+        (action, code, *_) = rules.route("Qi25=0", testpeer)
+        self.assertEqual(action, RulesAction.NORMAL)
+        self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
+
+        # Simulate frankenrouter.py having just sent the resync bang.
+        router.jettison_resync_sent_at = time.perf_counter()
+
+        # An unrelated keyword, unchanged, arriving from upstream
+        # within the resync window: this is almost certainly part of
+        # the private bang reply re-confirming state we already have,
+        # so it must be dropped rather than flooded out to our clients.
+        router.cache.update('Qh123', '42')
+        (action, code, *_) = rules.route("Qh123=42", upstream)
+        self.assertEqual(action, RulesAction.DROP)
+        self.assertEqual(code, RulesCode.KEYVALUE_FILTERED_INGRESS_SILENT)
+
+        # The actually-corrected value (Qh274) arriving in that same
+        # reply must still get through normally, since it differs from
+        # what we had cached.
+        router.cache.update('Qh274', '0')
+        (action, code, *_) = rules.route("Qh274=2", upstream)
+        self.assertEqual(action, RulesAction.NORMAL)
+        self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
+
+        # An unrelated but genuinely different value landing in this
+        # same short window must also still get through normally - the
+        # dedup only ever drops exact echoes, never real changes.
+        router.cache.update('Qh456', '1')
+        (action, code, *_) = rules.route("Qh456=2", upstream)
+        self.assertEqual(action, RulesAction.NORMAL)
+        self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
+
+        # Once the resync window has elapsed, an unchanged value from
+        # upstream is forwarded normally again - PSX main servers and
+        # other frankenrouters do sometimes legitimately re-announce
+        # unchanged values (e.g. momentary DELTA-mode switches), and we
+        # must not suppress that outside the narrow window.
+        router.jettison_resync_sent_at = time.perf_counter() - 10.0
+        router.cache.update('Qh789', '5')
+        (action, code, *_) = rules.route("Qh789=5", upstream)
+        self.assertEqual(action, RulesAction.NORMAL)
+        self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
+
+        # With jettison_resync_fix disabled: Qi25 changing must not
+        # trigger a bang, and an unchanged echo must never be dropped,
+        # even right after what would otherwise be a resync window.
+        router.config.psx.jettison_resync_fix = False
+        router.jettison_resync_sent_at = time.perf_counter()
+        (action, code, *_) = rules.route("Qi25=1", upstream)
+        self.assertEqual(action, RulesAction.NORMAL)
+        self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
+        router.cache.update('Qh999', '7')
+        (action, code, *_) = rules.route("Qh999=7", upstream)
         self.assertEqual(action, RulesAction.NORMAL)
         self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
 

@@ -351,6 +351,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.routerinfo = None
         self.sharedinfo = None
         self.start_sent_at = None
+        self.jettison_resync_sent_at = None
         self.last_frdp_routerinfo = None
         self.last_frdp_sharedinfo = None
 
@@ -409,6 +410,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         }
         # Track when we last send the start keyword upstream
         self.start_sent_at = 0.0
+        # Track when we last sent a "bang" to upstream to resync a
+        # PSX-recomputed-but-not-broadcast variable (see rules.py's
+        # Qi25 handling in route())
+        self.jettison_resync_sent_at = 0.0
         # Track when we last sent FRDP ROUTERINFO and SHAREDINFO
         self.last_frdp_routerinfo = 0.0
         self.last_frdp_sharedinfo = 0.0
@@ -3272,6 +3277,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 )
                 await asyncio.sleep(0.2)
             self.cache.update('Qh397', 0)
+
+        elif code == RulesCode.JETTISON_MLW_CHANGED:
+            self.logger.info(
+                "Qi25 (jettison MLW config) changed from %s: %s - "
+                "sending bang to upstream to get PSX's authoritative "
+                "Qh274 (jettison selector) value", sender_hr, line)
+            self.jettison_resync_sent_at = time.perf_counter()
+            await self.send_to_upstream("bang")
 
         elif code == RulesCode.OBSERVER_MODE:
             self.logger.debug(

@@ -165,6 +165,19 @@ directory = 'C:\fs\PSX\Routerlogs'
   parking brake from releasing when pressed. Only enable this if you
   actually experience the problem.
   Only applies to slave sim routers.
+- `jettison_resync_fix`: defaults to true. PSX recomputes some ECON
+  variables internally as a side effect of another one changing (e.g
+  `Qh274` "JettSelSystem" when `Qi25` "CfgJettisonMlw" changes) without
+  always broadcasting the recomputed value onto the network (see
+  [Aerowinx forum
+  topic](https://aerowinx.com/board/index.php/topic,7861.0.html)).
+  When enabled, the router asks its own upstream to resend its current
+  state via `bang` whenever it sees `Qi25` change, and only forwards
+  whatever actually turns out to differ. This is somewhat intrusive (a
+  full private state resend on our upstream connection can have side
+  effects, e.g some addons react to a variable arriving even if its
+  value is unchanged), so set this to false to disable it if that
+  causes problems for you.
 
 Example:
 
