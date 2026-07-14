@@ -879,6 +879,18 @@ class Rules():  # pylint: disable=too-many-public-methods
         decide whether a private START response from upstream should
         be forwarded to it - see the isonlystart handling for why
         that distinction matters.
+
+        Also records that *we* are now expecting a private START
+        response on our own upstream connection, exactly as if we had
+        sent "start" ourselves via client_add_to_network(). This
+        matters when we're only relaying someone else's request (e.g.
+        a client frankenrouter welcoming one of its own clients): route()
+        uses router.start_sent_at to decide whether an incoming
+        pure-START-non-ECON variable from upstream is that private
+        response or an unsolicited broadcast-worthy update, and without
+        this, a relayed request would never mark that window as open on
+        this hop, so the response would leak to this router's own
+        unrelated local clients.
         """
         if self.sender.upstream:
             return self.myreturn(
@@ -886,6 +898,7 @@ class Rules():  # pylint: disable=too-many-public-methods
                 message=f"Got start message from upstream: {self.line}"
             )
         self.sender.last_start_relayed_at = time.perf_counter()
+        self.router.start_sent_at = self.sender.last_start_relayed_at
         return self.myreturn(RulesAction.UPSTREAM_ONLY, RulesCode.START)
 
     def handle_pbskaq(self):
@@ -1726,6 +1739,7 @@ class TestRules(unittest.TestCase):
 
         # start from client
         self.assertEqual(testpeer.last_start_relayed_at, 0.0)
+        self.assertEqual(router.start_sent_at, 0.0)
         (action, code, *_) = rules.route("start", testpeer)
         self.assertEqual(action, RulesAction.UPSTREAM_ONLY)
         self.assertEqual(code, RulesCode.START)
@@ -1733,6 +1747,11 @@ class TestRules(unittest.TestCase):
         # client_broadcast() can later tell this connection currently
         # has a pending welcome (see START_PRIVATE_WINDOW_S).
         self.assertGreater(testpeer.last_start_relayed_at, 0.0)
+        # It also marks this router itself as expecting a private START
+        # response on its own upstream connection, exactly as if it had
+        # initiated the request itself via client_add_to_network() -
+        # this matters when we're only relaying someone else's request.
+        self.assertGreater(router.start_sent_at, 0.0)
 
         # start from upstream
         (action, code, *_) = rules.route("start", router.upstream)
