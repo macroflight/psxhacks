@@ -299,6 +299,11 @@ if ([string]::IsNullOrWhiteSpace($PsxhacksPython)) {
     Show-ErrorAndExit "`$PsxhacksPython is not an .exe file: $PsxhacksPython`nEdit $OverrideFile and set `$PsxhacksPython to the path of python.exe in your Python virtual environment."
 } elseif (-not (Test-Path (Join-Path (Split-Path $PsxhacksPython -Parent) "activate"))) {
     Show-ErrorAndExit "`$PsxhacksPython does not look like it is inside a Python virtual environment (no 'activate' next to it): $PsxhacksPython`nEdit $OverrideFile and set `$PsxhacksPython to the path of python.exe in your Python virtual environment."
+} else {
+    $PsxhacksPythonVersion = (& $PsxhacksPython --version 2>&1 | Out-String).Trim()
+    if ($PsxhacksPythonVersion -notmatch '^Python 3\.13\.') {
+        Show-ErrorAndExit "`$PsxhacksPython reports '$PsxhacksPythonVersion', not Python 3.13.x: $PsxhacksPython`nRun start_scripts\setup_python_venv.ps1 to create a venv with the right Python version."
+    }
 }
 
 # $AerowinxDir has no default - it must be set in the override file (see
