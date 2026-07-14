@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-07-14: version 1.4.3
+
+- **New feature: work around PSX not always broadcasting the
+  jettison selector position (`Qh274`) after its MLW configuration
+  (`Qi25`) changes.** PSX recomputes `Qh274` internally to keep the
+  jettison switch position consistent whenever `Qi25` changes (e.g.
+  when loading a situ with a different jettison switch type), but
+  doesn't always send the network the recomputed value (see [Aerowinx
+  forum topic](https://aerowinx.com/board/index.php/topic,7861.0.html)).
+  Rather than hardcode PSX's undocumented remap table (an earlier,
+  removed attempt at that got the mapping wrong), the router now asks
+  its own upstream for a `bang` whenever it sees `Qi25` change, and
+  forwards only whatever in that private reply actually differs from
+  what it already had cached - so an unsolicited full resync never
+  floods already-connected clients. Sending `bang` can have side
+  effects of its own (some addons react to a variable arriving even
+  when its value is unchanged), so this is controlled by the new
+  `[psx] jettison_resync_fix` config setting, defaulting to enabled.
+
 ## 2026-07-14: version 1.4.2
 
 - **Bug fix: the 1.4.1 START-leak fix was still incomplete for chains
