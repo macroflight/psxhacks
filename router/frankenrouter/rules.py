@@ -133,6 +133,7 @@ class RulesCode(enum.Enum):
     FRDP_ELEVATION_SOURCE = enum.auto()
     FRDP_TRAFFIC_SOURCE = enum.auto()
     FRDP_JOIN = enum.auto()
+    FRDP_SUBSCRIBE = enum.auto()
     FRDP_CLIENTINFO = enum.auto()
     FRDP_ROUTERINFO = enum.auto()
     FRDP_SHAREDINFO = enum.auto()
@@ -288,6 +289,24 @@ class Rules():  # pylint: disable=too-many-public-methods
         flight control filtering.
         """
         return self.myreturn(RulesAction.DROP, RulesCode.FRDP_NO_CONTROL_LOCKS)
+
+    def handle_addon_frankenrouter_subscribe(self):
+        """Handle a FRDP SUBSCRIBE message.
+
+        Format:
+        addon=FRANKENROUTER:<protocol version>:SUBSCRIBE
+
+        Opts a plain (non-router) addon into receiving FRDP broadcasts
+        (ROUTERINFO, SHAREDINFO, FLIGHTINFO, SIMEVENTS) without making it
+        a full FRDP peer: unlike sending name=...FRANKEN.PY frankenrouter...
+        to fake router identification, this does not set is_frankenrouter,
+        so the client is not FRDP-pinged and none of the router-to-router-
+        only behavior elsewhere in this module (PTT/audio cross-sim
+        filtering, MY_CONTROLS/ALL_CONTROL_LOCKS/NO_CONTROL_LOCKS, AUTH,
+        START-private-window relaying, etc.) is affected by it.
+        """
+        self.sender.frdp_subscribed = True
+        return self.myreturn(RulesAction.DROP, RulesCode.FRDP_SUBSCRIBE)
 
     def handle_addon_frankenrouter_elevation_source(self, payload):
         """Handle FRDP ELEVATION_SOURCE message.
@@ -686,6 +705,8 @@ class Rules():  # pylint: disable=too-many-public-methods
             return self.handle_addon_frankenrouter_all_control_locks()
         if message_type == 'NO_CONTROL_LOCKS':
             return self.handle_addon_frankenrouter_no_control_locks()
+        if message_type == 'SUBSCRIBE':
+            return self.handle_addon_frankenrouter_subscribe()
         if message_type == 'FLIGHTCONTROLS':
             return self.handle_addon_frankenrouter_flightcontrols(payload)
         if message_type == 'ELEVATION_SOURCE':
@@ -1479,6 +1500,7 @@ class TestRules(unittest.TestCase):
             self.client_provided_id = None
             self.client_provided_display_name = None
             self.is_frankenrouter = False
+            self.frdp_subscribed = False
             self.upstream = False
             self.peername = None
 
@@ -1683,6 +1705,28 @@ class TestRules(unittest.TestCase):
         self.assertEqual(testpeer.client_provided_id, 'GATEFIND')
         self.assertEqual(testpeer.display_name, 'PSX.NET GateFinder')
         self.assertEqual(testpeer.display_name_source, 'FRDP CLIENTINFO')
+
+    def test_frdp_subscribe(self):
+        """Test the FRDP SUBSCRIBE opt-in, and that it stays short of full FRDP peer status."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+
+        router.upstream = self.DummyUpstreamConnection()
+        router.clients = {
+            ('127.0.0.1', 12345): self.DummyClientConnection(('127.0.0.1', 12345)),
+        }
+        testpeer = router.clients[('127.0.0.1', 12345)]
+        self.assertFalse(testpeer.frdp_subscribed)
+        self.assertFalse(testpeer.is_frankenrouter)
+
+        (action, code, *_) = rules.route("addon=FRANKENROUTER:1:SUBSCRIBE", testpeer)
+        self.assertEqual(action, RulesAction.DROP)
+        self.assertEqual(code, RulesCode.FRDP_SUBSCRIBE)
+        self.assertTrue(testpeer.frdp_subscribed)
+        # SUBSCRIBE must not also grant full FRDP peer status - that
+        # would defeat the point (FRDP-ping traffic, router-to-router-only
+        # behaviors like PTT/audio cross-sim filtering, etc.).
+        self.assertFalse(testpeer.is_frankenrouter)
 
     def test_frdp_client_auth(self):  # pylint: disable=too-many-statements
         """Test FRDP messages from client."""

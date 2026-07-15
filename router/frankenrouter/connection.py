@@ -95,6 +95,14 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         # Set to true if the connection is to another frankenrouter
         self.is_frankenrouter = False
 
+        # Set to true once this connection has sent FRDP SUBSCRIBE (see
+        # rules.py's handle_addon_frankenrouter_subscribe()). Grants
+        # receipt of FRDP broadcasts (ROUTERINFO/SHAREDINFO/FLIGHTINFO/
+        # SIMEVENTS) to a plain addon without making it a full FRDP peer
+        # (is_frankenrouter) - it is not FRDP-pinged and none of the
+        # router-to-router-only behavior elsewhere in rules.py applies.
+        self.frdp_subscribed = False
+
         # FRDP PING
         # ID of the last FRDP PING sent
         self.frdp_ping_request_id = None

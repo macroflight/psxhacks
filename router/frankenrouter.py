@@ -1248,7 +1248,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         "Not sending %s to %s due to regexp match for %s against %s",
                         line, client.peername, client.display_name, exclude_name_regexp)
                     continue
-            if not client.is_frankenrouter and exclude_non_frankenrouter:
+            if (not (client.is_frankenrouter or client.frdp_subscribed) and
+                    exclude_non_frankenrouter):
                 self.logger.debug(
                     "Not sending to non-frankenrouter client %s: %s", client.peername, line)
                 continue
@@ -3139,6 +3140,16 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.connection_state_changed()
         elif code == RulesCode.FRDP_JOIN:
             # A new router has joined the network
+            self.connection_state_changed()
+        elif code == RulesCode.FRDP_SUBSCRIBE:
+            self.logger.info(
+                "Got FRDP SUBSCRIBE message from %s: %s",
+                sender_hr, line)
+            # Re-trigger broadcasts now that this client wants them; the
+            # initial connection_state_changed() at connect time fires
+            # before this, so exclude_non_frankenrouter broadcasts would
+            # have skipped it (see handle_name()'s newly_identified for
+            # the same idiom).
             self.connection_state_changed()
         elif code == RulesCode.LOAD1:
             self.logger.info("Got load1 message from %s", sender_hr)

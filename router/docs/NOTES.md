@@ -344,6 +344,28 @@ information to the router.
 
 FIXME: document the JSON data format
 
+### FRDP SUBSCRIBE
+
+`addon=FRANKENROUTER:<protocol version>:SUBSCRIBE` (no payload) can be
+sent by any client to opt into receiving FRDP broadcasts - ROUTERINFO,
+SHAREDINFO, FLIGHTINFO, and SIMEVENTS - without becoming a full FRDP
+peer.
+
+Before this existed, a client that only wanted these broadcasts (e.g.
+frankenpush, for ROUTERINFO/SHAREDINFO/FLIGHTINFO) had to fake full
+router identification (`name=<id>:FRANKEN.PY frankenrouter ...`
+followed by FRDP IDENT), which also pulls in every other
+router-to-router-only behavior - FRDP PING/PONG RTT tracking,
+PTT/audio-panel cross-sim filtering, MY_CONTROLS/ALL_CONTROL_LOCKS/
+NO_CONTROL_LOCKS, AUTH, START-private-window relaying, etc. - none of
+which such a client wants or correctly implements, and usually meant
+maintaining a second TCP connection purely for this (in addition to a
+normal PSX main-client connection used for everything else). SUBSCRIBE
+grants just the broadcast receipt: it sets `frdp_subscribed` rather
+than `is_frankenrouter`, so the client is not FRDP-pinged and none of
+those other behaviors apply. It can be sent on the same connection as
+normal PSX traffic.
+
 ## Shared cockpit support
 
 These setups need to work with the router:
