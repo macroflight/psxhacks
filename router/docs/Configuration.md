@@ -158,6 +158,28 @@ directory = 'C:\fs\PSX\Routerlogs'
   slave sim routers, i.e giving you control. This can be handy if you
   don't use frankenusb for your controls but still wants to use the
   flight control lock.
+- `qs121_keepalive`: defaults to true. PSX only sends `Qs121`
+  (`PiBaHeAlTas` - pitch/bank/heading/altitude/TAS/lat/lon) at 5 Hz
+  while the aircraft is moving, and stops sending it entirely once
+  stationary - a possible workaround for the "rubberband bug" where
+  other clients see a frozen/rubberbanding position. When enabled, a
+  master or standalone router that hasn't seen a fresh
+  `Qs121` for more than 1 second re-sends the last cached value,
+  alternating a physically-imperceptible ±1 µrad bank wobble so each
+  keepalive is a distinct value (some PSX main clients ignore an
+  identical repeat). Only sent once the aircraft is confirmed on the
+  ground (`Qi257` "OnGround" == 1) - the same trick applied to a
+  momentarily-motionless-but-airborne aircraft (e.g frozen/paused)
+  would not be safe, so an unknown or not-yet-cached `Qi257` inhibits
+  the keepalive (with a warning, at most once a minute) rather than
+  assuming it's safe. Set this to false to disable it if it causes
+  problems for you.
+- `irs_align_fix`: defaults to true. A possible workaround for IRS
+  alignment not finishing correctly across the network: once all three
+  IRSes' `Qs355` ("IrsAlignTime") values reach ≥60000 (fully aligned)
+  and stay there for 5 seconds, the router broadcasts
+  `Qs355=102000;102000;102000` to upstream and all clients. Set this to
+  false to disable it if it causes problems for you.
 - `parking_brake_fix`: defaults to false. If set to true, the router
   will automatically release the parking brake when the slave sim sends
   near-maximum brake pressure (>99%) while the parking brake is set.
@@ -165,6 +187,27 @@ directory = 'C:\fs\PSX\Routerlogs'
   parking brake from releasing when pressed. Only enable this if you
   actually experience the problem.
   Only applies to slave sim routers.
+- `filter_from_other_sim` / `filter_to_other_sim`: both default to an
+  empty list (no filtering). Lists of PSX keywords that should be
+  dropped when received from - or not sent to - a frankenrouter
+  belonging to a different simulator, in a shared-cockpit setup. This
+  prevents one sim from inadvertently overwriting local state on
+  another sim. A common use case is cockpit lighting, so each sim's own
+  lighting switches don't drive the other sim's lights, e.g:
+  `Qh6` LtStorm, `Qh7` LtOvhd, `Qh8` LtDome, `Qh9` LtGlrshPanel, `Qh10`
+  LtGlrshFlood, `Qh11` LtAislePanel, `Qh12` LtAisleFlood.
+- `gps_spoofing_egress`: defaults to false. Opt-in support for the PSX
+  Instructor Station's GPS jamming/spoofing scenario: while active,
+  adjusts outgoing `Qs121` messages sent specifically to the client
+  named "PSX SimLink Bridge" (the psx_simlink_bridge addon, used to
+  feed an external moving-map app), so it sees the same erroneous
+  position the aircraft's own GPS/FMC would see rather than the real
+  one. While spoofing, this tracks the FMC's resulting (possibly
+  erroneous) lat/lon/altitude and sends that instead of the true
+  position; while jamming (a jammed GPS gives the FMC no fix at all, so
+  there's no erroneous position to compute), it sends a
+  slowly-switching random mix of the true position and several decoys
+  instead. Set this to true to enable it.
 - `jettison_resync_fix`: defaults to true. PSX recomputes some ECON
   variables internally as a side effect of another one changing (e.g
   `Qh274` "JettSelSystem" when `Qi25` "CfgJettisonMlw" changes) without
