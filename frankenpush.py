@@ -6,10 +6,13 @@ data, and streams it to a PSCC Flight Centre portal over an authenticated
 WebSocket connection.  No inbound port forwarding is needed — the connection
 is always initiated outward from your machine to the portal.
 
-Also connects as an FRDP peer to receive FLIGHTINFO (crew codes, airline,
-VATSIM callsign, etc.) and ROUTERINFO (connected simulator names) from
-frankenrouter, and includes them in each push update to the portal.
-The FRDP peer connection requires no extra configuration.
+If connected to a frankenrouter, also sends addon=FRANKENROUTER:SUBSCRIBE
+on that same connection to receive FRDP broadcasts - FLIGHTINFO (crew
+codes, airline, VATSIM callsign, etc.) and ROUTERINFO (connected
+simulator names) - included in each push update to the portal. This
+requires no extra configuration, and is a no-op (silently ignored) if
+connected directly to a PSX main server with no frankenrouter in front
+of it - see router/docs/NOTES.md's "FRDP SUBSCRIBE" section.
 
 Setup:
   1. Register a "My sim" on the portal (your portal URL)/mysim
@@ -32,7 +35,6 @@ import pathlib
 import sys
 import time
 import traceback
-import uuid
 
 import aiohttp
 
@@ -44,11 +46,6 @@ __MY_DISPLAY_NAME__ = 'FrankenPush'
 __MY_DESCRIPTION__ = 'PSCC Flight Centre push connector'
 
 _FRDP_VERSION = '1'
-_FRDP_CLIENT_ID = 'FrankenPush'
-_FRDP_ROUTER_ID = 'frankenpush'
-# The literal substring frankenrouter's rules.py matches to mark a connecting
-# peer as is_frankenrouter=True (required to receive FLIGHTINFO/ROUTERINFO).
-_FRDP_MARKER = 'FRANKEN.PY frankenrouter'
 
 # ROUTERINFO is sent every 10 s by frankenrouter; expire entries unseen for 2× that.
 _ROUTERINFO_MAX_AGE = 20.0
@@ -335,14 +332,13 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self._route2 = None
         self._eta = None
 
-        # FRDP peer connection state
+        # FRDP broadcast state, received (and, for FLIGHTINFO, also sent)
+        # over the single PSX connection - see get_psx_connection_coro()
+        # and _handle_addon_message().
         self._flightinfo = None             # latest FLIGHTINFO dict
         self._routerinfos: dict = {}        # {uuid: routerinfo_dict}
         self._sharedinfo: dict = {}         # latest SHAREDINFO from master router
         self._pending_simevents: list = []  # events received since last portal send
-        # live FRDP peer StreamWriter, for sending Flight-Centre-sourced
-        # FLIGHTINFO upstream
-        self._frdp_writer = None
 
         # Flight Centre flight-plan push state (see CLAUDE.md's Flight
         # Centre / frankenrouter integration section). Set from "flight_plan"/
@@ -709,6 +705,11 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.logger.info("PSX CONNECTED")
             self.psx_connected = True
             self.psx.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
+            # Opt into FRDP broadcasts (ROUTERINFO/SHAREDINFO/FLIGHTINFO/
+            # SIMEVENTS) if connected to a frankenrouter - see
+            # router/docs/NOTES.md's "FRDP SUBSCRIBE" section. Silently
+            # ignored if connected directly to a PSX main server instead.
+            self.psx.send("addon", f"FRANKENROUTER:{_FRDP_VERSION}:SUBSCRIBE")
 
         def disconnected():
             self.logger.info("PSX DISCONNECTED")
@@ -718,6 +719,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self._vs_fpm = None
             self._prev_alt_ft_for_vs = None
             self._prev_ts_for_vs = None
+            self._flightinfo = None
+            self._routerinfos.clear()
+            self._sharedinfo = {}
 
         try:
             self.logger.debug("Starting %s", inspect.currentframe().f_code.co_name)
@@ -751,6 +755,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.psx.subscribe("FlapLever", self._on_flap_lever)
             self.psx.subscribe("GearLever", self._on_gear_lever)
             self.psx.subscribe("SpdBrkLever", self._on_spd_brk_lever)
+            self.psx.subscribe("addon", self._handle_addon_message)
 
             self.psx.logger = self.logger.debug
 
@@ -763,18 +768,27 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 exc, inspect.currentframe().f_code.co_name)
             self.logger.critical(traceback.format_exc())
 
-    def _handle_frdp_line(self, line, writer):
-        """Process one line received on the FRDP peer connection."""
-        rest = line[len('addon=FRANKENROUTER:'):]
-        parts = rest.split(':', 2)
+    def _handle_addon_message(self, _key, value):
+        """Process one addon= message received on the PSX connection.
+
+        Handles our own addon=FRANKENROUTER:... FRDP broadcasts
+        (ROUTERINFO, SHAREDINFO, FLIGHTINFO, SIMEVENTS) - received
+        because we sent addon=FRANKENROUTER:<version>:SUBSCRIBE after
+        connecting (see get_psx_connection_coro()). No PING/PONG handling
+        is needed here: FRDP PING is only ever sent to full router peers
+        (is_frankenrouter), and SUBSCRIBE deliberately stops short of
+        that - see router/docs/NOTES.md's "FRDP SUBSCRIBE" section.
+        Other addon= messages (e.g from frankenweather, frankenusb) are
+        ignored.
+        """
+        if not value.startswith('FRANKENROUTER:'):
+            return
+        parts = value[len('FRANKENROUTER:'):].split(':', 2)
         if len(parts) < 2:
             return
         msg_type = parts[1]
         payload = parts[2] if len(parts) > 2 else ''
-        if msg_type == 'PING':
-            writer.write(
-                f"addon=FRANKENROUTER:{_FRDP_VERSION}:PONG:{payload}\r\n".encode())
-        elif msg_type == 'FLIGHTINFO':
+        if msg_type == 'FLIGHTINFO':
             self._handle_frdp_flightinfo(payload)
         elif msg_type == 'ROUTERINFO':
             self._handle_frdp_routerinfo(payload)
@@ -875,84 +889,23 @@ class Script():  # pylint: disable=too-many-instance-attributes
             })
 
     async def _send_frdp_flightinfo(self, flightinfo):
-        """Send a FLIGHTINFO addon message upstream over the FRDP peer connection.
+        """Send a FLIGHTINFO addon message to the router.
 
         This is the "frankenpush sends it to the routers via addon
         messages" leg of the Flight Centre -> sim push (see CLAUDE.md).
-        Returns True if actually sent (a live FRDP connection is required;
+        Returns True if actually sent (a live PSX connection is required;
         there's no queueing/retry — the next Flight Centre sync tick will
         naturally resend once the connection is back).
         """
-        if self._frdp_writer is None:
+        if not self.psx_connected:
             return False
-        line = f"addon=FRANKENROUTER:{_FRDP_VERSION}:FLIGHTINFO:{json.dumps(flightinfo)}\r\n"
-        try:
-            self._frdp_writer.write(line.encode())
-            await self._frdp_writer.drain()
-        except (OSError, ConnectionError) as exc:
-            self.logger.warning("FRDP: failed to send FLIGHTINFO: %s", exc)
-            return False
+        self.psx.send(
+            "addon", f"FRANKENROUTER:{_FRDP_VERSION}:FLIGHTINFO:{json.dumps(flightinfo)}")
         # frankenrouter floods a FLIGHTINFO to other peers but not back to
         # its origin connection, so update our own cache immediately rather
         # than waiting for an echo that will never arrive.
         self._flightinfo = flightinfo
         return True
-
-    async def _run_frdp_session(self, reader, writer):
-        """Read loop for a single FRDP peer session."""
-        while True:
-            raw = await reader.readline()
-            if not raw:
-                self.logger.info("FRDP: EOF from peer")
-                break
-            line = raw.decode(errors='replace').rstrip('\r\n')
-            if line.startswith('addon=FRANKENROUTER:'):
-                self._handle_frdp_line(line, writer)
-
-    async def get_frdp_connection_coro(self):
-        """Connect as an FRDP peer to receive FLIGHTINFO and ROUTERINFO.
-
-        Connects to the same host:port as the PSX connection but identifies
-        as a frankenrouter peer, which causes the frankenrouter to send
-        FLIGHTINFO (crew codes, airline, etc.) and ROUTERINFO (connected
-        simulator names) broadcasts.
-        """
-        frdp_uuid = str(uuid.uuid4())
-        handshake = (
-            f"name={_FRDP_CLIENT_ID}:{_FRDP_MARKER} PSX router {_FRDP_ROUTER_ID}\r\n"
-            f"addon=FRANKENROUTER:{_FRDP_VERSION}:IDENT:"
-            f"{_FRDP_CLIENT_ID}:{_FRDP_ROUTER_ID}:{frdp_uuid}\r\n"
-        ).encode()
-        backoff = 2.0
-        try:
-            self.logger.debug("Starting %s", inspect.currentframe().f_code.co_name)
-            while True:
-                try:
-                    reader, writer = await asyncio.open_connection(
-                        self.args.psx_host, self.args.psx_port)
-                    try:
-                        writer.write(handshake)
-                        backoff = 2.0
-                        self._frdp_writer = writer
-                        self.logger.info("FRDP: peer connection established")
-                        await self._run_frdp_session(reader, writer)
-                    finally:
-                        self._flightinfo = None
-                        self._routerinfos.clear()
-                        self._sharedinfo = {}
-                        self._frdp_writer = None
-                        writer.close()
-                        self.logger.info("FRDP: peer connection closed")
-                except (OSError, asyncio.IncompleteReadError) as exc:
-                    self.logger.warning("FRDP: connection failed: %s", exc)
-                self.logger.info("FRDP: retrying in %.0f s ...", backoff)
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, 60.0)
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            self.logger.critical(
-                "Unhandled exception %s in %s, shutting down",
-                exc, inspect.currentframe().f_code.co_name)
-            self.logger.critical(traceback.format_exc())
 
     async def _portal_send_loop(self, ws):
         """Send updates to the portal at the broadcast interval.
@@ -1203,7 +1156,6 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 all_coros = [
                     ("PSXConnection", self.get_psx_connection_coro),
                     ("PushLoop", self.push_loop_coro),
-                    ("FRDPConnection", self.get_frdp_connection_coro),
                 ]
                 if self.args.upload_autosave_from:
                     all_coros.append(
