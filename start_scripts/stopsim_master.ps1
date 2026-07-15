@@ -29,6 +29,7 @@ KillProcess "PSX.Bacars.UI"
 KillProcess "PSX.NET"
 KillJavaJar "$SrslPsxMasterDir\SRSL-PSX.jar"
 KillJavaJar "$CmcPsxDir\CMC-PSX.jar"
+KillProcess "psx_simlink_bridge*"
 
 # Ask PSX server to shut down gracefully before killing java.exe
 Write-Output "Shutting down PSX server..."

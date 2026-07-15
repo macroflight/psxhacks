@@ -204,6 +204,7 @@ $StartPsxNetGroundCrew   = $false
 
 $StartFrankencduproxy = $false
 $StartCsCdu           = $false
+$StartPsxSimlinkBridge = $false
 
 $StartSrslPsxMaster = $false
 $StartSrslPsxSlave  = $false
@@ -258,6 +259,7 @@ $SimAddonNames = [ordered]@{
     "SRSL-PSX master"        = "SRSL-PSX (master)"
     "SRSL-PSX slave"         = "SRSL-PSX (slave)"
     "CMC-PSX"                = "CMC-PSX"
+    "psx_simlink_bridge"     = "psx_simlink_bridge"
 }
 
 
@@ -524,6 +526,21 @@ if ($StartCsCdu) {
         Show-ErrorAndExit "`$CsCduExe not found: $CsCduExe`nEdit $OverrideFile and set `$CsCduExe to the path of your CS CDU Bridge (CockpitSimulator) .exe."
     } elseif ([System.IO.Path]::GetExtension($CsCduExe) -ne ".exe") {
         Show-ErrorAndExit "`$CsCduExe is not an .exe file: $CsCduExe`nEdit $OverrideFile and set `$CsCduExe to the path of your CS CDU Bridge (CockpitSimulator) .exe."
+    }
+}
+
+# $PsxSimlinkBridgeExe has no default - it must be set in the override file
+# (see psxhacks-start-override-EXAMPLE.ps1) and point at the
+# psx_simlink_bridge .exe, but only if it is actually enabled.
+# psx_simlink_bridge only runs in the master sim, connecting to the
+# master router.
+if ($StartPsxSimlinkBridge) {
+    if ([string]::IsNullOrWhiteSpace($PsxSimlinkBridgeExe)) {
+        Show-ErrorAndExit "`$StartPsxSimlinkBridge is `$true but `$PsxSimlinkBridgeExe is not set.`nEdit $OverrideFile and set `$PsxSimlinkBridgeExe to the path of your psx_simlink_bridge .exe."
+    } elseif (-not (Test-Path $PsxSimlinkBridgeExe -PathType Leaf)) {
+        Show-ErrorAndExit "`$PsxSimlinkBridgeExe not found: $PsxSimlinkBridgeExe`nEdit $OverrideFile and set `$PsxSimlinkBridgeExe to the path of your psx_simlink_bridge .exe."
+    } elseif ([System.IO.Path]::GetExtension($PsxSimlinkBridgeExe) -ne ".exe") {
+        Show-ErrorAndExit "`$PsxSimlinkBridgeExe is not an .exe file: $PsxSimlinkBridgeExe`nEdit $OverrideFile and set `$PsxSimlinkBridgeExe to the path of your psx_simlink_bridge .exe."
     }
 }
 

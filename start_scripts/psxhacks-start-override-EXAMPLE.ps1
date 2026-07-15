@@ -326,9 +326,9 @@
 # not to start it. To enable it: uncomment BOTH lines below AND edit the
 # path to the actual CMC-PSX installation.
 #
-# NOTE: restart_cmc_psx.ps1 rewrites the PORT= line in CMC-PSX.ini (in this
-# directory) on every start, forcing it to the MASTER sim's port - no
-# manual configuration needed.
+# NOTE: restart_cmc_psx.ps1 rewrites the PORT= and START_CONNECT= lines in
+# CMC-PSX.ini (in this directory) on every start, forcing it to the MASTER
+# sim's port and auto-connecting on launch - no manual configuration needed.
 # ---------------------------------------------------------------------------
 #$StartCmcPsx = $true   # CMC-PSX
 #$CmcPsxDir    = "$SimBase\CMC-PSX"
@@ -344,6 +344,28 @@
 # ---------------------------------------------------------------------------
 #$StartCsCdu = $true   # Cockpit Simulator CDU hardware
 #$CsCduExe    = "$SimBase\hw\cs_cdu\CockpitSimulator v2026.1.13.exe"
+
+
+# ---------------------------------------------------------------------------
+# psx_simlink_bridge settings
+# Download: https://aerowinx.com/board/index.php/topic,8010.msg86285.html#msg86285
+# $PsxSimlinkBridgeExe has no default in common.ps1 - it is REQUIRED if
+# $StartPsxSimlinkBridge is $true (checked at startup: must point at an
+# .exe file). Like CMC-PSX/SRSL-PSX, it only runs in the master sim:
+# started from startsim_master.ps1, connecting to the MASTER router
+# (restart_psx_simlink_bridge.ps1 passes -ip 127.0.0.1 and -port
+# $FrankenrouterMasterPort on the command line - no config file to edit).
+# Unlike CMC-PSX/SRSL-PSX, it is NOT started with -WindowStyle hidden -
+# that breaks this app's GUI - so its window will be visible on start.
+# Its console output is also NOT redirected to a file - redirecting it
+# makes this PyInstaller-built app crash with UnicodeEncodeError (it
+# needs a real console to print its UTF-8 box-drawing characters). Both
+# lines below are commented out since the default is not to start it. To
+# enable it: uncomment BOTH lines below AND edit $PsxSimlinkBridgeExe to
+# the actual path of the .exe.
+# ---------------------------------------------------------------------------
+#$StartPsxSimlinkBridge = $true   # psx_simlink_bridge
+#$PsxSimlinkBridgeExe    = "$SimBase\psx_simlink_bridge\psx_simlink_bridge_windows_v1_0b.exe"
 
 
 # ---------------------------------------------------------------------------

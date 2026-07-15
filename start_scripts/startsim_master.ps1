@@ -69,3 +69,9 @@ if ($StartCmcPsx ) {
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_cmc_psx.ps1"
     Invoke-WindowPosition "CMC-PSX"
 }
+
+if ($StartPsxSimlinkBridge ) {
+    Write-Output "Starting psx_simlink_bridge..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_simlink_bridge.ps1"
+    Invoke-WindowPosition "psx_simlink_bridge"
+}
