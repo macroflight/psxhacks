@@ -63,3 +63,9 @@ if ($StartSrslPsxMaster ) {
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_srsl_psx_master.ps1"
     Invoke-WindowPosition "SRSL-PSX master"
 }
+
+if ($StartCmcPsx ) {
+    Write-Output "Starting CMC-PSX..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_cmc_psx.ps1"
+    Invoke-WindowPosition "CMC-PSX"
+}

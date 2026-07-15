@@ -318,6 +318,23 @@
 
 
 # ---------------------------------------------------------------------------
+# CMC-PSX settings
+# $CmcPsxDir has no default in common.ps1 - it is REQUIRED if $StartCmcPsx is
+# $true (checked at startup: must point at a directory containing
+# CMC-PSX.jar). CMC-PSX only runs in the master sim, connecting to the
+# master router. Both lines below are commented out since the default is
+# not to start it. To enable it: uncomment BOTH lines below AND edit the
+# path to the actual CMC-PSX installation.
+#
+# NOTE: restart_cmc_psx.ps1 rewrites the PORT= line in CMC-PSX.ini (in this
+# directory) on every start, forcing it to the MASTER sim's port - no
+# manual configuration needed.
+# ---------------------------------------------------------------------------
+#$StartCmcPsx = $true   # CMC-PSX
+#$CmcPsxDir    = "$SimBase\CMC-PSX"
+
+
+# ---------------------------------------------------------------------------
 # CS CDU Bridge settings
 # $CsCduExe has no default in common.ps1 - it is REQUIRED if $StartCsCdu is
 # $true (checked at startup: must point at an .exe file). Both lines below

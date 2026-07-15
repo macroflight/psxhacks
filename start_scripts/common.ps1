@@ -214,6 +214,7 @@ $StartSrslPsxSlave  = $false
 $StartBacars        = $false
 $StartPsxNet        = $false
 $StartCpdlc         = $false
+$StartCmcPsx        = $false
 
 
 # Set to $true in the override file to enable apply_window_positions.ps1
@@ -256,6 +257,7 @@ $SimAddonNames = [ordered]@{
     "SimObjectRouter"        = "SimObjectRouter"
     "SRSL-PSX master"        = "SRSL-PSX (master)"
     "SRSL-PSX slave"         = "SRSL-PSX (slave)"
+    "CMC-PSX"                = "CMC-PSX"
 }
 
 
@@ -560,5 +562,22 @@ if ($StartFrankenusb) {
 
 # Flavor settings override both defaults and machine-specific overrides.
 if (Test-Path $FlavorFile) { . $FlavorFile }
+
+# $CmcPsxDir has no default - it must be set in the override file (see
+# psxhacks-start-override-EXAMPLE.ps1) and point at a real CMC-PSX install,
+# but only if CMC-PSX is actually enabled. CMC-PSX only runs in the master
+# sim, connecting to the master router. $StartCmcPsx is flavor-controlled
+# (see configure_flavor.ps1), so this check must run after the flavor file
+# is loaded above - otherwise enabling it via a flavor rather than the
+# override file would skip this validation entirely.
+if ($StartCmcPsx) {
+    if ([string]::IsNullOrWhiteSpace($CmcPsxDir)) {
+        Show-ErrorAndExit "`$StartCmcPsx is `$true but `$CmcPsxDir is not set.`nEdit $OverrideFile and set `$CmcPsxDir to your CMC-PSX installation directory."
+    } elseif (-not (Test-Path $CmcPsxDir -PathType Container)) {
+        Show-ErrorAndExit "`$CmcPsxDir not found: $CmcPsxDir`nEdit $OverrideFile and set `$CmcPsxDir to your CMC-PSX installation directory."
+    } elseif (-not (Test-Path (Join-Path $CmcPsxDir "CMC-PSX.jar"))) {
+        Show-ErrorAndExit "`$CmcPsxDir does not look like a CMC-PSX installation (no CMC-PSX.jar found): $CmcPsxDir`nEdit $OverrideFile and set `$CmcPsxDir to your CMC-PSX installation directory."
+    }
+}
 
 if ($StartPsxNetVatsim) { $RadioApp = "PSX.NET.VATSIM" }
