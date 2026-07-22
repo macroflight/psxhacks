@@ -253,6 +253,7 @@ class FrankenPrint:
         def connected(_key: str, _value: str) -> None:
             self.logger.info("PSX connected")
             client.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
+            client.send("clientName", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
             if self.args.test_print:
                 self._print_job(_TEST_MESSAGE)
 

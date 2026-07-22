@@ -20,6 +20,7 @@ def setup():
     print("Simulation started")
     CONNECTED = True
     PSX.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
+    PSX.send("clientName", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
 
 
 def teardown():

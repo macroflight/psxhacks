@@ -190,6 +190,8 @@ class Script():  # pylint: disable=too-many-instance-attributes
                     if not name_sent and data.startswith(b'version='):
                         writer.write("name=IDENT:FrankenIdent".encode() +
                                      PSX_PROTOCOL_SEPARATOR)
+                        writer.write("clientName=IDENT:FrankenIdent".encode() +
+                                     PSX_PROTOCOL_SEPARATOR)
                         name_sent = True
                     if not data:
                         self.logger.info(

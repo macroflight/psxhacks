@@ -195,6 +195,7 @@ class Bridge:  # pylint: disable=too-few-public-methods
 
     def _on_psx_version(self, _key: str, _value: str) -> None:
         self._psx.send("name", "MSFSBRDG:FrankenMSFSBridge")
+        self._psx.send("clientName", "MSFSBRDG:FrankenMSFSBridge")
 
     def _on_psx_connect(self) -> None:
         self._last_sent_at = 0.0

@@ -308,6 +308,7 @@ class CduProxy:  # pylint: disable=too-few-public-methods
 
         self._set_nodelay(psx_writer)
         psx_writer.write(b'name=CDUPROXY:FrankenCDUProxy\r\n')
+        psx_writer.write(b'clientName=CDUPROXY:FrankenCDUProxy\r\n')
         self.logger.info("Connected to PSX at %s:%d", self.psx_host, self.psx_port)
         self._bridge_writers.add(br_writer)
 

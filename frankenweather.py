@@ -4195,6 +4195,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 self.logger.info("PSX CONNECTED")
                 self.psx_connected = True
                 self.psx.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
+                self.psx.send("clientName", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
                 self._state_changed_event.set()
                 self._turb_state_changed_event.set()
                 if self._fw_mode == "disabled":

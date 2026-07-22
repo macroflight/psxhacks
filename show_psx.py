@@ -17,6 +17,7 @@ def psx_teardown():
     """Run when disconnected from PSX."""
     print("Simulation stopped")
     psx.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
+    psx.send("clientName", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
 
 
 def print_change(key, value):

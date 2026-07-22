@@ -705,6 +705,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.logger.info("PSX CONNECTED")
             self.psx_connected = True
             self.psx.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
+            self.psx.send("clientName", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
             # Opt into FRDP broadcasts (ROUTERINFO/SHAREDINFO/FLIGHTINFO/
             # SIMEVENTS) if connected to a frankenrouter - see
             # router/docs/NOTES.md's "FRDP SUBSCRIBE" section. Silently

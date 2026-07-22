@@ -1405,6 +1405,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
                 # Send our name (for when we connect to another router)
                 await self.send_to_upstream(f"name={self.config.identity.router}:FRANKEN.PY frankenrouter PSX router {self.config.identity.router} in {self.config.identity.simulator}")  # pylint: disable=line-too-long
+                await self.send_to_upstream(f"clientName={self.config.identity.router}:FRANKEN.PY frankenrouter PSX router {self.config.identity.router} in {self.config.identity.simulator}")  # pylint: disable=line-too-long
 
                 # (re)Send demand= for all keywords that any client has demanded
                 clients_demand = set()
