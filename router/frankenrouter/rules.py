@@ -43,6 +43,15 @@ TRAFFIC_KEYWORDS = frozenset({'Qs450', 'Qs451'})
 # Qh411="SwitchesAudioC"; Qh412="SwitchesAudioR"
 PTT_KEYWORDS = frozenset({'Qh82', 'Qh93', 'Qh410', 'Qh411', 'Qh412'})
 
+# How long after a connection is established we drop any Qs546
+# ("TkofRefNg", the TAKEOFF REF page's CG/TRIM & RWY/POS no-go string) it
+# sends. A PSX client that joins with a different situ than the host it
+# connects to sends its own locally-computed, stale/default Qs546 right
+# after connecting; forwarded unfiltered, this silently resets valid
+# CG/TRIM and RWY/POS entries elsewhere in the shared cockpit. A genuine
+# route/perf change entered later (i.e. after this window) is unaffected.
+QS546_CONNECT_FILTER_WINDOW_S = 5.0
+
 # Addon names that are expected to produce regular addon= traffic; their
 # forwarded messages are logged at debug rather than info.
 _KNOWN_ADDONS = frozenset(('FRANKENCDUPROXY', 'FRANKENMSFSBRIDGE', 'FRANKENWEATHER'))
@@ -164,6 +173,7 @@ class RulesCode(enum.Enum):
     PBSKAQ = enum.auto()
     LAYOUT = enum.auto()
     PTT = enum.auto()
+    QS546_CONNECT_FILTER = enum.auto()
     PSXNETVATSIM = enum.auto()
     CDUPROXY = enum.auto()
     KEYVALUE_FILTERED_INGRESS_SIM_LOCAL = enum.auto()
@@ -1085,6 +1095,14 @@ class Rules():  # pylint: disable=too-many-public-methods
         if key == 'layout':
             return self.handle_layout()
 
+        if key == 'Qs546':
+            age = time.perf_counter() - self.sender.connected_at
+            if age < QS546_CONNECT_FILTER_WINDOW_S:
+                self.logger.info(
+                    "Dropping Qs546 from %s: connection is only %.1fs old (< %.0fs)",
+                    self.sender.display_name, age, QS546_CONNECT_FILTER_WINDOW_S)
+                return self.myreturn(RulesAction.DROP, RulesCode.QS546_CONNECT_FILTER)
+
         if key in PTT_KEYWORDS:
             if self.sender.is_frankenrouter:
                 if self.router.config.identity.simulator != self.sender.simulator_name:
@@ -1503,6 +1521,9 @@ class TestRules(unittest.TestCase):
             self.frdp_subscribed = False
             self.upstream = False
             self.peername = None
+            # Default to "long connected" so existing tests are unaffected by
+            # the Qs546 connect-window filter unless they opt in.
+            self.connected_at = time.perf_counter() - 3600
 
     class DummyClientConnection(DummyConnection):  # pylint: disable=too-few-public-methods
         """Implement small parts of the router for unit testing."""
@@ -2220,3 +2241,34 @@ class TestRules(unittest.TestCase):
                 self.assertEqual(code, RulesCode.PTT, msg=f"{key}={val} should use PTT code")
             (action, code, *_) = rules.route(f"{key}=1", testpeer)
             self.assertEqual(action, RulesAction.NORMAL, msg=f"{key}=1 should pass")
+
+    def test_qs546_connect_filter(self):
+        """Test the Qs546 (TkofRefNg) connect-window ingress filter."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+
+        router.upstream = self.DummyUpstreamConnection()
+        router.clients = {
+            ('127.0.0.1', 12345): self.DummyClientConnection(('127.0.0.1', 12345)),
+        }
+        testpeer = router.clients[('127.0.0.1', 12345)]
+
+        # Freshly connected: Qs546 is dropped
+        testpeer.connected_at = time.perf_counter()
+        (action, code, *_) = rules.route("Qs546=avsfc-1;;;-1;-99;-1;-1;999;", testpeer)
+        self.assertEqual(action, RulesAction.DROP)
+        self.assertEqual(code, RulesCode.QS546_CONNECT_FILTER)
+
+        # Still within the window: still dropped
+        testpeer.connected_at = (
+            time.perf_counter() - QS546_CONNECT_FILTER_WINDOW_S + 1.0)
+        (action, code, *_) = rules.route("Qs546=avsfc-1;;;-1;-99;-1;-1;999;", testpeer)
+        self.assertEqual(action, RulesAction.DROP)
+        self.assertEqual(code, RulesCode.QS546_CONNECT_FILTER)
+
+        # Past the window: a genuine change (e.g. route entered from that CDU) passes
+        testpeer.connected_at = (
+            time.perf_counter() - QS546_CONNECT_FILTER_WINDOW_S - 1.0)
+        (action, code, *_) = rules.route("Qs546=avsfC200;11;-2625;-1;-99;-1;-1;8;", testpeer)
+        self.assertEqual(action, RulesAction.NORMAL)
+        self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
