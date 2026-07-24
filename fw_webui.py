@@ -894,6 +894,7 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         '<a href="/weather/settings" class="btn btn-gray btn-sm">Weather zones</a>\n'
         '<a href="/weather/turbulence" class="btn btn-gray btn-sm">Extra turbulence</a>\n'
         '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Enroute wind</a>\n'
+        '<a href="/weather/config" class="btn btn-gray btn-sm">Config</a>\n'
         '<button class="btn btn-blue btn-sm" onclick="openFeedback()">Feedback</button>\n'
         '</div>\n'
     )
@@ -965,6 +966,7 @@ def _build_weather_settings_page(ctx):  # pylint: disable=too-many-locals,too-ma
             '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
             '<a href="/weather/manual" class="btn btn-gray btn-sm">Manual weather</a>'
             '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Enroute wind</a>'
+            '<a href="/weather/config" class="btn btn-gray btn-sm">Config</a>'
             '<a href="/weather/settings" class="btn btn-gray btn-sm">Refresh</a>'
         )
         return _page_shell(
@@ -1256,6 +1258,78 @@ def _build_weather_settings_page(ctx):  # pylint: disable=too-many-locals,too-ma
             '</div>\n'
         )
 
+    body += '<hr>\n<a href="/weather" class="btn btn-gray">Back to map</a>\n'
+    return _page(body)
+
+
+def _build_weather_config_page(ctx):
+    """Render the /weather/config page (time sync settings for now)."""
+    color_scheme = ctx.color_scheme
+    state = ctx.fw_state
+    received_at = ctx.fw_state_received_at
+    age_s = time.time() - received_at if received_at else float('inf')
+    stale = state is None or age_s > 300.0
+
+    def _page(body):
+        nav_html = (
+            '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
+            '<a href="/weather/settings" class="btn btn-gray btn-sm">Weather zones</a>'
+            '<a href="/weather/config" class="btn btn-gray btn-sm">Refresh</a>'
+        )
+        return _page_shell(color_scheme, 'Config', nav_html, body)
+
+    if stale:
+        msg = ('No data received from frankenweather, '
+               'check PSX Instructor station')
+        if state is not None:
+            age_min = int(age_s // 60)
+            msg = (f'No recent frankenweather data (last received {age_min} min ago), '
+                   'check PSX Instructor station')
+        return _page(f'<div class="card warn"><p style="margin:0">{msg}</p></div>\n'
+                     '<a href="/weather" class="btn btn-gray">Back</a>\n')
+
+    cfg = state.get('config', {})
+    on_startup = cfg.get('timesync_on_startup', True)
+    on_situ_load = cfg.get('timesync_on_situ_load', True)
+    periodic = cfg.get('timesync_periodic', False)
+
+    def _toggle(field, val, label, active, color='btn-green'):
+        inactive_color = 'btn-gray'
+        return (
+            f'<form method="post" action="/api/weather/config" style="display:inline">'
+            f'<input type="hidden" name="{field}" value="{val}">'
+            f'<button class="btn {color if active else inactive_color} btn-sm"'
+            f' title="Click to toggle">{label}</button></form>'
+        )
+
+    body = (
+        '<h2>Time sync</h2>\n'
+        '<p class="note">Keeps PSX\'s clocks (TimeEarth, and both cockpit clocks) in sync '
+        "with your computer's real-world time.</p>\n"
+        '<div class="card ok">\n<table>\n'
+        '<tr><td style="padding-right:0.8em">Sync on startup<br>'
+        '<span style="font-size:0.82em;color:#64748b">Sync every time FrankenWeather '
+        'connects or reconnects to PSX.</span></td><td>' +
+        _toggle('timesync_on_startup', 'false' if on_startup else 'true',
+                'ON' if on_startup else 'OFF', on_startup) +
+        '</td></tr>\n'
+        '<tr><td style="padding-right:0.8em">Sync on situ load<br>'
+        '<span style="font-size:0.82em;color:#64748b">Sync whenever PSX finishes loading a '
+        "situation — detected via PSX's own load1/load3 pause/resume signal, the only wire-"
+        'protocol event that brackets a situ (re)load. Turn off if you want to keep the '
+        'aircraft clock a loaded situ brings with it.</span></td><td>' +
+        _toggle('timesync_on_situ_load', 'false' if on_situ_load else 'true',
+                'ON' if on_situ_load else 'OFF', on_situ_load) +
+        '</td></tr>\n'
+        '<tr><td style="padding-right:0.8em">Periodic resync<br>'
+        '<span style="font-size:0.82em;color:#64748b">Every minute, resync if PSX\'s clock '
+        "has drifted more than 1 second from your computer's clock. Useful after flying with "
+        'time acceleration, to catch back up once you return to 1x.</span></td><td>' +
+        _toggle('timesync_periodic', 'false' if periodic else 'true',
+                'ON' if periodic else 'OFF', periodic) +
+        '</td></tr>\n'
+        '</table>\n</div>\n'
+    )
     body += '<hr>\n<a href="/weather" class="btn btn-gray">Back to map</a>\n'
     return _page(body)
 
@@ -2077,6 +2151,11 @@ def register_weather_routes(routes, ctx):  # pylint: disable=too-many-statements
         return web.Response(
             text=_paused_or(_build_weather_settings_page), content_type='text/html')
 
+    @routes.get('/weather/config')
+    async def _weather_config_get(_):
+        return web.Response(
+            text=_paused_or(_build_weather_config_page), content_type='text/html')
+
     @routes.get('/weather/turbulence')
     async def _weather_turb_get(_):
         return web.Response(text=_paused_or(_build_weather_turb_page), content_type='text/html')
@@ -2160,6 +2239,17 @@ def register_weather_routes(routes, ctx):  # pylint: disable=too-many-statements
         if cmd:
             await ctx.send_fw_settings_cmd(cmd)
         raise web.HTTPFound('/weather/settings')
+
+    @routes.post('/api/weather/config')
+    async def _weather_config_post(request):
+        data = await request.post()
+        cmd = {}
+        for field in ('timesync_on_startup', 'timesync_on_situ_load', 'timesync_periodic'):
+            if field in data:
+                cmd[field] = data[field].lower() == 'true'
+        if cmd:
+            await ctx.send_fw_settings_cmd(cmd)
+        raise web.HTTPFound('/weather/config')
 
     @routes.post('/api/weather/config/save')
     async def _weather_config_save(_):

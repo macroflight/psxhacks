@@ -911,6 +911,11 @@ _CONFIG_ENROUTE_WIND_FIELDS = (
     ("enabled", "_enroute_wind_enabled", bool),
     ("deviation", "_enroute_wind_deviation", int),
 )
+_CONFIG_TIMESYNC_FIELDS = (
+    ("on_startup", "_timesync_on_startup", bool),
+    ("on_situ_load", "_timesync_on_situ_load", bool),
+    ("periodic", "_timesync_periodic", bool),
+)
 _CONFIG_MANUAL_WX_FIELDS = (
     "hi_oktas", "hi_top", "hi_base", "lo_oktas", "lo_top", "lo_base",
     "cb_oktas", "cb_top", "cb_base", "turb_severity", "turb_top", "turb_base",
@@ -1177,6 +1182,10 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self._msfs_in_cloud_sync: bool = True
         self._msfs_qnh_check: str = "CHECK"   # "CHECK" or "SYNC"
         self._msfs_wind_sync: bool = False
+        # Runtime toggles for PSX clock sync (see _sync_psx_clock/time_sync_coro)
+        self._timesync_on_startup: bool = True    # on every PSX connect/reconnect
+        self._timesync_on_situ_load: bool = True  # on every PSX situ load (load1..load3)
+        self._timesync_periodic: bool = False     # every 60s if drifted >1s from real time
         self.focused_zone: int = 0          # 0 = WxBasic, 1-7 = Wx1-Wx7
         self.cloud_sync_last_alt_ft: float = 0.0
 
@@ -1314,7 +1323,14 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self.psx_send_and_set("Qi243", str(_WX_SLOW_TRANSIT_MS))
 
     def _sync_psx_clock(self) -> None:
-        """Sync PSX clocks (TimeEarth, TimeClockL, TimeClockR) to current real-world time."""
+        """Sync PSX clocks (TimeEarth, TimeClockL, TimeClockR) to current real-world time.
+
+        Called from three independently-toggleable triggers (see
+        _timesync_on_startup / _timesync_on_situ_load / _timesync_periodic):
+        on every PSX connect/reconnect, on every situ load, and periodically
+        if PSX's clock has drifted from real time. See time_sync_coro() for
+        the periodic drift check.
+        """
         ms = int(time.time() * 1000)
         self.logger.info("Syncing PSX clocks to real time: %d ms", ms)
         for key in ("Qs123", "Qs124", "Qs125"):
@@ -1795,6 +1811,18 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 self.logger.info("enroute_wind_enabled → False (disabled by msfs_wind_sync)")
                 self._restore_corridor_snapshot()
             settings_changed = True
+        if "timesync_on_startup" in cmd:
+            self._timesync_on_startup = bool(cmd["timesync_on_startup"])
+            self.logger.info("timesync_on_startup → %s", self._timesync_on_startup)
+            settings_changed = True
+        if "timesync_on_situ_load" in cmd:
+            self._timesync_on_situ_load = bool(cmd["timesync_on_situ_load"])
+            self.logger.info("timesync_on_situ_load → %s", self._timesync_on_situ_load)
+            settings_changed = True
+        if "timesync_periodic" in cmd:
+            self._timesync_periodic = bool(cmd["timesync_periodic"])
+            self.logger.info("timesync_periodic → %s", self._timesync_periodic)
+            settings_changed = True
         if "enroute_wind_enabled" in cmd:
             self._enroute_wind_enabled = bool(cmd["enroute_wind_enabled"])
             self.logger.info("enroute_wind_enabled → %s", self._enroute_wind_enabled)
@@ -1844,7 +1872,6 @@ class Script:  # pylint: disable=too-many-instance-attributes
             elif old_mode == "disabled":
                 self._inject_wx_slow_transit()
                 self.psx_send_and_set("WxAutoSet", "0")
-                self._sync_psx_clock()
         if new_mode == "manual" or old_mode == "manual":
             # Force an immediate zone update on either side of a manual-mode
             # transition: entering needs the manual string written right away,
@@ -2006,6 +2033,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
             "msfs": {key: getattr(self, attr) for key, attr, _cast in _CONFIG_MSFS_FIELDS},
             "enroute_wind": {
                 key: getattr(self, attr) for key, attr, _cast in _CONFIG_ENROUTE_WIND_FIELDS},
+            "timesync": {
+                key: getattr(self, attr) for key, attr, _cast in _CONFIG_TIMESYNC_FIELDS},
             "manual_weather": {
                 key: self._manual_wx_params[key] for key in _CONFIG_MANUAL_WX_FIELDS},
             "turbulence": {key: getattr(self, attr) for key, attr, _cast in _CONFIG_TURB_FIELDS},
@@ -2034,6 +2063,11 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 setattr(self, attr, cast(enroute[key]))
         if self._enroute_wind_deviation not in (10, 20, 30, 40, 50, 60, 70, 80):
             self._enroute_wind_deviation = 30
+
+        timesync = config.get("timesync", {})
+        for key, attr, cast in _CONFIG_TIMESYNC_FIELDS:
+            if key in timesync:
+                setattr(self, attr, cast(timesync[key]))
 
         manual_wx = config.get("manual_weather", {})
         for key in _CONFIG_MANUAL_WX_FIELDS:
@@ -2078,7 +2112,6 @@ class Script:  # pylint: disable=too-many-instance-attributes
             elif old_mode == "disabled":
                 self._inject_wx_slow_transit()
                 self.psx_send_and_set("WxAutoSet", "0")
-                self._sync_psx_clock()
         if self._fw_mode == "manual" or old_mode == "manual":
             # See the matching comment in _handle_fw_command: force an
             # immediate zone update on either side of a manual-mode
@@ -3872,6 +3905,9 @@ class Script:  # pylint: disable=too-many-instance-attributes
             "msfs_wind_sync": self._msfs_wind_sync,
             "enroute_wind_enabled": self._enroute_wind_enabled,
             "enroute_wind_deviation": self._enroute_wind_deviation,
+            "timesync_on_startup": self._timesync_on_startup,
+            "timesync_on_situ_load": self._timesync_on_situ_load,
+            "timesync_periodic": self._timesync_periodic,
             "config_file": cfg.config_file,
             "config_file_exists": bool(cfg.config_file and os.path.exists(cfg.config_file)),
         }
@@ -3942,6 +3978,41 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self._web_state_received_at = time.time()
         payload = json.dumps(state, separators=(',', ':'))
         return f"FRANKENWEATHER:STATE:{self._instance_uuid}:{payload}"
+
+    async def time_sync_coro(self) -> None:
+        """Every 60s, resync PSX's clock if it has drifted >1s from real time.
+
+        Opt-in via _timesync_periodic. Reads the live TimeEarth value PSX
+        broadcasts (already subscribed for the turbulence subsystem) rather
+        than tracking our own last-sent value, so this also catches drift
+        caused by anything else writing the PSX clocks, not just the passage
+        of time under acceleration.
+        """
+        myname = inspect.currentframe().f_code.co_name
+        try:
+            self.logger.debug("Starting %s", myname)
+            while True:
+                await asyncio.sleep(60.0)
+                if not self._timesync_periodic:
+                    continue
+                if not self.psx_connected or self.psx_paused:
+                    continue
+                raw = self.psx.get("TimeEarth")
+                if not raw:
+                    continue
+                try:
+                    psx_ms = int(raw)
+                except ValueError:
+                    continue
+                drift_ms = psx_ms - int(time.time() * 1000)
+                if abs(drift_ms) > 1000:
+                    self.logger.info(
+                        "Time sync: PSX clock %.1fs %s real time — resyncing",
+                        abs(drift_ms) / 1000.0, "ahead of" if drift_ms > 0 else "behind")
+                    self._sync_psx_clock()
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
+            self.logger.critical(traceback.format_exc())
 
     async def state_broadcast_coro(self) -> None:
         """Broadcast current state as a PSX addon message on change or every 60 seconds.
@@ -4201,7 +4272,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 self._turb_state_changed_event.set()
                 if self._fw_mode == "disabled":
                     self.psx_send_and_set("WxAutoSet", "1")
-                else:
+                if self._timesync_on_startup:
                     self._sync_psx_clock()
 
             def disconnected():
@@ -4213,6 +4284,12 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 self.psx_connected = True
                 self.psx_paused = False
                 self._turb_state_changed_event.set()
+                # PSX's load1 (pause) / load3 (resume) pair brackets every full
+                # situ (re)load, not just a runtime pause/unpause — it's the only
+                # wire-protocol signal PSX gives for "a new situ just finished
+                # loading", so it doubles as our situ-load detector here.
+                if self._timesync_on_situ_load:
+                    self._sync_psx_clock()
 
             self.psx = psx.Client()
             self.psx.onPause = lambda: setattr(self, 'psx_paused', True)
@@ -4275,6 +4352,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
                     ("EnrouteWind", self.enroute_wind_coro),
                     ("StateBroadcast", self.state_broadcast_coro),
                     ("WindStateBroadcast", self.windstate_broadcast_coro),
+                    ("TimeSync", self.time_sync_coro),
                 ]
                 coros += [
                     ("TurbulenceTask", self.turbulence_coro),

@@ -79,7 +79,8 @@ Features:
 - Web UI: pass `--web-port PORT` to start a standalone HTTP server. The
   same UI is also available through the frankenrouter web interface.
   The web UI provides a live weather map, zone details, manual weather
-  entry, turbulence tuning, and the MSFS bridge settings toggles.
+  entry, turbulence tuning, the MSFS bridge settings toggles, and (on
+  `/weather/config`) the time sync toggles.
 
 - Settings persistence: pass `--config-file PATH` to load every setting
   the web UI can change from a TOML file at startup, and to enable the
@@ -112,6 +113,35 @@ Key options:
 --save-logs DIR      [DEVELOPMENT] Save enroute wind diff data per flight
 --debug              Verbose logging
 ```
+
+### Time sync
+
+Keeps PSX's clocks (`TimeEarth`, and both cockpit clocks `TimeClockL`/
+`TimeClockR`) matched to your computer's real-world time. Controlled by
+three independent toggles on the `/weather/config` web page (or the
+`[timesync]` section of the [config file](#configuration-file)):
+
+- **`on_startup`** (default on) — sync every time frankenweather connects
+  or reconnects to PSX.
+- **`on_situ_load`** (default on) — sync whenever PSX finishes loading a
+  situation. There's no dedicated "situ loaded" event in the PSX wire
+  protocol; this is detected via PSX's own `load1`/`load3` pause/resume
+  message pair, which brackets every full situ (re)load (as well as the
+  very first connection's own initial load). Turn this off if you'd
+  rather keep the aircraft clock a loaded situ brings with it — e.g.
+  flying on VATSIM or with MSFS Live Weather, where the situ's own time
+  may matter more than your PC's clock.
+- **`periodic`** (default off) — every 60 seconds, resync if PSX's clock
+  has drifted more than 1 second from your computer's clock. Useful when
+  flying with time acceleration: leave this on and the clock snaps back
+  in sync automatically once you return to 1x, instead of staying however
+  far ahead the acceleration left it.
+
+All three call the same sync routine, which unconditionally overwrites
+`TimeEarth`/`TimeClockL`/`TimeClockR` with the current real-world time —
+none of them account for time zone or the aircraft's own local time, only
+real-world UTC-equivalent wall clock time as read from the machine running
+frankenweather.
 
 ### Enroute wind importer
 
@@ -199,8 +229,8 @@ default; opt-in from the `/weather/enroute-wind` web page (or the
 
 `--config-file PATH` points frankenweather at a TOML file holding every
 setting that can also be changed at runtime from the web UI: MSFS sync
-toggles, the enroute wind importer, manual weather parameters, and
-turbulence tuning. It does **not** include the `--xxx` command-line
+toggles, the enroute wind importer, time sync, manual weather parameters,
+and turbulence tuning. It does **not** include the `--xxx` command-line
 options for zone placement, CB overrides, etc. — those remain
 command-line-only.
 
@@ -239,6 +269,11 @@ wind_sync = false
 [enroute_wind]
 enabled = false
 deviation = 30            # 10-80, in steps of 10
+
+[timesync]
+on_startup = true
+on_situ_load = true
+periodic = false
 
 [manual_weather]
 hi_oktas = 0
