@@ -2652,6 +2652,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
         if not self.psx_connected:
             return
         value = f"2{self._enroute_wind_deviation:02d}"
+        self._inject_wx_slow_transit()
         self.psx_send_and_set("Qs497", value)
 
     def _apply_enroute_wind_injection(self) -> None:
