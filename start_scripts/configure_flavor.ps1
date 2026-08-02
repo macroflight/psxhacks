@@ -5,20 +5,6 @@ $Host.UI.RawUI.WindowTitle = "Choose Flavors"
 
 $FlavorDefinitions = @(
     [ordered]@{
-        Name        = "AirlineIcao"
-        Description = "Airline ICAO code"
-        Options     = @("BAW", "GTI", "BAN", "DLH", "CLX", "HGO", "MPH", "SIA", "UPS", "GST")
-        Default     = "BAW"
-        Type        = "string"
-    },
-    [ordered]@{
-        Name        = "AirlineIata"
-        Description = "Airline IATA code"
-        Options     = @("BA", "5Y", "LH", "CL", "HC", "MP", "SQ", "5X", "--")
-        Default     = "BA"
-        Type        = "string"
-    },
-    [ordered]@{
         Name        = "VpilotPlugin"
         Description = "vPilot private message plugin"
         Options     = @("none", "Pushover", "PSX Printer")
@@ -41,7 +27,8 @@ $FlavorDefinitions = @(
     }
 )
 
-# Inject codemap pickers after AirlineIata for any multi-option named sets.
+# Inject codemap pickers (currently just Hoppie logon code) at the front of
+# the list, for any multi-option named sets.
 $injected = @()
 
 if ($HoppieLogonCodes -is [hashtable] -and $HoppieLogonCodes.Count -gt 0) {
@@ -60,24 +47,8 @@ if ($HoppieLogonCodes -is [hashtable] -and $HoppieLogonCodes.Count -gt 0) {
     })
 }
 
-if ($SimfestEmails -is [hashtable] -and $SimfestEmails.Count -gt 0) {
-    $emailNames = @($SimfestEmails.Keys)
-    $currentEmailName = ($SimfestEmails.GetEnumerator() |
-        Where-Object { $_.Value -eq $SimfestEmail } |
-        Select-Object -First 1).Key
-    if (-not $currentEmailName) { $currentEmailName = $emailNames[0] }
-    $injected += @([ordered]@{
-        Name        = "SimfestEmail"
-        Description = "Simfest Portal email address"
-        Options     = $emailNames
-        Default     = $currentEmailName
-        Type        = "codemap"
-        CodeMap     = $SimfestEmails
-    })
-}
-
 if ($injected.Count -gt 0) {
-    $FlavorDefinitions = $FlavorDefinitions[0..1] + $injected + $FlavorDefinitions[2..($FlavorDefinitions.Count - 1)]
+    $FlavorDefinitions = $injected + $FlavorDefinitions
 }
 
 # Parse the flavor file to know which variables are explicitly set there
