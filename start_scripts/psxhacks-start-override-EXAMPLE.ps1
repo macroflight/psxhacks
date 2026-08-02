@@ -274,16 +274,6 @@
 #$HoppieLogonCodes = @{ "normal" = "your-logon-code-here"; "testing" = "your-other-logon-code-here" }
 
 
-# ---------------------------------------------------------------------------
-# Simfest Portal email address(es) — used when registering for/joining
-# Simfest network flights.
-#
-# Define a named hashtable, even if you only have one address -
-# configure_flavor.ps1 will let you pick one by name and will set
-# $SimfestEmail for you:
-# ---------------------------------------------------------------------------
-#$SimfestEmails = @{ "personal" = "me@gmail.com"; "PSCC shared account" = "pscc@example.com" }
-
 
 # ---------------------------------------------------------------------------
 # ACARS Print settings

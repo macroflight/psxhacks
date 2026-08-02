@@ -82,9 +82,6 @@ $PsxNetConfigDir = "$env:USERPROFILE\Documents\PSX.NET"
 
 # Flavor-derived variables — overridden at runtime by psxhacks-current-flavor.ps1.
 # These defaults apply when configure_flavor.ps1 has not yet been run.
-$AirlineIcao    = "BAW"
-$AirlineIata    = "BA"
-$SimfestEmail   = ""
 $PsxSoundsRb211 = "66"
 $VpilotPlugin   = "none"
 
@@ -104,15 +101,6 @@ $HoppieLogonCode = ""
 # Setting $HoppieLogonCode directly in the override file instead (legacy
 # style) still works, but prints a startup warning recommending
 # $HoppieLogonCodes instead. See the check below.
-
-# Your Simfest Portal email address(es). The recommended way to set this is
-# a named hashtable in the override file - configure_flavor.ps1 will let
-# you pick one by name (even if it only has one entry) and will set
-# $SimfestEmail for you:
-#   $SimfestEmails = @{ "work" = "work@example.com"; "personal" = "me@gmail.com" }
-# Setting $SimfestEmail directly in the override file still works, but is
-# checked for below and prints a startup warning recommending
-# $SimfestEmails instead.
 
 # Directory for frankenusb's config file (frankenusb.conf by default - see
 # the startup check below). This is a working directory you create
@@ -284,13 +272,6 @@ if ($StartBacars -or $StartCpdlc) {
     } elseif (-not ($HoppieLogonCodes -is [hashtable] -and $HoppieLogonCodes.Count -gt 0)) {
         Show-ErrorAndExit "`$HoppieLogonCodes is not set.`nEdit $OverrideFile and set `$HoppieLogonCodes (a hashtable) to your Hoppie logon code(s), or set the legacy `$HoppieLogonCode directly. See psxhacks-start-override-EXAMPLE.ps1."
     }
-}
-
-# $SimfestEmail/$SimfestEmails have no such requirement - Simfest email is
-# optional (unlike the Hoppie logon code, which BACARS/HAFAP need to
-# function at all).
-if ($SimfestEmail -ne "") {
-    Show-WarningAndContinue "`$SimfestEmail is set directly in $OverrideFile.`nThis still works, but the recommended approach is to define `$SimfestEmails (a hashtable) instead and let configure_flavor.ps1 pick from it. See psxhacks-start-override-EXAMPLE.ps1."
 }
 
 # $PsxhacksPython has no default - it must be set in the override file
