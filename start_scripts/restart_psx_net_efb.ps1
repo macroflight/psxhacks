@@ -5,8 +5,6 @@ $Host.UI.RawUI.WindowTitle = "Start PSX.NET.EFB"
 $configPath = "$PsxNetEfbConfigDir\PSX.NET.EFB.Windows.Config.xml"
 $xml = New-Object System.Xml.XmlDocument
 $xml.Load($configPath)
-$xml.SelectSingleNode("//AirlineCode").InnerText    = $AirlineIcao
-$xml.SelectSingleNode("//PlanningPortalEmail").InnerText = $SimfestEmail
 # PSX.NET.EFB is started from startsim_slave.ps1, so it must connect to the
 # SLAVE sim's router port.
 $xml.SelectSingleNode("//psxIP").InnerText = "127.0.0.1"
