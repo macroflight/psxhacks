@@ -99,9 +99,11 @@
 # NOTE: BACARS is started from startsim_master.ps1. Unlike most addons in
 # this file, restart_bacars.ps1 already takes care of pointing it at the
 # MASTER sim's PSX port for you - it rewrites ServerAddress to 127.0.0.1
-# and Port to $FrankenrouterMasterPort in BACARS' own config file on every
-# start (BACARS always runs on the same host as frankenrouter and the PSX
-# main server, so ServerAddress is always the loopback address).
+# and ServerPort to $FrankenrouterMasterPort in BACARS' config file
+# (now $PsxNetConfigDir\PSX.NET.BACARS.xml, alongside the other PSX.NET.*
+# configs, not next to the BACARS .exe) on every start (BACARS always runs
+# on the same host as frankenrouter and the PSX main server, so
+# ServerAddress is always the loopback address).
 #
 # $BacarsDir has no default in common.ps1 - it is REQUIRED if $StartBacars
 # is $true (checked at startup: must point at a directory containing
