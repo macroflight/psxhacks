@@ -537,3 +537,11 @@ $ChangeWindowPositions = $false
 # ---------------------------------------------------------------------------
 #$StopAfterSlaveRouterStart = $true
 #$StopBeforeMsfsStart       = $true
+
+
+# ---------------------------------------------------------------------------
+# Confirmation prompt in stopsim_master.ps1/stopsim_slave.ps1
+# Defaults to $true in common.ps1 (asks "Are you sure?" before stopping).
+# Set to $false to stop the sim immediately with no confirmation prompt.
+# ---------------------------------------------------------------------------
+#$StopSimConfirm = $true

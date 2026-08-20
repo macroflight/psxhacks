@@ -7,11 +7,13 @@ Write-Host "*** STOP SLAVE SIM ***" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "This will stop PSX and all slave sim components." -ForegroundColor White
 Write-Host ""
-$answer = Read-Host "Are you sure you want to stop the slave sim? [y/N]"
-if ($answer -notmatch '^[Yy]') {
-    Write-Host "Cancelled." -ForegroundColor Yellow
-    Read-Host -Prompt "Enter to close"
-    exit 0
+if ($StopSimConfirm) {
+    $answer = Read-Host "Are you sure you want to stop the slave sim? [y/N]"
+    if ($answer -notmatch '^[Yy]') {
+        Write-Host "Cancelled." -ForegroundColor Yellow
+        Read-Host -Prompt "Enter to close"
+        exit 0
+    }
 }
 
 Write-Host ""

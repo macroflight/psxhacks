@@ -213,6 +213,10 @@ $ChangeWindowPositions = $false
 $StopAfterSlaveRouterStart = $true
 $StopBeforeMsfsStart       = $true
 
+# Set to $false in the override file to skip the "are you sure?" confirmation
+# prompt in stopsim_master.ps1/stopsim_slave.ps1
+$StopSimConfirm = $true
+
 # Retry interval and timeout (seconds) used by apply_window_positions.ps1 when
 # waiting for an addon window to appear after the addon is started.
 $WindowPositionInitialDelay    = 2
