@@ -6,7 +6,7 @@
 
 $ErrorActionPreference = 'Stop'
 
-function Prompt-WithDefault([string]$question, [string]$default) {
+function Read-WithDefault([string]$question, [string]$default) {
     $answer = Read-Host "$question [$default]"
     if ([string]::IsNullOrWhiteSpace($answer)) { $default } else { $answer }
 }
@@ -57,7 +57,7 @@ $useExisting = Read-Host "Use an existing Python 3.13 installation instead of in
 
 if ($useExisting -eq 'y' -or $useExisting -eq 'Y') {
     $defaultExisting = Find-ExistingPython313
-    $pythonExe = Prompt-WithDefault "Path to existing python.exe" $defaultExisting
+    $pythonExe = Read-WithDefault "Path to existing python.exe" $defaultExisting
     if (-not (Test-Path $pythonExe)) {
         Write-Host "ERROR: $pythonExe not found." -ForegroundColor Red
         Read-Host -Prompt "Press Enter to close" | Out-Null
@@ -81,7 +81,7 @@ if ($useExisting -eq 'y' -or $useExisting -eq 'Y') {
 Write-Host ""
 Write-Host "=== Step 2: Python install location ===" -ForegroundColor White
 
-$PythonBase = Prompt-WithDefault "Where should Python be installed?" "$SimBase\python"
+$PythonBase = Read-WithDefault "Where should Python be installed?" "$SimBase\python"
 
 # ---------------------------------------------------------------------------
 # Step 3: Find latest Python 3.13.x
@@ -242,7 +242,7 @@ Write-Host "=== Step 6: Virtual environment ===" -ForegroundColor White
 
 $today       = Get-Date -Format "yyyy-MM-dd"
 $defaultVenv = "$PythonBase\psxhacks-venv-$today"
-$VenvPath    = Prompt-WithDefault "Virtual environment path?" $defaultVenv
+$VenvPath    = Read-WithDefault "Virtual environment path?" $defaultVenv
 
 # ---------------------------------------------------------------------------
 # Step 7: Create venv and install requirements
