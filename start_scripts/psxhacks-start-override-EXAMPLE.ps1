@@ -133,26 +133,6 @@
 
 
 # ---------------------------------------------------------------------------
-# PSX.NET.GroundHandling settings
-# NOTE: PSX.NET.GroundHandling is started from startsim_master.ps1, and
-# replaces both PSX.NET and PSX.NET.GroundCrew - enable at most ONE of the
-# three (checked at startup). restart_psx_net_groundhandling.ps1 takes care
-# of pointing it at the MASTER sim's PSX port for you - it rewrites
-# PsxHost/PsxPort in $PsxNetConfigDir\PSX.NET.GroundHandling.Config.xml on
-# every start.
-#
-# $PsxNetGroundHandlingDir has no default in common.ps1 - it is REQUIRED if
-# $StartPsxNetGroundHandling is $true (checked at startup: must point at a
-# directory containing PSX.NET.GroundHandling.exe). Both lines below are
-# commented out since the default is not to start it. To enable it:
-# uncomment BOTH lines below AND edit $PsxNetGroundHandlingDir to the actual
-# path of your PSX.NET.GroundHandling installation.
-# ---------------------------------------------------------------------------
-#$StartPsxNetGroundHandling = $true
-#$PsxNetGroundHandlingDir   = "$SimBase\psx_net_groundhandling\2026-04-11"
-
-
-# ---------------------------------------------------------------------------
 # PSX.NET.VATSIM settings
 # $PsxNetVatsimDir has no default in common.ps1 - it is REQUIRED if
 # $StartPsxNetVatsim is $true (checked at startup: must point at a
@@ -227,6 +207,26 @@
 # ---------------------------------------------------------------------------
 #$StartPsxNetGroundCrew = $true   # PSX.NET GroundCrew
 #$PsxNetGroundCrewDir    = "$SimBase\psx_net_ground_crew\2026-05-07"
+
+
+# ---------------------------------------------------------------------------
+# PSX.NET.GroundHandling settings
+# NOTE: PSX.NET.GroundHandling runs in slave sims only (not the master sim),
+# and replaces both PSX.NET and PSX.NET.GroundCrew - enable at most ONE of
+# the three (checked at startup). restart_psx_net_groundhandling.ps1 takes
+# care of pointing it at the SLAVE sim's PSX port for you - it rewrites
+# PsxHost/PsxPort in $PsxNetConfigDir\PSX.NET.GroundHandling.Config.xml on
+# every start.
+#
+# $PsxNetGroundHandlingDir has no default in common.ps1 - it is REQUIRED if
+# $StartPsxNetGroundHandling is $true (checked at startup: must point at a
+# directory containing PSX.NET.GroundHandling.exe). Both lines below are
+# commented out since the default is not to start it. To enable it:
+# uncomment BOTH lines below AND edit $PsxNetGroundHandlingDir to the actual
+# path of your PSX.NET.GroundHandling installation.
+# ---------------------------------------------------------------------------
+#$StartPsxNetGroundHandling = $true
+#$PsxNetGroundHandlingDir   = "$SimBase\psx_net_groundhandling\2026-04-11"
 
 
 # ---------------------------------------------------------------------------

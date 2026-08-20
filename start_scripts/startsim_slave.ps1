@@ -123,6 +123,12 @@ if ($StartPsxNetGroundCrew ) {
     Invoke-WindowPosition "PSX.NET.GroundCrew"
 }
 
+if ($StartPsxNetGroundHandling ) {
+    Write-Output "Starting PSX.NET.GroundHandling..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_groundhandling.ps1"
+    Invoke-WindowPosition "PSX.NET.GroundHandling"
+}
+
 if ($StartSimObjectRouter ) {
     Write-Output "Starting SimObjectRouter..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_sim_object_router.ps1"

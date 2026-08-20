@@ -190,6 +190,7 @@ $StartPsxNetMsfsClient   = $false
 $StartPsxNetMsfsRouter   = $false
 $StartPsxNetWeatherRadar = $false
 $StartPsxNetGroundCrew   = $false
+$StartPsxNetGroundHandling = $false
 
 $StartFrankencduproxy = $false
 $StartCsCdu           = $false
@@ -203,7 +204,6 @@ $StartSrslPsxSlave  = $false
 #
 $StartBacars        = $false
 $StartPsxNet        = $false
-$StartPsxNetGroundHandling = $false
 $StartCpdlc         = $false
 $StartCmcPsx        = $false
 
