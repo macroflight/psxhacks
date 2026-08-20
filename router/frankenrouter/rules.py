@@ -56,6 +56,13 @@ QS546_CONNECT_FILTER_WINDOW_S = 5.0
 # forwarded messages are logged at debug rather than info.
 _KNOWN_ADDONS = frozenset(('FRANKENCDUPROXY', 'FRANKENMSFSBRIDGE', 'FRANKENWEATHER'))
 
+# Same idea, but for addons whose messages don't use the normal NAME:payload
+# colon convention (so the "addon" token above ends up being the whole
+# rest-of-line, e.g. "GROUND.HANDLING;;;;V1|OWNER|<uuid>|21" -- PSX.NET.
+# GroundHandling's own semicolon/pipe-delimited protocol), matched by prefix
+# instead of exact membership.
+_KNOWN_ADDON_PREFIXES = ('GROUND.HANDLING',)
+
 # How long a pure-START-non-ECON value from upstream is treated as the
 # private response to a "start" command, rather than an unsolicited
 # broadcast-worthy update. Used both for router.start_sent_at (see
@@ -807,7 +814,8 @@ class Rules():  # pylint: disable=too-many-public-methods
         # clients that are allowed to write.
         if not self.allow_write():
             return self.myreturn(RulesAction.DROP, RulesCode.NOWRITE)
-        code = (RulesCode.ADDON_FORWARDED_KNOWN if addon in _KNOWN_ADDONS
+        code = (RulesCode.ADDON_FORWARDED_KNOWN
+                if addon in _KNOWN_ADDONS or addon.startswith(_KNOWN_ADDON_PREFIXES)
                 else RulesCode.ADDON_FORWARDED)
         return self.myreturn(RulesAction.NORMAL, code)
 
