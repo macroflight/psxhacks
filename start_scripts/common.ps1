@@ -76,8 +76,9 @@ $RadioApp           = "vPilot"
 $PsxNetEfbConfigDir = "$env:USERPROFILE\Documents\PSX.NET.EFB"
 
 #  Where the PSX.NET.MSFS.Router/PSX.NET.VATSIM/PSX.NET.WeatherRadar/
-#  PSX.NET.GroundCrew config files are located (each addon controls this
-#  and expects its file in this shared location, so don't override this)
+#  PSX.NET.GroundCrew/PSX.NET.GroundHandling config files are located (each
+#  addon controls this and expects its file in this shared location, so
+#  don't override this)
 $PsxNetConfigDir = "$env:USERPROFILE\Documents\PSX.NET"
 
 # Flavor-derived variables — overridden at runtime by psxhacks-current-flavor.ps1.
@@ -342,10 +343,13 @@ if ($StartPsxNet) {
     }
 }
 
-# PSX.NET.GroundHandling is mutually exclusive with PSX.NET - only one of the
-# two may be configured to start.
+# PSX.NET.GroundHandling replaces both PSX.NET and PSX.NET.GroundCrew -
+# only one of the three may be configured to start.
 if ($StartPsxNet -and $StartPsxNetGroundHandling) {
     Show-ErrorAndExit "`$StartPsxNet and `$StartPsxNetGroundHandling are both `$true.`nEdit $OverrideFile and enable only one of the two - they are mutually exclusive."
+}
+if ($StartPsxNetGroundCrew -and $StartPsxNetGroundHandling) {
+    Show-ErrorAndExit "`$StartPsxNetGroundCrew and `$StartPsxNetGroundHandling are both `$true.`nEdit $OverrideFile and enable only one of the two - they are mutually exclusive."
 }
 
 # $PsxNetGroundHandlingDir has no default - it must be set in the override

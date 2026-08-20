@@ -134,10 +134,12 @@
 
 # ---------------------------------------------------------------------------
 # PSX.NET.GroundHandling settings
-# NOTE: PSX.NET.GroundHandling is started from startsim_master.ps1, and is
-# mutually exclusive with PSX.NET - enable at most ONE of the two (checked
-# at startup). Unlike PSX.NET, it needs no config file editing before
-# launch.
+# NOTE: PSX.NET.GroundHandling is started from startsim_master.ps1, and
+# replaces both PSX.NET and PSX.NET.GroundCrew - enable at most ONE of the
+# three (checked at startup). restart_psx_net_groundhandling.ps1 takes care
+# of pointing it at the MASTER sim's PSX port for you - it rewrites
+# PsxHost/PsxPort in $PsxNetConfigDir\PSX.NET.GroundHandling.Config.xml on
+# every start.
 #
 # $PsxNetGroundHandlingDir has no default in common.ps1 - it is REQUIRED if
 # $StartPsxNetGroundHandling is $true (checked at startup: must point at a
