@@ -202,6 +202,7 @@ $StartSrslPsxSlave  = $false
 #
 $StartBacars        = $false
 $StartPsxNet        = $false
+$StartPsxNetGroundHandling = $false
 $StartCpdlc         = $false
 $StartCmcPsx        = $false
 
@@ -229,6 +230,7 @@ $SimAddonNames = [ordered]@{
     "PSX.NET.MSFS"         = "PSX.NET MSFS Client"
     "PSX.NET.MSFS.Router"  = "PSX.NET MSFS Router"
     "PSX.NET"              = "PSX.NET"
+    "PSX.NET.GroundHandling" = "PSX.NET GroundHandling"
     "PSXSounds"            = "PSX Sounds"
     "HAFAP/CPDLC"          = "HAFAP/CPDLC"
     "vPilot"               = "vPilot"
@@ -337,6 +339,26 @@ if ($StartPsxNet) {
         Show-ErrorAndExit "`$PsxNetDir not found: $PsxNetDir`nEdit $OverrideFile and set `$PsxNetDir to your PSX.NET installation directory."
     } elseif (-not (Test-Path (Join-Path $PsxNetDir "PSX.NET.exe"))) {
         Show-ErrorAndExit "`$PsxNetDir does not look like a PSX.NET installation (no PSX.NET.exe found): $PsxNetDir`nEdit $OverrideFile and set `$PsxNetDir to your PSX.NET installation directory."
+    }
+}
+
+# PSX.NET.GroundHandling is mutually exclusive with PSX.NET - only one of the
+# two may be configured to start.
+if ($StartPsxNet -and $StartPsxNetGroundHandling) {
+    Show-ErrorAndExit "`$StartPsxNet and `$StartPsxNetGroundHandling are both `$true.`nEdit $OverrideFile and enable only one of the two - they are mutually exclusive."
+}
+
+# $PsxNetGroundHandlingDir has no default - it must be set in the override
+# file (see psxhacks-start-override-EXAMPLE.ps1) and point at a real
+# PSX.NET.GroundHandling install, but only if PSX.NET.GroundHandling is
+# actually enabled.
+if ($StartPsxNetGroundHandling) {
+    if ([string]::IsNullOrWhiteSpace($PsxNetGroundHandlingDir)) {
+        Show-ErrorAndExit "`$StartPsxNetGroundHandling is `$true but `$PsxNetGroundHandlingDir is not set.`nEdit $OverrideFile and set `$PsxNetGroundHandlingDir to your PSX.NET.GroundHandling installation directory."
+    } elseif (-not (Test-Path $PsxNetGroundHandlingDir -PathType Container)) {
+        Show-ErrorAndExit "`$PsxNetGroundHandlingDir not found: $PsxNetGroundHandlingDir`nEdit $OverrideFile and set `$PsxNetGroundHandlingDir to your PSX.NET.GroundHandling installation directory."
+    } elseif (-not (Test-Path (Join-Path $PsxNetGroundHandlingDir "PSX.NET.GroundHandling.exe"))) {
+        Show-ErrorAndExit "`$PsxNetGroundHandlingDir does not look like a PSX.NET.GroundHandling installation (no PSX.NET.GroundHandling.exe found): $PsxNetGroundHandlingDir`nEdit $OverrideFile and set `$PsxNetGroundHandlingDir to your PSX.NET.GroundHandling installation directory."
     }
 }
 

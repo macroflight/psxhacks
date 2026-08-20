@@ -133,6 +133,24 @@
 
 
 # ---------------------------------------------------------------------------
+# PSX.NET.GroundHandling settings
+# NOTE: PSX.NET.GroundHandling is started from startsim_master.ps1, and is
+# mutually exclusive with PSX.NET - enable at most ONE of the two (checked
+# at startup). Unlike PSX.NET, it needs no config file editing before
+# launch.
+#
+# $PsxNetGroundHandlingDir has no default in common.ps1 - it is REQUIRED if
+# $StartPsxNetGroundHandling is $true (checked at startup: must point at a
+# directory containing PSX.NET.GroundHandling.exe). Both lines below are
+# commented out since the default is not to start it. To enable it:
+# uncomment BOTH lines below AND edit $PsxNetGroundHandlingDir to the actual
+# path of your PSX.NET.GroundHandling installation.
+# ---------------------------------------------------------------------------
+#$StartPsxNetGroundHandling = $true
+#$PsxNetGroundHandlingDir   = "$SimBase\psx_net_groundhandling\2026-04-11"
+
+
+# ---------------------------------------------------------------------------
 # PSX.NET.VATSIM settings
 # $PsxNetVatsimDir has no default in common.ps1 - it is REQUIRED if
 # $StartPsxNetVatsim is $true (checked at startup: must point at a

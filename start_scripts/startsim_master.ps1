@@ -33,6 +33,12 @@ if ($StartPsxNet ) {
     Invoke-WindowPosition "PSX.NET"
 }
 
+if ($StartPsxNetGroundHandling ) {
+    Write-Output "Starting PSX.NET.GroundHandling..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_groundhandling.ps1"
+    Invoke-WindowPosition "PSX.NET.GroundHandling"
+}
+
 if ($StartCpdlc ) {
     Delay 5
     Write-Output "Starting HAFAP (CPDLC)..."
