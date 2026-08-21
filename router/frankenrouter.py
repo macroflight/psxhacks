@@ -49,7 +49,7 @@ __VERSION__ = '1.4.3'
 
 # If we have no upstream connection and no cached data, assume this
 # version.
-PSX_DEFAULT_VERSION = '10.188 NG'
+PSX_DEFAULT_VERSION = '10.191 NG'
 
 # Buffer size (bytes) for asyncio stream readers (both upstream and client
 # connections)
