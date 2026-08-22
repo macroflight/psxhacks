@@ -17,6 +17,14 @@
 # Shared helper functions (Show-ErrorAndExit, KillProcess, etc.) — see functions.ps1.
 . "$PSScriptRoot\functions.ps1"
 
+# Set (to "1") by startsim_norouter.ps1/stopsim_norouter.ps1, BEFORE they
+# dot-source this file, to select the no-router topology (a bare PSX main
+# server, no frankenrouter at all - see the $IsNoRouterSim usages below).
+# An environment variable, not a plain script variable, because it must
+# survive the Start-Process boundary into every addon script spawned as its
+# own powershell.exe process, each of which dot-sources this file fresh.
+$IsNoRouterSim = ($env:PSXHACKS_NOROUTER -eq "1")
+
 # Location of the override file — sim-specific settings live here,
 # outside the git tree. Change this path in-place if your layout
 # differs. Resolved via GetFullPath (not Resolve-Path, which requires the
@@ -24,6 +32,17 @@
 # shown to the user - a raw "..\.." is confusing to someone unfamiliar
 # with relative paths.
 $OverrideFile = [System.IO.Path]::GetFullPath("$PSScriptRoot\..\..\psxhacks-start-override.ps1")
+if ($IsNoRouterSim) {
+    # No-router setups commonly need different addon ports/dirs than a
+    # router-based setup (see the port-aliasing below), so they get their
+    # own optional override file - falling back to the normal one if it
+    # doesn't exist, e.g. for settings ($PsxhacksPython, $AerowinxDir, ...)
+    # that are the same either way.
+    $NoRouterOverrideFile = [System.IO.Path]::GetFullPath("$PSScriptRoot\..\..\psxhacks-start-override-norouter.ps1")
+    if (Test-Path $NoRouterOverrideFile) {
+        $OverrideFile = $NoRouterOverrideFile
+    }
+}
 if (-not (Test-Path $OverrideFile)) {
     Show-ErrorAndExit "Override file not found: $OverrideFile`nCopy start_scripts\psxhacks-start-override-EXAMPLE.ps1 to $OverrideFile and edit it."
 }
@@ -266,6 +285,19 @@ $NonscriptedApps = @()
 # $OverrideFile's existence was already verified above (Show-ErrorAndExit
 # if missing), so it is safe to dot-source unconditionally here.
 . $OverrideFile
+
+# In no-router mode there is no frankenrouter at all - the PSX main server
+# (started by startsim_norouter.ps1 via start_psx_main_server.ps1, reused
+# unchanged) listens directly on $FrankenrouterMasterPort. Every addon that
+# already connects via $FrankenrouterMasterPort or $FrankenrouterSlavePort
+# (i.e. every one where we already set a host/port at all) therefore only
+# needs the latter aliased to the former to end up pointed at the single
+# PSX instance, with no changes needed to any individual addon script.
+# Must run after the override file above, since that's what may have set
+# $FrankenrouterMasterPort to something other than its common.ps1 default.
+if ($IsNoRouterSim) {
+    $FrankenrouterSlavePort = $FrankenrouterMasterPort
+}
 
 # $HoppieLogonCode resets to "" above (not a real value) - you must set
 # $HoppieLogonCodes (a hashtable) in the override file, unless you set the
@@ -574,8 +606,9 @@ if ($StartSimObjectRouter) {
 # exist until you create it, so we still need to check for it. Unlike the
 # addons above, frankenrouter.py itself is always started (both
 # start_router_master.ps1 and start_router_slave.ps1), so this check is
-# unconditional.
-if (-not (Test-Path $FrankenrouterDir -PathType Container)) {
+# unconditional - except in no-router mode, where no frankenrouter of any
+# kind is ever started (see startsim_norouter.ps1).
+if (-not $IsNoRouterSim -and -not (Test-Path $FrankenrouterDir -PathType Container)) {
     Show-ErrorAndExit "`$FrankenrouterDir not found: $FrankenrouterDir`nCreate this directory and place your frankenrouter config file(s) in it (one for the master router, one for the slave router, if you run both), then add --config-file=<name> to `$FrankenrouterMasterOptions and/or `$FrankenrouterSlaveOptions in $OverrideFile. See psxhacks-start-override-EXAMPLE.ps1 for an example."
 }
 

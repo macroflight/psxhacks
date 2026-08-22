@@ -1,4 +1,5 @@
 Remove-Item Env:\PSXHACKS_NOROUTER -ErrorAction SilentlyContinue
+$env:PSXHACKS_NOROUTER = "1"
 
 . "$PSScriptRoot\common.ps1"
 
@@ -12,13 +13,20 @@ function Invoke-WindowPosition([string]$addon) {
     }
 }
 
-Write-Output "Starting slave sim router..."
-Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_router_slave.ps1"
-Invoke-WindowPosition "frankenrouter slave"
+# No-router setup: a PSX main server plus its main client(s) (the actual
+# flyable cockpit instance(s) - the server alone has no visual interface),
+# no frankenrouter of any kind. Every addon below that connects to PSX at
+# all already does so via $FrankenrouterMasterPort/$FrankenrouterSlavePort
+# (common.ps1 aliases the latter to the former in this mode), so they all
+# end up pointed at this same server with no changes needed to any
+# individual addon script. The main client(s) themselves connect to the
+# server the same way they always do (configured in their own .pref
+# file(s)/PSX connection settings, pointed at 127.0.0.1:$FrankenrouterMasterPort)
+# - that's outside this script's control, same as in router-based mode.
+Write-Output "Starting PSX main server..."
+Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_psx_main_server.ps1"
 
-if ($StopAfterSlaveRouterStart) {
-    Read-Host -Prompt "Connect to $FrankenRouterSlaveWeb and connect to the master sim, then press Enter"
-}
+Delay 5
 
 if ($StartFrankenident ) {
     Write-Output "Starting FrankenIDENT..."
@@ -28,6 +36,18 @@ if ($StartFrankenident ) {
 
 Write-Output "Starting PSX main clients..."
 Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_psx_main_clients.ps1"
+
+if ($StartBacars ) {
+    Write-Output "Starting BACARS..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_bacars.ps1"
+    Invoke-WindowPosition "BACARS"
+}
+
+if ($StartPsxNet ) {
+    Write-Output "Starting PSX.NET..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net.ps1"
+    Invoke-WindowPosition "PSX.NET"
+}
 
 if ($StartPsxNetVatsim ) {
     Write-Output "Starting PSX.NET.VATSIM..."
@@ -39,6 +59,31 @@ if ($StartVpilot ) {
     Write-Output "Starting vPilot..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_vpilot.ps1"
     Invoke-WindowPosition "vPilot"
+}
+
+if ($StartCpdlc ) {
+    Delay 5
+    Write-Output "Starting HAFAP (CPDLC)..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_cpdlc.ps1"
+    Invoke-WindowPosition "HAFAP/CPDLC"
+}
+
+if ($StartFrankentanker ) {
+    Write-Output "Starting FrankenTanker..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankentanker.ps1"
+    Invoke-WindowPosition "frankentanker"
+}
+
+if ($StartFrankenweather ) {
+    Write-Output "Starting FrankenWeather..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenweather.ps1"
+    Invoke-WindowPosition "frankenweather"
+}
+
+if ($StartFrankenpush ) {
+    Write-Output "Starting FrankenPush..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenpush.ps1"
+    Invoke-WindowPosition "frankenpush"
 }
 
 if ($StartPsxNetMsfsRouter ) {
@@ -59,10 +104,22 @@ if ($StartFrankenusb ) {
     Invoke-WindowPosition "frankenusb"
 }
 
+if ($StartSrslPsxMaster ) {
+    Write-Output "Starting SRSL-PSX..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_srsl_psx_master.ps1"
+    Invoke-WindowPosition "SRSL-PSX master"
+}
+
 if ($StartSrslPsxSlave ) {
     Write-Output "Starting SRSL-PSX..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_srsl_psx_slave.ps1"
     Invoke-WindowPosition "SRSL-PSX slave"
+}
+
+if ($StartCmcPsx ) {
+    Write-Output "Starting CMC-PSX..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_cmc_psx.ps1"
+    Invoke-WindowPosition "CMC-PSX"
 }
 
 if ($StartAcarsPrint -and -not $StartFrankenprint ) {
@@ -98,6 +155,12 @@ if ($StartFrankenmsfsbridge ) {
 if ($StartCsCdu ) {
     Write-Output "Starting CS CDU..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_cs_cdu.ps1"
+}
+
+if ($StartPsxSimlinkBridge ) {
+    Write-Output "Starting psx_simlink_bridge..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_simlink_bridge.ps1"
+    Invoke-WindowPosition "psx_simlink_bridge"
 }
 
 Delay 10
@@ -141,4 +204,4 @@ if ($StartSimObjectRouter ) {
 Write-Output "Starting non-scripted apps..."
 start_nonscripted_apps
 
-Read-Host -Prompt "Done. Enter to close. If flying alone (or as VATPRI), remember to disable filters: $FrankenRouterSlaveWeb"
+Read-Host -Prompt "Done. Enter to close."

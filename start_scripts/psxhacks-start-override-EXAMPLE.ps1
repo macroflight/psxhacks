@@ -440,6 +440,41 @@
 
 
 # ---------------------------------------------------------------------------
+# No-router mode (startsim_norouter.ps1/stopsim_norouter.ps1)
+# For an "old-school" PSX setup with NO frankenrouter at all. None of the
+# settings above in this section apply in that mode - $FrankenrouterDir
+# isn't required to exist, and no router is ever started. Instead, the PSX
+# main server (started the same way as in master mode, via
+# start_psx_main_server.ps1/$AerowinxMainServerPrefFile) listens directly on
+# $FrankenrouterMasterPort, and its main client(s) - the actual flyable
+# cockpit instance(s); the server alone has no visual interface - are
+# started the same way as in slave mode, via
+# start_psx_main_clients.ps1/$AerowinxPrefFiles, connecting directly to
+# 127.0.0.1:$FrankenrouterMasterPort (set this in each client's own .pref
+# file/PSX connection settings, same as you always would). Every addon that
+# already connects via $FrankenrouterMasterPort/$FrankenrouterSlavePort
+# (i.e. every one where a host/port is set at all) is automatically pointed
+# at the main server too - common.ps1 aliases $FrankenrouterSlavePort to
+# $FrankenrouterMasterPort for you in this mode. Addons that don't already
+# take a host/port from those two variables are unaffected and still need
+# to be configured manually, same as in router-based mode.
+#
+# This means your PSX main server's .pref file needs Port10747 set to
+# match $FrankenrouterMasterPort (e.g. Port10747=10748) - otherwise it's
+# the same deliberately headless/no-audio/no-USB style .pref file as in
+# master mode, since your main client instance(s) do the actual flying.
+#
+# startsim_norouter.ps1/stopsim_norouter.ps1 read
+# psxhacks-start-override-norouter.ps1 (next to this file) instead of
+# psxhacks-start-override.ps1, if it exists - falling back to the normal
+# override file otherwise. A separate file is useful since a no-router setup
+# commonly wants a different $AerowinxMainServerPrefFile/port than your
+# router-based one; settings that are the same either way ($PsxhacksPython,
+# $AerowinxDir, ...) don't need to be duplicated if you don't create one.
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
 # FrankenUSB settings (slave sim)
 # $FrankenusbDir is a working directory YOU create (not an installer
 # target) - it holds frankenusb's config file. It only needs to exist if

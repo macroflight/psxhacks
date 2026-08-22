@@ -1,3 +1,5 @@
+Remove-Item Env:\PSXHACKS_NOROUTER -ErrorAction SilentlyContinue
+
 . "$PSScriptRoot\common.ps1"
 
 $Host.UI.RawUI.WindowTitle = "Stop Slave Sim"

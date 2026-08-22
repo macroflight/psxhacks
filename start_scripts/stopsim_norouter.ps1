@@ -1,17 +1,17 @@
 Remove-Item Env:\PSXHACKS_NOROUTER -ErrorAction SilentlyContinue
+$env:PSXHACKS_NOROUTER = "1"
 
 . "$PSScriptRoot\common.ps1"
 
-$Host.UI.RawUI.WindowTitle = "Stop Master Sim"
+$Host.UI.RawUI.WindowTitle = "Stop Sim"
 
 Write-Host ""
-Write-Host "*** STOP MASTER SIM ***" -ForegroundColor Yellow
+Write-Host "*** STOP SIM ***" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "This will stop PSX and all master sim components." -ForegroundColor White
-Write-Host "Other slave sims may be connected to this server." -ForegroundColor Red
+Write-Host "This will stop PSX and all sim components (no-router setup)." -ForegroundColor White
 Write-Host ""
 if ($StopSimConfirm) {
-    $answer = Read-Host "Are you sure you want to stop the master sim? [y/N]"
+    $answer = Read-Host "Are you sure you want to stop the sim? [y/N]"
     if ($answer -notmatch '^[Yy]') {
         Write-Host "Cancelled." -ForegroundColor Yellow
         Read-Host -Prompt "Enter to close"
@@ -32,8 +32,29 @@ KillPythonScript "frankenpush.py"
 KillProcess "PSX.Bacars.UI"
 KillProcess "PSX.NET"
 KillJavaJar "$SrslPsxMasterDir\SRSL-PSX.jar"
+KillJavaJar "$SrslPsxSlaveDir\SRSL-PSX.jar"
 KillJavaJar "$CmcPsxDir\CMC-PSX.jar"
 KillProcess "psx_simlink_bridge*"
+
+KillProcess "PSX.NET.MSFS.Client"
+KillProcess "PSX.NET.MSFS2024.Client"
+KillProcess "PSX.NET.MSFS.Router"
+KillProcess "PSX.NET.WeatherRadar"
+KillProcess "PSX.NET.GroundCrew"
+KillProcess "PSX.NET.GroundHandling"
+KillProcess "PSX.NET.MSFS.Temporary.SimObjectRouter"
+KillProcess "PSXSounds"
+KillProcess "PSXVibrate"
+KillProcess "PSX.NET.EFB.Windows"
+KillProcess "vPilot"
+KillProcess "GeoVR.PSX.Client.Wpf"
+KillProcess "CockpitSimulator"
+
+KillPythonScript "frankenrouter_ident.py"
+KillPythonScript "frankencduproxy.py"
+KillPythonScript "frankenmsfsbridge.py"
+KillPythonScript "frankenprint.py"
+KillJavaJar "AcarsPrint.jar"
 
 # Ask PSX server to shut down gracefully before killing java.exe
 Write-Output "Shutting down PSX server..."
@@ -45,6 +66,4 @@ Delay 10
 
 KillJavaJar "AerowinxStart.jar"
 
-# Stop master sim router last, after PSX has had time to shut down
-$masterRouterConfig = ($FrankenrouterMasterOptions | Where-Object { $_ -like "--config-file=*" }) -replace "^--config-file=", ""
-KillPythonScript $masterRouterConfig
+Read-Host -Prompt "Done. Enter to close."

@@ -1,5 +1,5 @@
 # The scripts in start_scripts
-A collection of mostly PowerShell scripts to start and stop a PSX simulator. It assumes you use a frankenrouter as a permanent part of your sim (which then either connects to a PSX main server in your sim or a shared cockpit master sim, probably over the internet).
+A collection of mostly PowerShell scripts to start and stop a PSX simulator. Most of it assumes you use a frankenrouter as a permanent part of your sim (which then either connects to a PSX main server in your sim or a shared cockpit master sim, probably over the internet) - but an "old-school", router-less setup is also supported (see [The no-router setup](#the-no-router-setup) below).
 
 The scripts can be used to greatly simplify startup of your sim and provide a lot of granularity and modularity. The general idea of this directory is that any customizations are done outside of the **psxhacks** Git repository, so you can keep updating your local installation as updates are published in the Github repo while preserving your local overrides. This will be described further down below. 
 
@@ -48,6 +48,27 @@ All of these components can run on the same PC, but they don't need to. If you *
 | Master PSX instance | 20747 | PSX preference file with `Port10747=20747` |
 | Master Frankenrouter | 10748 | Frankenrouter config file (e.g. `C:\fs\frankenrouter\frankensim-master.toml`)|
 | Slave Frankenrouter | 10747 | Frankenrouter config file (e.g. `C:\fs\frankenrouter\frankensim-slave.toml`) |
+
+### The no-router setup
+For an "old-school" single-PC setup with no frankenrouter at all - just a bare PSX main server, its main client(s) connecting directly to it, and whatever addons you point at it directly:
+
+```
++----------------------+
+| PSX main server      |
++----------------------+
+           ^
++----------------------+
+| PSX main client      |
++-+--------------------+-+
+  | PSX main client      |
+  +----------------------+
+```
+
+Started/stopped with `startsim_norouter.ps1`/`stopsim_norouter.ps1` instead of the master/slave script pairs. There's no master/slave split to worry about here - it's a single PSX instance (server plus its client(s)), so every addon that's normally split between `startsim_master.ps1` and `startsim_slave.ps1` (because one runs once in the shared cockpit and the other runs per-instance, see [Flying solo vs shared cockpit](#flying-solo-vs-shared-cockpit) below) is simply available, gated by its usual `$Start*` flag, in `startsim_norouter.ps1`.
+
+Any addon that already connects to PSX via `$FrankenrouterMasterPort`/`$FrankenrouterSlavePort` (i.e. one where a host/port is already configured for you) is automatically pointed at the PSX main server directly - `common.ps1` aliases `$FrankenrouterSlavePort` to `$FrankenrouterMasterPort` in this mode, and the PSX main server itself listens on `$FrankenrouterMasterPort` (configure this in its `.pref` file via `Port10747=...`). Addons that don't take a host/port from those variables still need to be configured manually, exactly as in router-based mode.
+
+`startsim_norouter.ps1`/`stopsim_norouter.ps1` read `psxhacks-start-override-norouter.ps1` (next to your normal override file) instead of `psxhacks-start-override.ps1`, if it exists - falling back to the normal override file otherwise. This is useful because a no-router setup commonly wants a different PSX `.pref` file (and port) than a router-based one, without having to duplicate every other setting. See the "No-router mode" section in `psxhacks-start-override-EXAMPLE.ps1` for details.
 
 ### Connecting to another master sim
 Because of the distributed setup, it's rather easy to connect to another master sim using the webinterface of your slave Frankenrouter. If you always want to be able to choose a known other master sim, this requires configuration of the `[[upstream]]` section in your slave router configuration file. Alternatively, you can add another master sim ad hoc in the webinterface of your slave Frankenrouter.
@@ -159,6 +180,9 @@ Used to stop a main PSX instance and any programs or scripts that need are runni
 
 ### stopsim_slave.ps1
 Used to stop all client PSX instances and any programs or scripts that are running alongside them. It will also stop clients that are running on another PC connected to the same slave router, e.g. if you have multiple PCs driving different monitors through distributed PSX instances, then those instances on other PCs are stopped as well. The stop commands are not propagated to other routers, so you won't be stopping PSX clients in other cockpits.
+
+### startsim_norouter.ps1 / stopsim_norouter.ps1
+The no-router equivalents of the script pairs above - see [The no-router setup](#the-no-router-setup). `startsim_norouter.ps1` starts a PSX main server and its main client(s), plus every addon normally split between `startsim_master.ps1` and `startsim_slave.ps1` (still gated by its usual `$Start*` flag), with no frankenrouter of any kind. `stopsim_norouter.ps1` stops all of it. Both read `psxhacks-start-override-norouter.ps1` instead of the normal override file, if it exists.
 
 ## Help
 ### Unable to execute ps1/powershell scripts
