@@ -210,23 +210,23 @@
 
 
 # ---------------------------------------------------------------------------
-# PSX.NET.GroundHandling settings
-# NOTE: PSX.NET.GroundHandling runs in slave sims only (not the master sim),
+# PSX.NET.Orchestration settings
+# NOTE: PSX.NET.Orchestration runs in slave sims only (not the master sim),
 # and replaces both PSX.NET and PSX.NET.GroundCrew - enable at most ONE of
-# the three (checked at startup). restart_psx_net_groundhandling.ps1 takes
+# the three (checked at startup). restart_psx_net_orchestration.ps1 takes
 # care of pointing it at the SLAVE sim's PSX port for you - it rewrites
-# PsxHost/PsxPort in $PsxNetConfigDir\PSX.NET.GroundHandling.Config.xml on
+# PsxHost/PsxPort in $PsxNetConfigDir\PSX.NET.Orchestration.Config.xml on
 # every start.
 #
-# $PsxNetGroundHandlingDir has no default in common.ps1 - it is REQUIRED if
-# $StartPsxNetGroundHandling is $true (checked at startup: must point at a
-# directory containing PSX.NET.GroundHandling.exe). Both lines below are
+# $PsxNetOrchestrationDir has no default in common.ps1 - it is REQUIRED if
+# $StartPsxNetOrchestration is $true (checked at startup: must point at a
+# directory containing PSX.NET.Orchestration.exe). Both lines below are
 # commented out since the default is not to start it. To enable it:
-# uncomment BOTH lines below AND edit $PsxNetGroundHandlingDir to the actual
-# path of your PSX.NET.GroundHandling installation.
+# uncomment BOTH lines below AND edit $PsxNetOrchestrationDir to the actual
+# path of your PSX.NET.Orchestration installation.
 # ---------------------------------------------------------------------------
-#$StartPsxNetGroundHandling = $true
-#$PsxNetGroundHandlingDir   = "$SimBase\psx_net_groundhandling\2026-04-11"
+#$StartPsxNetOrchestration = $true
+#$PsxNetOrchestrationDir   = "$SimBase\psx_net_orchestration\2026-04-11"
 
 
 # ---------------------------------------------------------------------------

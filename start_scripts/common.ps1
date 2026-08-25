@@ -95,7 +95,7 @@ $RadioApp           = "vPilot"
 $PsxNetEfbConfigDir = "$env:USERPROFILE\Documents\PSX.NET.EFB"
 
 #  Where the PSX.NET.MSFS.Router/PSX.NET.VATSIM/PSX.NET.WeatherRadar/
-#  PSX.NET.GroundCrew/PSX.NET.GroundHandling config files are located (each
+#  PSX.NET.GroundCrew/PSX.NET.Orchestration config files are located (each
 #  addon controls this and expects its file in this shared location, so
 #  don't override this)
 $PsxNetConfigDir = "$env:USERPROFILE\Documents\PSX.NET"
@@ -209,7 +209,7 @@ $StartPsxNetMsfsClient   = $false
 $StartPsxNetMsfsRouter   = $false
 $StartPsxNetWeatherRadar = $false
 $StartPsxNetGroundCrew   = $false
-$StartPsxNetGroundHandling = $false
+$StartPsxNetOrchestration = $false
 
 $StartFrankencduproxy = $false
 $StartCsCdu           = $false
@@ -250,7 +250,7 @@ $SimAddonNames = [ordered]@{
     "PSX.NET.MSFS"         = "PSX.NET MSFS Client"
     "PSX.NET.MSFS.Router"  = "PSX.NET MSFS Router"
     "PSX.NET"              = "PSX.NET"
-    "PSX.NET.GroundHandling" = "PSX.NET GroundHandling"
+    "PSX.NET.Orchestration" = "PSX.NET Orchestration"
     "PSXSounds"            = "PSX Sounds"
     "HAFAP/CPDLC"          = "HAFAP/CPDLC"
     "vPilot"               = "vPilot"
@@ -375,26 +375,26 @@ if ($StartPsxNet) {
     }
 }
 
-# PSX.NET.GroundHandling replaces both PSX.NET and PSX.NET.GroundCrew -
+# PSX.NET.Orchestration replaces both PSX.NET and PSX.NET.GroundCrew -
 # only one of the three may be configured to start.
-if ($StartPsxNet -and $StartPsxNetGroundHandling) {
-    Show-ErrorAndExit "`$StartPsxNet and `$StartPsxNetGroundHandling are both `$true.`nEdit $OverrideFile and enable only one of the two - they are mutually exclusive."
+if ($StartPsxNet -and $StartPsxNetOrchestration) {
+    Show-ErrorAndExit "`$StartPsxNet and `$StartPsxNetOrchestration are both `$true.`nEdit $OverrideFile and enable only one of the two - they are mutually exclusive."
 }
-if ($StartPsxNetGroundCrew -and $StartPsxNetGroundHandling) {
-    Show-ErrorAndExit "`$StartPsxNetGroundCrew and `$StartPsxNetGroundHandling are both `$true.`nEdit $OverrideFile and enable only one of the two - they are mutually exclusive."
+if ($StartPsxNetGroundCrew -and $StartPsxNetOrchestration) {
+    Show-ErrorAndExit "`$StartPsxNetGroundCrew and `$StartPsxNetOrchestration are both `$true.`nEdit $OverrideFile and enable only one of the two - they are mutually exclusive."
 }
 
-# $PsxNetGroundHandlingDir has no default - it must be set in the override
+# $PsxNetOrchestrationDir has no default - it must be set in the override
 # file (see psxhacks-start-override-EXAMPLE.ps1) and point at a real
-# PSX.NET.GroundHandling install, but only if PSX.NET.GroundHandling is
+# PSX.NET.Orchestration install, but only if PSX.NET.Orchestration is
 # actually enabled.
-if ($StartPsxNetGroundHandling) {
-    if ([string]::IsNullOrWhiteSpace($PsxNetGroundHandlingDir)) {
-        Show-ErrorAndExit "`$StartPsxNetGroundHandling is `$true but `$PsxNetGroundHandlingDir is not set.`nEdit $OverrideFile and set `$PsxNetGroundHandlingDir to your PSX.NET.GroundHandling installation directory."
-    } elseif (-not (Test-Path $PsxNetGroundHandlingDir -PathType Container)) {
-        Show-ErrorAndExit "`$PsxNetGroundHandlingDir not found: $PsxNetGroundHandlingDir`nEdit $OverrideFile and set `$PsxNetGroundHandlingDir to your PSX.NET.GroundHandling installation directory."
-    } elseif (-not (Test-Path (Join-Path $PsxNetGroundHandlingDir "PSX.NET.GroundHandling.exe"))) {
-        Show-ErrorAndExit "`$PsxNetGroundHandlingDir does not look like a PSX.NET.GroundHandling installation (no PSX.NET.GroundHandling.exe found): $PsxNetGroundHandlingDir`nEdit $OverrideFile and set `$PsxNetGroundHandlingDir to your PSX.NET.GroundHandling installation directory."
+if ($StartPsxNetOrchestration) {
+    if ([string]::IsNullOrWhiteSpace($PsxNetOrchestrationDir)) {
+        Show-ErrorAndExit "`$StartPsxNetOrchestration is `$true but `$PsxNetOrchestrationDir is not set.`nEdit $OverrideFile and set `$PsxNetOrchestrationDir to your PSX.NET.Orchestration installation directory."
+    } elseif (-not (Test-Path $PsxNetOrchestrationDir -PathType Container)) {
+        Show-ErrorAndExit "`$PsxNetOrchestrationDir not found: $PsxNetOrchestrationDir`nEdit $OverrideFile and set `$PsxNetOrchestrationDir to your PSX.NET.Orchestration installation directory."
+    } elseif (-not (Test-Path (Join-Path $PsxNetOrchestrationDir "PSX.NET.Orchestration.exe"))) {
+        Show-ErrorAndExit "`$PsxNetOrchestrationDir does not look like a PSX.NET.Orchestration installation (no PSX.NET.Orchestration.exe found): $PsxNetOrchestrationDir`nEdit $OverrideFile and set `$PsxNetOrchestrationDir to your PSX.NET.Orchestration installation directory."
     }
 }
 
