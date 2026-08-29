@@ -1152,8 +1152,8 @@ def _build_weather_settings_page(ctx):  # pylint: disable=too-many-locals,too-ma
 
     body += '<h2>MSFS bridge</h2>\n'
     body += (
-        '<p class="note">Data from SimConnect (via frankenmsfsbridge) used to sync '
-        'PSX weather to what MSFS sees. These settings take effect only when the bridge '
+        '<p class="note">Data from PSX.NET.MSFS.Client used to sync '
+        'PSX weather to what MSFS sees. These settings take effect only when it '
         'is connected.</p>\n'
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1em;align-items:start">\n'
         '<div class="card ok">\n'
@@ -1858,7 +1858,7 @@ def _build_weather_turb_page(ctx):  # pylint: disable=too-many-locals,too-many-b
         '<div class="card">'
         '<h3 style="margin:0 0 0.5em">MSFS bridge</h3>'
         '<p style="font-size:0.85em;color:#94a3b8;margin:0 0 0.75em">'
-        'Real-time data read from MSFS via SimConnect (requires the frankenweather MSFS addon). '
+        'Real-time data read from MSFS via PSX.NET.MSFS.Client. '
         'Used to boost turbulence intensity when the aircraft is inside cloud or precipitation — '
         'e.g. a higher cloud density or active rain amplifies the computed intensity. '
         'The Turb factor shows the current multiplier being applied.</p>'

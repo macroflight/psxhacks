@@ -1,6 +1,76 @@
-# FrankenWeather and FrankenMSFS Bridge
+# FrankenWeather
 
 Real-world weather and turbulence injection for Aerowinx PSX.
+
+## Who this is for
+
+The goal is better "real weather" (i.e. not manually set or historical
+weather) in PSX using all available data sources (including MSFS). If
+you are looking for something that will set MSFS weather to be what the
+PSX weather is, FrankenWeather is not the answer.
+
+In short: if you want PSX's weather to track true, live real-world
+conditions continuously as you fly — rather than a situation someone
+set once (by hand, or baked into a saved situ) and never updated again
+— this is for you.
+
+### Major features at a glance
+
+- Live weather zones, sourced from real airport METARs and Open-Meteo
+  forecasts, placed and continuously updated around the aircraft as you fly.
+- Realistic CB (cumulonimbus) placement driven by actual atmospheric
+  CAPE/CIN data and TS SIGMETs, not hand-set oktas.
+- A dedicated terrain-based turbulence engine — mountain wave, rotor,
+  mechanical, wind-shear CAT, plus CB/CAPE/PIREP/G-AIRMET-driven bumps —
+  using real wind and satellite terrain data.
+- Optional sync with MSFS (in-cloud state, QNH, wind), when using MSFS
+  for visuals, fed by PSX.NET.MSFS.Client.
+- A simulated enroute wind uplink using real current forecast data,
+  compared against your flight plan.
+- Real-world clock sync, and a web UI for live status, tuning, and a
+  weather map.
+
+See the [full feature list](#frankenweatherpy) below.
+
+### Adding it to an existing PSX sim
+
+FrankenWeather connects to PSX like any other add-on (BACARS, PSX.NET,
+etc.) — it does not require frankenrouter, a particular sim topology, or
+any change to how you already run PSX.
+
+A standalone Windows EXE is available, no Python required — download it
+from [Google Drive](https://drive.google.com/drive/folders/1Eu1uJCNUiLkFg9Qq8YwPCiPd9V7D5FbA?usp=drive_link).
+For most users — a single PC running PSX on its default port — just start
+the EXE and then control everything from
+[http://localhost:9747/](http://localhost:9747/); no setup or arguments
+needed.
+
+Otherwise, to run it from source:
+
+1. Install Python 3.13 and the packages listed below (`pip install aiohttp
+   pyproj numpy rasterio requests`).
+2. Run `python frankenweather.py`, pointing `--psx-host`/`--psx-port` at
+   wherever PSX (or your frankenrouter, if you use one) is listening.
+   Both default to `127.0.0.1:10747`, so if PSX is running on the same PC
+   on its default port, no arguments are needed at all.
+3. That's it. A web UI is on by default at `http://localhost:9747` (see
+   `--web-port`/`--no-web-ui` below) for live status and tuning.
+
+If you already use `start_scripts` (see `start_scripts/README.md`), set
+`$StartFrankenweather = $true` in your override file instead of running it
+by hand.
+
+### If you use MSFS for visuals
+
+- **MSFS sync requires PSX.NET.MSFS.Client version 10.5.1 or later** —
+  download it from <https://planning.simfest.co.uk/downloads>. Without it,
+  everything else in FrankenWeather still works; you just won't get the
+  in-cloud/QNH/wind sync described above.
+- **Recommended: the "Mawea Design - Storm Package" addon for MSFS**, also
+  from <https://planning.simfest.co.uk/downloads>. FrankenWeather generally
+  places more CBs, and in locations (e.g. over the ocean) where PSX's own
+  weather logic rarely puts any, than you may be used to — this addon gives
+  MSFS itself the visual storm assets to actually show them.
 
 ## frankenweather.py
 
@@ -64,10 +134,9 @@ Features:
   dispatch link. Off by default; opt-in from the `/weather/enroute-wind`
   web page. See [Enroute wind importer](#enroute-wind-importer) below.
 
-- The MSFS in-cloud, QNH and wind data is provided by
-  `frankenmsfsbridge.py` that fetches MSFS weather data via
-  SimConnect. The MSFS sync features have no effect unless the bridge
-  is connected.
+- The MSFS in-cloud, QNH and wind data is provided by PSX.NET.MSFS.Client
+  over the PSX network (`addon=FRANKENMSFSBRIDGE:{...}` messages). The
+  MSFS sync features have no effect unless it is connected.
 
 - Smooth weather transitions: every zone weather, MSFS sync, or wind
   corridor write is preceded by PSX's `Qi243` ("WxSlowTransit") smooth-
@@ -338,26 +407,3 @@ cape = 100
 gairmet = 100
 ```
 
-## frankenmsfsbridge.py
-
-Companion to `frankenweather.py` for setups where frankenweather runs
-on the PSX master sim but MSFS runs on a separate slave sim. The bridge
-runs on the slave sim, reads `AMBIENT_IN_CLOUD`, `SEA_LEVEL_PRESSURE`,
-`AMBIENT_TEMPERATURE`, `AMBIENT_WIND_DIRECTION` and
-`AMBIENT_WIND_VELOCITY` from MSFS via SimConnect, and publishes them to
-the PSX network as `addon=FRANKENMSFSBRIDGE:{...}` messages every time
-the data changes, and at least every 60 seconds as a heartbeat.
-Frankenweather picks up these messages and uses them in place of a
-local SimConnect connection. Bridge data that has not been refreshed
-for more than 5 minutes is considered stale and is not applied.
-
-Requires SimConnect on the machine it runs on (the MSFS slave).
-
-Key options:
-
-```
---psx-host HOST   PSX server hostname (default: 127.0.0.1)
---psx-port PORT   PSX server port (default: 10747)
---interval SEC    SimConnect poll interval in seconds (default: 5)
---debug           Verbose logging
-```

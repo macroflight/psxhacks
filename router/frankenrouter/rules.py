@@ -773,7 +773,7 @@ class Rules():  # pylint: disable=too-many-public-methods
 
         # Drop addon=FRANKENMSFSBRIDGE from non-elevation-master sources.
         # Only filter it coming from downstream (i.e. our own local
-        # PSX.NET.MSFS.Client/frankenmsfsbridge) - a copy arriving from
+        # PSX.NET.MSFS.Client, which sends these) - a copy arriving from
         # upstream is from the authoritative elevation-master sim and
         # should always be accepted.
         if (addon == 'FRANKENMSFSBRIDGE' and not self.sender.upstream and

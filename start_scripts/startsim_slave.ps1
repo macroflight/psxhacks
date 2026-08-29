@@ -89,12 +89,6 @@ if ($StartFrankencduproxy ) {
     Invoke-WindowPosition "frankencduproxy"
 }
 
-if ($StartFrankenmsfsbridge ) {
-    Write-Output "Starting FrankenMSFSBridge..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenmsfsbridge.ps1"
-    Invoke-WindowPosition "frankenmsfsbridge"
-}
-
 if ($StartCsCdu ) {
     Write-Output "Starting CS CDU..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_cs_cdu.ps1"

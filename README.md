@@ -95,19 +95,16 @@ double-click start_cpdlc.ps1 to restart the CPDLC client.
 
 [Full documentation →](start_scripts/README.md)
 
-### frankenweather.py and frankenmsfsbridge.py
+### frankenweather.py
 
 Real-world weather and turbulence injection.
 
 - **frankenweather.py** replaces PSX's built-in weather with live data
   from [Open-Meteo](https://open-meteo.com/) and VATSIM METARs,
-  including CAPE-based CB generation and optional MSFS sync. It also
-  provides extra wind-driven terrain turbulence (wave, rotor,
-  mechanical, shear CAT) using Open-Meteo winds and Copernicus GLO-30
-  DEMs.
-- **frankenmsfsbridge.py** is a companion for split-PC setups that
-  streams MSFS in-cloud state, QNH and wind to the PSX master over the
-  network.
+  including CAPE-based CB generation and optional MSFS sync (fed by
+  PSX.NET.MSFS.Client). It also provides extra wind-driven terrain
+  turbulence (wave, rotor, mechanical, shear CAT) using Open-Meteo winds
+  and Copernicus GLO-30 DEMs.
 
 [Full documentation →](docs/frankenweather.md)
 

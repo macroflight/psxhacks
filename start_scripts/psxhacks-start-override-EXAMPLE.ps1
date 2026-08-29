@@ -541,15 +541,6 @@
 
 
 # ---------------------------------------------------------------------------
-# FrankenMSFSBridge settings (slave sim)
-# MSFS -> PSX data bridge; a helper for FrankenWeather (see above).
-# ---------------------------------------------------------------------------
-#$StartFrankenmsfsbridge  = $true   # FrankenMSFSBridge (MSFS -> PSX data bridge)
-#$FrankenmsfsbridgeOptions = @("--sdk-path=C:\MSFS 2024 SDK")
-#$FrankenmsfsbridgeRepo    = $null
-
-
-# ---------------------------------------------------------------------------
 # FrankenPush settings (master sim)
 #
 # NOTE: started from startsim_master.ps1 - see the FrankenTanker settings

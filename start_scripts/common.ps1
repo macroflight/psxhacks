@@ -161,7 +161,6 @@ $FrankenusbOptions  = @()
 $FrankenwindOptions  = @()
 $FrankenidentOptions = @()
 $FrankencduproxyOptions = @()
-$FrankenmsfsbridgeOptions = @()
 $FrankenprintOptions = @()
 $FrankenpushOptions  = @()
 
@@ -180,7 +179,6 @@ $FrankenrouterRepo      = $null
 $FrankentankerRepo      = $null
 $FrankenusbRepo         = $null
 $FrankenwindRepo        = $null
-$FrankenmsfsbridgeRepo  = $null
 $FrankenprintRepo       = $null
 $FrankenpushRepo        = $null
 
@@ -192,7 +190,6 @@ $FrankenpushRepo        = $null
 #
 
 $StartFrankenweather     = $false
-$StartFrankenmsfsbridge  = $false
 $StartFrankentanker  = $false
 $StartFrankenusb    = $false
 $StartFrankenident  = $false
@@ -262,7 +259,6 @@ $SimAddonNames = [ordered]@{
     "frankentanker"        = "FrankenTanker"
     "frankenident"         = "FrankenIDENT"
     "frankencduproxy"      = "FrankenCDU Proxy"
-    "frankenmsfsbridge"    = "FrankenMSFSBridge"
     "frankenprint"         = "FrankenPrinter"
     "frankenpush"          = "FrankenPush"
     "frankenrouter slave"    = "FrankenRouter (slave)"

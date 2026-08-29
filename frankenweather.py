@@ -1167,7 +1167,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
         # Parsed TS SIGMETs used to lift WMO/showers CB suppression when CAPE agrees
         self.ts_sigmets: list = []
 
-        # MSFS bridge state (via frankenmsfsbridge)
+        # MSFS bridge state (via PSX.NET.MSFS.Client's addon=FRANKENMSFSBRIDGE: messages)
         self.msfs_in_cloud: Optional[bool] = None
         self.msfs_qnh_hpa: Optional[float] = None
         self.msfs_cloud_density: Optional[float] = None   # 0.0-1.0 (SimConnect ENV CLOUD DENSITY)
@@ -1201,7 +1201,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self._bz_strikes: list = []
         self._bz_fetch_time: float = 0.0
 
-        # MSFS wind state (--msfs-wind-sync via frankenmsfsbridge)
+        # MSFS wind state (--msfs-wind-sync via PSX.NET.MSFS.Client's
+        # addon=FRANKENMSFSBRIDGE: messages)
         self.msfs_wind_dir: Optional[float] = None
         self.msfs_wind_spd: Optional[float] = None
         self.msfs_oat_c: Optional[float] = None

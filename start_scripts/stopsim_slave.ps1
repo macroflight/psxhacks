@@ -38,7 +38,6 @@ KillProcess "CockpitSimulator"
 
 KillPythonScript "frankenrouter_ident.py"
 KillPythonScript "frankencduproxy.py"
-KillPythonScript "frankenmsfsbridge.py"
 KillPythonScript "frankenprint.py"
 KillJavaJar "AcarsPrint.jar"
 KillJavaJar "$SrslPsxSlaveDir\SRSL-PSX.jar"

@@ -1,7 +1,7 @@
 # psxhacks requirements
 # Install with: pip install -r requirements.txt
 #
-# Note: pywin32 and SimConnect are Windows-only.
+# Note: pywin32 is Windows-only.
 # rasterio is only needed for frankenturb.
 # Pillow is optional (radar imagery in frankenweather/fw_scanner; graceful fallback without it).
 # hidapi is required by show_hid.py; hid-parser is optional (human-readable -r mode only).
@@ -19,4 +19,3 @@ requests>=2.31
 
 # Windows-only
 pywin32>=306
-SimConnect

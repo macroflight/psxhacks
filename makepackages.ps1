@@ -41,7 +41,6 @@ if (-not (Test-Path $PyI)) {
 $Specs = @(
     'frankenusb.spec',
     'frankenweather.spec',
-    'frankenmsfsbridge.spec',
     'frankentanker.spec',
     'frankenpush.spec',
     'psx_shutdown.spec',
