@@ -76,11 +76,12 @@ Features:
   (e.g. the altimeter snapping to a new value). This does not apply to
   turbulence `WxBurst` injections, which are deliberately abrupt.
 
-- Web UI: pass `--web-port PORT` to start a standalone HTTP server. The
-  same UI is also available through the frankenrouter web interface.
-  The web UI provides a live weather map, zone details, manual weather
-  entry, turbulence tuning, the MSFS bridge settings toggles, and (on
-  `/weather/config`) the time sync toggles.
+- Web UI: a standalone HTTP server is started by default on port 9747;
+  pass `--web-port PORT` to use a different port, or `--no-web-ui` to
+  disable it entirely. The same UI is also available through the
+  frankenrouter web interface. The web UI provides a live weather map,
+  zone details, manual weather entry, turbulence tuning, the MSFS bridge
+  settings toggles, and (on `/weather/config`) the time sync toggles.
 
 - Settings persistence: pass `--config-file PATH` to load every setting
   the web UI can change from a TOML file at startup, and to enable the
@@ -107,7 +108,8 @@ Key options:
 ```
 --psx-host HOST      PSX server hostname (default: 127.0.0.1)
 --psx-port PORT      PSX server port (default: 10747)
---web-port PORT      Enable standalone web UI on this port (e.g. 8085)
+--web-port PORT      Port for the standalone web UI (default: 9747)
+--no-web-ui          Disable the standalone web UI
 --config-file PATH   Load/save web-UI settings from this TOML file
                      (default: ~/.frankenweather.toml)
 --save-logs DIR      [DEVELOPMENT] Save enroute wind diff data per flight

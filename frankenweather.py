@@ -4441,8 +4441,11 @@ class Script:  # pylint: disable=too-many-instance-attributes
                  "written until then). See docs/frankenweather.md for the file format.")
 
         parser.add_argument(
-            '--web-port', type=int, default=None, metavar='PORT',
-            help="Enable standalone web UI on this TCP port (e.g. 8085).")
+            '--web-port', type=int, default=9747, metavar='PORT',
+            help="TCP port for the standalone web UI (on by default; see --no-web-ui).")
+        parser.add_argument(
+            '--no-web-ui', action='store_true',
+            help="Disable the standalone web UI (enabled by default on --web-port).")
 
         # Removed options, kept as accepted-but-ignored so old startup scripts still run;
         # handle_args() logs a deprecation warning for each one actually passed.
@@ -4545,7 +4548,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
         async with asyncio.TaskGroup() as self.taskgroup:
             task = self.taskgroup.create_task(self.monitor_coro(), name="Monitor")
             self.tasks.add(task)
-            if self.args.web_port:
+            if not self.args.no_web_ui:
                 task = self.taskgroup.create_task(
                     self.run_web_ui_coro(), name="WebUI")
                 self.tasks.add(task)
