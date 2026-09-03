@@ -1465,6 +1465,18 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 new_psx_value = ";".join(elems)
                 psx_var = self.translate_var(button_config['psx variable'])
                 self.psx_send_and_set(psx_var, new_psx_value)
+            elif button_config['button type'] == 'RADIO_SWITCH':
+                # Push the RCP standby/active swap button (SwitchesRcpL, or
+                # SwitchesRcpR when the cabin side swap is active), and reset
+                # RADIO_TUNE back to the "big" knob -- otherwise the pilot has
+                # no way to know whether RADIO_TUNE is currently tuning the
+                # big or small knob, since RADIO_TUNE_TOGGLE_KNOB toggles it
+                # silently. Swapping the active/standby frequency is the
+                # natural end of that workflow, so resetting here means the
+                # next RADIO_TUNE turn always starts back on the big knob.
+                psx_var = self.translate_var('SwitchesRcpL')
+                self.psx_send_and_set(psx_var, 7)
+                self.rotselrcp_knob = 'big'
             else:
                 raise FrankenUsbException(f"Unknown button type {button_config['button type']}")
             # End of helper
