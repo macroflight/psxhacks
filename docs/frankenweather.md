@@ -94,6 +94,27 @@ Features:
   SHRA, GR, LTG, FC, CB sky groups) are also used and can override or
   refine the Open-Meteo prediction.
 
+- METAR TEMPO/BECMG/PROBnn trend groups are parsed out and excluded from
+  the current-observation weather (they describe conditions that *may*
+  occur during a 2-hour trend period, not what's happening now) — but
+  their CB content is not simply discarded:
+  - A bare `PROBnn` group (e.g. `PROB40 BKN030CB`) is rolled once per
+    distinct METAR observation; if the roll hits, that CB coverage is
+    applied at full value for as long as that exact observation remains
+    current (i.e. until the station's METAR text next changes).
+  - A `TEMPO` group (bare, or gated by a `PROBnn`, e.g.
+    `PROB40 TEMPO ... BKN008CB`) fluctuates: once armed (a bare `TEMPO` is
+    always armed; a `PROBnn`-gated one only if its own roll hits), it
+    randomly toggles on and off on an irregular 10–30 minute timer — not
+    tied to the normal weather refresh cycle, so the transitions don't
+    look driven by it — using a reduced, randomized CB coverage each time
+    it's "on" rather than always the group's full stated value.
+  - `BECMG` groups are excluded from the current observation but are not
+    otherwise modeled.
+  - This state is tracked per airport (not per weather zone), so it
+    survives a zone relocating to point at a different station and
+    persists correctly if the same station comes back into scope later.
+
 - Zone placement adapts to flight phase: in cruise (above 18 000 ft)
   stale zones behind the aircraft are relocated ahead; at low altitude
   all zones are kept within a tighter radius. The FMC departure and

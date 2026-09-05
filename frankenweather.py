@@ -166,6 +166,13 @@ _AIRPORT_SNAP_NM = 25.0               # snap zone to a real airport if within th
 _REPOSITION_DIST_NM = 500.0           # zone this far away → aircraft was repositioned
 _REFRESH_MAX_S = 300                  # always refresh weather after this many seconds
 _PUSH_COOLDOWN_S = 5.0                # ignore Wx echo-backs for this long after our write
+# METAR TEMPO/PROBnn trend-group CB modulation (see Script._trend_cb_contribution):
+# how long a TEMPO segment's "on"/"off" state is held before randomly toggling again.
+# Deliberately not tied to the ~5-minute weather refresh cadence, so the on/off
+# transitions don't line up with (and look driven by) our own refresh cycle.
+_TEMPO_HOLD_MIN_S = 600.0             # 10 minutes
+_TEMPO_HOLD_MAX_S = 1800.0            # 30 minutes
+_TEMPO_MIN_OKTAS = 2                  # lowest CB coverage used while a TEMPO segment is "on"
 _MSFS_BRIDGE_TIMEOUT_S = 300.0        # stop using bridge data after this silence period
 # Rolling window for the MSFS in-cloud duty cycle used by cloud sync (_msfs_cloud_oktas):
 # long enough to smooth out a brief punch through a wisp of cirrus, short enough to still
@@ -481,9 +488,19 @@ def _gen_metar(icao: str, om: dict, now: datetime) -> str:
 
 _METAR_WIND_RE = re.compile(r'(VRB|\d{3})(\d{2,3})(?:G(\d{2,3}))?KT')
 _METAR_SKY_RE = re.compile(r'^(FEW|SCT|BKN|OVC)(\d{3})(CB|TCU)?')
+_METAR_SKY_OKTAS = {'FEW': 2, 'SCT': 4, 'BKN': 6, 'OVC': 8}
 _METAR_TEMP_RE = re.compile(r'^(M?\d{1,2})/(M?\d{1,2})$')
 _METAR_QNH_RE = re.compile(r'^Q(\d{4})$')
 _METAR_ALT_RE = re.compile(r'^A(\d{4})$')
+# Trend forecast group markers (ICAO Annex 3 2-hour trend, appended to some
+# METARs, mainly at European stations) and the ICAO-nonstandard PROBnn
+# probability prefix that VATSIM-sourced reports occasionally carry (PROBnn
+# is formally a TAF-only construct, but real-world feeds don't always stick
+# to that, so it's handled defensively here). Content in these groups
+# describes conditions that may occur *during the trend period*, not the
+# current observation -- see _parse_metar()'s handling below.
+_METAR_TREND_MARKERS = ('TEMPO', 'BECMG')
+_METAR_PROB_RE = re.compile(r'^PROB(\d{2})$')
 
 
 def _update_metar_qnh(metar: str, qnh_hpa: float) -> str:
@@ -659,14 +676,101 @@ def _metar_wx_token(token: str, out: dict) -> None:
         out['showers'] = True
 
 
-def _parse_metar(raw: str) -> dict:  # pylint: disable=too-many-branches
-    """Parse a raw METAR string into a dict of weather fields."""
+def _parse_trend_segment(tokens: list) -> dict:
+    """Parse the convective signal (CB oktas, showers) out of one trend segment.
+
+    Trend segments (TEMPO/BECMG, optionally PROBnn-prefixed) describe
+    conditions that may occur during the trend period, not the current
+    observation -- see _parse_metar(). Only the convective fields are
+    extracted here; FrankenWeather does not model trend-driven visibility
+    or general (non-CB) cloud changes, only CB coverage.
+    """
+    seg: dict = {'ts_oktas': 0, 'showers': False}
+    for token in tokens:
+        m = _METAR_SKY_RE.match(token)
+        if m:
+            cloud_type = m.group(3)
+            if cloud_type == 'CB':
+                seg['ts_oktas'] = max(seg['ts_oktas'], _METAR_SKY_OKTAS[m.group(1)])
+            elif cloud_type == 'TCU':
+                seg['showers'] = True
+            continue
+        _metar_wx_token(token, seg)
+    return seg
+
+
+def _parse_metar_trends(tokens: list) -> list:
+    """Split trend-group tokens (everything after the main body, before RMK) into segments.
+
+    Each segment is one TEMPO or BECMG group, optionally preceded by a
+    PROBnn probability prefix (e.g. "PROB40 TEMPO ..."). PROBnn is formally
+    a TAF-only construct per ICAO Annex 3, and there it's always followed
+    by TEMPO/BECMG/an FM group -- but real-world METAR feeds (e.g. VATSIM)
+    sometimes carry a bare "PROBnn <weather-elements>" with no following
+    TEMPO/BECMG at all, so that's recognized too, as its own 'PROB' segment
+    type (see Script._trend_cb_contribution() for how 'PROB' vs 'TEMPO' are
+    applied differently). Returns a list of {'type': 'TEMPO'|'BECMG'|'PROB',
+    'prob': int|None, 'ts_oktas': int, 'showers': bool}.
+    """
+    segments = []
+    i = 0
+    n = len(tokens)
+    while i < n:
+        prob = None
+        m = _METAR_PROB_RE.match(tokens[i])
+        if m:
+            prob = int(m.group(1))
+            i += 1
+            if i >= n:
+                break
+        if i < n and tokens[i] in _METAR_TREND_MARKERS:
+            seg_type = tokens[i]
+            i += 1
+        elif prob is not None:
+            # Bare "PROBnn <weather-elements>" with no TEMPO/BECMG --
+            # sustained (not fluctuating) for the whole observation if the
+            # roll hits; see _trend_cb_contribution().
+            seg_type = 'PROB'
+        else:
+            # Stray/unrecognized token (e.g. a FMhhmm time group on its
+            # own) -- skip it and keep looking rather than aborting the
+            # whole scan.
+            i += 1
+            continue
+        seg_tokens = []
+        while (i < n and tokens[i] not in _METAR_TREND_MARKERS and
+               not _METAR_PROB_RE.match(tokens[i])):
+            seg_tokens.append(tokens[i])
+            i += 1
+        seg = _parse_trend_segment(seg_tokens)
+        segments.append({'type': seg_type, 'prob': prob, **seg})
+    return segments
+
+
+def _parse_metar(raw: str) -> dict:  # pylint: disable=too-many-branches,too-many-statements
+    """Parse a raw METAR string into a dict of weather fields.
+
+    Only the main observation body -- everything before the first
+    TEMPO/BECMG/PROBnn trend group, or the RMK remarks section, whichever
+    comes first -- feeds the returned 'ts_oktas'/'showers'/'sky' fields.
+    Trend-group content describes conditions that may occur during the
+    trend period, not the current observation, and is returned separately
+    in 'trends' for the caller to decide whether/how to apply (see
+    Script._trend_cb_contribution()).
+    """
     out: dict = {
         'wind_dir': 0, 'wind_var': False, 'wind_spd': 0, 'wind_gust': 0,
         'vis_m': 10000, 'sky': [], 'temp_c': 15, 'dp_c': 10, 'qnh_hpa': 1013.0,
-        'ts_oktas': 0, 'showers': False,
+        'ts_oktas': 0, 'showers': False, 'trends': [],
     }
-    for token in raw.split():
+    all_tokens = raw.split()
+    body_end = len(all_tokens)
+    for idx, token in enumerate(all_tokens):
+        if (token == 'RMK' or token in _METAR_TREND_MARKERS or
+                _METAR_PROB_RE.match(token)):
+            body_end = idx
+            break
+    for token in all_tokens[:body_end]:
         m = _METAR_WIND_RE.match(token)
         if m:
             out['wind_var'] = m.group(1) == 'VRB'
@@ -687,7 +791,7 @@ def _parse_metar(raw: str) -> dict:  # pylint: disable=too-many-branches
             continue
         m = _METAR_SKY_RE.match(token)
         if m:
-            oktas = {'FEW': 2, 'SCT': 4, 'BKN': 6, 'OVC': 8}[m.group(1)]
+            oktas = _METAR_SKY_OKTAS[m.group(1)]
             out['sky'].append((oktas, int(m.group(2)) * 100))
             cloud_type = m.group(3)
             if cloud_type == 'CB':
@@ -709,6 +813,14 @@ def _parse_metar(raw: str) -> dict:  # pylint: disable=too-many-branches
             out['qnh_hpa'] = round(int(m.group(1)) / 2.953)
             continue
         _metar_wx_token(token, out)
+    # Trend groups: everything from body_end up to (not including) RMK.
+    trend_tokens = all_tokens[body_end:]
+    if trend_tokens and trend_tokens[0] != 'RMK':
+        try:
+            rmk_idx = trend_tokens.index('RMK')
+        except ValueError:
+            rmk_idx = len(trend_tokens)
+        out['trends'] = _parse_metar_trends(trend_tokens[:rmk_idx])
     # LTG (lightning) in remarks; DSNT = distant (~VCTS), otherwise overhead
     if 'LTG' in raw:
         if 'LTG DSNT' in raw:
@@ -1117,6 +1229,13 @@ class Script:  # pylint: disable=too-many-instance-attributes
         # VATSIM METAR cache: ICAO → raw METAR string
         self.vatsim_cache: dict = {}
         self.vatsim_cache_time = 0.0
+
+        # METAR TEMPO/PROBnn trend-group state, keyed by ICAO (not zone
+        # number -- a zone's bound station can change as it relocates, but
+        # the PROB roll / TEMPO on-off state belongs to the station's
+        # observation, not to whichever zone happens to be pointed at it
+        # right now). See _trend_cb_contribution().
+        self._metar_trend_state: dict = {}
 
         # On-disk Open-Meteo caches — see _OM_ZONE_CACHE_PATH for why the
         # max age matches each fetch's own existing refresh cadence.
@@ -3319,6 +3438,93 @@ class Script:  # pylint: disable=too-many-instance-attributes
         return moved
 
     # ------------------------------------------------------------------
+    # METAR TEMPO/PROBnn trend-group CB modulation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _tempo_oktas(seg_ts_oktas: int) -> int:
+        """Pick a randomized 'on' CB oktas value for an active TEMPO segment.
+
+        A TEMPO fluctuation doesn't always show the segment's full oktas
+        value -- pick uniformly between _TEMPO_MIN_OKTAS and the segment's
+        own oktas, representing that TEMPO coverage may be less than
+        otherwise stated. Segments carrying only 'showers' (e.g. "TEMPO
+        SHRA" with no CB sky group) have seg_ts_oktas == 0; there is
+        nothing to reduce in that case.
+        """
+        if seg_ts_oktas <= 0:
+            return 0
+        lo = min(_TEMPO_MIN_OKTAS, seg_ts_oktas)
+        return random.randint(lo, seg_ts_oktas)
+
+    def _trend_cb_contribution(self, icao: str, raw_metar: str, trends: list) -> tuple:
+        """Return (ts_oktas, showers) currently contributed by this station's TEMPO/PROBnn groups.
+
+        Manages the persistent roll/flicker state in self._metar_trend_state,
+        keyed by ICAO. Semantics (see the design discussion this implements):
+
+        - A bare PROBnn segment (no TEMPO/BECMG, e.g. "PROB40 BKN030CB") is
+          a sustained yes/no: rolled once per distinct METAR observation
+          and, if the roll hits, applied at full value for that
+          observation's entire validity (until the raw text next changes).
+        - A TEMPO segment (bare, or PROBnn-gated, e.g. "PROB40 TEMPO ...")
+          fluctuates: while armed (a bare TEMPO is always armed; a
+          PROBnn-gated TEMPO is armed only if its own roll hits), it
+          randomly toggles on/off on an irregular timer
+          (_TEMPO_HOLD_MIN_S/_TEMPO_HOLD_MAX_S) rather than every ~5-minute
+          refresh cycle, so the transitions don't visibly flicker in sync
+          with our own refresh cadence. While "on" it contributes a
+          reduced oktas value (see _tempo_oktas), not necessarily the
+          segment's full stated oktas.
+        - BECMG segments are excluded from the main-body observation (see
+          _parse_metar()) but are not otherwise modeled here.
+        """
+        now = time.monotonic()
+        state = self._metar_trend_state.get(icao)
+        if state is None or state['raw'] != raw_metar:
+            # New station, or a new observation for this station: (re-)roll
+            # every PROBnn segment fresh and (re-)initialize every TEMPO
+            # segment's flicker timer. A previous roll/flicker state must
+            # never carry over to a different observation.
+            segs = []
+            for seg in trends:
+                if seg['type'] == 'BECMG':
+                    segs.append(None)
+                    continue
+                armed = (seg['prob'] is None) or (random.random() * 100 < seg['prob'])
+                on = armed and seg['type'] == 'TEMPO' and random.random() < 0.5
+                segs.append({
+                    'armed': armed,
+                    'on': on,
+                    'next_toggle': now + random.uniform(_TEMPO_HOLD_MIN_S, _TEMPO_HOLD_MAX_S),
+                    'oktas': self._tempo_oktas(seg['ts_oktas']) if on else 0,
+                })
+            state = {'raw': raw_metar, 'segs': segs}
+            self._metar_trend_state[icao] = state
+
+        ts_oktas = 0
+        showers = False
+        for seg, sstate in zip(trends, state['segs']):
+            if sstate is None or not sstate['armed']:
+                continue
+            if seg['type'] == 'TEMPO':
+                if now >= sstate['next_toggle']:
+                    sstate['on'] = not sstate['on']
+                    sstate['next_toggle'] = now + random.uniform(
+                        _TEMPO_HOLD_MIN_S, _TEMPO_HOLD_MAX_S)
+                    if sstate['on']:
+                        sstate['oktas'] = self._tempo_oktas(seg['ts_oktas'])
+                if not sstate['on']:
+                    continue
+                ts_oktas = max(ts_oktas, sstate['oktas'])
+            else:
+                # Bare PROBnn (sustained): full value for the whole
+                # observation once armed, no flicker.
+                ts_oktas = max(ts_oktas, seg['ts_oktas'])
+            showers = showers or seg['showers']
+        return ts_oktas, showers
+
+    # ------------------------------------------------------------------
     # VATSIM METAR cache
     # ------------------------------------------------------------------
 
@@ -3715,6 +3921,10 @@ class Script:  # pylint: disable=too-many-instance-attributes
             has_showers_metar = False
             if raw_metars[i] is not None:
                 parsed = _parse_metar(raw_metars[i])
+                trend_ts_oktas, trend_showers = self._trend_cb_contribution(
+                    icao, raw_metars[i], parsed.get('trends', []))
+                parsed['ts_oktas'] = max(parsed['ts_oktas'], trend_ts_oktas)
+                parsed['showers'] = parsed['showers'] or trend_showers
                 new_modes.append(build_wxmode_string(lat, lon, 0.0, month, icao))
                 wx = metar_to_wx_string(parsed)
                 ts_oktas = parsed.get('ts_oktas', 0)
