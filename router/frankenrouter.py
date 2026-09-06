@@ -3270,8 +3270,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         elif code == RulesCode.ADDON_FORWARDED_KNOWN:
             self.logger.debug("Known addon message from %s forwarded: %s",
                               sender_hr, line)
-            if line.startswith("addon=FRANKENWEATHER:"):
-                self.cache_frankenweather_addon(line)
+        elif code == RulesCode.FRANKENWEATHER_FILTERED:
+            self.logger.debug("FRANKENWEATHER addon message from %s filtered: %s",
+                              sender_hr, line)
+            # The router's own web UI needs this cached regardless of who
+            # the message actually gets forwarded to (see rules.py's
+            # handle_addon() FRANKENWEATHER case).
+            self.cache_frankenweather_addon(line)
         elif code == RulesCode.AGAIN:
             self.logger.info("Keyword again from %s forwarded: %s", sender_hr, line)
         elif code == RulesCode.BANG:
