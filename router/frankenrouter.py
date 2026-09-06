@@ -3340,6 +3340,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             # - endpoint_name_regexp: do not send if endpoint name matches
             # - frankenweather_forward: only send to frankenrouters and clients
             #   whose client_provided_id matches (see below)
+            # - ground_handling_forward: only send to frankenrouters and clients
+            #   whose display_name is in the given list (see below)
             # Only one filter type will be given by the ruleset.
             if 'nolong' in extra_data:
                 self.logger.debug("sending with islong: %s", line)
@@ -3405,6 +3407,25 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 matching_peernames = [
                     c.peername for c in self.clients.values()
                     if c.client_provided_id == client_id and c.peername != sender.peername]
+                if sender.upstream:
+                    tasks = [self.client_broadcast(line, exclude_non_frankenrouter=True)]
+                    if matching_peernames:
+                        tasks.append(self.client_broadcast(line, include=matching_peernames))
+                    await asyncio.gather(*tasks)
+                else:
+                    tasks = [self.client_broadcast(
+                        line, exclude=[sender.peername], exclude_non_frankenrouter=True)]
+                    if matching_peernames:
+                        tasks.append(self.client_broadcast(line, include=matching_peernames))
+                    if self.is_upstream_connected() and self.upstream.is_frankenrouter:
+                        tasks.append(self.send_to_upstream(line, sender.peername))
+                    await asyncio.gather(*tasks)
+            elif 'ground_handling_forward' in extra_data:
+                self.logger.debug("sending with ground_handling_forward: %s", line)
+                allowed_names = set(extra_data['ground_handling_forward'])
+                matching_peernames = [
+                    c.peername for c in self.clients.values()
+                    if c.display_name in allowed_names and c.peername != sender.peername]
                 if sender.upstream:
                     tasks = [self.client_broadcast(line, exclude_non_frankenrouter=True)]
                     if matching_peernames:

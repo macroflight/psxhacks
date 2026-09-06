@@ -66,13 +66,6 @@ _KNOWN_ADDONS = frozenset(('FRANKENCDUPROXY', 'FRANKENMSFSBRIDGE'))
 # _note_conflict() for why that visibility matters.
 _FRANKENWEATHER_CLIENT_ID = 'WEATHER'
 
-# Same idea, but for addons whose messages don't use the normal NAME:payload
-# colon convention (so the "addon" token above ends up being the whole
-# rest-of-line, e.g. "GROUND.HANDLING;;;;V1|OWNER|<uuid>|21" -- PSX.NET.
-# GroundHandling's own semicolon/pipe-delimited protocol), matched by prefix
-# instead of exact membership.
-_KNOWN_ADDON_PREFIXES = ('GROUND.HANDLING',)
-
 # How long a pure-START-non-ECON value from upstream is treated as the
 # private response to a "start" command, rather than an unsolicited
 # broadcast-worthy update. Used both for router.start_sent_at (see
@@ -135,6 +128,13 @@ class RulesAction(enum.Enum):
     _FRANKENWEATHER_CLIENT_ID) so cross-instance conflict detection keeps
     working. Upstream is only sent to if it is itself a frankenrouter.
 
+    - 'ground_handling_forward': list of display_name values
+
+    Send only to frankenrouters (upstream and downstream), plus any
+    downstream client whose display_name is in the given list (see
+    [filtering] ground_handling_forward_names in the config file).
+    Upstream is only sent to if it is itself a frankenrouter.
+
     Other things we can include in extra_data:
 
     - 'frdp_rtt': the FRDP RTT time in seconds (float)
@@ -187,6 +187,7 @@ class RulesCode(enum.Enum):
     ADDON_FORWARDED = enum.auto()
     ADDON_FORWARDED_KNOWN = enum.auto()
     FRANKENWEATHER_FILTERED = enum.auto()
+    GROUND_HANDLING_FILTERED = enum.auto()
     AGAIN = enum.auto()
     START = enum.auto()
     LOAD1 = enum.auto()
@@ -817,6 +818,26 @@ class Rules():  # pylint: disable=too-many-public-methods
                 RulesCode.FRANKENWEATHER_FILTERED,
                 extra_data={'frankenweather_forward': _FRANKENWEATHER_CLIENT_ID})
 
+        # GROUND.HANDLING (PSX.NET.Orchestration) doesn't use the normal
+        # NAME:payload colon convention -- its messages look like
+        # "GROUND.HANDLING;;;;V1|STATUS|runtime|..." with no colon at all,
+        # so the split above raised ValueError and `addon` here is the
+        # whole rest-of-line; matched by prefix instead of exact equality.
+        # Its traffic is frequent (mostly small STATUS heartbeats) and only
+        # useful to other frankenrouters and to a configured allowlist of
+        # ground-handling-aware clients (see [filtering]
+        # ground_handling_forward_names) -- most clients (e.g. constrained
+        # hardware addons) have no use for it.
+        if addon.startswith('GROUND.HANDLING'):
+            if not self.allow_write():
+                return self.myreturn(RulesAction.DROP, RulesCode.NOWRITE)
+            return self.myreturn(
+                RulesAction.FILTER,
+                RulesCode.GROUND_HANDLING_FILTERED,
+                extra_data={
+                    'ground_handling_forward':
+                        self.router.config.filtering.ground_handling_forward_names})
+
         if addon == 'FRANKENROUTER':
             if ':' not in payload:
                 return self.myreturn(
@@ -849,7 +870,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         if not self.allow_write():
             return self.myreturn(RulesAction.DROP, RulesCode.NOWRITE)
         code = (RulesCode.ADDON_FORWARDED_KNOWN
-                if addon in _KNOWN_ADDONS or addon.startswith(_KNOWN_ADDON_PREFIXES)
+                if addon in _KNOWN_ADDONS
                 else RulesCode.ADDON_FORWARDED)
         return self.myreturn(RulesAction.NORMAL, code)
 
@@ -1452,7 +1473,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         return self.myreturn(RulesAction.NORMAL, RulesCode.KEYVALUE_NORMAL)
 
 
-class TestRules(unittest.TestCase):
+class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
     """Basic test cases for the module."""
 
     class DummyVariables():  # pylint: disable=too-few-public-methods
@@ -1507,6 +1528,14 @@ class TestRules(unittest.TestCase):
             """Initialize the identity config."""
             self.simulator = 'MySim'
 
+    class DummyConfigFiltering():  # pylint: disable=too-few-public-methods
+        """Implement small parts of the router for unit testing."""
+
+        def __init__(self):
+            """Initialize the filtering config."""
+            self.ground_handling_forward_names = [
+                'PSX.NET EFB For Windows', 'PSX.NET.Orchestration', 'BA ACARS Simulation']
+
     class DummyConfig():  # pylint: disable=too-few-public-methods
         """Implement small parts of the router for unit testing."""
 
@@ -1514,6 +1543,7 @@ class TestRules(unittest.TestCase):
             """Initialize the config."""
             self.psx = TestRules.DummyConfigPsx()
             self.identity = TestRules.DummyConfigIdentity()
+            self.filtering = TestRules.DummyConfigFiltering()
 
     class DummyFrankenrouter():  # pylint: disable=too-few-public-methods,too-many-instance-attributes
         """Implement small parts of the router for unit testing."""
@@ -2258,6 +2288,45 @@ class TestRules(unittest.TestCase):
         testpeer.access_level = NOACCESS_ACCESS_LEVEL
         (action, code, _, extra_data) = rules.route(
             "addon=FRANKENWEATHER:STATE:someuuid:{}", testpeer)
+        self.assertEqual(action, RulesAction.DROP)
+        self.assertEqual(code, RulesCode.NOWRITE)
+
+    def test_addon_ground_handling_filter(self):
+        """GROUND.HANDLING addon messages must be filtered per [filtering] config."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+
+        router.upstream = self.DummyUpstreamConnection()
+        router.clients = {
+            ('127.0.0.1', 12345): self.DummyClientConnection(('127.0.0.1', 12345)),
+        }
+        testpeer = router.clients[('127.0.0.1', 12345)]
+
+        # GROUND.HANDLING doesn't use the normal NAME:payload colon
+        # convention, so the whole rest-of-line is matched by prefix.
+        line = "addon=GROUND.HANDLING;;;;V1|STATUS|runtime|loading|0|heartbeat"
+        (action, code, _, extra_data) = rules.route(line, testpeer)
+        self.assertEqual(action, RulesAction.FILTER)
+        self.assertEqual(code, RulesCode.GROUND_HANDLING_FILTERED)
+        self.assertEqual(
+            extra_data,
+            {'ground_handling_forward': [
+                'PSX.NET EFB For Windows', 'PSX.NET.Orchestration', 'BA ACARS Simulation']})
+
+        # Same filtering applies regardless of sender direction.
+        (action, code, _, extra_data) = rules.route(line, router.upstream)
+        self.assertEqual(action, RulesAction.FILTER)
+        self.assertEqual(code, RulesCode.GROUND_HANDLING_FILTERED)
+
+        # The configured allowlist (from [filtering]) is passed through as-is.
+        router.config.filtering.ground_handling_forward_names = ['Some Client']
+        (action, code, _, extra_data) = rules.route(line, testpeer)
+        self.assertEqual(extra_data, {'ground_handling_forward': ['Some Client']})
+
+        # A client without write access must still be dropped, same as any
+        # other addon message.
+        testpeer.access_level = NOACCESS_ACCESS_LEVEL
+        (action, code, _, extra_data) = rules.route(line, testpeer)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.NOWRITE)
 

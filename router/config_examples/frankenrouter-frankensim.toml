@@ -16,6 +16,14 @@ traffic = true
 [psx]
 variables = 'C:\fs\PSX\Variables.txt'
 
+[filtering]
+# display_name values of clients that addon=GROUND.HANDLING (PSX.NET
+# Orchestration) messages are forwarded to, in addition to
+# upstream/downstream frankenrouters. Shown here with the built-in default.
+# ground_handling_forward_names = [
+#     "PSX.NET EFB For Windows", "PSX.NET.Orchestration", "BA ACARS Simulation",
+# ]
+
 [[upstream]]
 host = "127.0.0.1"
 name = "My PSX main server"

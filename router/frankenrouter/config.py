@@ -156,9 +156,26 @@ class _RouterConfigSharedinfo:  # pylint: disable=missing-class-docstring,too-fe
             key for key in _DEPRECATED_SHAREDINFO_KEYS if key in data]
 
 
+_DEFAULT_GROUND_HANDLING_FORWARD_NAMES = [
+    'PSX.NET EFB For Windows', 'PSX.NET.Orchestration', 'BA ACARS Simulation',
+]
+
+
 class _RouterConfigFiltering:  # pylint: disable=missing-class-docstring,too-few-public-methods
     def __init__(self, data):
-        pass
+        # display_name values of clients that addon=GROUND.HANDLING
+        # (PSX.NET Orchestration ground-handling protocol) messages should
+        # be forwarded to, in addition to upstream/downstream
+        # frankenrouters. See rules.py's handle_addon() GROUND.HANDLING case.
+        self.ground_handling_forward_names = data.get(
+            'ground_handling_forward_names',
+            list(_DEFAULT_GROUND_HANDLING_FORWARD_NAMES))
+        if not isinstance(self.ground_handling_forward_names, list):
+            raise RouterConfigError(
+                "filtering ground_handling_forward_names must be a list")
+        if not all(isinstance(n, str) for n in self.ground_handling_forward_names):
+            raise RouterConfigError(
+                "filtering ground_handling_forward_names entries must be strings")
 
 
 class _RouterConfigPerformance:  # pylint: disable=missing-class-docstring,too-few-public-methods,too-many-instance-attributes
@@ -484,6 +501,20 @@ I'm not TOML
         self.assertEqual(conf.psx.jettison_resync_fix, False)
         with self.assertRaises(RouterConfigError):
             RouterConfig(config_data="[psx]\njettison_resync_fix = 'no'\n")
+
+    def test_ground_handling_forward_names(self):
+        """ground_handling_forward_names has sane defaults and can be overridden in [filtering]."""
+        conf = RouterConfig(config_data="")
+        self.assertEqual(
+            conf.filtering.ground_handling_forward_names,
+            ['PSX.NET EFB For Windows', 'PSX.NET.Orchestration', 'BA ACARS Simulation'])
+        conf = RouterConfig(config_data=(
+            "[filtering]\nground_handling_forward_names = ['Some Client']\n"))
+        self.assertEqual(conf.filtering.ground_handling_forward_names, ['Some Client'])
+        with self.assertRaises(RouterConfigError):
+            RouterConfig(config_data="[filtering]\nground_handling_forward_names = 'nope'\n")
+        with self.assertRaises(RouterConfigError):
+            RouterConfig(config_data="[filtering]\nground_handling_forward_names = [1, 2]\n")
 
     def test_file_input(self):
         """Test reading from one of the example files."""
