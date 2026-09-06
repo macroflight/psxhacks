@@ -3338,6 +3338,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             # - nolong: do not send NOLONG variables to clients is nolong=True
             # - start: do not send unless the client has requested START variables
             # - endpoint_name_regexp: do not send if endpoint name matches
+            # - frankenweather_forward: only send to frankenrouters and clients
+            #   whose client_provided_id matches (see below)
             # Only one filter type will be given by the ruleset.
             if 'nolong' in extra_data:
                 self.logger.debug("sending with islong: %s", line)
@@ -3395,6 +3397,25 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         line, exclude=[sender.peername],
                         exclude_other_sim_frankenrouters=True)]
                     if not upstream_is_other_sim:
+                        tasks.append(self.send_to_upstream(line, sender.peername))
+                    await asyncio.gather(*tasks)
+            elif 'frankenweather_forward' in extra_data:
+                self.logger.debug("sending with frankenweather_forward: %s", line)
+                client_id = extra_data['frankenweather_forward']
+                matching_peernames = [
+                    c.peername for c in self.clients.values()
+                    if c.client_provided_id == client_id and c.peername != sender.peername]
+                if sender.upstream:
+                    tasks = [self.client_broadcast(line, exclude_non_frankenrouter=True)]
+                    if matching_peernames:
+                        tasks.append(self.client_broadcast(line, include=matching_peernames))
+                    await asyncio.gather(*tasks)
+                else:
+                    tasks = [self.client_broadcast(
+                        line, exclude=[sender.peername], exclude_non_frankenrouter=True)]
+                    if matching_peernames:
+                        tasks.append(self.client_broadcast(line, include=matching_peernames))
+                    if self.is_upstream_connected() and self.upstream.is_frankenrouter:
                         tasks.append(self.send_to_upstream(line, sender.peername))
                     await asyncio.gather(*tasks)
             else:

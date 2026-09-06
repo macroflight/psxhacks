@@ -53,8 +53,18 @@ PTT_KEYWORDS = frozenset({'Qh82', 'Qh93', 'Qh410', 'Qh411', 'Qh412'})
 QS546_CONNECT_FILTER_WINDOW_S = 5.0
 
 # Addon names that are expected to produce regular addon= traffic; their
-# forwarded messages are logged at debug rather than info.
-_KNOWN_ADDONS = frozenset(('FRANKENCDUPROXY', 'FRANKENMSFSBRIDGE', 'FRANKENWEATHER'))
+# forwarded messages are logged at debug rather than info. FRANKENWEATHER is
+# not listed here since it never reaches this classification -- it is
+# special-cased and forwarded via its own filter in handle_addon() below.
+_KNOWN_ADDONS = frozenset(('FRANKENCDUPROXY', 'FRANKENMSFSBRIDGE'))
+
+# client_provided_id FrankenWeather identifies itself with on the network
+# (see frankenweather.py's __MY_CLIENT_ID__). Used so that other
+# FrankenWeather instances keep receiving each other's addon=FRANKENWEATHER
+# messages even though those are otherwise restricted to frankenrouters --
+# see handle_addon()'s FRANKENWEATHER case and frankenweather.py's
+# _note_conflict() for why that visibility matters.
+_FRANKENWEATHER_CLIENT_ID = 'WEATHER'
 
 # Same idea, but for addons whose messages don't use the normal NAME:payload
 # colon convention (so the "addon" token above ends up being the whole
@@ -118,6 +128,13 @@ class RulesAction(enum.Enum):
 
     Send the message to the sender (used for e.g FRDP PONG)
 
+    - 'frankenweather_forward': True
+
+    Send only to frankenrouters (upstream and downstream), plus any
+    downstream client identifying itself as FrankenWeather (see
+    _FRANKENWEATHER_CLIENT_ID) so cross-instance conflict detection keeps
+    working. Upstream is only sent to if it is itself a frankenrouter.
+
     Other things we can include in extra_data:
 
     - 'frdp_rtt': the FRDP RTT time in seconds (float)
@@ -169,6 +186,7 @@ class RulesCode(enum.Enum):
     DEMAND = enum.auto()
     ADDON_FORWARDED = enum.auto()
     ADDON_FORWARDED_KNOWN = enum.auto()
+    FRANKENWEATHER_FILTERED = enum.auto()
     AGAIN = enum.auto()
     START = enum.auto()
     LOAD1 = enum.auto()
@@ -754,7 +772,7 @@ class Rules():  # pylint: disable=too-many-public-methods
             message=f"Unsupported FRDP message type {message_type}: {self.line}"
         )
 
-    def handle_addon(self, rest):  # pylint: disable=too-many-return-statements
+    def handle_addon(self, rest):  # pylint: disable=too-many-return-statements,too-many-branches
         """Handle an addon= message."""
         try:
             (addon, payload) = rest.split(":", 1)
@@ -782,6 +800,22 @@ class Rules():  # pylint: disable=too-many-public-methods
                 RulesAction.DROP,
                 RulesCode.KEYVALUE_FILTERED_INGRESS_SILENT,
                 message="filtered FRANKENMSFSBRIDGE addon as filter_elevation is set")
+
+        # FRANKENWEATHER addon traffic (STATE/TURBSTATE/WINDSTATE) can be
+        # large -- WINDSTATE in particular runs several KB per message --
+        # and is only useful to other frankenrouters (to relay state
+        # across the mesh) and to other FrankenWeather instances
+        # themselves, which rely on seeing each other's messages to detect
+        # a conflicting duplicate instance on the network (see
+        # frankenweather.py's _note_conflict()). Restrict it accordingly
+        # instead of broadcasting it to every client.
+        if addon == 'FRANKENWEATHER':
+            if not self.allow_write():
+                return self.myreturn(RulesAction.DROP, RulesCode.NOWRITE)
+            return self.myreturn(
+                RulesAction.FILTER,
+                RulesCode.FRANKENWEATHER_FILTERED,
+                extra_data={'frankenweather_forward': _FRANKENWEATHER_CLIENT_ID})
 
         if addon == 'FRANKENROUTER':
             if ':' not in payload:
@@ -2192,6 +2226,40 @@ class TestRules(unittest.TestCase):
         self.assertEqual(action, RulesAction.NORMAL)
         self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
         self.assertIsNone(extra_data)
+
+    def test_addon_frankenweather_filter(self):
+        """FRANKENWEATHER addon messages must be filtered to frankenrouters only."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+
+        router.upstream = self.DummyUpstreamConnection()
+        router.clients = {
+            ('127.0.0.1', 12345): self.DummyClientConnection(('127.0.0.1', 12345)),
+        }
+        testpeer = router.clients[('127.0.0.1', 12345)]
+
+        # From a downstream client, with write access.
+        (action, code, _, extra_data) = rules.route(
+            "addon=FRANKENWEATHER:STATE:someuuid:{}", testpeer)
+        self.assertEqual(action, RulesAction.FILTER)
+        self.assertEqual(code, RulesCode.FRANKENWEATHER_FILTERED)
+        self.assertEqual(extra_data, {'frankenweather_forward': 'WEATHER'})
+
+        # Same filtering applies regardless of sender direction or message
+        # subtype (STATE/TURBSTATE/WINDSTATE all use the same addon name).
+        (action, code, _, extra_data) = rules.route(
+            "addon=FRANKENWEATHER:WINDSTATE:someuuid:payload", router.upstream)
+        self.assertEqual(action, RulesAction.FILTER)
+        self.assertEqual(code, RulesCode.FRANKENWEATHER_FILTERED)
+        self.assertEqual(extra_data, {'frankenweather_forward': 'WEATHER'})
+
+        # A client without write access must still be dropped, same as any
+        # other addon message.
+        testpeer.access_level = NOACCESS_ACCESS_LEVEL
+        (action, code, _, extra_data) = rules.route(
+            "addon=FRANKENWEATHER:STATE:someuuid:{}", testpeer)
+        self.assertEqual(action, RulesAction.DROP)
+        self.assertEqual(code, RulesCode.NOWRITE)
 
     def test_route(self):
         """Test routing."""
