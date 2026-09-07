@@ -12,6 +12,7 @@ import pathlib
 import random
 import re
 import sys
+import textwrap
 import time
 import tomllib
 import traceback
@@ -162,6 +163,12 @@ _STATIONS_CACHE = os.path.join(os.path.expanduser("~"), ".cache", "frankenweathe
 _DEFAULT_CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".frankenweather.toml")
 _VATSIM_ALL_URL = "https://metar.vatsim.net/all"
 _VATSIM_CACHE_MAX_S = 1800             # re-fetch VATSIM METARs every 30 minutes
+_DATIS_LINE_MAX_CHARS = 24            # PSX MetarsUp (Qs464): max chars per '^'-delimited line
+# Split a MetarsUp (Qs464) value into per-airport blocks. PSX terminates every
+# airport's block -- found or not -- with a blank line, i.e. two consecutive
+# '^' (see _handle_metars_up()), so blocks never contain an empty segment
+# themselves and splitting on '^^' is exact.
+_DATIS_BLOCK_SEP = '^^'
 _AIRPORT_SNAP_NM = 25.0               # snap zone to a real airport if within this radius
 _REPOSITION_DIST_NM = 500.0           # zone this far away → aircraft was repositioned
 _REFRESH_MAX_S = 300                  # always refresh weather after this many seconds
@@ -1229,6 +1236,12 @@ class Script:  # pylint: disable=too-many-instance-attributes
         # VATSIM METAR cache: ICAO → raw METAR string
         self.vatsim_cache: dict = {}
         self.vatsim_cache_time = 0.0
+
+        # Last MetarsUp (Qs464) value we wrote ourselves, so we can recognize
+        # our own write reflected back through psx_send_and_set()'s local
+        # cache update (or an eventual network echo) instead of re-processing
+        # it as a new D-ATIS request. See _handle_metars_up().
+        self._datis_last_written: Optional[str] = None
 
         # METAR TEMPO/PROBnn trend-group state, keyed by ICAO (not zone
         # number -- a zone's bound station can change as it relocates, but
@@ -3554,6 +3567,90 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self.logger.warning("VATSIM METAR cache refresh failed: %s", exc)
 
     # ------------------------------------------------------------------
+    # D-ATIS (MetarsUp / Qs464) override
+    # ------------------------------------------------------------------
+    #
+    # PSX's ACARS "ATIS REQUEST" page (6R = SEND) composes and broadcasts
+    # MetarsUp itself, ~5s after being sent, from its own local weather
+    # zones or its last two downloaded METAR world files -- neither of
+    # which reflects live VATSIM data, and airports outside those sources
+    # come back as "<ICAO> UNAVAIL". Since we already hold the full live
+    # VATSIM METAR feed (self.vatsim_cache), we replace PSX's answer with
+    # our own whenever it contains an UNAVAIL, using VATSIM data for every
+    # requested airport (not just the ones PSX itself couldn't find) so
+    # the reply is internally consistent -- see the PAIB thread this was
+    # designed against for the exact wire format PSX uses.
+
+    @staticmethod
+    def _datis_requested_icaos(value: str) -> list:
+        """Extract the list of requested ICAOs from a MetarsUp value.
+
+        Works whether each per-airport block found a report ("<ICAO> M
+        <date>^...") or not ("<ICAO> UNAVAIL"), since in both cases the
+        block starts with the bare ICAO as its first whitespace-delimited
+        token.
+        """
+        icaos = []
+        for block in value.split(_DATIS_BLOCK_SEP):
+            block = block.strip()
+            if not block:
+                continue
+            icao = block.split(None, 1)[0]
+            if len(icao) == 4 and icao.isalpha() and icao.isupper():
+                icaos.append(icao)
+        return icaos
+
+    def _compose_datis_block(self, icao: str) -> str:
+        """Build one airport's MetarsUp block.
+
+        The VATSIM METAR if we have one, wrapped to PSX's 24-char line
+        limit, else the same "UNAVAIL" text PSX itself would show.
+        """
+        raw = self.vatsim_cache.get(icao)
+        if raw is None:
+            lines = [f"{icao} UNAVAIL"]
+        else:
+            lines = textwrap.wrap(raw, width=_DATIS_LINE_MAX_CHARS)
+        return "^".join(lines) + _DATIS_BLOCK_SEP
+
+    def _compose_datis_reply(self, value: str) -> str:
+        """Return a MetarsUp value using VATSIM data for every requested airport.
+
+        Returns `value` unchanged if none of the requested airports could
+        be parsed out of it (defensive -- should not happen given PSX's
+        own format).
+        """
+        icaos = self._datis_requested_icaos(value)
+        if not icaos:
+            return value
+        return "".join(self._compose_datis_block(icao) for icao in icaos)
+
+    def _handle_metars_up(self, _key: str, value: str) -> None:
+        """React to PSX's own MetarsUp (Qs464) D-ATIS reply.
+
+        Overrides it with live VATSIM data for any requested airport PSX
+        itself couldn't find -- see the module comment above
+        _datis_requested_icaos() for why.
+        """
+        if self.args.no_datis_override:
+            return
+        if self._should_skip_wx_update():
+            return
+        if 'UNAVAIL' not in value:
+            return
+        if value == self._datis_last_written:
+            # Our own previous write, reflected back via psx_send_and_set()'s
+            # local cache update (or a network echo) -- not a new request.
+            return
+        new_value = self._compose_datis_reply(value)
+        if new_value == value:
+            return
+        self._datis_last_written = new_value
+        self.logger.info("D-ATIS: overriding PSX MetarsUp reply with VATSIM data: %s",
+                         self._datis_requested_icaos(value))
+        self.psx_send_and_set("MetarsUp", new_value)
+
+    # ------------------------------------------------------------------
     # Open-Meteo fetch
     # ------------------------------------------------------------------
 
@@ -4519,6 +4616,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self.psx.subscribe("WxSigmet", self.handle_sigmet_change)
             self.psx.subscribe("addon", self._handle_addon)
             self.psx.subscribe("WxCorridorTxt", self._handle_corridor)
+            self.psx.subscribe("MetarsUp", self._handle_metars_up)
 
             for i in range(1, 8):
                 self.psx.subscribe(f"Wx{i}", self.handle_wx_change)
@@ -4657,6 +4755,11 @@ class Script:  # pylint: disable=too-many-instance-attributes
         parser.add_argument(
             '--no-web-ui', action='store_true',
             help="Disable the standalone web UI (enabled by default on --web-port).")
+        parser.add_argument(
+            '--no-datis-override', action='store_true',
+            help="Disable overriding PSX's own D-ATIS/MetarsUp (Qs464) reply with VATSIM "
+                 "data (enabled by default whenever frankenweather is actively controlling "
+                 "the weather zones). For testing/troubleshooting.")
 
         # Removed options, kept as accepted-but-ignored so old startup scripts still run;
         # handle_args() logs a deprecation warning for each one actually passed.
