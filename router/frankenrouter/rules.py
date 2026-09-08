@@ -58,6 +58,14 @@ QS546_CONNECT_FILTER_WINDOW_S = 5.0
 # special-cased and forwarded via its own filter in handle_addon() below.
 _KNOWN_ADDONS = frozenset(('FRANKENCDUPROXY', 'FRANKENMSFSBRIDGE'))
 
+# Same idea, but for addons whose messages don't use the normal NAME:payload
+# colon convention (so the "addon" token above ends up being the whole
+# rest-of-line, e.g. "BACARS.REMOTE;;;;V1|<base64>"), matched by prefix
+# instead of exact membership. GROUND.HANDLING isn't listed here even though
+# it uses the same convention -- it's special-cased earlier in handle_addon()
+# and never reaches this classification.
+_KNOWN_ADDON_PREFIXES = ('BACARS.REMOTE', 'GROUND.COMPANIES', 'GEOVR.PSX.')
+
 # client_provided_id FrankenWeather identifies itself with on the network
 # (see frankenweather.py's __MY_CLIENT_ID__). Used so that other
 # FrankenWeather instances keep receiving each other's addon=FRANKENWEATHER
@@ -870,7 +878,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         if not self.allow_write():
             return self.myreturn(RulesAction.DROP, RulesCode.NOWRITE)
         code = (RulesCode.ADDON_FORWARDED_KNOWN
-                if addon in _KNOWN_ADDONS
+                if addon in _KNOWN_ADDONS or addon.startswith(_KNOWN_ADDON_PREFIXES)
                 else RulesCode.ADDON_FORWARDED)
         return self.myreturn(RulesAction.NORMAL, code)
 
