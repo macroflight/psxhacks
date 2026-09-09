@@ -163,6 +163,7 @@ _STATIONS_CACHE = os.path.join(os.path.expanduser("~"), ".cache", "frankenweathe
 _DEFAULT_CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".frankenweather.toml")
 _VATSIM_ALL_URL = "https://metar.vatsim.net/all"
 _VATSIM_CACHE_MAX_S = 1800             # re-fetch VATSIM METARs every 30 minutes
+_SIGMET_REFRESH_MAX_S = 1800           # re-request PSX's own SIGMET download every 30 minutes
 _DATIS_LINE_MAX_CHARS = 24            # PSX MetarsUp (Qs464): max chars per '^'-delimited line
 # Split a MetarsUp (Qs464) value into per-airport blocks. PSX terminates every
 # airport's block -- found or not -- with a blank line, i.e. two consecutive
@@ -1048,6 +1049,9 @@ _CONFIG_TIMESYNC_FIELDS = (
     ("on_situ_load", "_timesync_on_situ_load", bool),
     ("periodic", "_timesync_periodic", bool),
 )
+_CONFIG_SIGMET_FIELDS = (
+    ("use_sigmets", "_use_sigmets", bool),
+)
 _CONFIG_MANUAL_WX_FIELDS = (
     "hi_oktas", "hi_top", "hi_base", "lo_oktas", "lo_top", "lo_base",
     "cb_oktas", "cb_top", "cb_base", "turb_severity", "turb_top", "turb_base",
@@ -1223,7 +1227,7 @@ class StandaloneFWContext:
 # Main script class
 # ---------------------------------------------------------------------------
 
-class Script:  # pylint: disable=too-many-instance-attributes
+class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-methods
     """FrankenWeather script."""
 
     def __init__(self):  # pylint: disable=too-many-statements
@@ -1334,6 +1338,16 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self._timesync_on_startup: bool = True    # on every PSX connect/reconnect
         self._timesync_on_situ_load: bool = True  # on every PSX situ load (load1..load3)
         self._timesync_periodic: bool = False     # every 60s if drifted >1s from real time
+        # Whether to periodically tell PSX to (re)download its own SIGMET
+        # data (see sigmet_refresh_coro). Needed because frankenweather
+        # disabling PSX's own METAR downloads also silently disables its
+        # SIGMET downloads (they share a fetch cycle in PSX) -- with this
+        # off, PSX's SIGMET data (and our own ts_sigmets, parsed from the
+        # same WxSigmet/Qs499 PSX populates) goes stale for the whole
+        # flight. Qi262=5 sets both "SIGMETs embedded in the planet
+        # weather model" (bit 0) and triggers an immediate download
+        # (bit 2) -- confirmed live 2026-09-08.
+        self._use_sigmets: bool = True
         self.focused_zone: int = 0          # 0 = WxBasic, 1-7 = Wx1-Wx7
         self.cloud_sync_last_alt_ft: float = 0.0
 
@@ -2026,6 +2040,10 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self._timesync_periodic = bool(cmd["timesync_periodic"])
             self.logger.info("timesync_periodic → %s", self._timesync_periodic)
             settings_changed = True
+        if "use_sigmets" in cmd:
+            self._use_sigmets = bool(cmd["use_sigmets"])
+            self.logger.info("use_sigmets → %s", self._use_sigmets)
+            settings_changed = True
         if "enroute_wind_enabled" in cmd:
             self._enroute_wind_enabled = bool(cmd["enroute_wind_enabled"])
             self.logger.info("enroute_wind_enabled → %s", self._enroute_wind_enabled)
@@ -2238,6 +2256,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
                 key: getattr(self, attr) for key, attr, _cast in _CONFIG_ENROUTE_WIND_FIELDS},
             "timesync": {
                 key: getattr(self, attr) for key, attr, _cast in _CONFIG_TIMESYNC_FIELDS},
+            "sigmet": {
+                key: getattr(self, attr) for key, attr, _cast in _CONFIG_SIGMET_FIELDS},
             "manual_weather": {
                 key: self._manual_wx_params[key] for key in _CONFIG_MANUAL_WX_FIELDS},
             "turbulence": {key: getattr(self, attr) for key, attr, _cast in _CONFIG_TURB_FIELDS},
@@ -2271,6 +2291,11 @@ class Script:  # pylint: disable=too-many-instance-attributes
         for key, attr, cast in _CONFIG_TIMESYNC_FIELDS:
             if key in timesync:
                 setattr(self, attr, cast(timesync[key]))
+
+        sigmet = config.get("sigmet", {})
+        for key, attr, cast in _CONFIG_SIGMET_FIELDS:
+            if key in sigmet:
+                setattr(self, attr, cast(sigmet[key]))
 
         manual_wx = config.get("manual_weather", {})
         for key in _CONFIG_MANUAL_WX_FIELDS:
@@ -4372,6 +4397,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
             "timesync_on_startup": self._timesync_on_startup,
             "timesync_on_situ_load": self._timesync_on_situ_load,
             "timesync_periodic": self._timesync_periodic,
+            "use_sigmets": self._use_sigmets,
             "config_file": cfg.config_file,
             "config_file_exists": bool(cfg.config_file and os.path.exists(cfg.config_file)),
         }
@@ -4474,6 +4500,39 @@ class Script:  # pylint: disable=too-many-instance-attributes
                         "Time sync: PSX clock %.1fs %s real time — resyncing",
                         abs(drift_ms) / 1000.0, "ahead of" if drift_ms > 0 else "behind")
                     self._sync_psx_clock()
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
+            self.logger.critical(traceback.format_exc())
+
+    async def sigmet_refresh_coro(self) -> None:
+        """Every _SIGMET_REFRESH_MAX_S (and once at startup), refresh PSX's own SIGMET data.
+
+        frankenweather disabling PSX's own METAR downloads also silently
+        disables its SIGMET downloads (they share a fetch cycle in PSX) --
+        left alone, PSX's SIGMET data (and our own ts_sigmets, parsed from
+        the same WxSigmet/Qs499 PSX populates -- see handle_sigmet_change)
+        goes stale for the whole flight. Writing Qi262=5 (SigmetOn) sets
+        "SIGMETs embedded in the planet weather model" (bit 0) and
+        triggers an immediate download (bit 2) in one write -- confirmed
+        live 2026-09-08. Gated on _use_sigmets and only while
+        frankenweather is actively driving the weather zones, matching
+        the D-ATIS/ALTN-supplement gating.
+        """
+        myname = inspect.currentframe().f_code.co_name
+        last_refresh = 0.0
+        try:
+            self.logger.debug("Starting %s", myname)
+            while True:
+                await asyncio.sleep(30.0)
+                if not self.psx_connected or self.psx_paused:
+                    continue
+                if not self._use_sigmets or self._should_skip_wx_update():
+                    continue
+                if time.time() - last_refresh < _SIGMET_REFRESH_MAX_S:
+                    continue
+                last_refresh = time.time()
+                self.psx_send_and_set("SigmetOn", "5")
+                self.logger.info("SIGMET: requested a fresh PSX download (Qi262=5)")
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
             self.logger.critical(traceback.format_exc())
@@ -4873,6 +4932,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
                     ("WindStateBroadcast", self.windstate_broadcast_coro),
                     ("TimeSync", self.time_sync_coro),
                     ("OmFailureBanner", self.om_failure_banner_coro),
+                    ("SigmetRefresh", self.sigmet_refresh_coro),
                 ]
                 coros += [
                     ("TurbulenceTask", self.turbulence_coro),
