@@ -44,6 +44,7 @@ $Specs = @(
     'frankentanker.spec',
     'frankenpush.spec',
     'psx_shutdown.spec',
+    'temporary_weather_logger.spec',
     'show_psx.spec',
     'show_usb.spec',
     'show_hid.spec'
