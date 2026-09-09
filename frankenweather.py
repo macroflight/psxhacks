@@ -1365,6 +1365,23 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self._fw_mode: str = "enabled"
         # True when OM is temporarily unavailable; WxAutoSet=1 until it recovers.
         self._om_unavailable: bool = False
+        # Diagnostic-only: forces _fetch_om_batch() to behave as if every
+        # request failed, without touching the network, so the
+        # _om_unavailable/WxAutoSet handoff can be triggered on demand for
+        # testing (addon=FRANKENWEATHER:DIAG:simulate_openmeteo_download_failure:1|0).
+        # See _handle_fw_addon().
+        self._diag_simulate_om_failure: bool = False
+        # Diagnostic-only: forces _zones_all_stale() to return True, so the
+        # WxAutoSet handoff itself can be triggered without needing the
+        # aircraft to actually fly far enough for real zone staleness
+        # (addon=FRANKENWEATHER:DIAG:force_zones_stale:1|0). See _handle_fw_addon().
+        self._diag_force_zones_stale: bool = False
+        # Diagnostic-only: shifts the pressure_msl reported by Open-Meteo for
+        # every zone by this many hPa before it's turned into a QNH, so the
+        # gap between our OM-derived weather and PSX's own default/METAR
+        # weather can be widened on demand (addon=FRANKENWEATHER:DIAG:
+        # qnh_offset_hpa:<float>). See _handle_fw_addon() / _update_zones().
+        self._diag_qnh_offset_hpa: float = 0.0
         # Manual weather parameters (used when _fw_mode == "manual")
         self._manual_wx_force_update: bool = False
         self._manual_wx_params: dict = {
@@ -1818,7 +1835,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
         if self._msfs_wind_sync:
             self._apply_wind_injection()
 
-    def _handle_fw_addon(self, value: str) -> None:
+    def _handle_fw_addon(self, value: str) -> None:  # pylint: disable=too-many-return-statements
         """Dispatch FRANKENWEATHER addon messages: commands, or a STATE/TURBSTATE/WINDSTATE msg."""
         rest = value[len("FRANKENWEATHER:"):]
         if rest.startswith("COMMAND:"):
@@ -1829,6 +1846,35 @@ class Script:  # pylint: disable=too-many-instance-attributes
             return
         if rest.startswith("MANUALWXCOMMAND:"):
             self._handle_manual_wx_command(rest[len("MANUALWXCOMMAND:"):])
+            return
+        if rest.startswith("DIAG:simulate_openmeteo_download_failure:"):
+            flag = rest[len("DIAG:simulate_openmeteo_download_failure:"):]
+            self._diag_simulate_om_failure = flag == "1"
+            self.logger.warning(
+                "DIAG: simulate_openmeteo_download_failure set to %s",
+                self._diag_simulate_om_failure)
+            # Trigger the next zone update immediately rather than waiting
+            # for the normal _REFRESH_MAX_S cycle -- same flag the manual
+            # weather panel uses to force an out-of-cycle update.
+            self._manual_wx_force_update = True
+            return
+        if rest.startswith("DIAG:force_zones_stale:"):
+            flag = rest[len("DIAG:force_zones_stale:"):]
+            self._diag_force_zones_stale = flag == "1"
+            self.logger.warning(
+                "DIAG: force_zones_stale set to %s", self._diag_force_zones_stale)
+            self._manual_wx_force_update = True
+            return
+        if rest.startswith("DIAG:qnh_offset_hpa:"):
+            raw = rest[len("DIAG:qnh_offset_hpa:"):]
+            try:
+                self._diag_qnh_offset_hpa = float(raw)
+            except ValueError:
+                self.logger.warning("DIAG: malformed qnh_offset_hpa value %r", raw)
+                return
+            self.logger.warning(
+                "DIAG: qnh_offset_hpa set to %s", self._diag_qnh_offset_hpa)
+            self._manual_wx_force_update = True
             return
         # STATE/TURBSTATE/WINDSTATE are the three self-broadcast message types
         # that carry a sending instance's UUID — used only for detecting
@@ -3328,6 +3374,8 @@ class Script:  # pylint: disable=too-many-instance-attributes
         serving its last-known-good weather than hand control to PSX's own
         WxAutoSet and fight it (see handle_wx_change()).
         """
+        if self._diag_force_zones_stale:
+            return True
         if not self.zone_positions:
             return False
         in_cruise = self.ac_alt_ft is not None and self.ac_alt_ft >= 18000.0
@@ -3664,7 +3712,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
         body = r.json() if r.status_code in (200, 429) else None
         return r.status_code, body
 
-    async def _fetch_om_batch(self, positions: list) -> list:
+    async def _fetch_om_batch(self, positions: list) -> list:  # pylint: disable=too-many-return-statements
         """Fetch Open-Meteo current weather for all positions. Returns list of dicts.
 
         Served straight from the on-disk cache when every position already
@@ -3674,6 +3722,9 @@ class Script:  # pylint: disable=too-many-instance-attributes
         cache miss falls back to fetching fresh data for the whole batch,
         exactly as before.
         """
+        if self._diag_simulate_om_failure:
+            self.logger.warning("Open-Meteo fetch simulated as failed (DIAG)")
+            return []
         cached = [self._om_zone_cache.get(_om_pos_key(p[0], p[1])) for p in positions]
         if cached and all(c is not None for c in cached):
             return cached
@@ -3994,6 +4045,21 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self._inject_wx_slow_transit()
             self.psx_send_and_set("WxAutoSet", "0")
             self._state_changed_event.set()
+        if self._diag_qnh_offset_hpa:
+            # om_batch entries may be the exact objects held in
+            # self._om_zone_cache (a cache hit returns them as-is, see
+            # _fetch_om_batch) -- mutate a copy, never the cached dict
+            # itself, or the offset gets permanently baked into the cache.
+            new_batch = []
+            for entry in om_batch:
+                cur = entry.get("current")
+                if cur and "pressure_msl" in cur:
+                    entry = dict(entry)
+                    entry["current"] = dict(cur)
+                    entry["current"]["pressure_msl"] = (
+                        float(cur["pressure_msl"]) + self._diag_qnh_offset_hpa)
+                new_batch.append(entry)
+            om_batch = new_batch
         om_by_zone: dict = {i: om_batch[i] for i in range(min(len(om_batch), 7))}
 
         # Refresh radar and lightning sources; failures degrade to echo=0 / no lightning
