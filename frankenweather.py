@@ -169,6 +169,19 @@ _DATIS_LINE_MAX_CHARS = 24            # PSX MetarsUp (Qs464): max chars per '^'-
 # '^' (see _handle_metars_up()), so blocks never contain an empty segment
 # themselves and splitting on '^^' is exact.
 _DATIS_BLOCK_SEP = '^^'
+# Header for the printer message frankenweather sends after PSX's own FMC
+# ALTN weather-request printout when it contains an UNAVAIL airport we have
+# VATSIM data for -- see _handle_printer_text(). In practice this write
+# lands before PSX's own message finishes rendering and replaces it
+# entirely (live-confirmed, only one printout comes out), rather than
+# appearing as a genuinely separate second message -- one line, well under
+# _DATIS_LINE_MAX_CHARS.
+_ALTN_SUPPLEMENT_HEADER = "FRANKENWEATHER ALTN WX^^"
+# Header PSX itself prints for both D-ATIS and ALTN weather replies (live-
+# confirmed identical for both) -- required (not just "UNAVAIL" present) in
+# _handle_printer_text() so an unrelated printout that happens to contain
+# the literal text "<ICAO> UNAVAIL" for some other reason can't misfire it.
+_DATIS_PRINT_HEADER = "ACARS D-ATIS:"
 _AIRPORT_SNAP_NM = 25.0               # snap zone to a real airport if within this radius
 _REPOSITION_DIST_NM = 500.0           # zone this far away → aircraft was repositioned
 _REFRESH_MAX_S = 300                  # always refresh weather after this many seconds
@@ -1242,6 +1255,9 @@ class Script:  # pylint: disable=too-many-instance-attributes
         # cache update (or an eventual network echo) instead of re-processing
         # it as a new D-ATIS request. See _handle_metars_up().
         self._datis_last_written: Optional[str] = None
+        # Same self-echo guard, for the ALTN-weather print supplement --
+        # see _handle_printer_text().
+        self._altn_supplement_last_written: Optional[str] = None
 
         # METAR TEMPO/PROBnn trend-group state, keyed by ICAO (not zone
         # number -- a zone's bound station can change as it relocates, but
@@ -3719,6 +3735,57 @@ class Script:  # pylint: disable=too-many-instance-attributes
                          self._datis_requested_icaos(value))
         self.psx_send_and_set("MetarsUp", new_value)
 
+    @staticmethod
+    def _print_requested_unavail_icaos(value: str) -> list:
+        """Return ICAOs from a Qs119 printout whose block was exactly "<ICAO> UNAVAIL"."""
+        icaos = []
+        for block in value.split(_DATIS_BLOCK_SEP):
+            parts = block.strip().split(None, 1)
+            if len(parts) != 2:
+                continue
+            icao, rest = parts
+            if (len(icao) == 4 and icao.isalpha() and icao.isupper() and
+                    rest.strip() == "UNAVAIL"):
+                icaos.append(icao)
+        return icaos
+
+    def _compose_altn_supplement(self, icaos: list) -> str:
+        """Build a supplemental printer message with VATSIM weather for icaos."""
+        return _ALTN_SUPPLEMENT_HEADER + "".join(
+            self._compose_datis_block(icao) for icao in icaos)
+
+    def _handle_printer_text(self, _key: str, value: str) -> None:
+        """React to a new PSX printer message (Qs119).
+
+        PSX's own FMC ALTN weather-request feature prints its reply in the
+        same "<ICAO> UNAVAIL"/^^-block format as D-ATIS (see
+        _datis_requested_icaos()), confirmed by live testing -- but unlike
+        D-ATIS it never touches Qs464, so there's no earlier point to
+        intercept it (Aerowinx's own guidance: print a second, corrective
+        message after it instead). A normal D-ATIS printout never reaches
+        here with an UNAVAIL airport we have data for, since
+        _handle_metars_up() already fixes Qs464 before PSX prints it -- so
+        in practice this only fires for ALTN requests.
+        """
+        if self.args.no_altn_supplement:
+            return
+        if self._should_skip_wx_update():
+            return
+        if not value.startswith(_DATIS_PRINT_HEADER) or 'UNAVAIL' not in value:
+            return
+        if value == self._altn_supplement_last_written:
+            # Our own previous write, reflected back through
+            # psx_send_and_set()'s local cache update -- not a new printout.
+            return
+        icaos = [icao for icao in self._print_requested_unavail_icaos(value)
+                 if icao in self.vatsim_cache]
+        if not icaos:
+            return
+        supplement = self._compose_altn_supplement(icaos)
+        self._altn_supplement_last_written = supplement
+        self.logger.info("ALTN weather: printing VATSIM supplement for %s", icaos)
+        self.psx_send_and_set("PrinterText", supplement)
+
     # ------------------------------------------------------------------
     # Open-Meteo fetch
     # ------------------------------------------------------------------
@@ -4759,6 +4826,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self.psx.subscribe("addon", self._handle_addon)
             self.psx.subscribe("WxCorridorTxt", self._handle_corridor)
             self.psx.subscribe("MetarsUp", self._handle_metars_up)
+            self.psx.subscribe("PrinterText", self._handle_printer_text)
 
             for i in range(1, 8):
                 self.psx.subscribe(f"Wx{i}", self.handle_wx_change)
@@ -4912,6 +4980,12 @@ class Script:  # pylint: disable=too-many-instance-attributes
             help="Disable overriding PSX's own D-ATIS/MetarsUp (Qs464) reply with VATSIM "
                  "data (enabled by default whenever frankenweather is actively controlling "
                  "the weather zones). For testing/troubleshooting.")
+        parser.add_argument(
+            '--no-altn-supplement', action='store_true',
+            help="Disable printing a supplemental VATSIM-weather message after PSX's own "
+                 "FMC ALTN weather printout when it contains an UNAVAIL airport we have "
+                 "data for (enabled by default whenever frankenweather is actively "
+                 "controlling the weather zones). For testing/troubleshooting.")
 
         # Removed options, kept as accepted-but-ignored so old startup scripts still run;
         # handle_args() logs a deprecation warning for each one actually passed.
