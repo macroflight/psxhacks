@@ -1365,6 +1365,14 @@ class Script:  # pylint: disable=too-many-instance-attributes
         self._fw_mode: str = "enabled"
         # True when OM is temporarily unavailable; WxAutoSet=1 until it recovers.
         self._om_unavailable: bool = False
+        # True whenever the most recent Open-Meteo fetch attempt failed, set
+        # on every _update_zones() call regardless of whether that failure
+        # was enough to trigger the full _om_unavailable/WxAutoSet handoff
+        # (i.e. this can be True while zones are still within useful range
+        # and frankenweather is quietly serving frozen weather). Drives the
+        # periodic om_failure_banner_coro() warning so an ongoing outage is
+        # never silent, even before/without a full handoff.
+        self._last_om_fetch_failed: bool = False
         # Diagnostic-only: forces _fetch_om_batch() to behave as if every
         # request failed, without touching the network, so the
         # _om_unavailable/WxAutoSet handoff can be triggered on demand for
@@ -3366,24 +3374,37 @@ class Script:  # pylint: disable=too-many-instance-attributes
         return f"{dist_nm:.0f}nm away (limit {self.args.low_alt_dist:.0f}nm)"
 
     def _zones_all_stale(self) -> bool:
-        """Return True if every current zone is now far enough to need relocation.
+        """Return True if the aircraft is too far from every zone for PSX to use them.
 
         Used by _update_zones() to decide whether a persistent Open-Meteo
-        outage has made the existing (frozen) zone weather irrelevant. While
-        any zone is still within its normal useful range, we'd rather keep
-        serving its last-known-good weather than hand control to PSX's own
-        WxAutoSet and fight it (see handle_wx_change()).
+        outage has made the existing (frozen) zone weather irrelevant enough
+        to hand control to PSX's own WxAutoSet (see handle_wx_change()).
+        Deliberately a *separate*, more generous distance test than
+        _zone_relocate_reason()'s cruise_behind_dist/low_alt_dist (50nm/
+        200nm) -- those exist to keep frankenweather's own zones
+        geographically *useful* for weather lookahead, not to track how far
+        PSX itself will still credit a zone's weather at the aircraft's
+        position. PSX keeps using the nearest zone's weather out to
+        wxautoset_handoff_dist nm regardless of how "stale" frankenweather
+        considers it for its own placement purposes -- handing off any
+        sooner than that needlessly exposes the aircraft to PSX's own
+        auto-weather, which is close to random more than ~320nm from a real
+        METAR station.
         """
         if self._diag_force_zones_stale:
             return True
-        if not self.zone_positions:
+        nearest_nm = self._nearest_zone_dist_nm()
+        if nearest_nm is None:
             return False
-        in_cruise = self.ac_alt_ft is not None and self.ac_alt_ft >= 18000.0
-        arpt_icaos = {icao for icao, _, _ in self._arpt_coverage_needed()}
-        return all(
-            self._zone_relocate_reason(zone_num, in_cruise, arpt_icaos) is not None
-            for zone_num in range(1, 8)
-            if zone_num in self.zone_positions
+        return nearest_nm > self.args.wxautoset_handoff_dist
+
+    def _nearest_zone_dist_nm(self) -> Optional[float]:
+        """Return the distance in nm from the aircraft to its nearest zone, or None."""
+        if not self.zone_positions or self.ac_lat is None:
+            return None
+        return min(
+            self._dist_nm(self.ac_lat, self.ac_lon, lat, lon)
+            for lat, lon, _ in self.zone_positions.values()
         )
 
     def _check_and_relocate(self) -> bool:  # pylint: disable=too-many-locals
@@ -4018,6 +4039,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
 
         # Fetch Open-Meteo for all 7 zones — CB always comes from OM even for METAR zones
         om_batch = await self._fetch_om_batch(snap_positions)
+        self._last_om_fetch_failed = not om_batch
         if not om_batch:
             if not self._zones_all_stale():
                 # A temporary outage: the existing (frozen) zone weather is still
@@ -4269,6 +4291,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
         config = {
             "cruise_behind_dist": cfg.cruise_behind_dist,
             "low_alt_dist": cfg.low_alt_dist,
+            "wxautoset_handoff_dist": cfg.wxautoset_handoff_dist,
             "new_zone_infront_range": list(cfg.new_zone_infront_range),
             "new_zone_leftright_range": list(cfg.new_zone_leftright_range),
             "new_zone_notnear": cfg.new_zone_notnear,
@@ -4388,6 +4411,48 @@ class Script:  # pylint: disable=too-many-instance-attributes
             self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
             self.logger.critical(traceback.format_exc())
 
+    async def om_failure_banner_coro(self) -> None:
+        """Every 30s, print a hard-to-miss banner while the last OM fetch failed.
+
+        _last_om_fetch_failed can be True well before (or even without ever
+        reaching) the full _om_unavailable/WxAutoSet handoff -- a fetch can
+        keep failing while frankenweather quietly serves frozen zone weather
+        because not all zones are stale yet. That's silent otherwise: only a
+        single warning line gets logged once, easy to scroll past. This
+        makes an ongoing outage impossible to miss on the console.
+        """
+        myname = inspect.currentframe().f_code.co_name
+        try:
+            self.logger.debug("Starting %s", myname)
+            while True:
+                await asyncio.sleep(30.0)
+                if not self._last_om_fetch_failed:
+                    continue
+                if self._om_unavailable:
+                    status = " — PSX default weather is active"
+                else:
+                    nearest_nm = self._nearest_zone_dist_nm()
+                    if nearest_nm is None:
+                        status = ""
+                    else:
+                        remaining = self.args.wxautoset_handoff_dist - nearest_nm
+                        status = (
+                            f" — nearest zone is {nearest_nm:.0f}nm away, still "
+                            f"{max(remaining, 0.0):.0f}nm short of the "
+                            f"{self.args.wxautoset_handoff_dist:.0f}nm handoff distance"
+                        )
+                self.logger.warning(
+                    "\n"
+                    "############################################################\n"
+                    "###  OPEN-METEO FETCH FAILING — weather not updating%s\n"
+                    "###  Retrying automatically; this banner repeats every 30s\n"
+                    "###  while the outage continues.\n"
+                    "############################################################",
+                    status)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
+            self.logger.critical(traceback.format_exc())
+
     async def state_broadcast_coro(self) -> None:
         """Broadcast current state as a PSX addon message on change or every 60 seconds.
 
@@ -4447,7 +4512,18 @@ class Script:  # pylint: disable=too-many-instance-attributes
                     # When PSX manages its own weather (WxAutoSet=1), don't reposition
                     # zones — PSX will move them and we'd overwrite that on recovery.
                     # The last known zone_positions are preserved for STATE broadcasts.
-                    wx_auto = self._fw_mode == "disabled" or self._om_unavailable
+                    # Also freeze repositioning as soon as the last Open-Meteo fetch
+                    # failed, even before the full _om_unavailable handoff: relocating
+                    # a zone only updates our own internal zone_positions bookkeeping
+                    # (the actual PSX write is separately blocked by the failed fetch
+                    # inside _update_zones()), and _zones_all_stale() checks against
+                    # that same bookkeeping -- so an ordinary relocation during an
+                    # outage can silently "un-stale" a zone whose PSX-side weather
+                    # was never actually refreshed, indefinitely delaying a handoff
+                    # that should have happened. Confirmed live 2026-09-08.
+                    wx_auto = (self._fw_mode == "disabled" or
+                               self._om_unavailable or
+                               self._last_om_fetch_failed)
                     if wx_auto:
                         any_relocated = False
                     elif not self.zone_positions:
@@ -4728,6 +4804,7 @@ class Script:  # pylint: disable=too-many-instance-attributes
                     ("StateBroadcast", self.state_broadcast_coro),
                     ("WindStateBroadcast", self.windstate_broadcast_coro),
                     ("TimeSync", self.time_sync_coro),
+                    ("OmFailureBanner", self.om_failure_banner_coro),
                 ]
                 coros += [
                     ("TurbulenceTask", self.turbulence_coro),
@@ -4777,6 +4854,11 @@ class Script:  # pylint: disable=too-many-instance-attributes
             '--low-alt-dist', type=float, default=200.0, metavar='NM',
             help="Below cruise alt: relocate any zone more than this many nm away.")
         parser.add_argument(
+            '--wxautoset-handoff-dist', type=float, default=320.0, metavar='NM',
+            help="Hand control to PSX's own WxAutoSet only once every zone is more "
+                 "than this many nm away (matches PSX's own zone-of-influence radius; "
+                 "deliberately independent of --cruise-behind-dist/--low-alt-dist).")
+        parser.add_argument(
             '--new-zone-infront-range', type=_parse_nm_range, default=(150.0, 250.0),
             metavar='MIN,MAX',
             help="Forward range in nm when placing a new zone ahead (e.g. 150,250).")
@@ -4803,6 +4885,10 @@ class Script:  # pylint: disable=too-many-instance-attributes
         parser.add_argument(
             '--debug', action='store_true',
             help="Log PSX weather changes, every value sent to PSX, and all PSX traffic.")
+        parser.add_argument(
+            '--log', type=str, default=None, metavar='FILE',
+            help="Also write every console log line to this file (e.g. to review later how "
+                 "often Open-Meteo fetches were failing). Appends if the file exists.")
         parser.add_argument(
             '--save-logs', type=str, default=None, metavar='DIR',
             help="[DEVELOPMENT] Directory to save enroute-wind flight-plan-vs-Open-Meteo "
@@ -4898,11 +4984,14 @@ class Script:  # pylint: disable=too-many-instance-attributes
         """Entry point."""
         self.handle_args()
 
+        handlers = [logging.StreamHandler(sys.stdout)]
+        if self.args.log:
+            handlers.append(logging.FileHandler(self.args.log))
         logging.basicConfig(
             format="%(asctime)s: %(message)s",
             level=logging.INFO,
             datefmt="%H:%M:%S",
-            handlers=[logging.StreamHandler(sys.stdout)])
+            handlers=handlers)
         self.logger = logging.getLogger(__MYNAME__)
         if self.args.debug:
             self.logger.setLevel(logging.DEBUG)
