@@ -1322,7 +1322,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # the whole flight (see _update_fmc_route_waypoints).
         self.route_waypoints: list = []           # [(name, lat_deg, lon_deg), ...] in route order
         self._enroute_waypoints: list = []        # persistent per-flight superset, same shape
-        self._enroute_wind_enabled: bool = False   # opt-in; off until enabled from the web UI
+        self._enroute_wind_enabled: bool = True    # on by default; can be disabled from the web UI
         self._enroute_wind_deviation: int = 30     # Qs497 random wind/OAT deviation, 10-80
         # Exact text of the last corridor we ourselves sent (MSFS wind sync or
         # the enroute wind importer) — compared by value, not time, in
