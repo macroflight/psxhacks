@@ -116,6 +116,7 @@ _INDEX_PAGE = (
     '<h1>Frankenrouter &mdash; {this_sim}</h1>'
     '{checklist_warning}'
     '<div style="margin-left:auto">'
+    '<a href="/efb" class="btn btn-gray btn-sm">EFB mode</a>'
     '<a href="/" class="btn btn-gray btn-sm">Refresh</a>'
     '</div>'
     '</div>\n'
@@ -852,6 +853,454 @@ def _build_events_page(router, color_scheme):
         f'<p class="note">{len(events)} event(s) — auto-refreshes every 30 s'
         f' — ★ = this router</p>\n' +
         body +
+        '</body>\n</html>\n'
+    )
+
+
+_EFB_STALE_TIMEOUT_S = 300.0
+# VATSIM METAR only refreshes every 30 minutes by design (frankenweather.py's
+# _VATSIM_CACHE_MAX_S), and even that only happens opportunistically inside
+# _update_zones() -- flagging it "not getting data" against the generic 5-minute
+# threshold above would be a false alarm on every normal cycle. Give it a
+# matching cadence plus a buffer instead.
+_EFB_VATSIM_STALE_TIMEOUT_S = 2100.0
+
+_EFB_CSS = '''\
+<style>
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0; background: #000; color: #dbe6f5;
+  font-family: "Segoe UI", -apple-system, "Helvetica Neue", Arial, sans-serif;
+}
+body { padding: 1.1rem 1.3rem 1.6rem; }
+.efb-grid { display: grid; gap: 0.9rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+.efb-grid.wide { grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); }
+.efb-card {
+  background: #0d1826; border: 1px solid #1e2f45; border-radius: 10px;
+  padding: 0.95rem 1.1rem; min-width: 0;
+}
+.efb-card.fill-green { background: linear-gradient(135deg, #1f8a4c, #176b3c); border-color: #1f8a4c; }
+.efb-card.fill-red { background: linear-gradient(135deg, #8a2f2f, #6b2323); border-color: #8a2f2f; }
+.efb-eyebrow {
+  color: #7e97ba; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; margin: 0 0 0.5rem;
+}
+.fill-green .efb-eyebrow, .fill-red .efb-eyebrow { color: rgba(255,255,255,0.75); }
+.efb-value { font-size: 1.35rem; font-weight: 700; color: #eef4fb; }
+.efb-value small { display: block; font-size: 0.78rem; font-weight: 400; color: #9fb2cc; margin-top: 0.15rem; }
+.fill-green .efb-value, .fill-red .efb-value { color: #fff; }
+.fill-green .efb-value small, .fill-red .efb-value small { color: rgba(255,255,255,0.8); }
+.efb-dot { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 50%; margin-right: 0.4rem; }
+.efb-chip-row { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-top: 0.4rem; }
+.efb-hint { margin: 0.35rem 0 0; font-size: 0.78rem; color: #7e97ba; }
+.efb-chip {
+  display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.55rem 0.9rem;
+  border-radius: 8px; border: 1px solid #24384f; background: #101c2c; color: #cbd8ea;
+  font-size: 0.88rem; font-weight: 600; cursor: pointer; text-decoration: none;
+}
+.efb-chip.active { background: #f4d100; border-color: #f4d100; color: #1a1a1a; }
+.efb-chip.active.blue { background: #2058a8; border-color: #3b7fe0; color: #fff; }
+.efb-src-row {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 0.85rem; padding: 0.3rem 0; border-bottom: 1px solid #16233a;
+}
+.efb-src-row:last-of-type { border-bottom: none; }
+.efb-src-row .lbl { color: #9fb2cc; }
+.efb-src-row .val { color: #eef4fb; font-weight: 600; }
+.efb-banner {
+  border-radius: 8px; padding: 0.65rem 0.9rem; font-size: 0.9rem; font-weight: 600;
+  margin-top: 0.7rem; background: #4a3a06; border: 1px solid #8a6d0d; color: #ffdf7a;
+}
+.efb-foot {
+  margin-bottom: 1rem; border-radius: 8px; padding: 0.6rem 0.9rem; font-size: 0.85rem;
+  color: #7c8fac; border: 1px solid #1e2f45; background: #0a1120;
+}
+.efb-foot ul { margin: 0.3rem 0 0; padding-left: 1.2rem; color: #f5a3a3; }
+form.efb-inline { display: inline; }
+</style>
+'''
+
+
+def _efb_age_label(age_s):
+    """Return a short human-readable age string for a data-freshness display."""
+    if age_s == float('inf'):
+        return 'never'
+    if age_s < 60:
+        return f"{int(age_s)}s ago"
+    if age_s < 3600:
+        return f"{int(age_s / 60)}m ago"
+    return f"{int(age_s / 3600)}h ago"
+
+
+def _efb_data_status(now, epoch, timeout_s=_EFB_STALE_TIMEOUT_S):
+    """Return (color, label, age_label) describing a 'last received' epoch timestamp."""
+    if not epoch:
+        return '#ef4444', 'not getting data', 'never'
+    age_s = now - epoch
+    if age_s > timeout_s:
+        return '#ef4444', 'not getting data', _efb_age_label(age_s)
+    return '#22c55e', 'OK', _efb_age_label(age_s)
+
+
+def _efb_status_dict(router, ctx):  # pylint: disable=too-many-locals
+    """Build the compact router+frankenweather status dict served by /efb and its JSON API."""
+    now = time.time()
+    connected = router.upstream is not None
+    host = router.config.upstream.host
+    port = router.config.upstream.port
+    preset_name = next(
+        (u.name for u in router.config.upstreams if u.host == host and u.port == port),
+        None,
+    )
+    upstream_label = f"{preset_name} ({host}:{port})" if preset_name else f"{host}:{port}"
+    own_sim = router.config.identity.simulator
+    standalone = router.config.identity.type == 'standalone'
+    elevation_source = router.sharedinfo.get('elevation_source_simulator', 'unknown')
+    traffic_source = router.sharedinfo.get('traffic_source_simulator', 'unknown')
+    pilot_flying = router.sharedinfo.get('pilot_flying_simulator', 'unknown')
+
+    def _disp(value):
+        return f"{value} (this sim)" if value == own_sim else value
+
+    router_info = {
+        'connected': connected,
+        'upstream_label': upstream_label,
+        'client_count': len(router.clients),
+        'standalone': standalone,
+        'errors': list(router.sharedinfo.get('errors', [])),
+    }
+    if not standalone:
+        connected_sims = ', '.join(
+            f"{s} (observer)" if any(
+                i.get('observer_mode')
+                for i in router.routerinfo.values()
+                if i.get('simulator_name') == s
+            ) else s
+            for s in sorted({
+                i['simulator_name']
+                for i in router.routerinfo.values()
+                if 'simulator_name' in i
+            })
+        ) or 'unknown'
+        router_info.update({
+            'elevation_master': _disp(elevation_source),
+            'elevation_ok': elevation_source != 'NOSIM',
+            'traffic_master': _disp(traffic_source),
+            'traffic_ok': traffic_source != 'NOSIM',
+            'flight_control_locks': _disp(pilot_flying),
+            'flight_control_locks_ok': pilot_flying == own_sim,
+            'connected_sims': connected_sims,
+        })
+
+    state = ctx.fw_state
+    fw_color, fw_label, fw_age = _efb_data_status(now, ctx.fw_state_received_at)
+    cfg = (state or {}).get('config', {})
+    last_om_failed = bool((state or {}).get('last_om_fetch_failed'))
+    metar_fallback = bool((state or {}).get('metar_fallback_active'))
+    if metar_fallback:
+        om_color, om_label = '#f4d100', 'METAR fallback active'
+    elif last_om_failed:
+        om_color, om_label = '#f4d100', 'retrying'
+    elif state is not None:
+        om_color, om_label = '#22c55e', 'OK'
+    else:
+        om_color, om_label = '#64748b', 'unknown'
+    vatsim_color, vatsim_label, vatsim_age = _efb_data_status(
+        now, (state or {}).get('vatsim_cache_time'), _EFB_VATSIM_STALE_TIMEOUT_S)
+
+    turbstate = ctx.fw_turbstate
+    turb_fresh_color, _, turb_age = _efb_data_status(now, ctx.fw_turbstate_received_at)
+    turb_available = turbstate is not None and turb_fresh_color == '#22c55e'
+    msfs_active = bool((turbstate or {}).get('msfs_active'))
+    msfs_color, _, msfs_age = _efb_data_status(now, (turbstate or {}).get('msfs_last_seen_epoch'))
+    if not msfs_active:
+        msfs_color = '#64748b'
+
+    weather_info = {
+        'available': state is not None,
+        'status_color': fw_color, 'status_label': fw_label, 'age_label': fw_age,
+        'fw_mode': (state or {}).get('fw_mode', 'unknown'),
+        'enroute_wind_enabled': bool(cfg.get('enroute_wind_enabled', False)),
+        'avoid_cb_near_airport': bool(cfg.get('avoid_cb_near_airport', False)),
+        'cb_airport_clearance_nm': cfg.get('cb_airport_clearance_nm', 15),
+        'src_router_color': fw_color, 'src_router_label': fw_label, 'src_router_age': fw_age,
+        'src_msfs_color': msfs_color,
+        'src_msfs_label': 'connected' if msfs_active else 'not connected',
+        'src_msfs_age': msfs_age,
+        'src_om_color': om_color, 'src_om_label': om_label,
+        'src_vatsim_color': vatsim_color, 'src_vatsim_label': vatsim_label,
+        'src_vatsim_age': vatsim_age,
+        'turb_available': turb_available,
+        'turb_enabled': bool((turbstate or {}).get('enabled', True)),
+        'turb_kind': (turbstate or {}).get('active_kind', 'none'),
+        'turb_intensity_pct': round((turbstate or {}).get('active_intensity', 0.0) * 100),
+        'turb_age': turb_age,
+        'turb_reason': (turbstate or {}).get('active_reason') or '—',
+    }
+    return {'router': router_info, 'weather': weather_info}
+
+
+def _efb_router_card(info):
+    """Render the frankenrouter connection status card."""
+    dot = '#22c55e' if info['connected'] else '#ef4444'
+    label = 'Connected' if info['connected'] else 'Disconnected'
+    rows = ''
+    if not info['standalone']:
+        for title, ok, val in (
+                ('Elevation master', info['elevation_ok'], info['elevation_master']),
+                ('Traffic master', info['traffic_ok'], info['traffic_master']),
+                ('Flight control locks', info['flight_control_locks_ok'],
+                 info['flight_control_locks']),
+        ):
+            c = '#22c55e' if ok else '#f4d100'
+            rows += (f'<div style="margin-top:0.35rem;font-size:0.85rem">'
+                     f'<span style="color:#7e97ba">{title}:</span> '
+                     f'<span style="color:{c};font-weight:600">{val}</span></div>\n')
+        rows += (f'<div style="margin-top:0.35rem;font-size:0.85rem">'
+                 f'<span style="color:#7e97ba">Connected simulators:</span> '
+                 f'<span style="color:#cbd8ea;font-weight:600">'
+                 f'{info["connected_sims"]}</span></div>\n')
+    return (
+        '<div class="efb-card" id="efb-router-card">\n'
+        '<div class="efb-eyebrow">Router Status</div>\n'
+        f'<div class="efb-value"><span class="efb-dot" style="background:{dot}"></span>'
+        f'{label}<small>{info["upstream_label"]} — {info["client_count"]} client(s)</small>'
+        '</div>\n' + rows +
+        '</div>\n'
+    )
+
+
+def _efb_bool_chip_row(action, field, current, true_label='Enabled', false_label='Disabled'):
+    """Render a two-state (true/false) chip toggle row posting an absolute value."""
+    def _chip(value, label):
+        active = ' active' if current == value else ''
+        val = '1' if value else '0'
+        return (f'<form class="efb-inline" method="post" action="{action}">'
+                f'<input type="hidden" name="field" value="{field}">'
+                f'<input type="hidden" name="value" value="{val}">'
+                f'<button type="submit" class="efb-chip{active}">{label}</button></form>\n')
+    return f'<div class="efb-chip-row">{_chip(True, true_label)}{_chip(False, false_label)}</div>\n'
+
+
+def _efb_controls_card(w):
+    """Render the turbulence and CB-avoidance control card."""
+    return (
+        '<div class="efb-card" id="efb-controls-card">\n'
+        '<div class="efb-eyebrow">Extra Turbulence</div>\n' +
+        _efb_bool_chip_row('/api/efb/turb-toggle', 'enabled', w['turb_enabled']) +
+        '<p class="efb-hint">Adds extra turbulence based on wind, terrain, '
+        'convection, CB proximity, etc.</p>\n'
+        '<div class="efb-eyebrow" style="margin-top:0.9rem">'
+        'Avoid CB Near Departure And Arrival Airport</div>\n' +
+        _efb_bool_chip_row(
+            '/api/efb/toggle', 'avoid_cb_near_airport', w['avoid_cb_near_airport']) +
+        '<p class="efb-hint">This will shift the position of CBs in the departure or '
+        'arrival airport weather zones away from the airport.</p>\n'
+        '</div>\n'
+    )
+
+
+def _efb_src_row(label, color, text):
+    """Render one labelled/colored status row shared by the data-sources-style cards."""
+    return (f'<div class="efb-src-row"><span class="lbl">{label}</span>'
+            f'<span class="val"><span class="efb-dot" style="background:{color}">'
+            f'</span>{text}</span></div>\n')
+
+
+def _efb_turb_text(w):
+    """Return a short human-readable description of the currently-injected turbulence."""
+    if not w['turb_available']:
+        return 'no data'
+    if not w['turb_enabled']:
+        return 'OFF'
+    if w['turb_kind'] in (None, 'none'):
+        return 'none active'
+    return f"{w['turb_kind']}, {w['turb_intensity_pct']}%"
+
+
+def _efb_turb_color(w):
+    """Return the extra-turbulence row color: intensity-graded when active, else neutral/alert."""
+    if not w['turb_available']:
+        return '#ef4444'
+    if not w['turb_enabled'] or w['turb_kind'] in (None, 'none'):
+        return '#22c55e'
+    pct = w['turb_intensity_pct']
+    if pct < 25:
+        return '#22c55e'
+    if pct < 50:
+        return '#f4d100'
+    return '#ef4444'
+
+
+def _efb_turb_injected(w):
+    """Return True when turbulence is actually being injected right now."""
+    return w['turb_available'] and w['turb_enabled'] and w['turb_kind'] not in (None, 'none')
+
+
+def _efb_datasources_card(w):
+    """Render the extra-turbulence status + data-source connectivity/freshness card."""
+    reason_row = (
+        _efb_src_row('Turbulence reason', '#64748b', w['turb_reason'])
+        if _efb_turb_injected(w) else ''
+    )
+    rows = (
+        _efb_src_row('Extra turbulence', _efb_turb_color(w), _efb_turb_text(w)) +
+        reason_row +
+        _efb_src_row('Router ← FrankenWeather', w['src_router_color'],
+                     f"{w['src_router_label']}, {w['age_label']}") +
+        _efb_src_row('FrankenWeather ← MSFS', w['src_msfs_color'],
+                     f"{w['src_msfs_label']}, {w['src_msfs_age']}") +
+        _efb_src_row('FrankenWeather ← Open-Meteo', w['src_om_color'], w['src_om_label']) +
+        _efb_src_row('FrankenWeather ← VATSIM METAR', w['src_vatsim_color'],
+                     f"{w['src_vatsim_label']}, {w['src_vatsim_age']}")
+    )
+    return (
+        '<div class="efb-card" id="efb-datasources-card">\n'
+        '<div class="efb-eyebrow">Weather Status</div>\n' +
+        rows +
+        '</div>\n'
+    )
+
+
+def _efb_decode_wx_wind(wind_field):
+    """Decode a Wx-string wind field (VVV+DDD+SS or legacy VVV+DD+SS) into (dir_deg, spd_kt)."""
+    try:
+        if len(wind_field) == 8:
+            return int(wind_field[3:6]), int(wind_field[6:8])
+        if len(wind_field) == 7:
+            return int(wind_field[3:5]) * 10, int(wind_field[5:7])
+    except ValueError:
+        pass
+    return None, None
+
+
+def _efb_decode_wx(wx_str):
+    """Decode a PSX Wx<N>/WxBasic string into display-ready weather fields, or None."""
+    if not wx_str:
+        return None
+    parts = wx_str.split(';')
+    if len(parts) < 24:
+        return None
+    wind_dir, wind_spd = _efb_decode_wx_wind(parts[18])
+    if wind_dir is None:
+        return None
+    try:
+        gust = int(parts[19])
+        return {
+            'wind_dir': wind_dir,
+            'wind_spd_kt': wind_spd,
+            'wind_gust_kt': gust if gust > wind_spd else None,
+            'visibility_m': int(parts[20]),
+            'temp_c': int(parts[22]),
+            'qnh_hpa': round(int(parts[23]) / 2.953, 1),
+            'cloud_oktas': int(parts[3]),
+            'cloud_base_ft': int(parts[5]),
+            'cb_oktas': int(parts[9]),
+            'cb_base_ft': int(parts[11]),
+            'cb_top_ft': int(parts[10]),
+        }
+    except (ValueError, IndexError):
+        return None
+
+
+def _efb_current_location_dict(ctx):
+    """Read PSX's currently-focused weather zone directly and decode its content."""
+    raw_zone = ctx.cache_get('FocussedWxZone')
+    try:
+        zone_num = int(raw_zone) if raw_zone not in (None, '') else 0
+    except ValueError:
+        zone_num = 0
+    if zone_num <= 0:
+        wx_key, zone_label = 'WxBasic', 'Global (no zone)'
+    else:
+        wx_key = f'Wx{zone_num}'
+        raw_mode = ctx.cache_get(f'WxMode{zone_num}') or ''
+        mode_parts = raw_mode.split(';')
+        icao = mode_parts[5][:4] if len(mode_parts) >= 6 else ''
+        zone_label = f'Zone {zone_num} ({icao})' if icao else f'Zone {zone_num}'
+    fields = _efb_decode_wx(ctx.cache_get(wx_key))
+    if fields is None:
+        return None
+    fields['zone_label'] = zone_label
+    return fields
+
+
+def _efb_location_wx_card(loc):
+    """Render the currently-focused zone's weather detail card."""
+    if loc is None:
+        body = '<p style="margin:0;color:#64748b">No weather data available.</p>\n'
+    else:
+        gust = f" G{loc['wind_gust_kt']}kt" if loc['wind_gust_kt'] else ''
+        clouds = (f"{loc['cloud_oktas']}/8 oktas @ {loc['cloud_base_ft']:,}ft"
+                  if loc['cloud_oktas'] > 0 else 'Clear')
+        cb = (f"{loc['cb_oktas']}/8 oktas, base {loc['cb_base_ft']:,}ft, "
+              f"tops {loc['cb_top_ft']:,}ft" if loc['cb_oktas'] > 0 else 'None')
+        body = (
+            _efb_src_row('Zone', '#3b82f6', loc['zone_label']) +
+            _efb_src_row('Wind', '#3b82f6',
+                         f"{loc['wind_dir']:03d}° / {loc['wind_spd_kt']}kt{gust}") +
+            _efb_src_row('QNH', '#3b82f6', f"{loc['qnh_hpa']} hPa") +
+            _efb_src_row('Temperature', '#3b82f6', f"{loc['temp_c']}°C") +
+            _efb_src_row('Visibility', '#3b82f6', f"{loc['visibility_m']:,} m") +
+            _efb_src_row('Clouds', '#3b82f6', clouds) +
+            _efb_src_row('Convective (CB)', '#3b82f6', cb)
+        )
+    return (
+        '<div class="efb-card" id="efb-location-card">\n'
+        '<div class="efb-eyebrow">Current Location Weather</div>\n' +
+        body +
+        '</div>\n'
+    )
+
+
+def _efb_errors_html(errors):
+    """Render the critical-errors banner, or '' when there are none."""
+    if not errors:
+        return ''
+    return (
+        '<div class="efb-foot">'
+        '<b style="color:#f5a3a3">Critical errors</b><ul>' +
+        ''.join(f'<li>{e}</li>' for e in errors) + '</ul></div>\n'
+    )
+
+
+def _build_efb_page(router, ctx):
+    """Build the compact /efb status+control page for the PSX.NET EFB app."""
+    status = _efb_status_dict(router, ctx)
+    r, w = status['router'], status['weather']
+    loc = _efb_current_location_dict(ctx)
+    return (
+        '<!DOCTYPE html>\n<html>\n<head>\n'
+        '<meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        '<meta name="color-scheme" content="dark">\n' +
+        _EFB_CSS +
+        '</head>\n<body>\n'
+        f'<div id="efb-errors">{_efb_errors_html(r["errors"])}</div>\n'
+        '<div style="text-align:right;margin-bottom:0.6rem">'
+        '<a href="/" class="efb-chip">Full router/weather control panel</a></div>\n'
+        '<div class="efb-grid wide">' +
+        _efb_router_card(r) + _efb_datasources_card(w) +
+        _efb_controls_card(w) + _efb_location_wx_card(loc) +
+        '</div>\n'
+        '<script>\n'
+        'function efbPoll() {\n'
+        '  fetch("/api/efb/status").then(function(r) { return r.json(); })'
+        '.then(function(s) {\n'
+        '    var ec = document.getElementById("efb-errors");\n'
+        '    var rc = document.getElementById("efb-router-card");\n'
+        '    var cc = document.getElementById("efb-controls-card");\n'
+        '    var dc = document.getElementById("efb-datasources-card");\n'
+        '    var lc = document.getElementById("efb-location-card");\n'
+        '    if (ec) ec.innerHTML = s.errors_html;\n'
+        '    if (rc) rc.outerHTML = s.router_html;\n'
+        '    if (cc) cc.outerHTML = s.controls_html;\n'
+        '    if (dc) dc.outerHTML = s.datasources_html;\n'
+        '    if (lc) lc.outerHTML = s.location_html;\n'
+        '  }).catch(function() {});\n'
+        '}\n'
+        'setInterval(efbPoll, 5000);\n'
+        '</script>\n'
         '</body>\n</html>\n'
     )
 
@@ -1697,10 +2146,52 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
             async def handle_briefing_get(_):
                 return web.json_response(router.flightinfo)
 
-            _fw_webui.register_weather_routes(
-                routes,
-                RouterFWContext(router, router.config.listen.rest_api_color_scheme),
-            )
+            _efb_ctx = RouterFWContext(router, router.config.listen.rest_api_color_scheme)
+
+            _fw_webui.register_weather_routes(routes, _efb_ctx)
+
+            @routes.get('/efb')
+            async def handle_efb_get(_):
+                return web.Response(
+                    text=_build_efb_page(router, _efb_ctx), content_type='text/html')
+
+            @routes.get('/api/efb/status')
+            async def handle_efb_status_get(_):
+                status = _efb_status_dict(router, _efb_ctx)
+                r, w = status['router'], status['weather']
+                loc = _efb_current_location_dict(_efb_ctx)
+                return web.json_response({
+                    'router': r,
+                    'weather': w,
+                    'errors_html': _efb_errors_html(r['errors']),
+                    'router_html': _efb_router_card(r),
+                    'controls_html': _efb_controls_card(w),
+                    'datasources_html': _efb_datasources_card(w),
+                    'location_html': _efb_location_wx_card(loc),
+                })
+
+            @routes.post('/api/efb/mode')
+            async def handle_efb_mode_post(request):
+                data = await request.post()
+                mode = data.get('mode')
+                if mode in ('enabled', 'paused', 'disabled', 'manual'):
+                    await _efb_ctx.send_mode_cmd(mode)
+                raise web.HTTPFound('/efb')
+
+            @routes.post('/api/efb/toggle')
+            async def handle_efb_toggle_post(request):
+                data = await request.post()
+                field = data.get('field')
+                if field in ('enroute_wind_enabled', 'avoid_cb_near_airport'):
+                    await _efb_ctx.send_fw_settings_cmd({field: data.get('value') == '1'})
+                raise web.HTTPFound('/efb')
+
+            @routes.post('/api/efb/turb-toggle')
+            async def handle_efb_turb_toggle_post(request):
+                data = await request.post()
+                if data.get('field') == 'enabled':
+                    await _efb_ctx.send_turb_cmd({'enabled': data.get('value') == '1'})
+                raise web.HTTPFound('/efb')
 
             @routes.get('/utils')
             async def handle_utils_get(_):

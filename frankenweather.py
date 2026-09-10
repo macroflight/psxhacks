@@ -4719,6 +4719,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         state = {
             "fw_mode": self._fw_mode,
             "metar_fallback_active": self._metar_fallback_active,
+            "last_om_fetch_failed": self._last_om_fetch_failed,
+            "vatsim_cache_time": self.vatsim_cache_time or None,
             "mode": "MANEUVERING" if self._maneuvering else "CRUISE",
             "ac_lat": round(self.ac_lat, 4) if self.ac_lat is not None else None,
             "ac_lon": round(self.ac_lon, 4) if self.ac_lon is not None else None,
