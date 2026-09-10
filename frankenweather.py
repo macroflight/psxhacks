@@ -184,6 +184,17 @@ _ALTN_SUPPLEMENT_HEADER = "FRANKENWEATHER ALTN WX^^"
 # the literal text "<ICAO> UNAVAIL" for some other reason can't misfire it.
 _DATIS_PRINT_HEADER = "ACARS D-ATIS:"
 _AIRPORT_SNAP_NM = 25.0               # snap zone to a real airport if within this radius
+# CB-near-airport avoidance (see _avoid_cb_near_airport / _arpt_coverage_needed()):
+# PSX always places a zone's CB exactly _CB_TO_ZONE_OFFSET_NM from the zone centre
+# (bearing varies with sim time/zone elevation, but the radius never does -- see
+# frankenturb/cb.py's _cb_bearing()/_CB_OFFSET_NM, same figure). So offsetting the
+# dep/dst zone centre itself by at least _CB_AIRPORT_CLEARANCE_NM +
+# _CB_TO_ZONE_OFFSET_NM from the real airport, in any fixed direction, geometrically
+# guarantees the CB can never land within _CB_AIRPORT_CLEARANCE_NM of the airport --
+# no need to track the (constantly rotating) bearing at all.
+_CB_TO_ZONE_OFFSET_NM = 7.0
+_CB_AIRPORT_CLEARANCE_NM = 15.0
+_CB_AVOIDANCE_BEARING_DEG = 0.0       # fixed direction to offset in; arbitrary but stable
 _REPOSITION_DIST_NM = 500.0           # zone this far away → aircraft was repositioned
 _REFRESH_MAX_S = 300                  # always refresh weather after this many seconds
 _PUSH_COOLDOWN_S = 5.0                # ignore Wx echo-backs for this long after our write
@@ -1052,6 +1063,9 @@ _CONFIG_TIMESYNC_FIELDS = (
 _CONFIG_SIGMET_FIELDS = (
     ("use_sigmets", "_use_sigmets", bool),
 )
+_CONFIG_CB_AVOIDANCE_FIELDS = (
+    ("avoid_cb_near_airport", "_avoid_cb_near_airport", bool),
+)
 _CONFIG_MANUAL_WX_FIELDS = (
     "hi_oktas", "hi_top", "hi_base", "lo_oktas", "lo_top", "lo_base",
     "cb_oktas", "cb_top", "cb_base", "turb_severity", "turb_top", "turb_base",
@@ -1348,6 +1362,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # weather model" (bit 0) and triggers an immediate download
         # (bit 2) -- confirmed live 2026-09-08.
         self._use_sigmets: bool = True
+        # Whether to offset the departure/destination zone's centre away
+        # from the real airport (see _arpt_coverage_needed()) so any CB
+        # PSX generates there can never land within _CB_AIRPORT_CLEARANCE_NM
+        # of the airport. Opt-in: the zone's weather still describes the
+        # real airport (see _update_zones()'s dep/dst bypass), but its
+        # broadcast position (and hence CB placement) is shifted.
+        self._avoid_cb_near_airport: bool = False
         self.focused_zone: int = 0          # 0 = WxBasic, 1-7 = Wx1-Wx7
         self.cloud_sync_last_alt_ft: float = 0.0
 
@@ -2044,6 +2065,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self._use_sigmets = bool(cmd["use_sigmets"])
             self.logger.info("use_sigmets → %s", self._use_sigmets)
             settings_changed = True
+        if "avoid_cb_near_airport" in cmd:
+            self._avoid_cb_near_airport = bool(cmd["avoid_cb_near_airport"])
+            self.logger.info("avoid_cb_near_airport → %s", self._avoid_cb_near_airport)
+            self._reposition_arpt_zones_for_cb_avoidance()
+            settings_changed = True
         if "enroute_wind_enabled" in cmd:
             self._enroute_wind_enabled = bool(cmd["enroute_wind_enabled"])
             self.logger.info("enroute_wind_enabled → %s", self._enroute_wind_enabled)
@@ -2258,6 +2284,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 key: getattr(self, attr) for key, attr, _cast in _CONFIG_TIMESYNC_FIELDS},
             "sigmet": {
                 key: getattr(self, attr) for key, attr, _cast in _CONFIG_SIGMET_FIELDS},
+            "cb_avoidance": {
+                key: getattr(self, attr) for key, attr, _cast in _CONFIG_CB_AVOIDANCE_FIELDS},
             "manual_weather": {
                 key: self._manual_wx_params[key] for key in _CONFIG_MANUAL_WX_FIELDS},
             "turbulence": {key: getattr(self, attr) for key, attr, _cast in _CONFIG_TURB_FIELDS},
@@ -2296,6 +2324,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         for key, attr, cast in _CONFIG_SIGMET_FIELDS:
             if key in sigmet:
                 setattr(self, attr, cast(sigmet[key]))
+
+        cb_avoidance = config.get("cb_avoidance", {})
+        for key, attr, cast in _CONFIG_CB_AVOIDANCE_FIELDS:
+            if key in cb_avoidance:
+                setattr(self, attr, cast(cb_avoidance[key]))
 
         manual_wx = config.get("manual_weather", {})
         for key in _CONFIG_MANUAL_WX_FIELDS:
@@ -3506,7 +3539,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             lat, lon = self.airports[icao]
             dist = self._dist_nm(self.ac_lat, self.ac_lon, lat, lon)
             if dist <= _ARPT_ZONE_DIST_NM:
-                result.append((icao, lat, lon))
+                if self._avoid_cb_near_airport:
+                    offset_nm = _CB_AIRPORT_CLEARANCE_NM + _CB_TO_ZONE_OFFSET_NM + 1.0
+                    offset_lon, offset_lat, _ = self.geod.fwd(
+                        lons=lon, lats=lat, az=_CB_AVOIDANCE_BEARING_DEG,
+                        dist=offset_nm * _NM_TO_M)
+                    result.append((icao, offset_lat, offset_lon))
+                else:
+                    result.append((icao, lat, lon))
             else:
                 self.logger.debug("FMC arpt %s too far (%.0fnm > %.0fnm limit)",
                                   icao, dist, _ARPT_ZONE_DIST_NM)
@@ -3522,6 +3562,42 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             if d > best_dist:
                 best_dist, best_zn = d, zn
         return best_zn
+
+    def _reposition_arpt_zones_for_cb_avoidance(self) -> None:
+        """Immediately re-apply the current avoid_cb_near_airport offset in place.
+
+        _ensure_arpt_zones()/_place_all_zones() only ever assign a *new*
+        zone to an airport that doesn't already have one -- an
+        already-established dep/dst zone is never revisited, by design
+        (repositioning a zone the aircraft currently depends on risks the
+        same instant-PFD-jump pattern this whole avoidance feature exists
+        to sidestep). But per explicit user request, toggling
+        avoid_cb_near_airport in flight should take effect immediately even
+        at that cost, rather than only applying to the next fresh
+        assignment -- so this directly moves any already-assigned dep/dst
+        zone to match what _arpt_coverage_needed() would now place it at,
+        and forces an out-of-cycle _update_zones() write to apply it.
+        """
+        needed = {icao: (lat, lon) for icao, lat, lon in self._arpt_coverage_needed()}
+        moved = False
+        for zone_num, (lat, lon, icao) in list(self.zone_positions.items()):
+            if icao not in needed:
+                continue
+            new_lat, new_lon = needed[icao]
+            if (new_lat, new_lon) == (lat, lon):
+                continue
+            self.zone_positions[zone_num] = (new_lat, new_lon, icao)
+            self.zone_placement_reason[zone_num] = self._placement_desc(
+                new_lat, new_lon, icao, is_arpt=True)
+            self.zone_relocated_time[zone_num] = time.time()
+            self.logger.info(
+                "Zone %d: repositioned %s for avoid_cb_near_airport toggle "
+                "(%.3f/%.3f → %.3f/%.3f)",
+                zone_num, icao, lat, lon, new_lat, new_lon)
+            moved = True
+        if moved:
+            self._manual_wx_force_update = True
+            self.fmc_changed_event.set()
 
     def _ensure_arpt_zones(self) -> bool:
         """Ensure dep/dst airports within arpt_zone_dist have a dedicated zone.
@@ -4097,6 +4173,35 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         used_icaos: set = set()
 
         for i, (lat, lon, stored_icao) in enumerate(positions):
+            if (self._avoid_cb_near_airport and stored_icao and
+                    stored_icao in (self.fmc_dep_icao, self.fmc_dst_icao) and
+                    stored_icao not in used_icaos):
+                # positions[i] was deliberately offset from the real airport
+                # by _arpt_coverage_needed() so PSX's CB (always 7nm from the
+                # zone centre) can never land near the runway. Keep using the
+                # real airport's own METAR/identity directly -- the normal
+                # nearest-airport search below would otherwise snap straight
+                # back to the airport's exact coordinates via
+                # _AIRPORT_SNAP_NM and undo the offset. Weather content is
+                # still fetched at the offset position (lat, lon) for
+                # anything not covered by the METAR text itself (CAPE/radar/
+                # lightning CB inputs), so the CB decision stays consistent
+                # with the zone's actual (offset) broadcast position.
+                raw = self.vatsim_cache.get(stored_icao)
+                snap_positions.append((lat, lon))
+                snap_icaos.append(stored_icao)
+                raw_metars.append(raw)
+                used_icaos.add(stored_icao)
+                if raw is None:
+                    om_zone_idx.append(i)
+                    self.logger.debug(
+                        "Zone %d: no METAR for %s (CB-avoidance offset zone) — "
+                        "using Open-Meteo", i + 1, stored_icao)
+                else:
+                    self.logger.debug(
+                        "Zone %d → %s (VATSIM METAR, CB-avoidance offset zone)",
+                        i + 1, stored_icao)
+                continue
             for icao, alat, alon, dist_nm in zone_candidates[i]:
                 if icao in self.vatsim_cache and icao not in used_icaos:
                     snap_positions.append((alat, alon))
@@ -4398,6 +4503,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "timesync_on_situ_load": self._timesync_on_situ_load,
             "timesync_periodic": self._timesync_periodic,
             "use_sigmets": self._use_sigmets,
+            "avoid_cb_near_airport": self._avoid_cb_near_airport,
+            "cb_airport_clearance_nm": _CB_AIRPORT_CLEARANCE_NM,
             "config_file": cfg.config_file,
             "config_file_exists": bool(cfg.config_file and os.path.exists(cfg.config_file)),
         }

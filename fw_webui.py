@@ -1045,8 +1045,30 @@ def _build_weather_settings_page(ctx):  # pylint: disable=too-many-locals,too-ma
         )
     body += '</div>\n'
 
+    cfg = state.get('config', {})
+    avoid_cb = bool(cfg.get('avoid_cb_near_airport'))
+    avoid_cb_clearance_nm = cfg.get('cb_airport_clearance_nm', 15)
+    avoid_cb_toggle_label = "Disable" if avoid_cb else "Enable"
+    avoid_cb_toggle_class = "btn-red" if avoid_cb else "btn-green"
+    body += (
+        '<h2>Weather zones</h2>\n'
+        '<div class="card" style="display:flex;align-items:center;gap:1.5em;flex-wrap:wrap">'
+        '<div style="flex:1;min-width:18em">'
+        '<span style="color:#94a3b8;font-size:0.85em">Avoid CB near departure/destination</span>'
+        '<br><b style="color:'
+        f'{"#4ade80" if avoid_cb else "#64748b"}">{"ENABLED" if avoid_cb else "disabled"}</b>'
+        '<br><span style="font-size:0.8em;color:#64748b">Offsets the departure/destination '
+        "zone's centre (keeping the airport's real weather/METAR) so any CB PSX places there "
+        f"can never land within {avoid_cb_clearance_nm:.0f}nm of the airport.</span>"
+        '</div>'
+        '<form action="/api/weather/avoid-cb-near-airport/toggle" method="post">'
+        f'<input type="hidden" name="enabled" value="{0 if avoid_cb else 1}">'
+        f'<button type="submit" class="btn {avoid_cb_toggle_class} btn-sm">'
+        f'{avoid_cb_toggle_label}</button>'
+        '</form></div>\n'
+    )
+
     zones = state.get('zones', [])
-    body += '<h2>Weather zones</h2>\n'
     body += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1em;align-items:start">\n'
 
     focused_zone = None
@@ -2175,6 +2197,13 @@ def register_weather_routes(routes, ctx):  # pylint: disable=too-many-statements
         enabled = data.get('enabled') == '1'
         await ctx.send_fw_settings_cmd({"enroute_wind_enabled": enabled})
         raise web.HTTPFound('/weather/enroute-wind')
+
+    @routes.post('/api/weather/avoid-cb-near-airport/toggle')
+    async def _weather_avoid_cb_toggle(request):
+        data = await request.post()
+        enabled = data.get('enabled') == '1'
+        await ctx.send_fw_settings_cmd({"avoid_cb_near_airport": enabled})
+        raise web.HTTPFound('/weather/settings')
 
     @routes.post('/api/weather/enroute-wind/deviation')
     async def _weather_enroute_wind_deviation(request):
