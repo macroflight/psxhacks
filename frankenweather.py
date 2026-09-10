@@ -163,6 +163,14 @@ _STATIONS_CACHE = os.path.join(os.path.expanduser("~"), ".cache", "frankenweathe
 _DEFAULT_CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".frankenweather.toml")
 _VATSIM_ALL_URL = "https://metar.vatsim.net/all"
 _VATSIM_CACHE_MAX_S = 1800             # re-fetch VATSIM METARs every 30 minutes
+# Secondary METAR source used only for the METAR-fallback path, when VATSIM's
+# own (ATC/pilot-reported) network doesn't cover a station near enough to be
+# useful -- NOAA's hourly cycle files have much broader, non-VATSIM-dependent
+# global coverage. Each file is a bulk dump of every METAR received in that
+# UTC hour, refreshed hourly, so re-fetching more often than that is pointless.
+_NOAA_METAR_CYCLE_URL = "https://tgftp.nws.noaa.gov/data/observations/metar/cycles/{hour:02d}Z.TXT"
+_NOAA_METAR_CACHE_MAX_S = 1800
+_METAR_FALLBACK_ZONE_COUNT = 7
 _SIGMET_REFRESH_MAX_S = 1800           # re-request PSX's own SIGMET download every 30 minutes
 _DATIS_LINE_MAX_CHARS = 24            # PSX MetarsUp (Qs464): max chars per '^'-delimited line
 # Split a MetarsUp (Qs464) value into per-airport blocks. PSX terminates every
@@ -1267,6 +1275,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # VATSIM METAR cache: ICAO → raw METAR string
         self.vatsim_cache: dict = {}
         self.vatsim_cache_time = 0.0
+        # NOAA METAR cache (secondary source, METAR-fallback path only): ICAO → raw METAR
+        self.noaa_metar_cache: dict = {}
+        self.noaa_metar_cache_time = 0.0
 
         # Last MetarsUp (Qs464) value we wrote ourselves, so we can recognize
         # our own write reflected back through psx_send_and_set()'s local
@@ -1414,27 +1425,42 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # disabled = stop updating; set WxAutoSet=1 (PSX resumes its own auto-weather)
         # manual  = all zones get the same manually-configured weather
         self._fw_mode: str = "enabled"
-        # True when OM is temporarily unavailable; WxAutoSet=1 until it recovers.
-        self._om_unavailable: bool = False
+        # True while the METAR-fallback path (see _apply_metar_fallback()) has
+        # taken over all 7 zones + WxBasic from cached VATSIM/NOAA METAR text,
+        # because Open-Meteo has been down long enough that _zones_all_stale()
+        # trips. Never hands control to PSX's own WxAutoSet -- PSX's own
+        # fallback beyond real METAR coverage is essentially random (see
+        # project_frankenweather_altitude_jump memory), so real METAR data,
+        # however far away, is always at least as good.
+        self._metar_fallback_active: bool = False
         # True whenever the most recent Open-Meteo fetch attempt failed, set
         # on every _update_zones() call regardless of whether that failure
-        # was enough to trigger the full _om_unavailable/WxAutoSet handoff
-        # (i.e. this can be True while zones are still within useful range
-        # and frankenweather is quietly serving frozen weather). Drives the
+        # was enough to trigger the full METAR-fallback handoff (i.e. this
+        # can be True while zones are still within useful range and
+        # frankenweather is quietly serving frozen weather). Drives the
         # periodic om_failure_banner_coro() warning so an ongoing outage is
         # never silent, even before/without a full handoff.
         self._last_om_fetch_failed: bool = False
         # Diagnostic-only: forces _fetch_om_batch() to behave as if every
-        # request failed, without touching the network, so the
-        # _om_unavailable/WxAutoSet handoff can be triggered on demand for
-        # testing (addon=FRANKENWEATHER:DIAG:simulate_openmeteo_download_failure:1|0).
+        # request failed, without touching the network, so the METAR-fallback
+        # handoff can be triggered on demand for testing
+        # (addon=FRANKENWEATHER:DIAG:simulate_openmeteo_download_failure:1|0).
         # See _handle_fw_addon().
         self._diag_simulate_om_failure: bool = False
         # Diagnostic-only: forces _zones_all_stale() to return True, so the
-        # WxAutoSet handoff itself can be triggered without needing the
+        # METAR-fallback handoff itself can be triggered without needing the
         # aircraft to actually fly far enough for real zone staleness
         # (addon=FRANKENWEATHER:DIAG:force_zones_stale:1|0). See _handle_fw_addon().
         self._diag_force_zones_stale: bool = False
+        # Diagnostic-only: makes _nearest_metar_stations() (the METAR-fallback
+        # path only -- not the D-ATIS override or normal per-zone METAR
+        # matching, both of which keep using the real cache) act as if
+        # self.vatsim_cache were empty, without touching the real cached data
+        # or its refresh cycle, so the NOAA-secondary-source and
+        # no-data-at-all branches of _apply_metar_fallback() can be exercised
+        # on demand (addon=FRANKENWEATHER:DIAG:simulate_vatsim_failure:1|0).
+        # See _handle_fw_addon().
+        self._diag_simulate_vatsim_failure: bool = False
         # Diagnostic-only: shifts the pressure_msl reported by Open-Meteo for
         # every zone by this many hPa before it's turned into a QNH, so the
         # gap between our OM-derived weather and PSX's own default/METAR
@@ -1571,13 +1597,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         """Re-apply our weather if PSX overwrites a zone we've set.
 
         No-ops entirely while PSX itself is in charge of weather (WxAutoSet=1,
-        set when _fw_mode is "disabled" or during an Open-Meteo outage that's
-        made every zone stale — see _update_zones()/_zones_all_stale()):
-        otherwise every PSX-generated change would look like an "overwrite" of
-        our stale self.zone_wx and get stomped right back, fighting PSX's own
-        auto-weather engine indefinitely instead of actually handing off to it.
+        set only when _fw_mode is "disabled") or while the METAR-fallback path
+        is active: fallback zones get their content from PSX's own METAR
+        parser (via Metar<N>), not from anything we compute ourselves, so
+        self.zone_wx has nothing valid to compare against for them — treating
+        PSX's own recompute as an "overwrite" to stomp back would just fight
+        it indefinitely.
         """
-        if self._fw_mode == "disabled" or self._om_unavailable:
+        if self._fw_mode == "disabled" or self._metar_fallback_active:
             return
         elapsed = time.time() - self.last_write_time
         self.logger.debug("← PSX %s changed (%.1fs since last write)", key, elapsed)
@@ -1922,6 +1949,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self._diag_force_zones_stale = flag == "1"
             self.logger.warning(
                 "DIAG: force_zones_stale set to %s", self._diag_force_zones_stale)
+            self._manual_wx_force_update = True
+            return
+        if rest.startswith("DIAG:simulate_vatsim_failure:"):
+            flag = rest[len("DIAG:simulate_vatsim_failure:"):]
+            self._diag_simulate_vatsim_failure = flag == "1"
+            self.logger.warning(
+                "DIAG: simulate_vatsim_failure set to %s", self._diag_simulate_vatsim_failure)
             self._manual_wx_force_update = True
             return
         if rest.startswith("DIAG:qnh_offset_hpa:"):
@@ -2703,7 +2737,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         self._turb_state_changed_event.set()
                     continue
 
-                if self._om_unavailable:
+                if self._last_om_fetch_failed:
+                    # Turbulence physics needs real CAPE/OM data regardless of
+                    # whether zone content has a METAR-fallback substitute.
                     continue
 
                 state, pirep_rec, cape_sample, gairmet_region = await asyncio.gather(
@@ -3452,18 +3488,16 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
         Used by _update_zones() to decide whether a persistent Open-Meteo
         outage has made the existing (frozen) zone weather irrelevant enough
-        to hand control to PSX's own WxAutoSet (see handle_wx_change()).
-        Deliberately a *separate*, more generous distance test than
-        _zone_relocate_reason()'s cruise_behind_dist/low_alt_dist (50nm/
-        200nm) -- those exist to keep frankenweather's own zones
-        geographically *useful* for weather lookahead, not to track how far
-        PSX itself will still credit a zone's weather at the aircraft's
+        to reposition onto the METAR-fallback stations instead (see
+        _apply_metar_fallback()). Deliberately a *separate*, more generous
+        distance test than _zone_relocate_reason()'s cruise_behind_dist/
+        low_alt_dist (50nm/200nm) -- those exist to keep frankenweather's own
+        zones geographically *useful* for weather lookahead, not to track how
+        far PSX itself will still credit a zone's weather at the aircraft's
         position. PSX keeps using the nearest zone's weather out to
         wxautoset_handoff_dist nm regardless of how "stale" frankenweather
-        considers it for its own placement purposes -- handing off any
-        sooner than that needlessly exposes the aircraft to PSX's own
-        auto-weather, which is close to random more than ~320nm from a real
-        METAR station.
+        considers it for its own placement purposes -- repositioning any
+        sooner than that just causes needless zone churn for no benefit.
         """
         if self._diag_force_zones_stale:
             return True
@@ -3751,6 +3785,139 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 self.logger.info("VATSIM METAR cache refreshed: %d airports", len(metars))
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.warning("VATSIM METAR cache refresh failed: %s", exc)
+
+    async def _refresh_noaa_metar_cache(self, session: aiohttp.ClientSession) -> None:
+        """Fetch NOAA's current-hour METAR cycle file and update the local cache.
+
+        Secondary source, used only by _apply_metar_fallback() when VATSIM's
+        own cache doesn't cover enough nearby stations -- NOAA's network is
+        far broader (every station reporting anywhere, not just VATSIM
+        ATC/pilot-fed ones). Each file is two lines per station: an
+        observation timestamp, then the raw METAR text itself.
+        """
+        url = _NOAA_METAR_CYCLE_URL.format(hour=datetime.now(timezone.utc).hour)
+        try:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as r:
+                if r.status != 200:
+                    self.logger.warning("NOAA METAR cycle fetch: HTTP %d", r.status)
+                    return
+                text = await r.text()
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.warning("NOAA METAR cycle fetch failed: %s", exc)
+            return
+        metars: dict = {}
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split()
+            if parts:
+                icao = parts[0]
+                if len(icao) == 4 and icao.upper() == icao and icao.isalpha():
+                    metars[icao] = line
+        self.noaa_metar_cache = metars
+        self.noaa_metar_cache_time = time.time()
+        self.logger.info("NOAA METAR cache refreshed: %d stations", len(metars))
+
+    def _nearest_metar_stations(self, lat: float, lon: float, n: int) -> list:
+        """Return up to n (icao, lat, lon, dist_nm, raw_metar), nearest first.
+
+        Draws from the VATSIM (preferred on overlap) and NOAA caches
+        combined, cross-referenced against the known airport-position
+        database. Used only by the METAR-fallback path, so distance is
+        unbounded -- the whole point is to find the best available data,
+        however far away. See _diag_simulate_vatsim_failure for how to
+        exercise the NOAA-only / no-data-at-all branches on demand.
+        """
+        combined = dict(self.noaa_metar_cache)
+        if not self._diag_simulate_vatsim_failure:
+            combined.update(self.vatsim_cache)
+        candidates = []
+        for icao, raw in combined.items():
+            pos = self.airports.get(icao)
+            if pos is None:
+                continue
+            alat, alon = pos
+            dist = self._dist_nm(lat, lon, alat, alon)
+            candidates.append((dist, icao, alat, alon, raw))
+        candidates.sort(key=lambda c: c[0])
+        return [(icao, alat, alon, dist, raw) for dist, icao, alat, alon, raw in candidates[:n]]
+
+    def _apply_metar_to_wxbasic(self, icao: str, raw: str, dist_nm: float) -> None:
+        """Ground WxBasic's QNH/temp in the single globally-nearest METAR.
+
+        WxBasic is the "no zone nearby" background/planet weather -- it
+        should never be left at whatever it happened to be (or at PSX's own
+        synthetic default) when real station data exists anywhere at all,
+        however far away. Only QNH and temperature are overridden; every
+        other field is left as PSX last had it, since we have no real basis
+        for guessing wind/cloud/visibility that far from the actual station.
+        """
+        parsed = _parse_metar(raw)
+        current = self.psx.get("WxBasic") if self.psx else None
+        current_parts = current.split(';') if current else []
+        base = list(current_parts) if len(current_parts) >= 24 else list(_WX_DEFAULTS)
+        base[22] = str(int(round(parsed['temp_c'])))
+        base[23] = str(_hpa_to_psx_qnh(parsed['qnh_hpa']))
+        wx_str = ";".join(base)
+        self.zone_wx[0] = wx_str
+        self.psx_send_and_set("WxBasic", wx_str)
+        self.logger.info(
+            "METAR fallback: WxBasic QNH/temp set from %s (%.0fnm away)", icao, dist_nm)
+
+    async def _apply_metar_fallback(  # pylint: disable=too-many-locals
+            self, session: aiohttp.ClientSession) -> None:
+        """Take over all 7 zones + WxBasic from cached METAR text directly.
+
+        Entered from _update_zones() once _zones_all_stale() says the
+        existing (frozen) zone weather is no longer geographically relevant
+        during a persistent Open-Meteo outage. Positions each zone at one of
+        the nearest cached VATSIM/NOAA METAR stations (however far away) and
+        pushes the raw METAR text straight into PSX's native Metar<N> field
+        (Qs343-Qs349) -- confirmed live 2026-09-10 that PSX's own parser
+        correctly derives wind/cloud/CB/QNH/temp from it, for both ICAO/hPa
+        and US/inHg METAR formats, with no Open-Meteo/CAPE data needed at
+        all. Deliberately never hands control to PSX's own WxAutoSet -- see
+        project_frankenweather_altitude_jump memory for why PSX's own
+        fallback beyond real METAR coverage is essentially random.
+        """
+        stations = self._nearest_metar_stations(
+            self.ac_lat, self.ac_lon, _METAR_FALLBACK_ZONE_COUNT)
+        if (len(stations) < _METAR_FALLBACK_ZONE_COUNT and
+                time.time() - self.noaa_metar_cache_time > _NOAA_METAR_CACHE_MAX_S):
+            await self._refresh_noaa_metar_cache(session)
+            stations = self._nearest_metar_stations(
+                self.ac_lat, self.ac_lon, _METAR_FALLBACK_ZONE_COUNT)
+        if not stations:
+            self.logger.warning(
+                "METAR fallback: no METAR station with known coordinates in "
+                "the VATSIM or NOAA cache — keeping existing (stale) zone weather")
+            return
+        self._inject_wx_slow_transit()
+        self.zone_positions = {}
+        self.zone_placement_reason = {}
+        now = time.time()
+        month = datetime.now(timezone.utc).month
+        for i, (icao, lat, lon, dist_nm, raw) in enumerate(stations):
+            zone_num = i + 1
+            self.zone_positions[zone_num] = (lat, lon, icao)
+            self.zone_placement_reason[zone_num] = f"METAR fallback: {icao} ({dist_nm:.0f}nm)"
+            self.zone_relocated_time[zone_num] = now
+            wxmode = build_wxmode_string(lat, lon, 0.0, month, icao)
+            self.zone_mode[zone_num] = wxmode
+            self.psx_send_and_set(f"WxMode{zone_num}", wxmode)
+            self.psx_send_and_set(f"Metar{zone_num}", raw)
+            self.zone_is_metar[zone_num] = True
+            self.zone_reason[zone_num] = f"VATSIM/NOAA {icao} (METAR fallback, {dist_nm:.0f}nm)"
+        nearest_icao, _, _, nearest_dist, nearest_raw = stations[0]
+        self._apply_metar_to_wxbasic(nearest_icao, nearest_raw, nearest_dist)
+        if not self._metar_fallback_active:
+            self.logger.warning(
+                "METAR fallback ACTIVE: Open-Meteo unavailable, positioned %d zone(s) "
+                "on nearest cached METAR stations (nearest %s at %.0fnm)",
+                len(stations), nearest_icao, nearest_dist)
+        self._metar_fallback_active = True
+        self._state_changed_event.set()
 
     # ------------------------------------------------------------------
     # D-ATIS (MetarsUp / Qs464) override
@@ -4240,29 +4407,20 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if not om_batch:
             if not self._zones_all_stale():
                 # A temporary outage: the existing (frozen) zone weather is still
-                # geographically relevant, so keep serving it rather than handing
-                # control to PSX's WxAutoSet — that would fight handle_wx_change()'s
-                # reapply logic the moment PSX's own auto-weather diverges from our
-                # last-known values, causing exactly the kind of rapid QNH/altitude
-                # jump this was built to avoid.
+                # geographically relevant, so keep serving it rather than
+                # repositioning onto METAR-fallback zones for no reason.
                 self.logger.warning(
                     "Open-Meteo unavailable — keeping existing zone weather"
                     " (still within useful range)")
                 return
-            if not self._om_unavailable:
-                self._om_unavailable = True
-                self.logger.warning(
-                    "Open-Meteo unavailable and all zones now stale"
-                    " — reverting to PSX default weather")
-                self._inject_wx_slow_transit()
-                self.psx_send_and_set("WxAutoSet", "1")
-                self._state_changed_event.set()
+            await self._apply_metar_fallback(session)
             return
-        if self._om_unavailable:
-            self._om_unavailable = False
-            self.logger.info("Open-Meteo available again — resuming FrankenWeather")
-            self._inject_wx_slow_transit()
-            self.psx_send_and_set("WxAutoSet", "0")
+        if self._metar_fallback_active:
+            self._metar_fallback_active = False
+            self.logger.info(
+                "Open-Meteo available again — resuming normal zone placement"
+                " (repositioning off the METAR-fallback stations happens on"
+                " the next relocation cycle)")
             self._state_changed_event.set()
         if self._diag_qnh_offset_hpa:
             # om_batch entries may be the exact objects held in
@@ -4508,7 +4666,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "config_file": cfg.config_file,
             "config_file_exists": bool(cfg.config_file and os.path.exists(cfg.config_file)),
         }
-        wx_auto = self._fw_mode == "disabled" or self._om_unavailable
+        psx_governed = self._fw_mode == "disabled"
         arpt_icaos = {self.fmc_dep_icao, self.fmc_dst_icao} - {None}
         zones = []
         for zone_num in range(1, 8):
@@ -4520,7 +4678,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             mode_parts = raw_mode.split(';')
             icao_raw = mode_parts[5] if len(mode_parts) >= 6 else ""
             icao = icao_raw[:4] if len(icao_raw) >= 4 else ""
-            if wx_auto:
+            if psx_governed:
                 source = "PSX"
                 reason = "Set by PSX"
             elif self._fw_mode == "manual":
@@ -4560,7 +4718,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 })
         state = {
             "fw_mode": self._fw_mode,
-            "om_unavailable": self._om_unavailable,
+            "metar_fallback_active": self._metar_fallback_active,
             "mode": "MANEUVERING" if self._maneuvering else "CRUISE",
             "ac_lat": round(self.ac_lat, 4) if self.ac_lat is not None else None,
             "ac_lon": round(self.ac_lon, 4) if self.ac_lon is not None else None,
@@ -4648,11 +4806,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         """Every 30s, print a hard-to-miss banner while the last OM fetch failed.
 
         _last_om_fetch_failed can be True well before (or even without ever
-        reaching) the full _om_unavailable/WxAutoSet handoff -- a fetch can
-        keep failing while frankenweather quietly serves frozen zone weather
-        because not all zones are stale yet. That's silent otherwise: only a
-        single warning line gets logged once, easy to scroll past. This
-        makes an ongoing outage impossible to miss on the console.
+        reaching) the full METAR-fallback handoff -- a fetch can keep failing
+        while frankenweather quietly serves frozen zone weather because not
+        all zones are stale yet. That's silent otherwise: only a single
+        warning line gets logged once, easy to scroll past. This makes an
+        ongoing outage impossible to miss on the console.
         """
         myname = inspect.currentframe().f_code.co_name
         try:
@@ -4661,8 +4819,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 await asyncio.sleep(30.0)
                 if not self._last_om_fetch_failed:
                     continue
-                if self._om_unavailable:
-                    status = " — PSX default weather is active"
+                if self._metar_fallback_active:
+                    status = " — VATSIM/NOAA METAR-fallback zones are active"
                 else:
                     nearest_nm = self._nearest_zone_dist_nm()
                     if nearest_nm is None:
@@ -4672,7 +4830,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         status = (
                             f" — nearest zone is {nearest_nm:.0f}nm away, still "
                             f"{max(remaining, 0.0):.0f}nm short of the "
-                            f"{self.args.wxautoset_handoff_dist:.0f}nm handoff distance"
+                            f"{self.args.wxautoset_handoff_dist:.0f}nm METAR-fallback distance"
                         )
                 self.logger.warning(
                     "\n"
@@ -4742,20 +4900,24 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     if self.ac_lat is None:
                         continue
                     entered_maneuvering = self._update_maneuvering_mode()
-                    # When PSX manages its own weather (WxAutoSet=1), don't reposition
-                    # zones — PSX will move them and we'd overwrite that on recovery.
-                    # The last known zone_positions are preserved for STATE broadcasts.
-                    # Also freeze repositioning as soon as the last Open-Meteo fetch
-                    # failed, even before the full _om_unavailable handoff: relocating
-                    # a zone only updates our own internal zone_positions bookkeeping
-                    # (the actual PSX write is separately blocked by the failed fetch
-                    # inside _update_zones()), and _zones_all_stale() checks against
-                    # that same bookkeeping -- so an ordinary relocation during an
-                    # outage can silently "un-stale" a zone whose PSX-side weather
-                    # was never actually refreshed, indefinitely delaying a handoff
-                    # that should have happened. Confirmed live 2026-09-08.
+                    # When PSX manages its own weather (WxAutoSet=1, "disabled"
+                    # mode only), don't reposition zones — PSX will move them
+                    # and we'd overwrite that on recovery. The last known
+                    # zone_positions are preserved for STATE broadcasts.
+                    # Also freeze repositioning as soon as the last Open-Meteo
+                    # fetch failed, even before the full METAR-fallback
+                    # handoff: relocating a zone only updates our own internal
+                    # zone_positions bookkeeping (the actual PSX write is
+                    # separately blocked by the failed fetch inside
+                    # _update_zones()), and _zones_all_stale() checks against
+                    # that same bookkeeping -- so an ordinary relocation during
+                    # an outage can silently "un-stale" a zone whose PSX-side
+                    # weather was never actually refreshed, indefinitely
+                    # delaying a handoff that should have happened. Confirmed
+                    # live 2026-09-08. _apply_metar_fallback() itself
+                    # overwrites zone_positions directly once the handoff
+                    # actually fires, bypassing this freeze deliberately.
                     wx_auto = (self._fw_mode == "disabled" or
-                               self._om_unavailable or
                                self._last_om_fetch_failed)
                     if wx_auto:
                         any_relocated = False
@@ -5090,8 +5252,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             help="Below cruise alt: relocate any zone more than this many nm away.")
         parser.add_argument(
             '--wxautoset-handoff-dist', type=float, default=320.0, metavar='NM',
-            help="Hand control to PSX's own WxAutoSet only once every zone is more "
-                 "than this many nm away (matches PSX's own zone-of-influence radius; "
+            help="During an Open-Meteo outage, reposition onto the nearest cached "
+                 "VATSIM/NOAA METAR stations only once every zone is more than this "
+                 "many nm away (matches PSX's own zone-of-influence radius; "
                  "deliberately independent of --cruise-behind-dist/--low-alt-dist).")
         parser.add_argument(
             '--new-zone-infront-range', type=_parse_nm_range, default=(150.0, 250.0),
