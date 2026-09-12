@@ -102,10 +102,70 @@ jobs:
           $retain = if ($isMain) { [int]$env:RETAIN_MAIN } else { [int]$env:RETAIN_TESTING }
           $tagSuffix = if ($isMain) { '' } else { '-testing' }
 
-          Write-Output "Branch: $branch (isMain=$isMain, retain=$retain, tagSuffix='$tagSuffix')"
-          Write-Output "Addons to build: $($addons -join ', ')"
+          # Addons that are actually a group of small utility scripts sharing
+          # one version file and published as a single release with a zip of
+          # every member's EXE, instead of one release per script -- see
+          # docs/BuildSystem.md. Not in makepackages.ps1's $AddonSpecs table
+          # itself (each member still builds individually via -Addon), this
+          # is purely about how the *release* is packaged.
+          $GroupMembers = @{
+              'psxutils' = @('show_hid', 'show_psx', 'show_usb', 'temporary_weather_logger')
+          }
+
+          function Publish-Release([string]$Tag, [string]$Title, [string[]]$Assets) {
+              Write-Output "=== Releasing $Tag ==="
+              # --target pins the new tag to the commit that was actually
+              # built. Without it, `gh release create` defaults an unseen
+              # tag to the *default branch* (main), not the checked-out
+              # commit -- on `testing` builds that silently tags the wrong
+              # commit (whatever main's HEAD happened to be).
+              $releaseArgs = @('release', 'create', $Tag) + $Assets + @('--title', $Title, '--target', '${{ github.sha }}')
+              if (-not $isMain) { $releaseArgs += '--prerelease' }
+              & gh @releaseArgs
+              if ($LASTEXITCODE -ne 0) { throw "gh release create failed for $Tag" }
+          }
+
+          function Remove-OldReleases([string]$Prefix) {
+              Write-Output "=== Pruning old releases matching '$Prefix*' (branch=$branch, keep=$retain) ==="
+              $existingJson = gh release list --limit 200 --json tagName,createdAt
+              $existing = $existingJson | ConvertFrom-Json |
+                  Where-Object { $_.tagName.StartsWith($Prefix) } |
+                  Sort-Object -Property createdAt -Descending
+              if ($existing.Count -gt $retain) {
+                  $toDelete = $existing | Select-Object -Skip $retain
+                  foreach ($old in $toDelete) {
+                      Write-Output "Deleting old release $($old.tagName)"
+                      gh release delete $old.tagName --yes --cleanup-tag
+                  }
+              }
+          }
 
           foreach ($addon in $addons) {
+              if ($GroupMembers.Contains($addon)) {
+                  $members = $GroupMembers[$addon]
+                  $exePaths = @()
+                  foreach ($member in $members) {
+                      Write-Output ""
+                      Write-Output "=== Building $member (member of $addon) ==="
+                      # See the -PythonDir / no-$LASTEXITCODE-check comments below.
+                      .\makepackages.ps1 -Addon $member -PythonDir $env:pythonLocation
+                      $exePath = "dist\$member.exe"
+                      if (-not (Test-Path $exePath)) {
+                          throw "Expected EXE not found: $exePath"
+                      }
+                      $exePaths += $exePath
+                  }
+
+                  $version = (Get-Content "$addon.version" -Raw).Trim()
+                  $tag = "$addon$tagSuffix-v$version"
+                  $zipPath = "dist\$addon.zip"
+                  Compress-Archive -Path $exePaths -DestinationPath $zipPath -Force
+
+                  Publish-Release -Tag $tag -Title "$addon $version" -Assets @($zipPath)
+                  Remove-OldReleases -Prefix "$addon$tagSuffix-v"
+                  continue
+              }
+
               Write-Output ""
               Write-Output "=== Building $addon ==="
               # No $LASTEXITCODE check here: with $ErrorActionPreference =
@@ -136,28 +196,6 @@ jobs:
                   throw "Expected EXE not found: $exePath"
               }
 
-              Write-Output "=== Releasing $tag ==="
-              # --target pins the new tag to the commit that was actually
-              # built. Without it, `gh release create` defaults an unseen
-              # tag to the *default branch* (main), not the checked-out
-              # commit -- on `testing` builds that silently tags the wrong
-              # commit (whatever main's HEAD happened to be).
-              $releaseArgs = @('release', 'create', $tag, $exePath, '--title', "$addon $version", '--target', '${{ github.sha }}')
-              if (-not $isMain) { $releaseArgs += '--prerelease' }
-              & gh @releaseArgs
-              if ($LASTEXITCODE -ne 0) { throw "gh release create failed for $tag" }
-
-              Write-Output "=== Pruning old releases for $addon (branch=$branch, keep=$retain) ==="
-              $prefix = "$addon$tagSuffix-v"
-              $existingJson = gh release list --limit 200 --json tagName,createdAt
-              $existing = $existingJson | ConvertFrom-Json |
-                  Where-Object { $_.tagName.StartsWith($prefix) } |
-                  Sort-Object -Property createdAt -Descending
-              if ($existing.Count -gt $retain) {
-                  $toDelete = $existing | Select-Object -Skip $retain
-                  foreach ($old in $toDelete) {
-                      Write-Output "Deleting old release $($old.tagName)"
-                      gh release delete $old.tagName --yes --cleanup-tag
-                  }
-              }
+              Publish-Release -Tag $tag -Title "$addon $version" -Assets @($exePath)
+              Remove-OldReleases -Prefix "$addon$tagSuffix-v"
           }

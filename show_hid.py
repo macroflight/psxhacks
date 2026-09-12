@@ -40,6 +40,8 @@ import sys
 import time
 import warnings
 
+from psxhacks_version import get_version
+
 try:
     import hid
 except ImportError:
@@ -50,6 +52,8 @@ try:
     HID_PARSER_AVAILABLE = True
 except ImportError:
     HID_PARSER_AVAILABLE = False
+
+__version__ = get_version("psxutils", __file__)
 
 # HID Generic Desktop usage values
 USAGE_NAMES = {
@@ -356,6 +360,7 @@ def main():
     parser.add_argument('-r', '--readable', action='store_true',
                         help='Human-readable mode: decode axes, buttons and hats'
                              ' (requires hid-parser)')
+    parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
     args = parser.parse_args()
 
     if args.device is None and not args.vid_pid:

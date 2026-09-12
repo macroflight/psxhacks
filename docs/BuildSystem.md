@@ -43,6 +43,18 @@ Special case: `router/frankenrouter.version` changing triggers builds of
 `frankenrouter_ident` has no version file of its own — it always mirrors
 frankenrouter's version (see `frankenrouter_ident.py`).
 
+Special case: `psxutils` is a shared version number for four small
+diagnostic utilities — `show_hid`, `show_psx`, `show_usb`,
+`temporary_weather_logger` — that don't need independent versioning or
+their own release history. `psxutils.version` changing builds all four
+individually (each still has its own `.spec`/`makepackages.ps1 -Addon`
+entry) and publishes them together as **one** release,
+`psxutils-v<version>`, with a single asset: `psxutils.zip` containing all
+four EXEs. This grouping lives in the `build.yml` workflow's
+`$GroupMembers` table, not in `release.py`'s `_ADDONS` (which just needs
+`psxutils.version` to exist there so `./release.py psxutils` can bump it
+like any other addon).
+
 The addon/version-file mapping lives in exactly one place,
 `release.py`'s `_ADDONS` dict, so it can never drift out of sync between
 `release.py` itself and the CI workflow: the detect job pipes the list of
@@ -83,7 +95,10 @@ are reused across every addon in that run, `venv` reused via
 Each addon has its own independent list of releases — go to the repo's
 Releases page and find the tag for the addon you want
 (`frankenweather-v1.2.4`, `frankenrouter-testing-v1.4.5`, etc.). Each
-release has exactly one asset: that addon's `.exe`.
+release has exactly one asset: that addon's `.exe` — except `psxutils`
+releases (`psxutils-v1.0.0`, etc.), whose one asset is a `.zip` containing
+all four utility EXEs (`show_hid.exe`, `show_psx.exe`, `show_usb.exe`,
+`temporary_weather_logger.exe`).
 
 ## Retention
 

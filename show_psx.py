@@ -3,7 +3,9 @@
 import asyncio
 import sys
 from psx import Client
+from psxhacks_version import get_version
 
+__version__ = get_version("psxutils", __file__)
 __MY_CLIENT_ID__ = 'SHOWPSX'
 __MY_DISPLAY_NAME__ = 'Show contents of PSX keyword'
 
@@ -16,8 +18,8 @@ def psx_setup():
 def psx_teardown():
     """Run when disconnected from PSX."""
     print("Simulation stopped")
-    psx.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
-    psx.send("clientName", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
+    psx.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__} {__version__}")
+    psx.send("clientName", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__} {__version__}")
 
 
 def print_change(key, value):
@@ -25,6 +27,7 @@ def print_change(key, value):
     print(f"PSX {key} is now {value}")
 
 
+print(f"show_psx version {__version__} starting")
 psx_variables = sys.argv[1].split(",")
 print(f"Watching {psx_variables}")
 

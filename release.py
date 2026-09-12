@@ -16,11 +16,16 @@ suggestion to add a changelog entry. A major release requires typing "YES"
 to confirm the changelog has actually been updated.
 
 <addon> is one of: frankencduproxy, frankenprint, frankenpush, frankenrouter,
-frankentanker, frankenusb, frankenweather.
+frankentanker, frankenusb, frankenweather, psxutils.
 
 frankenrouter_ident is not a separate release target -- it always reports
 frankenrouter's own version (see frankenrouter_ident.py), so bumping
 frankenrouter's version covers it too.
+
+psxutils is a shared version number for a group of small diagnostic
+utilities (show_hid, show_psx, show_usb, temporary_weather_logger) that are
+published together as one release containing a zip of all four EXEs, rather
+than each having its own version/release -- see docs/BuildSystem.md.
 
 CI usage (see .github/workflows/build.yml and docs/BuildSystem.md):
     git diff --name-only <before> <after> | ./release.py --detect-changed
@@ -60,6 +65,9 @@ _ADDONS = {
     'frankenweather': (
         _ROOT / 'frankenweather.version',
         _ROOT / 'docs' / 'Changelog-frankenweather.md'),
+    'psxutils': (
+        _ROOT / 'psxutils.version',
+        _ROOT / 'docs' / 'Changelog-psxutils.md'),
 }
 
 

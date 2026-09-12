@@ -2,6 +2,11 @@
 # pylint: disable=line-too-long
 import pygame  # pylint: disable=import-error
 
+from psxhacks_version import get_version
+
+__version__ = get_version("psxutils", __file__)
+print(f"show_usb version {__version__} starting")
+
 joysticks = {}
 pygame.init()
 for i in range(pygame.joystick.get_count()):

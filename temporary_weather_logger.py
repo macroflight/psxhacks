@@ -57,7 +57,9 @@ from collections import deque
 from typing import Optional
 
 import psx
+from psxhacks_version import get_version
 
+__version__ = get_version("psxutils", __file__)
 __MYNAME__ = 'temporary_weather_logger'
 __MY_CLIENT_ID__ = 'ALTJUMP'
 __MY_DISPLAY_NAME__ = 'Temporary Weather Logger'
@@ -311,8 +313,8 @@ class WeatherLogger:  # pylint: disable=too-many-instance-attributes
         """Maintain the PSX connection, demand LeftPfdAlt, and subscribe to the rest."""
         def connected(_key: str, _value: str) -> None:
             self.logger.info("PSX connected")
-            client.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
-            client.send("clientName", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
+            client.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__} {__version__}")
+            client.send("clientName", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__} {__version__}")
             client.send("demand", "Qs562")
 
         client = psx.Client()
@@ -362,6 +364,7 @@ class WeatherLogger:  # pylint: disable=too-many-instance-attributes
         parser.add_argument(
             '--debug', action='store_true',
             help="Enable debug logging.")
+        parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
         self.args = parser.parse_args()
         if self.args.psx_port_override is not None:
             if self.args.psx_port_override != self.args.psx_port:
@@ -372,6 +375,7 @@ class WeatherLogger:  # pylint: disable=too-many-instance-attributes
     async def run(self) -> None:
         """Parse args, open the log file, then run the PSX loop."""
         self.handle_args()
+        print(f"temporary_weather_logger version {__version__} starting")
         logging.basicConfig(
             level=logging.DEBUG if self.args.debug else logging.INFO,
             format="%(asctime)s: %(message)s",
