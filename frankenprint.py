@@ -254,8 +254,8 @@ class FrankenPrint:
         """Maintain the PSX connection and subscribe to the printer text variable."""
         def connected(_key: str, _value: str) -> None:
             self.logger.info("PSX connected")
-            client.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
-            client.send("clientName", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
+            client.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__} {__version__}")
+            client.send("clientName", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__} {__version__}")
             if self.args.test_print:
                 self._print_job(_TEST_MESSAGE)
 

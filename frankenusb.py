@@ -1733,8 +1733,8 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             self.psx_connected = True
             self.aileron_tiller_active = False
             self.logger.info("Connected to PSX")
-            self.psx.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
-            self.psx.send("clientName", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__}")
+            self.psx.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__} {__version__}")
+            self.psx.send("clientName", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__} {__version__}")
 
         def teardown():
             self.logger.info("Disconnected from PSX, tearing down")
