@@ -94,9 +94,9 @@ $RadioApp           = "vPilot"
 #  expect the file to be in this location, so don't override this)
 $PsxNetEfbConfigDir = "$env:USERPROFILE\Documents\PSX.NET.EFB"
 
-#  Where the PSX.NET.MSFS.Router/PSX.NET.VATSIM/PSX.NET.Orchestration config
-#  files are located (each addon controls this and expects its file in this
-#  shared location, so don't override this)
+#  Where the PSX.NET.MSFS.Router/PSX.NET.VATSIM/PSX.NET.Orchestration/
+#  PSXSounds config files are located (each addon controls this and expects
+#  its file in this shared location, so don't override this)
 $PsxNetConfigDir = "$env:USERPROFILE\Documents\PSX.NET"
 
 # Flavor-derived variables — overridden at runtime by psxhacks-current-flavor.ps1.
