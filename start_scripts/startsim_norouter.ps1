@@ -43,12 +43,6 @@ if ($StartBacars ) {
     Invoke-WindowPosition "BACARS"
 }
 
-if ($StartPsxNet ) {
-    Write-Output "Starting PSX.NET..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net.ps1"
-    Invoke-WindowPosition "PSX.NET"
-}
-
 if ($StartPsxNetVatsim ) {
     Write-Output "Starting PSX.NET.VATSIM..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_vatsim.ps1"
@@ -161,25 +155,9 @@ Delay 10
 Invoke-WindowPosition "PSX.NET.VATSIM"
 
 if ($StartPsxNetMsfsClient) {
-    if ($StopBeforeMsfsStart) {
-        Read-Host -Prompt "Now start MSFS and enter free flight, then press Enter"
-    }
-
     Write-Output "Starting PSX.NET.MSFS.Client..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_msfs_client.ps1"
     Invoke-WindowPosition "PSX.NET.MSFS"
-}
-
-if ($StartPsxNetWeatherRadar ) {
-    Write-Output "Starting PSX.NET.WeatherRadar..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_weather_radar.ps1"
-    Invoke-WindowPosition "PSX.NET.WeatherRadar"
-}
-
-if ($StartPsxNetGroundCrew ) {
-    Write-Output "Starting PSX.NET.GroundCrew..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_ground_crew.ps1"
-    Invoke-WindowPosition "PSX.NET.GroundCrew"
 }
 
 if ($StartPsxNetOrchestration ) {

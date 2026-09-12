@@ -116,23 +116,6 @@
 
 
 # ---------------------------------------------------------------------------
-# PSX.NET settings
-# NOTE: PSX.NET is started from startsim_master.ps1. restart_psx_net.ps1
-# already takes care of pointing it at the MASTER sim's PSX port for you -
-# it rewrites PsxServerIP/PsxServerPort in Settings\PSX.NET.xml on every
-# start.
-#
-# $PsxNetDir has no default in common.ps1 - it is REQUIRED if $StartPsxNet
-# is $true (checked at startup: must point at a directory containing
-# PSX.NET.exe). Both lines below are commented out since the default is not
-# to start PSX.NET. To enable it: uncomment BOTH lines below AND edit
-# $PsxNetDir to the actual path of your PSX.NET installation.
-# ---------------------------------------------------------------------------
-#$StartPsxNet = $true   # PSX.NET (EFB/nav data bridge)
-#$PsxNetDir   = "$SimBase\psx_net\2026-04-11"
-
-
-# ---------------------------------------------------------------------------
 # PSX.NET.VATSIM settings
 # $PsxNetVatsimDir has no default in common.ps1 - it is REQUIRED if
 # $StartPsxNetVatsim is $true (checked at startup: must point at a
@@ -184,39 +167,11 @@
 
 
 # ---------------------------------------------------------------------------
-# PSX.NET.WeatherRadar settings
-# $PsxNetWeatherRadarDir has no default in common.ps1 - it is REQUIRED if
-# $StartPsxNetWeatherRadar is $true (checked at startup: must point at a
-# directory containing PSX.NET.WeatherRadar.exe). Both lines below are
-# commented out since the default is not to start PSX.NET.WeatherRadar. To
-# enable it: uncomment BOTH lines below AND edit $PsxNetWeatherRadarDir to
-# the actual path of your PSX.NET.WeatherRadar installation.
-# ---------------------------------------------------------------------------
-#$StartPsxNetWeatherRadar = $true   # PSX.NET WeatherRadar
-#$PsxNetWeatherRadarDir    = "$SimBase\psx_net_weather_radar\2026-05-07"
-
-
-# ---------------------------------------------------------------------------
-# PSX.NET.GroundCrew settings
-# $PsxNetGroundCrewDir has no default in common.ps1 - it is REQUIRED if
-# $StartPsxNetGroundCrew is $true (checked at startup: must point at a
-# directory containing PSX.NET.GroundCrew.exe). Both lines below are
-# commented out since the default is not to start PSX.NET.GroundCrew. To
-# enable it: uncomment BOTH lines below AND edit $PsxNetGroundCrewDir to
-# the actual path of your PSX.NET.GroundCrew installation.
-# ---------------------------------------------------------------------------
-#$StartPsxNetGroundCrew = $true   # PSX.NET GroundCrew
-#$PsxNetGroundCrewDir    = "$SimBase\psx_net_ground_crew\2026-05-07"
-
-
-# ---------------------------------------------------------------------------
 # PSX.NET.Orchestration settings
-# NOTE: PSX.NET.Orchestration runs in slave sims only (not the master sim),
-# and replaces both PSX.NET and PSX.NET.GroundCrew - enable at most ONE of
-# the three (checked at startup). restart_psx_net_orchestration.ps1 takes
-# care of pointing it at the SLAVE sim's PSX port for you - it rewrites
-# PsxHost/PsxPort in $PsxNetConfigDir\PSX.NET.Orchestration.Config.xml on
-# every start.
+# NOTE: PSX.NET.Orchestration runs in slave sims only (not the master sim).
+# restart_psx_net_orchestration.ps1 takes care of pointing it at the SLAVE
+# sim's PSX port for you - it rewrites PsxHost/PsxPort in
+# $PsxNetConfigDir\PSX.NET.Orchestration.Config.xml on every start.
 #
 # $PsxNetOrchestrationDir has no default in common.ps1 - it is REQUIRED if
 # $StartPsxNetOrchestration is $true (checked at startup: must point at a
@@ -574,15 +529,13 @@ $ChangeWindowPositions = $false
 
 
 # ---------------------------------------------------------------------------
-# Interactive pauses in startsim_slave.ps1
+# Interactive pause in startsim_slave.ps1
 # $StopAfterSlaveRouterStart — pause after the slave router starts (before
 #   launching further addons) so you can verify the router is up.
-# $StopBeforeMsfsStart — pause again just before MSFS is launched.
-# Both default to $true in common.ps1.  Set to $false for a fully
-# automated startup.
+# Defaults to $true in common.ps1.  Set to $false for a fully automated
+# startup.
 # ---------------------------------------------------------------------------
 #$StopAfterSlaveRouterStart = $true
-#$StopBeforeMsfsStart       = $true
 
 
 # ---------------------------------------------------------------------------

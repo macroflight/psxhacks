@@ -29,12 +29,6 @@ if ($StartBacars ) {
     Invoke-WindowPosition "BACARS"
 }
 
-if ($StartPsxNet ) {
-    Write-Output "Starting PSX.NET..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net.ps1"
-    Invoke-WindowPosition "PSX.NET"
-}
-
 if ($StartCpdlc ) {
     Delay 5
     Write-Output "Starting HAFAP (CPDLC)..."

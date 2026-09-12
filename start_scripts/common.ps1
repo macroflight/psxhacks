@@ -94,10 +94,9 @@ $RadioApp           = "vPilot"
 #  expect the file to be in this location, so don't override this)
 $PsxNetEfbConfigDir = "$env:USERPROFILE\Documents\PSX.NET.EFB"
 
-#  Where the PSX.NET.MSFS.Router/PSX.NET.VATSIM/PSX.NET.WeatherRadar/
-#  PSX.NET.GroundCrew/PSX.NET.Orchestration config files are located (each
-#  addon controls this and expects its file in this shared location, so
-#  don't override this)
+#  Where the PSX.NET.MSFS.Router/PSX.NET.VATSIM/PSX.NET.Orchestration config
+#  files are located (each addon controls this and expects its file in this
+#  shared location, so don't override this)
 $PsxNetConfigDir = "$env:USERPROFILE\Documents\PSX.NET"
 
 # Flavor-derived variables — overridden at runtime by psxhacks-current-flavor.ps1.
@@ -204,8 +203,6 @@ $StartSimObjectRouter    = $false
 
 $StartPsxNetMsfsClient   = $false
 $StartPsxNetMsfsRouter   = $false
-$StartPsxNetWeatherRadar = $false
-$StartPsxNetGroundCrew   = $false
 $StartPsxNetOrchestration = $false
 
 $StartFrankencduproxy = $false
@@ -219,7 +216,6 @@ $StartSrslPsxSlave  = $false
 # Addons that run in the master sim (if enabled)
 #
 $StartBacars        = $false
-$StartPsxNet        = $false
 $StartCpdlc         = $false
 $StartCmcPsx        = $false
 
@@ -229,7 +225,6 @@ $ChangeWindowPositions = $false
 
 # Set to $false in the override file to skip the interactive pauses in startsim_slave.ps1
 $StopAfterSlaveRouterStart = $true
-$StopBeforeMsfsStart       = $true
 
 # Set to $false in the override file to skip the "are you sure?" confirmation
 # prompt in stopsim_master.ps1/stopsim_slave.ps1
@@ -246,7 +241,6 @@ $SimAddonNames = [ordered]@{
     "BACARS"               = "BACARS"
     "PSX.NET.MSFS"         = "PSX.NET MSFS Client"
     "PSX.NET.MSFS.Router"  = "PSX.NET MSFS Router"
-    "PSX.NET"              = "PSX.NET"
     "PSX.NET.Orchestration" = "PSX.NET Orchestration"
     "PSXSounds"            = "PSX Sounds"
     "HAFAP/CPDLC"          = "HAFAP/CPDLC"
@@ -263,8 +257,6 @@ $SimAddonNames = [ordered]@{
     "frankenpush"          = "FrankenPush"
     "frankenrouter slave"    = "FrankenRouter (slave)"
     "frankenrouter master"   = "FrankenRouter (master)"
-    "PSX.NET.WeatherRadar"   = "PSX.NET WeatherRadar"
-    "PSX.NET.GroundCrew"     = "PSX.NET GroundCrew"
     "SimObjectRouter"        = "SimObjectRouter"
     "SRSL-PSX master"        = "SRSL-PSX (master)"
     "SRSL-PSX slave"         = "SRSL-PSX (slave)"
@@ -358,28 +350,6 @@ if ($StartBacars) {
     }
 }
 
-# $PsxNetDir has no default - it must be set in the override file (see
-# psxhacks-start-override-EXAMPLE.ps1) and point at a real PSX.NET install,
-# but only if PSX.NET is actually enabled.
-if ($StartPsxNet) {
-    if ([string]::IsNullOrWhiteSpace($PsxNetDir)) {
-        Show-ErrorAndExit "`$StartPsxNet is `$true but `$PsxNetDir is not set.`nEdit $OverrideFile and set `$PsxNetDir to your PSX.NET installation directory."
-    } elseif (-not (Test-Path $PsxNetDir -PathType Container)) {
-        Show-ErrorAndExit "`$PsxNetDir not found: $PsxNetDir`nEdit $OverrideFile and set `$PsxNetDir to your PSX.NET installation directory."
-    } elseif (-not (Test-Path (Join-Path $PsxNetDir "PSX.NET.exe"))) {
-        Show-ErrorAndExit "`$PsxNetDir does not look like a PSX.NET installation (no PSX.NET.exe found): $PsxNetDir`nEdit $OverrideFile and set `$PsxNetDir to your PSX.NET installation directory."
-    }
-}
-
-# PSX.NET.Orchestration replaces both PSX.NET and PSX.NET.GroundCrew -
-# only one of the three may be configured to start.
-if ($StartPsxNet -and $StartPsxNetOrchestration) {
-    Show-ErrorAndExit "`$StartPsxNet and `$StartPsxNetOrchestration are both `$true.`nEdit $OverrideFile and enable only one of the two - they are mutually exclusive."
-}
-if ($StartPsxNetGroundCrew -and $StartPsxNetOrchestration) {
-    Show-ErrorAndExit "`$StartPsxNetGroundCrew and `$StartPsxNetOrchestration are both `$true.`nEdit $OverrideFile and enable only one of the two - they are mutually exclusive."
-}
-
 # $PsxNetOrchestrationDir has no default - it must be set in the override
 # file (see psxhacks-start-override-EXAMPLE.ps1) and point at a real
 # PSX.NET.Orchestration install, but only if PSX.NET.Orchestration is
@@ -430,34 +400,6 @@ if ($StartPsxNetMsfsRouter) {
         Show-ErrorAndExit "`$PsxNetMsfsRouterDir not found: $PsxNetMsfsRouterDir`nEdit $OverrideFile and set `$PsxNetMsfsRouterDir to your PSX.NET.MSFS.Router installation directory."
     } elseif (-not (Test-Path (Join-Path $PsxNetMsfsRouterDir "PSX.NET.MSFS.Router.exe"))) {
         Show-ErrorAndExit "`$PsxNetMsfsRouterDir does not look like a PSX.NET.MSFS.Router installation (no PSX.NET.MSFS.Router.exe found): $PsxNetMsfsRouterDir`nEdit $OverrideFile and set `$PsxNetMsfsRouterDir to your PSX.NET.MSFS.Router installation directory."
-    }
-}
-
-# $PsxNetWeatherRadarDir has no default - it must be set in the override file
-# (see psxhacks-start-override-EXAMPLE.ps1) and point at a real
-# PSX.NET.WeatherRadar install, but only if PSX.NET.WeatherRadar is actually
-# enabled.
-if ($StartPsxNetWeatherRadar) {
-    if ([string]::IsNullOrWhiteSpace($PsxNetWeatherRadarDir)) {
-        Show-ErrorAndExit "`$StartPsxNetWeatherRadar is `$true but `$PsxNetWeatherRadarDir is not set.`nEdit $OverrideFile and set `$PsxNetWeatherRadarDir to your PSX.NET.WeatherRadar installation directory."
-    } elseif (-not (Test-Path $PsxNetWeatherRadarDir -PathType Container)) {
-        Show-ErrorAndExit "`$PsxNetWeatherRadarDir not found: $PsxNetWeatherRadarDir`nEdit $OverrideFile and set `$PsxNetWeatherRadarDir to your PSX.NET.WeatherRadar installation directory."
-    } elseif (-not (Test-Path (Join-Path $PsxNetWeatherRadarDir "PSX.NET.WeatherRadar.exe"))) {
-        Show-ErrorAndExit "`$PsxNetWeatherRadarDir does not look like a PSX.NET.WeatherRadar installation (no PSX.NET.WeatherRadar.exe found): $PsxNetWeatherRadarDir`nEdit $OverrideFile and set `$PsxNetWeatherRadarDir to your PSX.NET.WeatherRadar installation directory."
-    }
-}
-
-# $PsxNetGroundCrewDir has no default - it must be set in the override file
-# (see psxhacks-start-override-EXAMPLE.ps1) and point at a real
-# PSX.NET.GroundCrew install, but only if PSX.NET.GroundCrew is actually
-# enabled.
-if ($StartPsxNetGroundCrew) {
-    if ([string]::IsNullOrWhiteSpace($PsxNetGroundCrewDir)) {
-        Show-ErrorAndExit "`$StartPsxNetGroundCrew is `$true but `$PsxNetGroundCrewDir is not set.`nEdit $OverrideFile and set `$PsxNetGroundCrewDir to your PSX.NET.GroundCrew installation directory."
-    } elseif (-not (Test-Path $PsxNetGroundCrewDir -PathType Container)) {
-        Show-ErrorAndExit "`$PsxNetGroundCrewDir not found: $PsxNetGroundCrewDir`nEdit $OverrideFile and set `$PsxNetGroundCrewDir to your PSX.NET.GroundCrew installation directory."
-    } elseif (-not (Test-Path (Join-Path $PsxNetGroundCrewDir "PSX.NET.GroundCrew.exe"))) {
-        Show-ErrorAndExit "`$PsxNetGroundCrewDir does not look like a PSX.NET.GroundCrew installation (no PSX.NET.GroundCrew.exe found): $PsxNetGroundCrewDir`nEdit $OverrideFile and set `$PsxNetGroundCrewDir to your PSX.NET.GroundCrew installation directory."
     }
 }
 

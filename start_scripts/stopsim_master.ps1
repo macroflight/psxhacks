@@ -30,7 +30,6 @@ KillPythonScript "frankenweather.py"
 KillPythonScript "frankenpush.py"
 
 KillProcess "PSX.Bacars.UI"
-KillProcess "PSX.NET"
 KillJavaJar "$SrslPsxMasterDir\SRSL-PSX.jar"
 KillJavaJar "$CmcPsxDir\CMC-PSX.jar"
 KillProcess "psx_simlink_bridge*"
