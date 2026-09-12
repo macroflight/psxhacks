@@ -80,11 +80,18 @@ Write-Host ""
 
 $found = 0
 $missed = 0
+$skipped = 0
 
 if ($Addon -ne "" -and -not $WindowPositions.ContainsKey($Addon)) {
     Write-Host ("No position configured for '" + $Addon + "'.") -ForegroundColor Red
     Write-Host ("Configured addons: " + (($WindowPositions.Keys | Sort-Object) -join ", ")) -ForegroundColor DarkGray
     exit 1
+}
+
+if ($Addon -ne "" -and $WindowPositions[$Addon].DoNotPosition) {
+    $displayName = if ($SimAddonNames -and $SimAddonNames.Contains($Addon)) { $SimAddonNames[$Addon] } else { $Addon }
+    Write-Host ($displayName + ": configured not to be positioned") -ForegroundColor DarkGray
+    exit 0
 }
 
 $noRetry = ($Addon -eq "")
@@ -94,8 +101,14 @@ if (-not $noRetry -and $WindowPositionInitialDelay -gt 0) { Start-Sleep -Seconds
 
 foreach ($addon in $keys) {
     $entry       = $WindowPositions[$addon]
-    $title       = $entry.Title
     $displayName = if ($SimAddonNames -and $SimAddonNames.Contains($addon)) { $SimAddonNames[$addon] } else { $addon }
+
+    if ($entry.DoNotPosition) {
+        $skipped++
+        Write-Host ($displayName + ": configured not to be positioned") -ForegroundColor DarkGray
+        continue
+    }
+    $title = $entry.Title
 
     $match   = $null
     $elapsed = 0.0
@@ -136,4 +149,4 @@ foreach ($addon in $keys) {
 
 Write-Host ""
 $color = if ($missed -eq 0) { "Green" } else { "Yellow" }
-Write-Host ("Positioned: " + $found + "  Not found: " + $missed) -ForegroundColor $color
+Write-Host ("Positioned: " + $found + "  Not found: " + $missed + "  Skipped (do not position): " + $skipped) -ForegroundColor $color

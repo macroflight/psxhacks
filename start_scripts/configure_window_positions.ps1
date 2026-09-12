@@ -70,7 +70,7 @@ function Get-WinRect([IntPtr]$hWnd) {
     return $null
 }
 
-function Select-Addon {
+function Select-Addon([hashtable]$positions) {
     $idx = 0
     $total = $SimAddons.Length
     $maxList = [Math]::Max(5, [Console]::WindowHeight - 6)
@@ -87,6 +87,14 @@ function Select-Addon {
         for ($i = 0; $i -lt $displayCount; $i++) {
             $ai = $i + $scrollOffset
             $label = $SimAddonNames[$SimAddons[$ai]]
+            $entry = $positions[$SimAddons[$ai]]
+            if ($null -ne $entry) {
+                if ($entry.DoNotPosition) {
+                    $label += " (do not position)"
+                } else {
+                    $label += " (configured)"
+                }
+            }
             if ($ai -eq $idx) {
                 Write-Host ("  > " + $label) -ForegroundColor Cyan
             } else {
@@ -252,6 +260,40 @@ function Read-YesNo([string]$prompt, [bool]$defaultYes) {
     }
 }
 
+function Read-AddonAction([string]$addonName, [hashtable]$positions) {
+    $entry = $positions[$addonName]
+    $status = if ($null -eq $entry) {
+        "not configured"
+    } elseif ($entry.DoNotPosition) {
+        "marked as 'do not position'"
+    } else {
+        "configured (" + $entry.Title + ")"
+    }
+
+    Clear-Host
+    Write-Host "=== Configure Window Positions ===" -ForegroundColor White
+    Write-Host ("Addon: " + $addonName) -ForegroundColor Cyan
+    Write-Host ("Current status: " + $status) -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  [S] Set/update position" -ForegroundColor White
+    Write-Host "  [D] Mark as 'do not position' (some apps misbehave when moved/resized)" -ForegroundColor White
+    Write-Host "  [Esc] Back" -ForegroundColor DarkGray
+    Write-Host ""
+
+    [Console]::CursorVisible = $false
+    try {
+        while ($true) {
+            $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+            $c = $key.Character
+            if ($c -eq 's' -or $c -eq 'S') { return 'set' }
+            if ($c -eq 'd' -or $c -eq 'D') { return 'donotposition' }
+            if ($key.VirtualKeyCode -eq 27) { return $null }
+        }
+    } finally {
+        [Console]::CursorVisible = $true
+    }
+}
+
 function Get-PositionData {
     $positions = @{}
     if (Test-Path $PositionsFile) {
@@ -271,18 +313,42 @@ function Export-PositionData([hashtable]$positions) {
     $lines += '$WindowPositions = @{}'
     foreach ($key in ($positions.Keys | Sort-Object)) {
         $e = $positions[$key]
-        $k = $key       -replace "'", "''"
-        $t = $e.Title   -replace "'", "''"
-        $m = if ($e.Minimized) { '$true' } else { '$false' }
-        $lines += "`$WindowPositions['" + $k + "'] = @{ Title = '" + $t + "'; X = " + $e.X + "; Y = " + $e.Y + "; Width = " + $e.Width + "; Height = " + $e.Height + "; Minimized = " + $m + " }"
+        $k = $key -replace "'", "''"
+        if ($e.DoNotPosition) {
+            $lines += "`$WindowPositions['" + $k + "'] = @{ DoNotPosition = `$true }"
+        } else {
+            $t = $e.Title   -replace "'", "''"
+            $m = if ($e.Minimized) { '$true' } else { '$false' }
+            $lines += "`$WindowPositions['" + $k + "'] = @{ Title = '" + $t + "'; X = " + $e.X + "; Y = " + $e.Y + "; Width = " + $e.Width + "; Height = " + $e.Height + "; Minimized = " + $m + " }"
+        }
     }
     $lines | Set-Content $PositionsFile -Encoding UTF8
 }
 
 # Main loop
 while ($true) {
-    $addon = Select-Addon
+    $positions = Get-PositionData
+    $addon = Select-Addon $positions
     if ($null -eq $addon) { break }
+
+    $action = Read-AddonAction $addon $positions
+    if ($null -eq $action) { continue }
+
+    if ($action -eq 'donotposition') {
+        $positions[$addon] = @{ DoNotPosition = $true }
+        Export-PositionData $positions
+
+        Write-Host ""
+        Write-Host "Saved." -ForegroundColor Green
+        Write-Host ("  Addon:  " + $addon) -ForegroundColor DarkGray
+        Write-Host "  Status: do not position" -ForegroundColor DarkGray
+        Write-Host ("  File:   " + (Split-Path $PositionsFile -Leaf)) -ForegroundColor DarkGray
+        Write-Host ""
+
+        $again = Read-YesNo "Configure another window?" $true
+        if (-not $again) { break }
+        continue
+    }
 
     $window = Select-Window $addon
     if ($null -eq $window) { continue }
