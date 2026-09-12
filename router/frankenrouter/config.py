@@ -235,8 +235,28 @@ class _RouterConfigPerformance:  # pylint: disable=missing-class-docstring,too-f
             raise RouterConfigError("performance frdp_rtt_warning must be an float")
 
 
+_ACCESS_KEYS = {
+    'display_name', 'match_ip', 'match_ipv4', 'is_frankenrouter',
+    'match_password', 'level',
+}
+
+
 class _RouterConfigAccess:  # pylint: disable=missing-class-docstring,too-few-public-methods
-    def __init__(self, data):
+    def __init__(self, data):  # pylint: disable=too-many-branches
+        # Reject unrecognized keys outright, rather than silently ignoring
+        # them: a misspelled key (e.g. "password" instead of "match_password")
+        # would otherwise be dropped without warning, leaving a broad
+        # match_ip rule (e.g. "ANY") granting access to everyone even though
+        # a password was clearly intended.
+        unknown = set(data.keys()) - _ACCESS_KEYS
+        if unknown:
+            hint = " (did you mean 'match_password'?)" if 'password' in unknown else ""
+            raise RouterConfigError(
+                f"Unknown key(s) in [[access]] rule: {sorted(unknown)}{hint} -- "
+                f"a misspelled key here can silently be dropped, e.g. leaving a "
+                f"match_ip rule open to everyone even though a password was "
+                f"intended: {data}")
+
         self.display_name = data.get('display_name', None)
         self.display_name_source = 'access config'
         if self.display_name is None:
@@ -493,6 +513,27 @@ I'm not TOML
         self.assertEqual(conf.performance.write_buffer_critical_limit, 100000)
         self.assertEqual(conf.access[0].level, 'full')
         self.assertEqual(conf.psx.gps_spoofing_egress, False)
+
+    def test_access_rejects_unknown_keys(self):
+        """An [[access]] rule with a misspelled/unknown key must refuse to load.
+
+        Regression guard for the specific dangerous case: 'password' (instead
+        of 'match_password') alongside a broad match_ip would otherwise be
+        silently dropped, leaving the rule open to everyone.
+        """
+        bad_config = r"""
+[identity]
+simulator = 'SampleSim'
+router = 'somerouter1'
+
+[[access]]
+display_name = 'Mats'
+match_ip = [ 'ANY' ]
+level = 'full'
+password = 'PW_MATS'
+"""
+        with self.assertRaises(RouterConfigError):
+            RouterConfig(config_data=bad_config)
 
     def test_gps_spoofing_egress(self):
         """gps_spoofing_egress defaults to off and can be enabled in [psx]."""
