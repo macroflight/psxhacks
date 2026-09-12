@@ -1,5 +1,60 @@
 # Changelog
 
+## 2026-09-12: version 1.5.0
+
+- **Bug fix / config safety: `[[access]]` rules now reject unknown
+  keys.** A typo'd key (e.g. a misspelled `password`) was previously
+  silently ignored rather than raising an error. For a rule like
+  `match_ipv4 = ["ANY"]`, that meant the intended password check
+  simply never happened, silently granting full access to anyone who
+  connected. Any unrecognized key in an `[[access]]` rule now fails
+  the router at startup instead.
+
+- **New feature: EFB-friendly `/efb` web page.** A compact,
+  single-screen status/control page designed to be embedded in an EFB
+  app: router status, weather status and controls, and current
+  location weather, with live polling and a persistent errors banner.
+
+- **New feature: the "Shutdown router" button is now opt-in.** The web
+  UI's shutdown button (and its `/shutdown` confirmation page) is
+  hidden by default; enable it with the new `rest_api_shutdown_enabled`
+  config option under `[listen]`. This only gates the human-facing
+  button/confirmation page - the `POST /api/shutdown/yes` API used by
+  scripts/automation to shut the router down directly is unaffected
+  either way.
+
+- **New feature: FRANKENWEATHER addon messages are now filtered
+  per-client.** These messages are large but infrequent. Only clients
+  that actually need them - frankenweather itself (to detect other
+  running instances) and every frankenrouter (for the weather web UI)
+  - now receive them, reducing load on slow or limited clients such as
+  Arduino-based hardware.
+
+- **New feature: GROUND.HANDLING addon messages are now filtered
+  per-client**, for the same reason as the FRANKENWEATHER filtering
+  above - these are small but frequent, so only clients that need them
+  now receive them. Also suppresses a spurious warning about
+  PSX.NET.GroundHandling's own addon messages.
+
+- **Bug fix / workaround: ingress-filter `Qs546` for 5 seconds after a
+  client connects.** Some PSX clients send `Qs546` right after
+  connecting - apparently when their current situ differs from what
+  they received in the welcome message - which wipes CG and
+  runway/position data from the master server's FMC. Filtering it out
+  for the first 5 seconds after connection works around this.
+
+- **New feature: non-router clients can now subscribe to FRDP
+  broadcasts** (`ROUTERINFO`/`SHAREDINFO`), needed to give addons like
+  frankenpush access to that data without themselves being a router.
+
+- **New feature: per-addon version numbers.** Every major addon
+  (frankencduproxy, frankenprint, frankenpush, frankenrouter,
+  frankentanker, frankenusb, frankenweather) now has its own version
+  number - frankenrouter_ident always mirrors frankenrouter's - sent
+  as part of the `name=`/`clientName=` messages every addon sends to
+  PSX. A new `release.py` script manages version bumps and changelog
+  reminders across all of them.
+
 ## 2026-07-14: version 1.4.3
 
 - **New feature: work around PSX not always broadcasting the
