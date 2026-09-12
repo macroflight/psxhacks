@@ -3,6 +3,8 @@ $env:PSXHACKS_NOROUTER = "1"
 
 . "$PSScriptRoot\common.ps1"
 
+Write-Output "start_scripts version $(Get-StartScriptsVersion)"
+
 Test-PythonRequirement
 
 function Invoke-WindowPosition([string]$addon) {

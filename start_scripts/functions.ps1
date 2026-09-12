@@ -57,6 +57,21 @@ function start_nonscripted_apps {
     }
 }
 
+# Returns start_scripts' own version number (start_scripts.version, next
+# to this file) or "unknown" if it can't be read -- mirrors the
+# never-crash-on-a-version-read behavior of the Python addons'
+# get_version() in psxhacks_version.py. $PSScriptRoot here resolves to
+# this file's own directory (start_scripts\) regardless of which script
+# dot-sourced common.ps1/functions.ps1 to get here.
+function Get-StartScriptsVersion {
+    $versionFile = Join-Path $PSScriptRoot "start_scripts.version"
+    try {
+        return (Get-Content $versionFile -Raw -ErrorAction Stop).Trim()
+    } catch {
+        return "unknown"
+    }
+}
+
 # Verify that every package listed in requirements.txt is installed in the
 # configured Python virtual environment ($PsxhacksPython). Called once at
 # startup by startsim_master.ps1/startsim_slave.ps1 - not from common.ps1,

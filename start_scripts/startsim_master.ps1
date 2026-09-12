@@ -2,6 +2,8 @@ Remove-Item Env:\PSXHACKS_NOROUTER -ErrorAction SilentlyContinue
 
 . "$PSScriptRoot\common.ps1"
 
+Write-Output "start_scripts version $(Get-StartScriptsVersion)"
+
 Test-PythonRequirement
 
 function Invoke-WindowPosition([string]$addon) {

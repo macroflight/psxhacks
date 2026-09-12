@@ -16,7 +16,7 @@ suggestion to add a changelog entry. A major release requires typing "YES"
 to confirm the changelog has actually been updated.
 
 <addon> is one of: frankencduproxy, frankenprint, frankenpush, frankenrouter,
-frankentanker, frankenusb, frankenweather, psxutils.
+frankentanker, frankenusb, frankenweather, psxutils, start_scripts.
 
 frankenrouter_ident is not a separate release target -- it always reports
 frankenrouter's own version (see frankenrouter_ident.py), so bumping
@@ -26,6 +26,11 @@ psxutils is a shared version number for a group of small diagnostic
 utilities (show_hid, show_psx, show_usb, temporary_weather_logger) that are
 published together as one release containing a zip of all four EXEs, rather
 than each having its own version/release -- see docs/BuildSystem.md.
+
+start_scripts is plain PowerShell the user runs directly (see
+start_scripts/functions.ps1's Get-StartScriptsVersion) -- it is never built
+into an EXE, so bumping it never triggers a CI build (it isn't in this
+file's _ADDONS, only in the separate _NONBUILD_ADDONS).
 
 CI usage (see .github/workflows/build.yml and docs/BuildSystem.md):
     git diff --name-only <before> <after> | ./release.py --detect-changed
@@ -69,6 +74,20 @@ _ADDONS = {
         _ROOT / 'psxutils.version',
         _ROOT / 'docs' / 'Changelog-psxutils.md'),
 }
+
+# Same shape as _ADDONS (name -> (version file, changelog file)), but for
+# things this script can bump that are NOT built/released as an EXE by
+# build.yml -- kept out of _ADDONS (and therefore out of
+# _map_changed_files/--detect-changed) so bumping one can never trigger a
+# CI build. start_scripts is plain PowerShell the user runs directly, not
+# a PyInstaller target.
+_NONBUILD_ADDONS = {
+    'start_scripts': (
+        _ROOT / 'start_scripts' / 'start_scripts.version',
+        _ROOT / 'docs' / 'Changelog-start_scripts.md'),
+}
+
+_ALL_ADDONS = {**_ADDONS, **_NONBUILD_ADDONS}
 
 
 def _parse_version(text: str) -> tuple:
@@ -127,7 +146,7 @@ def _map_changed_files(paths) -> list:
 def main() -> None:  # pylint: disable=too-many-branches,too-many-statements
     """Bump the chosen addon's version number and remind about its changelog."""
     parser = argparse.ArgumentParser(description="Bump an addon's version number.")
-    parser.add_argument('addon', nargs='?', default=None, choices=sorted(_ADDONS.keys()))
+    parser.add_argument('addon', nargs='?', default=None, choices=sorted(_ALL_ADDONS.keys()))
     parser.add_argument(
         '--detect-changed', action='store_true',
         help="CI mode: read newline-separated file paths from stdin, print a JSON "
@@ -154,7 +173,7 @@ def main() -> None:  # pylint: disable=too-many-branches,too-many-statements
 
     level = 'major' if args.major else 'minor' if args.minor else 'patch'
 
-    version_file, changelog_file = _ADDONS[args.addon]
+    version_file, changelog_file = _ALL_ADDONS[args.addon]
 
     if not version_file.exists():
         print(f"Version file not found: {version_file}", file=sys.stderr)
