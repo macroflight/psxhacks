@@ -144,7 +144,7 @@ _INDEX_PAGE = (
     '{observer_mode_notice}'
     '{master_buttons}'
     '{observer_mode_button}'
-    '<a href="/shutdown" class="btn btn-red">Shutdown router</a>\n'
+    '{shutdown_button}'
     '</div>\n'
     '</div>\n'
     '</body>\n</html>\n'
@@ -1552,6 +1552,10 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                         '' if router.config.identity.type == 'master' else
                         '<a href="/upstream" class="btn btn-blue">Change upstream</a>\n'
                     ),
+                    'shutdown_button': (
+                        '<a href="/shutdown" class="btn btn-red">Shutdown router</a>\n'
+                        if router.config.listen.rest_api_shutdown_enabled else ''
+                    ),
                     'checklist_warning': (
                         '' if not cl_items else
                         '' if (
@@ -2344,12 +2348,23 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
 
             @routes.get('/shutdown')
             async def handle_shutdown_get(_):
+                if not router.config.listen.rest_api_shutdown_enabled:
+                    return web.Response(
+                        text="Shutdown via the web UI is disabled "
+                             "(rest_api_shutdown_enabled is not set in the config file).",
+                        status=403)
                 data = {'rest_api_color_scheme': router.config.listen.rest_api_color_scheme}
                 return web.json_response(
                     text=_SHUTDOWN_PAGE.format(**data), content_type='text/html')
 
             @routes.post('/api/shutdown/yes')
             async def handle_shutdown_yes(_):
+                # Deliberately NOT gated on rest_api_shutdown_enabled: that flag
+                # only controls the human-facing button/confirmation page (an
+                # accidental-tap risk on a shared/EFB-embedded screen) -- a
+                # direct call to this API (e.g. from a start script) should
+                # always work, matching how most users already shut the
+                # router down "by other means".
                 router.logger.info("API: shutdown requested via web interface")
                 loop = asyncio.get_running_loop()
 

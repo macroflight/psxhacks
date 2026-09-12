@@ -32,6 +32,16 @@ class _RouterConfigListen:  # pylint: disable=missing-class-docstring,too-few-pu
             raise RouterConfigError("The API port must be an integer")
         self.rest_api_color_scheme = data.get('rest_api_color_scheme', 'dark')
 
+        # When true, the web UI shows a "Shutdown router" button that stops the
+        # router process. Off by default -- most users shut the router down by
+        # other means (closing the start-script console, a process manager,
+        # etc.), and an accidental tap on a shared/EFB-embedded screen would be
+        # disruptive. The underlying /shutdown routes are gated on this too,
+        # not just the button's visibility.
+        self.rest_api_shutdown_enabled = data.get('rest_api_shutdown_enabled', False)
+        if not isinstance(self.rest_api_shutdown_enabled, bool):
+            raise RouterConfigError("rest_api_shutdown_enabled must be true or false")
+
         # When true (default), the router will not accept client connections
         # until the upstream has sent its welcome message (load3), guaranteeing
         # that clients always receive a full set of variables on connect.
@@ -501,6 +511,15 @@ I'm not TOML
         self.assertEqual(conf.psx.jettison_resync_fix, False)
         with self.assertRaises(RouterConfigError):
             RouterConfig(config_data="[psx]\njettison_resync_fix = 'no'\n")
+
+    def test_rest_api_shutdown_enabled(self):
+        """rest_api_shutdown_enabled defaults to off and can be enabled in [listen]."""
+        conf = RouterConfig(config_data="")
+        self.assertEqual(conf.listen.rest_api_shutdown_enabled, False)
+        conf = RouterConfig(config_data="[listen]\nrest_api_shutdown_enabled = true\n")
+        self.assertEqual(conf.listen.rest_api_shutdown_enabled, True)
+        with self.assertRaises(RouterConfigError):
+            RouterConfig(config_data="[listen]\nrest_api_shutdown_enabled = 'yes'\n")
 
     def test_ground_handling_forward_names(self):
         """ground_handling_forward_names has sane defaults and can be overridden in [filtering]."""

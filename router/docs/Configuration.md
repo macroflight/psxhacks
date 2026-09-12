@@ -66,6 +66,12 @@ type = "slave"
 - `rest_api_port`: the port the router web interface and REST API
   should listen to. Defaults to 8747. If you do not want to use the
   web interface, set to false.
+- `rest_api_shutdown_enabled`: set to true to show a "Shutdown
+  router" button in the web interface. Defaults to false, since most
+  users stop the router by other means (closing the start-script
+  console, a process manager, etc.) and an accidental tap on a
+  shared/EFB-embedded screen would be disruptive. A direct API call
+  to shut the router down still works regardless of this setting.
 
 Note: the normal port for a PSX router is 10748. If you want to use
 the router as a drop-in replacement for your PSX main server for a
