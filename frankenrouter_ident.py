@@ -10,6 +10,7 @@ import ctypes
 import inspect
 import json
 import logging
+import pathlib
 import re
 import sys
 import traceback
@@ -18,10 +19,19 @@ import psutil  # pylint: disable=import-error
 import win32gui  # pylint: disable=import-error
 import win32process  # pylint: disable=import-error
 
+from psxhacks_version import get_version
+
 __MYNAME__ = 'frankenrouter_ident.py'
 __MY_DESCRIPTION__ = 'Identify PSX clients by process name or window title'
 
-VERSION = '0.1'
+# frankenrouter_ident is tightly coupled to frankenrouter and always reports
+# the same version -- it has no independent version of its own. When run
+# from source, its version file lives alongside router/frankenrouter.py, not
+# next to this script; a frozen (PyInstaller) build bundles it at the
+# EXE's own bundle root instead, same as every other addon.
+VERSION = get_version(
+    'frankenrouter', __file__,
+    version_dir=str(pathlib.Path(__file__).resolve().parent / 'router'))
 
 PSX_SERVER_RECONNECT_DELAY = 1.0
 
@@ -298,6 +308,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
             action='store_true',
             help="Print more debug info. Probably only useful for development.",
         )
+        parser.add_argument('--version', action='version', version=f'%(prog)s {VERSION}')
         self.args = parser.parse_args()
         if self.args.psx_port_override is not None:
             if self.args.psx_port_override != self.args.psx_port:
@@ -332,6 +343,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         if self.args.debug:
             self.logger.setLevel(logging.DEBUG)
             asyncio.get_event_loop().set_debug(True)
+        print(f"frankenrouter_ident version {VERSION} starting")
         async with asyncio.TaskGroup() as self.taskgroup:
             task = self.taskgroup.create_task(self.monitor_coro(), name="Monitor")
             self.tasks.add(task)

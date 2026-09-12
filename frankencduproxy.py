@@ -25,7 +25,9 @@ import socket
 import sys
 from typing import Callable, List, Optional, Set, Tuple
 
-__version__ = "1.0.0"
+from psxhacks_version import get_version
+
+__version__ = get_version("frankencduproxy", __file__)
 
 
 # ── CDU keyword classification ───────────────────────────────────────────────
@@ -413,6 +415,8 @@ def main() -> None:
         datefmt='%H:%M:%S',
         stream=sys.stdout,
     )
+
+    print(f"frankencduproxy version {__version__} starting")
 
     try:
         asyncio.run(CduProxy(args).run())

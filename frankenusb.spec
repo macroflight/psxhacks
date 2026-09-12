@@ -5,7 +5,7 @@ a = Analysis(
     ['frankenusb.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('frankenusb.version', '.')],
     hiddenimports=[],
     hookspath=['pyinstaller_hooks'],
     hooksconfig={},

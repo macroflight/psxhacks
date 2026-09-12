@@ -39,11 +39,13 @@ import traceback
 import aiohttp
 
 import psx
+from psxhacks_version import get_version
 
 __MYNAME__ = 'frankenpush'
 __MY_CLIENT_ID__ = 'PUSH'
 __MY_DISPLAY_NAME__ = 'FrankenPush'
 __MY_DESCRIPTION__ = 'PSCC Flight Centre push connector'
+__version__ = get_version("frankenpush", __file__)
 
 _FRDP_VERSION = '1'
 
@@ -1238,6 +1240,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
             action='store_true',
             help="Print more debug info.",
         )
+        parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
         self.args = parser.parse_args()
         if self.args.psx_port_override is not None:
             if self.args.psx_port_override != self.args.psx_port:
@@ -1274,6 +1277,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.logger.setLevel(logging.DEBUG)
             asyncio.get_event_loop().set_debug(True)
 
+        print(f"frankenpush version {__version__} starting")
         print(f"Connecting to PSX at {self.args.psx_host}:{self.args.psx_port}")
         print(f"Pushing to portal at {self.args.portal_url.rstrip('/')}/ws/push")
         print(f"FRDP peer: {self.args.psx_host}:{self.args.psx_port}")

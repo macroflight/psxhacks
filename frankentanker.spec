@@ -5,7 +5,7 @@ a = Analysis(
     ['frankentanker.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('frankentanker.version', '.')],
     hiddenimports=[],
     hookspath=['pyinstaller_hooks'],
     hooksconfig={},

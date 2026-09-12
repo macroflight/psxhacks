@@ -56,12 +56,14 @@ from fw_cb import (
     apply_fake_cb as _apply_fake_cb,
 )
 import fw_webui as _fw_webui  # pylint: disable=wrong-import-order
+from psxhacks_version import get_version
 
 
 __MYNAME__ = 'frankenweather'
 __MY_CLIENT_ID__ = 'WEATHER'
 __MY_DISPLAY_NAME__ = 'FrankenWeather'
 __MY_DESCRIPTION__ = 'Dynamic real-world weather zones for PSX using Open-Meteo'
+__version__ = get_version("frankenweather", __file__)
 
 _OM_URL = "https://api.open-meteo.com/v1/forecast"
 _OM_VARS = (
@@ -5233,6 +5235,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             prog=__MYNAME__,
             description=__MY_DESCRIPTION__,
             formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
         parser.add_argument(
             '--psx-host', type=str, default='127.0.0.1',
             help="Hostname or IP of the PSX server.")
@@ -5401,6 +5404,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self.logger = logging.getLogger(__MYNAME__)
         if self.args.debug:
             self.logger.setLevel(logging.DEBUG)
+        self.logger.info("frankenweather version %s starting", __version__)
         self._warn_removed_args()
 
         if self.args.stations:

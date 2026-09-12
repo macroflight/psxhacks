@@ -4,7 +4,7 @@ a = Analysis(
     ['frankenweather.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('frankenweather.version', '.')],
     hiddenimports=[
         # rasterio is imported lazily inside frankenturb — invisible to Analysis
         'rasterio',

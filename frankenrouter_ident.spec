@@ -1,11 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+# frankenrouter_ident reports frankenrouter's own version (see
+# psxhacks_version.get_version's version_dir override in frankenrouter_ident.py),
+# so it bundles router/frankenrouter.version here -- not a version file of its own.
 
 a = Analysis(
-    ['frankenpush.py'],
+    ['frankenrouter_ident.py'],
     pathex=[],
     binaries=[],
-    datas=[('frankenpush.version', '.')],
+    datas=[('router/frankenrouter.version', '.')],
     hiddenimports=[],
     hookspath=['pyinstaller_hooks'],
     hooksconfig={},
@@ -22,7 +25,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='frankenpush',
+    name='frankenrouter_ident',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

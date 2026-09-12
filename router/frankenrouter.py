@@ -40,12 +40,13 @@ if _PSXHACKS not in sys.path:
     sys.path.insert(0, _PSXHACKS)
 
 import fw_webui as _fw_webui  # noqa: E402  pylint: disable=wrong-import-position
+from psxhacks_version import get_version  # noqa: E402  pylint: disable=wrong-import-position
 
 
 __MYNAME__ = 'frankenrouter'
 __MY_DESCRIPTION__ = 'A PSX Router'
 
-__VERSION__ = '1.4.3'
+__VERSION__ = get_version('frankenrouter', __file__)
 
 # If we have no upstream connection and no cached data, assume this
 # version.

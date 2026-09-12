@@ -38,6 +38,7 @@ import urllib.parse
 from typing import Callable, Optional
 
 import psx
+from psxhacks_version import get_version
 
 try:
     import win32print as _win32print  # pylint: disable=import-error
@@ -48,6 +49,7 @@ __MYNAME__ = 'frankenprint'
 __MY_CLIENT_ID__ = 'PRINTER'
 __MY_DISPLAY_NAME__ = 'FrankenPrinter'
 __MY_DESCRIPTION__ = 'Print PSX virtual printer output on an Epson TM-T20iii'
+__version__ = get_version("frankenprint", __file__)
 
 # ESC/POS command sequences for the Epson TM-T20iii
 _ESC_INIT = b'\x1b@'       # ESC @ — initialise / reset the printer
@@ -322,6 +324,7 @@ class FrankenPrint:
         parser.add_argument(
             '--debug', action='store_true',
             help="Enable debug logging.")
+        parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
         self.args = parser.parse_args()
         if self.args.psx_port_override is not None:
             if self.args.psx_port_override != self.args.psx_port:
@@ -336,6 +339,7 @@ class FrankenPrint:
             level=logging.DEBUG if self.args.debug else logging.INFO,
             format="%(asctime)s: %(message)s",
             datefmt="%H:%M:%S")
+        print(f"frankenprint version {__version__} starting")
         if self.args.pushover:
             missing = [f'--{f}' for f in ('pushover-token', 'pushover-user')
                        if not getattr(self.args, f.replace('-', '_'))]

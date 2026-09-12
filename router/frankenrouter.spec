@@ -14,8 +14,11 @@ a = Analysis(
     ['frankenrouter.py'],
     pathex=[_PSXHACKS_ROOT],
     binaries=[],
-    datas=[('frankenrouter/static', 'frankenrouter/static')],
-    hiddenimports=['fw_webui'],
+    datas=[
+        ('frankenrouter/static', 'frankenrouter/static'),
+        ('frankenrouter.version', '.'),
+    ],
+    hiddenimports=['fw_webui', 'psxhacks_version'],
     hookspath=[os.path.join(_PSXHACKS_ROOT, 'pyinstaller_hooks')],
     hooksconfig={},
     runtime_hooks=[],

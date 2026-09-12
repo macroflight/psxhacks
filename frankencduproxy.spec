@@ -2,10 +2,10 @@
 
 
 a = Analysis(
-    ['frankenpush.py'],
+    ['frankencduproxy.py'],
     pathex=[],
     binaries=[],
-    datas=[('frankenpush.version', '.')],
+    datas=[('frankencduproxy.version', '.')],
     hiddenimports=[],
     hookspath=['pyinstaller_hooks'],
     hooksconfig={},
@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='frankenpush',
+    name='frankencduproxy',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

@@ -2,10 +2,10 @@
 
 
 a = Analysis(
-    ['frankenpush.py'],
+    ['frankenprint.py'],
     pathex=[],
     binaries=[],
-    datas=[('frankenpush.version', '.')],
+    datas=[('frankenprint.version', '.')],
     hiddenimports=[],
     hookspath=['pyinstaller_hooks'],
     hooksconfig={},
@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='frankenpush',
+    name='frankenprint',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

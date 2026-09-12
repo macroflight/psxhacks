@@ -11,10 +11,12 @@ import traceback
 from collections import defaultdict
 import pygame  # pylint: disable=import-error
 import psx  # pylint: disable=unused-import
+from psxhacks_version import get_version
 
 __MY_CLIENT_ID__ = 'USB'
 __MY_DISPLAY_NAME__ = 'FrankenUSB'
 __MY_DESCRIPTION__ = '(partial)Replacement for PSX USB controller subsystem'
+__version__ = get_version("frankenusb", __file__)
 
 # Avail message categories
 # Qs418="FreeMsgW"; master warning + message in red on upper EICAS
@@ -121,6 +123,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             datefmt="%H:%M:%S",
         )
         self.logger = logging.getLogger("frankenusb")
+        print(f"frankenusb version {__version__} starting")
         self.config = None
         self.config_misc = None
         # Pygame events we are intersted in are added to this queue
@@ -229,6 +232,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                             action='store_true', default=False,
                             help='disable the rudder-tiller interconnect',
                             )
+        parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
 
         self.args = parser.parse_args()
         if self.args.psx_port_override is not None:

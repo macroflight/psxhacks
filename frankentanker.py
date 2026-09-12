@@ -79,11 +79,13 @@ import time
 import traceback
 
 import psx
+from psxhacks_version import get_version
 
 __MYNAME__ = 'frankentanker'
 __MY_CLIENT_ID__ = 'TANKER'
 __MY_DISPLAY_NAME__ = 'FrankenTanker'
 __MY_DESCRIPTION__ = 'Load and drop H2O'
+__version__ = get_version("frankentanker", __file__)
 
 # Drop rates for the 1, 2 and 4 valves open modes (kg/s)
 # EMG rate is used for load jettison (can this be higher than 4 valve rate?)
@@ -1042,6 +1044,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
             action='store_true',
             help="Print more debug info. Probably only useful for development.",
         )
+        parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
         self.args = parser.parse_args()
         if self.args.psx_port_override is not None:
             if self.args.psx_port_override != self.args.psx_port:
@@ -1077,6 +1080,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         if self.args.debug:
             self.logger.setLevel(logging.DEBUG)
 
+        print(f"frankentanker version {__version__} starting")
         if self.args.debug:
             asyncio.get_event_loop().set_debug(True)
         async with asyncio.TaskGroup() as self.taskgroup:
