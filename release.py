@@ -21,9 +21,17 @@ frankentanker, frankenusb, frankenweather.
 frankenrouter_ident is not a separate release target -- it always reports
 frankenrouter's own version (see frankenrouter_ident.py), so bumping
 frankenrouter's version covers it too.
+
+CI usage (see .github/workflows/build.yml and docs/BuildSystem.md):
+    git diff --name-only <before> <after> | ./release.py --detect-changed
+Reads newline-separated file paths from stdin and prints a JSON array of
+addon names whose .version file is among them -- the single source of
+truth the build workflow uses to decide what to build, so it never drifts
+out of sync with this file's own addon/version-file mapping.
 """
 import argparse
 import datetime
+import json
 import pathlib
 import sys
 
@@ -85,10 +93,38 @@ def _confirm(prompt: str, default: bool) -> bool:
     return answer.startswith('y')
 
 
-def main() -> None:
+def _map_changed_files(paths) -> list:
+    """Return the sorted addon names whose .version file appears in `paths`.
+
+    router/frankenrouter.version implies both 'frankenrouter' and
+    'frankenrouter_ident', since frankenrouter_ident has no version file of
+    its own -- it always mirrors frankenrouter's (see get_version()'s
+    version_dir override in frankenrouter_ident.py).
+    """
+    version_file_to_addon = {
+        version_file.relative_to(_ROOT).as_posix(): name
+        for name, (version_file, _) in _ADDONS.items()
+    }
+    addons: set = set()
+    for path in paths:
+        addon = version_file_to_addon.get(path.strip())
+        if addon is None:
+            continue
+        addons.add(addon)
+        if addon == 'frankenrouter':
+            addons.add('frankenrouter_ident')
+    return sorted(addons)
+
+
+def main() -> None:  # pylint: disable=too-many-branches,too-many-statements
     """Bump the chosen addon's version number and remind about its changelog."""
     parser = argparse.ArgumentParser(description="Bump an addon's version number.")
-    parser.add_argument('addon', choices=sorted(_ADDONS.keys()))
+    parser.add_argument('addon', nargs='?', default=None, choices=sorted(_ADDONS.keys()))
+    parser.add_argument(
+        '--detect-changed', action='store_true',
+        help="CI mode: read newline-separated file paths from stdin, print a JSON "
+             "array of addon names whose .version file is among them, and exit. "
+             "Ignores every other argument.")
     bump_group = parser.add_mutually_exclusive_group()
     bump_group.add_argument(
         '--minor', action='store_true',
@@ -99,6 +135,15 @@ def main() -> None:
         help="Bump the major version instead of the patch version "
              "(e.g. 1.23.4 -> 2.0.0).")
     args = parser.parse_args()
+
+    if args.detect_changed:
+        paths = [line for line in sys.stdin.read().splitlines() if line.strip()]
+        print(json.dumps(_map_changed_files(paths)))
+        return
+
+    if args.addon is None:
+        parser.error("addon is required unless --detect-changed is given")
+
     level = 'major' if args.major else 'minor' if args.minor else 'patch'
 
     version_file, changelog_file = _ADDONS[args.addon]

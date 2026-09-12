@@ -1,0 +1,158 @@
+name: Build addon EXEs
+
+# See docs/BuildSystem.md for the full design and rationale.
+#
+# Only ever runs in the public macroflight/psxhacks repo (see the explicit
+# `github.repository` guard on every job below) -- psxhacks-devel (private)
+# never builds, no matter what branch is pushed there. `main` pushes create
+# real releases; `testing` pushes create pre-releases, so you can try the
+# build system (or a specific addon build) without touching main.
+
+"on":
+  push:
+    branches: [main, testing]
+  workflow_dispatch:
+    inputs:
+      addon:
+        description: >
+          Addon to force-build (see makepackages.ps1 -Addon for valid
+          names). Leave blank to build whatever .version file(s) changed
+          since the previous push on this branch, same as an automatic run.
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  # How many releases to keep per addon on each branch. Configurable here,
+  # independently per branch -- see docs/BuildSystem.md.
+  RETAIN_MAIN: 5
+  RETAIN_TESTING: 5
+
+jobs:
+  detect:
+    # Hard repo guard: makes this workflow a no-op anywhere except the
+    # public repo, regardless of branch name -- see docs/BuildSystem.md
+    # for why this can't just rely on the on:push branch filter alone.
+    if: github.repository == 'macroflight/psxhacks'
+    runs-on: ubuntu-latest
+    outputs:
+      addons: ${{ steps.detect.outputs.addons }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Determine which addons need building
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -n "${{ inputs.addon }}" ]; then
+            echo "Manually requested addon: ${{ inputs.addon }}"
+            echo 'addons=["${{ inputs.addon }}"]' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          BEFORE="${{ github.event.before }}"
+          ZERO="0000000000000000000000000000000000000000"
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "$ZERO" ]; then
+            # New branch (or manual dispatch with no addon given): no real
+            # "previous push" baseline exists, so fall back to the single
+            # parent commit instead of silently building nothing.
+            RANGE="HEAD~1..HEAD"
+          else
+            RANGE="$BEFORE..${{ github.sha }}"
+          fi
+
+          CHANGED=$(git diff --name-only $RANGE -- '*.version' || true)
+          echo "Changed .version files:"
+          echo "$CHANGED"
+
+          ADDONS=$(echo "$CHANGED" | python3 release.py --detect-changed)
+          echo "Addons to build: $ADDONS"
+          echo "addons=$ADDONS" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: detect
+    if: github.repository == 'macroflight/psxhacks' && needs.detect.outputs.addons != '[]'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Build and release each changed addon
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $addons = '${{ needs.detect.outputs.addons }}' | ConvertFrom-Json
+          $branch = '${{ github.ref_name }}'
+          $isMain = $branch -eq 'main'
+          $retain = if ($isMain) { [int]$env:RETAIN_MAIN } else { [int]$env:RETAIN_TESTING }
+          $tagSuffix = if ($isMain) { '' } else { '-testing' }
+
+          Write-Output "Branch: $branch (isMain=$isMain, retain=$retain, tagSuffix='$tagSuffix')"
+          Write-Output "Addons to build: $($addons -join ', ')"
+
+          foreach ($addon in $addons) {
+              Write-Output ""
+              Write-Output "=== Building $addon ==="
+              # No $LASTEXITCODE check here: with $ErrorActionPreference =
+              # "Stop", a real PyInstaller failure already propagates as a
+              # terminating error via makepackages.ps1's own `throw`. The
+              # Test-Path check below is the actual success signal --
+              # $LASTEXITCODE after invoking a .ps1 (as opposed to a native
+              # exe) can be stale/$null, and PowerShell's `$null -ne 0` is
+              # $true, which would false-positive as "build failed".
+              #
+              # -PythonDir points at whatever actions/setup-python just
+              # installed (its default, C:\fs\python\3.13.13, is a local
+              # dev-machine path that doesn't exist on a hosted runner).
+              .\makepackages.ps1 -Addon $addon -PythonDir $env:pythonLocation
+
+              # frankenrouter_ident has no .version file of its own -- it
+              # always mirrors frankenrouter's (see psxhacks_version.py).
+              if ($addon -eq 'frankenrouter' -or $addon -eq 'frankenrouter_ident') {
+                  $versionFile = "router\frankenrouter.version"
+              } else {
+                  $versionFile = "$addon.version"
+              }
+              $version = (Get-Content $versionFile -Raw).Trim()
+              $tag = "$addon$tagSuffix-v$version"
+              $exePath = "dist\$addon.exe"
+
+              if (-not (Test-Path $exePath)) {
+                  throw "Expected EXE not found: $exePath"
+              }
+
+              Write-Output "=== Releasing $tag ==="
+              $releaseArgs = @('release', 'create', $tag, $exePath, '--title', "$addon $version")
+              if (-not $isMain) { $releaseArgs += '--prerelease' }
+              & gh @releaseArgs
+              if ($LASTEXITCODE -ne 0) { throw "gh release create failed for $tag" }
+
+              Write-Output "=== Pruning old releases for $addon (branch=$branch, keep=$retain) ==="
+              $prefix = "$addon$tagSuffix-v"
+              $existingJson = gh release list --limit 200 --json tagName,createdAt
+              $existing = $existingJson | ConvertFrom-Json |
+                  Where-Object { $_.tagName.StartsWith($prefix) } |
+                  Sort-Object -Property createdAt -Descending
+              if ($existing.Count -gt $retain) {
+                  $toDelete = $existing | Select-Object -Skip $retain
+                  foreach ($old in $toDelete) {
+                      Write-Output "Deleting old release $($old.tagName)"
+                      gh release delete $old.tagName --yes --cleanup-tag
+                  }
+              }
+          }
