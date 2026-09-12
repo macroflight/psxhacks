@@ -872,12 +872,12 @@ html, body {
   margin: 0; padding: 0; background: #000; color: #dbe6f5;
   font-family: "Segoe UI", -apple-system, "Helvetica Neue", Arial, sans-serif;
 }
-body { padding: 1.1rem 1.3rem 1.6rem; }
-.efb-grid { display: grid; gap: 0.9rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
-.efb-grid.wide { grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); }
+body { padding: 0.8rem 1.1rem 1rem; }
+.efb-grid { display: grid; gap: 0.7rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+.efb-grid.wide { grid-template-columns: repeat(auto-fit, minmax(15.5rem, 1fr)); }
 .efb-card {
   background: #0d1826; border: 1px solid #1e2f45; border-radius: 10px;
-  padding: 0.95rem 1.1rem; min-width: 0;
+  padding: 0.75rem 0.9rem; min-width: 0;
 }
 .efb-card.fill-green { background: linear-gradient(135deg, #1f8a4c, #176b3c); border-color: #1f8a4c; }
 .efb-card.fill-red { background: linear-gradient(135deg, #8a2f2f, #6b2323); border-color: #8a2f2f; }
@@ -900,9 +900,10 @@ body { padding: 1.1rem 1.3rem 1.6rem; }
 }
 .efb-chip.active { background: #f4d100; border-color: #f4d100; color: #1a1a1a; }
 .efb-chip.active.blue { background: #2058a8; border-color: #3b7fe0; color: #fff; }
+.efb-chip-sm { padding: 0.3rem 0.6rem; font-size: 0.76rem; flex-shrink: 0; white-space: nowrap; }
 .efb-src-row {
-  display: flex; justify-content: space-between; align-items: center;
-  font-size: 0.85rem; padding: 0.3rem 0; border-bottom: 1px solid #16233a;
+  display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline;
+  gap: 0.15rem 0.5rem; font-size: 0.82rem; padding: 0.28rem 0; border-bottom: 1px solid #16233a;
 }
 .efb-src-row:last-of-type { border-bottom: none; }
 .efb-src-row .lbl { color: #9fb2cc; }
@@ -1277,12 +1278,12 @@ def _build_efb_page(router, ctx):
         _EFB_CSS +
         '</head>\n<body>\n'
         f'<div id="efb-errors">{_efb_errors_html(r["errors"])}</div>\n'
-        '<div style="text-align:right;margin-bottom:0.6rem">'
-        '<a href="/" class="efb-chip">Full router/weather control panel</a></div>\n'
         '<div class="efb-grid wide">' +
         _efb_router_card(r) + _efb_datasources_card(w) +
         _efb_controls_card(w) + _efb_location_wx_card(loc) +
         '</div>\n'
+        '<div style="text-align:right;margin-top:0.5rem">'
+        '<a href="/" class="efb-chip efb-chip-sm">Full router/weather control panel</a></div>\n'
         '<script>\n'
         'function efbPoll() {\n'
         '  fetch("/api/efb/status").then(function(r) { return r.json(); })'
