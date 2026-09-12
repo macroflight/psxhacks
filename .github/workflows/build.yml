@@ -137,7 +137,12 @@ jobs:
               }
 
               Write-Output "=== Releasing $tag ==="
-              $releaseArgs = @('release', 'create', $tag, $exePath, '--title', "$addon $version")
+              # --target pins the new tag to the commit that was actually
+              # built. Without it, `gh release create` defaults an unseen
+              # tag to the *default branch* (main), not the checked-out
+              # commit -- on `testing` builds that silently tags the wrong
+              # commit (whatever main's HEAD happened to be).
+              $releaseArgs = @('release', 'create', $tag, $exePath, '--title', "$addon $version", '--target', '${{ github.sha }}')
               if (-not $isMain) { $releaseArgs += '--prerelease' }
               & gh @releaseArgs
               if ($LASTEXITCODE -ne 0) { throw "gh release create failed for $tag" }
