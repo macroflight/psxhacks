@@ -7,6 +7,7 @@ reminds about updating its changelog. Does NOT commit, push, or tag --
 that is left to the user.
 
 Usage:
+    ./release.py                    # scan git history, suggest which addons may need a bump
     ./release.py <addon>            # bump the patch version, e.g. 1.23.4 -> 1.23.5
     ./release.py <addon> --minor    # bump the minor version, e.g. 1.23.4 -> 1.24.0
     ./release.py <addon> --major    # bump the major version, e.g. 1.23.4 -> 2.0.0
@@ -43,7 +44,9 @@ import argparse
 import datetime
 import json
 import pathlib
+import subprocess
 import sys
+from typing import Optional
 
 _ROOT = pathlib.Path(__file__).resolve().parent
 
@@ -88,6 +91,133 @@ _NONBUILD_ADDONS = {
 }
 
 _ALL_ADDONS = {**_ADDONS, **_NONBUILD_ADDONS}
+
+# addon name -> (paths it owns, extra commit-message aliases to also match).
+# Hand-maintained -- there's no directory structure yet that makes this
+# derivable automatically (see the psxhacks_version.py / per-addon-directory
+# idea floated alongside this feature). Used only by the no-args scan mode
+# below; wrong or missing entries just make the scan miss/over-report, they
+# can't cause an incorrect version bump or corrupt build.
+#
+# Files/dirs not listed anywhere here (psxhacks_version.py, release.py,
+# psx.py, Makefile, .github/, requirements.txt, ...) are shared
+# infrastructure, deliberately unattributed to any single addon.
+_ADDON_PATHS = {
+    'frankencduproxy': (['frankencduproxy.py', 'frankencduproxy.spec'], []),
+    'frankenprint': (['frankenprint.py', 'frankenprint.spec'], []),
+    'frankenpush': (['frankenpush.py', 'frankenpush.spec'], []),
+    'frankenrouter': (
+        ['router/', 'frankenrouter_ident.py', 'frankenrouter_ident.spec'],
+        ['router']),
+    'frankentanker': (['frankentanker.py', 'frankentanker.spec'], []),
+    'frankenusb': (['frankenusb.py', 'frankenusb.spec'], []),
+    'frankenweather': (
+        ['frankenweather.py', 'frankenweather.spec', 'fw_webui.py', 'fw_cb.py',
+         'fw_scanner.py', 'frankenturb/', 'docs/frankenweather.md'],
+        ['weather']),
+    'psxutils': (
+        ['show_hid.py', 'show_hid.spec', 'show_psx.py', 'show_usb.py',
+         'show_usb.spec', 'temporary_weather_logger.py',
+         'temporary_weather_logger.spec'],
+        []),
+    'start_scripts': (['start_scripts/'], []),
+}
+
+
+def _git(args: list) -> Optional[str]:
+    """Run a git command from _ROOT, returning stdout or None on any failure.
+
+    Covers "not a git repo", "git not installed", and any other git error
+    the same way -- this feature is a best-effort hint, never something
+    that should crash the script or block a bump.
+    """
+    try:
+        result = subprocess.run(
+            ['git', *args], cwd=_ROOT, capture_output=True, text=True, check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        return None
+    return result.stdout
+
+
+def _last_bump_commit(version_file: pathlib.Path) -> Optional[str]:
+    """Return the SHA of the commit that last changed version_file, or None.
+
+    None means either it has no git history yet (e.g. just created, not
+    committed) or git itself is unavailable -- both are treated the same
+    by callers: scan the addon's whole history instead of a range.
+    """
+    if not version_file.exists():
+        return None
+    out = _git(['log', '-1', '--format=%H', '--',
+                str(version_file.relative_to(_ROOT))])
+    return out.strip() if out and out.strip() else None
+
+
+def _log_since(commit: Optional[str], args: list) -> list:
+    """Return `git log --oneline` lines for `args` since `commit` (or ever)."""
+    range_spec = [f'{commit}..HEAD'] if commit else []
+    out = _git(['log', '--oneline', *range_spec, '--', *args]) if args else None
+    return [line for line in (out or '').splitlines() if line.strip()]
+
+
+def _log_since_by_message(commit: Optional[str], aliases: list) -> list:
+    """Return `git log --oneline` lines whose message matches any alias since commit."""
+    if not aliases:
+        return []
+    range_spec = [f'{commit}..HEAD'] if commit else []
+    grep_args = []
+    for alias in aliases:
+        grep_args += ['--grep', alias]
+    out = _git(['log', '--oneline', '-i', *grep_args, *range_spec])
+    return [line for line in (out or '').splitlines() if line.strip()]
+
+
+def _scan_for_pending_bumps() -> None:
+    """Print, per addon, commits since its last bump that may warrant a new one.
+
+    Looks at commits touching each addon's files or mentioning it by name
+    (see _ADDON_PATHS) since the commit that last changed its version file
+    -- a hint about what might need `./release.py <addon>` and a changelog
+    entry.
+
+    Heuristic, not authoritative: _ADDON_PATHS is hand-maintained and can
+    miss a change routed through a file it doesn't know about, or
+    over-report something like a docs-only tweak. Always look at the
+    listed commits yourself before deciding whether/how much to bump.
+    """
+    if _git(['rev-parse', '--git-dir']) is None:
+        print("Not a git repository (or git is unavailable) -- can't scan for "
+              "pending bumps.", file=sys.stderr)
+        return
+
+    any_found = False
+    for name in sorted(_ALL_ADDONS.keys()):
+        version_file, _ = _ALL_ADDONS[name]
+        paths, aliases = _ADDON_PATHS.get(name, ([], []))
+        if not paths:
+            continue
+        last_bump = _last_bump_commit(version_file)
+        by_file = _log_since(last_bump, paths)
+        seen = {line.split(maxsplit=1)[0] for line in by_file}
+        by_message = [line for line in _log_since_by_message(last_bump, aliases)
+                      if line.split(maxsplit=1)[0] not in seen]
+        commits = by_file + by_message
+        if not commits:
+            continue
+        any_found = True
+        current = version_file.read_text(encoding='utf-8').strip()
+        print(f"\n{name} (currently {current}): {len(commits)} commit(s) "
+              f"since last bump")
+        for line in commits[:10]:
+            print(f"  {line}")
+        if len(commits) > 10:
+            print(f"  ... and {len(commits) - 10} more")
+
+    if not any_found:
+        print("No addon shows commits since its last version bump.")
+    else:
+        print("\nReminder: this is a heuristic (see _ADDON_PATHS) -- check the "
+              "commits above before bumping. Run ./release.py <addon> when ready.")
 
 
 def _parse_version(text: str) -> tuple:
@@ -169,7 +299,8 @@ def main() -> None:  # pylint: disable=too-many-branches,too-many-statements
         return
 
     if args.addon is None:
-        parser.error("addon is required unless --detect-changed is given")
+        _scan_for_pending_bumps()
+        return
 
     level = 'major' if args.major else 'minor' if args.minor else 'patch'
 
