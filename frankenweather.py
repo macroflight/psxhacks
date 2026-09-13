@@ -99,6 +99,34 @@ def _om_pos_key(lat: float, lon: float) -> str:
     return f"{lat:.3f},{lon:.3f}"
 
 
+# Bucket size for _om_zone_cache_key(), matching CapeFetcher's/WindFetcher's
+# own CACHE_DEG_GRID in frankenturb/ -- see that function's docstring.
+_OM_ZONE_CACHE_DEG_GRID = 1.0
+
+
+def _om_zone_cache_key(lat: float, lon: float) -> str:
+    """Return a coarse-grid disk-cache key for a zone-weather Open-Meteo fetch.
+
+    Buckets to a _OM_ZONE_CACHE_DEG_GRID° grid (matching frankenturb's
+    CapeFetcher/WindFetcher bucket size) instead of _om_pos_key()'s exact
+    position, so a zone relocated a short distance from a moments-ago fetch
+    -- or two zones/relocations landing in roughly the same area, which
+    happens often given the ~150-250nm forward placement cone -- can reuse
+    that entry instead of missing and forcing a fresh Open-Meteo call.
+    Freshness is unaffected: _om_zone_cache's own max_age_s (_REFRESH_MAX_S,
+    matching the zone refresh cadence) still governs how old a served entry
+    can be, independent of this bucketing.
+
+    Deliberately a separate function from _om_pos_key(), which the enroute-
+    wind cache still uses at full precision -- that feature compares
+    Open-Meteo wind against the flight-plan's wind at a *specific* waypoint,
+    where coarsening position would blur the very comparison it exists to
+    show.
+    """
+    return (f"{math.floor(lat / _OM_ZONE_CACHE_DEG_GRID)},"
+            f"{math.floor(lon / _OM_ZONE_CACHE_DEG_GRID)}")
+
+
 def _prepare_event_log() -> Optional[str]:
     """Create this run's per-run log file path, pruning old runs first.
 
@@ -4127,14 +4155,20 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         Served straight from the on-disk cache when every position already
         has a still-fresh entry (see _OM_ZONE_CACHE_PATH) — the common case
         right after a dev restart, when zone positions haven't moved and the
-        cache's max age (matching _REFRESH_MAX_S) hasn't elapsed yet. Any
-        cache miss falls back to fetching fresh data for the whole batch,
-        exactly as before.
+        cache's max age (matching _REFRESH_MAX_S) hasn't elapsed yet. Cache
+        keys are bucketed to a coarse grid (_om_zone_cache_key(), matching
+        frankenturb's CAPE/wind fetcher granularity) rather than exact
+        position, so a relocated zone -- or a different zone landing nearby,
+        common given the ~150-250nm forward placement cone -- also counts as
+        a hit; this is what lets an Open-Meteo outage keep serving
+        reasonably fresh weather for longer instead of every relocation
+        forcing a fresh (and, during an outage, failing) fetch. Any cache
+        miss falls back to fetching fresh data for the whole batch.
         """
         if self._diag_simulate_om_failure:
             self.logger.warning("Open-Meteo fetch simulated as failed (DIAG)")
             return []
-        cached = [self._om_zone_cache.get(_om_pos_key(p[0], p[1])) for p in positions]
+        cached = [self._om_zone_cache.get(_om_zone_cache_key(p[0], p[1])) for p in positions]
         if cached and all(c is not None for c in cached):
             return cached
 
@@ -4169,7 +4203,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 body = [body]
             body = body or []
             for pos, entry in zip(positions, body):
-                self._om_zone_cache.set(_om_pos_key(pos[0], pos[1]), entry)
+                self._om_zone_cache.set(_om_zone_cache_key(pos[0], pos[1]), entry)
             return body
         return []
 
