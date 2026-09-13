@@ -236,6 +236,7 @@ variables = 'C:\fs\PSX\Variables.txt
 ```
 
 ### `[[access]]`
+
 This section can be listed several times in the file. Each access
 section describes one rule that control who can connect to the router
 and what access level (e.g full, read-only) they get.
@@ -469,7 +470,6 @@ Example:
 # so only warn if ping times are above 500 ms
 frdp_rtt_warning = 0.5
 ```
-
 
 <!---
 https://github.com/markdownlint/markdownlint

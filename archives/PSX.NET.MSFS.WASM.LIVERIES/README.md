@@ -1,4 +1,3 @@
-
 # A simple tutorial for how to convert existing repaints to work with PSX.NET.MSFS.WASM
 
 I say tutorial because this directory is not a complete livery, you
@@ -11,18 +10,18 @@ the FAIB model and a repaint from www.juergenbaumbusch.de.
 
 - A copy of this directory
 
-- The FAIB freighter basepack from https://fsxaibureau.com/manufacturing/boeing/boeing-747-400/
+- The FAIB freighter basepack from <https://fsxaibureau.com/manufacturing/boeing/boeing-747-400/>
 
-- The epaint you want to use (in this case https://www.juergenbaumbusch.de/?p=6571, I used the FSX version)
+- The epaint you want to use (in this case <https://www.juergenbaumbusch.de/?p=6571>, I used the FSX version)
 
 - The PSX.NET.MSFS.WASM model (of course you already have this, but we
   need to copy a file from it)
 
 ## Step 1: download FAIB7474F.zip and ai74fklm_fsx.zip
 
-https://fsxaibureau.com/manufacturing/boeing/boeing-747-400/boeing-747-400f-basepack/
+<https://fsxaibureau.com/manufacturing/boeing/boeing-747-400/boeing-747-400f-basepack/>
 
-http://www.juergenbaumbusch.de/paints/KLM/ai74fklm_fsx.zip
+<http://www.juergenbaumbusch.de/paints/KLM/ai74fklm_fsx.zip>
 
 ## Step 2: get the model file from the FAIB package
 
@@ -51,4 +50,3 @@ Drag the empty layout.json file onto MSFSLayoutGenerator.exe. It should now be a
 Copy PSX.NET.MSFS.LIVERIES into your MSFS Community folder and restart MSFS.
 
 Now you should hopefully see another livery for the PSX.NET.MSFS.WASM addon.
-

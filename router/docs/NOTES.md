@@ -201,8 +201,8 @@ same protocol version so they can understand eachother.
 
 In order to identify a router connecting to another router as a router
 (and also to be a good PSX network citizen), the connecting router
-will send `name=<simname>:FRANKEN.PY frankenrouter PSX router
-<routername>` as soon as the connection is established.
+will send `name=<simname>:FRANKEN.PY frankenrouter PSX router <routername>`
+as soon as the connection is established.
 
 The upstream router will then send a FRDP PING message to the
 client. The client will see this message and do two things:

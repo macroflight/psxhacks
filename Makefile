@@ -18,7 +18,7 @@ PYDOCSTYLEFILES = $(shell find . -name '*.py' | egrep -v '(^\./psx\.py$$|test_la
 
 CONFIGFILES = config_examples/*
 
-MARKDOWNFILES = router/*.md
+MARKDOWNFILES = $(shell git ls-files '*.md')
 
 TOMLFILES = router/config_examples/*.toml
 

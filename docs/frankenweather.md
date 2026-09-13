@@ -57,11 +57,11 @@ Otherwise, to run it from source:
 
 1. Install Python 3.13 and the packages listed below (`pip install aiohttp
    pyproj numpy rasterio requests`).
-2. Run `python frankenweather.py`, pointing `--psx-host`/`--psx-port` at
+1. Run `python frankenweather.py`, pointing `--psx-host`/`--psx-port` at
    wherever PSX (or your frankenrouter, if you use one) is listening.
    Both default to `127.0.0.1:10747`, so if PSX is running on the same PC
    on its default port, no arguments are needed at all.
-3. That's it. A web UI is on by default at `http://localhost:9747` (see
+1. That's it. A web UI is on by default at `http://localhost:9747` (see
    `--web-port`/`--no-web-ui` below) for live status and tuning.
 
 If you already use `start_scripts` (see `start_scripts/README.md`), set
@@ -197,13 +197,13 @@ Features:
 
 Requires `aiohttp`, `pyproj`, `numpy`, `rasterio`, and `requests`:
 
-```
+```bash
 pip install aiohttp pyproj numpy rasterio requests
 ```
 
 Key options:
 
-```
+```text
 --psx-host HOST      PSX server hostname (default: 127.0.0.1)
 --psx-port PORT      PSX server port (default: 10747)
 --web-port PORT      Port for the standalone web UI (default: 9747)
@@ -435,4 +435,3 @@ pirep = 100
 cape = 100
 gairmet = 100
 ```
-

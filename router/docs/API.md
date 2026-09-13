@@ -7,13 +7,13 @@ features of the router. This is not a replacement for the config file,
 the web pages are only intended for things that you often need to
 change while the router is running.
 
-If you http://127.0.0.1:8747/ you will get a start page with links to
+If you go to <http://127.0.0.1:8747/> you will get a start page with links to
 all available pages (replace 8747 with the API port number if you have
 changed it in the config file).
 
 ### Mini web page: /filter
 
-If you open http://127.0.0.1:8747/filter you get a small control panel
+If you open <http://127.0.0.1:8747/filter> you get a small control panel
 that lets see the status of the filter that prevents MSFS elevation
 data from being forwarded and the filter that prevents vPilot
 traffic/TCAS data from being forwarded. You can also toggle the filters
@@ -21,11 +21,10 @@ from there.
 
 ### Mini web page: /upstream
 
-If you open http://127.0.0.1:8747/upstream you get a small control
+If you open <http://127.0.0.1:8747/upstream> you get a small control
 panel that lets see the status of the upstream (master sim)
 connection. You can also choose to connect to another upstream without
 restarting the router.
-
 
 ## REST API
 
@@ -294,7 +293,6 @@ Remove an entry from the IP blocklist.
 
 Only used from the vPilot plugin to print messages to PSX printer. Do
 not use for anything else.
-
 
 <!---
 https://github.com/markdownlint/markdownlint

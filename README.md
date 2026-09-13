@@ -87,9 +87,9 @@ Quickstart Guide:
       configure_window_positions, save, repeat.
     - Set `$ChangeWindowPositionsThen = $true` in your override file.
     - Start the sim
-	- If you need to reapply all configured window positions, run
+    - If you need to reapply all configured window positions, run
       apply_window_positions.ps1
-	
+
 Most of the individual scripts can be run independently, e.g
 double-click start_cpdlc.ps1 to restart the CPDLC client.
 
@@ -146,16 +146,17 @@ a large fuel tank in the hold that can be emptied into the center
 tank. Who said you can't fly London to Sydney with a decent payload in
 a 744? :)
 
-## What you need to run my Python scripts:
+## What you need to run my Python scripts
 
 - Python 3.13 or later (might work with earlier versions but not
-  tested) from https://www.python.org/ 
+  tested) from <https://www.python.org/>
 - The python modules listed in requirements.txt
 
 If you already know how to use Python, just use your favorite way to
 install packages. If not, try to follow the recipe below:
 
 ### Install Python
+
 - Download the Python installer from python.org. You probably want to
   use "Windows installer (64-bit) and the latest version in the 3.13
   series.
@@ -164,7 +165,7 @@ install packages. If not, try to follow the recipe below:
 
 ### Create a Python virtual environment
 
-```
+```text
 c:\fs\python\3.13.5\python.exe -m venv c:\fs\psx\psxpython\venv-1
 c:\fs\psx\psxpython\venv-1\Scripts\pip install --upgrade pip
 ```
@@ -178,7 +179,7 @@ virtual environment. If so, adjust the paths below.
 
 ### Install Python packages into the virtual environment
 
-```
+```text
 c:\fs\psx\psxpython\venv-1\Scripts\pip install -r c:\fs\psx\psxhacks\requirements.txt
 ```
 
@@ -188,7 +189,7 @@ Most of my scripts requires Jeroen Hoppenbrouwers' `psx.py`
 module. For your convenience I'm including a copy of it in the
 repository, so you no longer need to download it.
 
-The original `psx.py` is available at https://www.hoppie.nl/psx/python/
+The original `psx.py` is available at <https://www.hoppie.nl/psx/python/>
 
 ## Running one of my scripts
 
@@ -198,7 +199,7 @@ The original `psx.py` is available at https://www.hoppie.nl/psx/python/
 
 E.g
 
-```
+```text
 cd c:\fs\psx\psxhacks
 c:\fs\python\psxpython\venv-1\Scripts\python.exe frankenusb.py --help
 ```
@@ -224,7 +225,7 @@ something. You also cannot verify what the binary does, so you have to
 trust the developer...
 
 You can find the binary packages on the project's GitHub Releases page:
-https://github.com/macroflight/psxhacks/releases
+<https://github.com/macroflight/psxhacks/releases>
 
 Each addon has its own independent list of releases there. Look for the
 tag matching the addon you want:

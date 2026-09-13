@@ -76,13 +76,13 @@ For each addon that needs building, the `build` job:
 1. Runs `makepackages.ps1 -Addon <name>` (the same script you'd run
    locally — see its own header comment and `docs/BuildSystem.md`'s
    sibling, the repo's main README, for manual usage).
-2. Reads the resulting version string from the addon's `.version` file
+1. Reads the resulting version string from the addon's `.version` file
    (or `router/frankenrouter.version` for `frankenrouter`/
    `frankenrouter_ident`).
-3. Creates a GitHub Release tagged `<addon>-v<version>` (`main`) or
+1. Creates a GitHub Release tagged `<addon>-v<version>` (`main`) or
    `<addon>-testing-v<version>` (`testing`, marked pre-release), with the
    bare `dist\<addon>.exe` as the only release asset.
-4. Prunes older releases for that same addon+branch: anything beyond the
+1. Prunes older releases for that same addon+branch: anything beyond the
    configured retention count gets deleted (both the release and its git
    tag).
 
