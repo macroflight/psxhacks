@@ -1,5 +1,30 @@
 # start_scripts changelog
 
+## 1.1.0 (2026-09-13)
+
+- **Bug fix: `configure_window_positions.ps1` now automatically removes
+  saved window positions for addons it no longer manages**, checked once
+  at startup. A leftover entry left in place after an addon is removed or
+  renamed isn't just clutter: `apply_window_positions.ps1` falls back to
+  a "contains anywhere" title match when nothing matches exactly, so a
+  stale entry with a short/generic `Title` can silently grab some other,
+  completely unrelated addon's window. Confirmed live: a leftover
+  `PSX.NET` entry (`Title = 'PSX.NET'`, left over from before
+  `PSX.NET.Orchestration` replaced it) was matching BACARS's window -
+  since BACARS is now part of the PSX.NET suite - and repositioning/
+  minimizing it, silently overriding BACARS's own correct "do not
+  position" entry.
+
+- **New feature: "Use standard match" shortcut when picking a window** in
+  `configure_window_positions.ps1`. Addons with a well-known window title
+  (a new `$KnownWindowTitlePatterns` table in `common.ps1`, seeded for
+  every addon with a confirmed title substring) now get a one-key shortcut
+  pinned at the top of the picker whenever that pattern currently
+  identifies exactly one visible window, instead of having to search for
+  it by hand every time. Falls back to the normal search-and-pick flow
+  whenever the pattern matches zero or more than one window (e.g. running
+  both SRSL-PSX master and slave at once, which share the same title).
+
 ## 1.0.0 (2026-09-12)
 
 - **New feature: start_scripts now has its own version number**, printed
