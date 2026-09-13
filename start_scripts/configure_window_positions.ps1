@@ -128,6 +128,18 @@ function Select-Addon([hashtable]$positions) {
 
 function Select-Window([string]$addonName) {
     $allWindows = @([WinPosConf]::GetVisibleWindows())
+
+    # If this addon has a known-title regex (see $KnownWindowTitlePatterns
+    # in common.ps1) and it currently identifies exactly one window, offer
+    # it as a one-key shortcut pinned at the top of the picker -- ambiguous
+    # (0 or 2+) matches fall back to the normal search-to-pick flow below.
+    $standardMatch = $null
+    if ($KnownWindowTitlePatterns -and $KnownWindowTitlePatterns.Contains($addonName)) {
+        $pattern = $KnownWindowTitlePatterns[$addonName]
+        $patternHits = @($allWindows | Where-Object { $_.Title -match $pattern })
+        if ($patternHits.Count -eq 1) { $standardMatch = $patternHits[0] }
+    }
+
     $search = ""
     $idx = 0
     $maxList = [Math]::Max(5, [Console]::WindowHeight - 9)
@@ -140,7 +152,13 @@ function Select-Window([string]$addonName) {
             } else {
                 $filtered = @($allWindows | Where-Object { $_.Title -like "*$search*" })
             }
-            $total = $filtered.Count
+            # Only offered while the search box is empty -- once the user
+            # starts typing they're looking for something specific, so the
+            # shortcut (which is otherwise always "first") would just be
+            # noise mixed into search results it has no relation to.
+            $showStandard = ($null -ne $standardMatch -and $search -eq "")
+            $standardOffset = if ($showStandard) { 1 } else { 0 }
+            $total = $filtered.Count + $standardOffset
 
             if ($idx -ge $total -and $total -gt 0) { $idx = $total - 1 }
             if ($total -eq 0) { $idx = 0 }
@@ -158,13 +176,21 @@ function Select-Window([string]$addonName) {
             $displayCount = [Math]::Min($total, $maxList)
             for ($i = 0; $i -lt $displayCount; $i++) {
                 $wi = $i + $scrollOffset
-                if ($wi -lt $total) {
-                    $w = $filtered[$wi]
+                if ($wi -ge $total) { continue }
+                if ($showStandard -and $wi -eq 0) {
+                    $label = "Use standard match: " + $standardMatch.Title
                     if ($wi -eq $idx) {
-                        Write-Host ("  > " + $w.Title) -ForegroundColor Cyan
+                        Write-Host ("  > " + $label) -ForegroundColor Green
                     } else {
-                        Write-Host ("    " + $w.Title) -ForegroundColor DarkGray
+                        Write-Host ("    " + $label) -ForegroundColor Green
                     }
+                    continue
+                }
+                $w = $filtered[$wi - $standardOffset]
+                if ($wi -eq $idx) {
+                    Write-Host ("  > " + $w.Title) -ForegroundColor Cyan
+                } else {
+                    Write-Host ("    " + $w.Title) -ForegroundColor DarkGray
                 }
             }
             $remaining = $total - $scrollOffset - $displayCount
@@ -182,7 +208,12 @@ function Select-Window([string]$addonName) {
             switch ($key.VirtualKeyCode) {
                 38 { if ($idx -gt 0)        { $idx-- } }
                 40 { if ($idx -lt $total-1) { $idx++ } }
-                13 { if ($total -gt 0)      { return $filtered[$idx] } }
+                13 {
+                    if ($total -gt 0) {
+                        if ($showStandard -and $idx -eq 0) { return $standardMatch }
+                        return $filtered[$idx - $standardOffset]
+                    }
+                }
                 27 { return $null }
                 8  {
                     if ($search.Length -gt 0) {
@@ -324,6 +355,51 @@ function Export-PositionData([hashtable]$positions) {
     }
     $lines | Set-Content $PositionsFile -Encoding UTF8
 }
+
+function Remove-OrphanedPosition {
+    <#
+    Prune saved positions for addons that are no longer in $SimAddonNames
+    -- e.g. after an addon is removed or renamed in common.ps1. Left in
+    place, an orphaned entry's Title can still fuzzy-match some other,
+    unrelated running addon's window (apply_window_positions.ps1 falls
+    back to a "contains anywhere" match when nothing matches exactly) and
+    silently reposition/minimize it under the wrong addon's saved
+    coordinates. Confirmed live: a leftover 'PSX.NET' entry (Title =
+    'PSX.NET', from before PSX.NET.Orchestration replaced it) grabbed
+    BACARS's window and minimized it, since BACARS is now part of the
+    PSX.NET suite and its real window title contains that substring --
+    even though BACARS itself had a correct, separate DoNotPosition entry.
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param()
+
+    $positions = Get-PositionData
+    $orphans = @($positions.Keys | Where-Object { $_ -notin $SimAddons } | Sort-Object)
+    if ($orphans.Count -eq 0) { return }
+
+    Write-Host "=== Configure Window Positions ===" -ForegroundColor White
+    Write-Host ""
+    Write-Host "Removing saved window position(s) for addon(s) no longer in use:" -ForegroundColor Yellow
+    foreach ($key in $orphans) {
+        if ($PSCmdlet.ShouldProcess($key, 'Remove orphaned window position')) {
+            Write-Host ("  - " + $key) -ForegroundColor DarkGray
+            $positions.Remove($key)
+        }
+    }
+    if ($PSCmdlet.ShouldProcess($PositionsFile, 'Save pruned window positions')) {
+        Export-PositionData $positions
+    }
+    Write-Host ""
+    Write-Host "Press any key to continue..." -ForegroundColor DarkGray
+    [Console]::CursorVisible = $false
+    try {
+        $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown") | Out-Null
+    } finally {
+        [Console]::CursorVisible = $true
+    }
+}
+
+Remove-OrphanedPosition
 
 # Main loop
 while ($true) {

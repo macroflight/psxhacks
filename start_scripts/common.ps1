@@ -264,6 +264,47 @@ $SimAddonNames = [ordered]@{
     "psx_simlink_bridge"     = "psx_simlink_bridge"
 }
 
+# Regex patterns for addons whose window title is predictable -- used by
+# configure_window_positions.ps1 to offer a "use standard match" shortcut
+# during window selection when the pattern currently matches exactly one
+# visible window, instead of having to search/pick it by hand every time.
+# Unanchored substring matches (the real title may have more around it,
+# e.g. a version number) -- a version number itself can be matched with a
+# wildcard, e.g. 'BACARS v\d+\.\d+', once/if a real format is known.
+#
+# BACARS, CS CDU, and psx_simlink_bridge have no entry -- their real
+# window title isn't confirmed yet.
+#
+# Note: SRSL-PSX master and slave share the exact same title text, so
+# when both are running at once (a normal shared-cockpit setup) neither
+# addon's pattern matches exactly one window and the shortcut won't be
+# offered for either -- falls back to the normal search-to-pick flow, no
+# crash, just no shortcut in that specific situation.
+$KnownWindowTitlePatterns = @{
+    "ACARS Print App"      = 'Thermal ACARS Printer for PSX'
+    "CMC-PSX"               = 'Central Maintenance Computer For PSX'
+    "frankencduproxy"       = 'FrankenCDUProxy'
+    "frankenident"          = 'FrankenRouterIDENT'
+    "frankenprint"          = 'FrankenPrinter'
+    "frankenpush"           = 'FrankenPUSH'
+    "frankenrouter master"  = 'FrankenRouter MASTER'
+    "frankenrouter slave"   = 'FrankenRouter SLAVE'
+    "frankentanker"         = 'FrankenTanker'
+    "frankenusb"            = 'FrankenUSB'
+    "frankenweather"        = 'FrankenWEATHER'
+    "HAFAP/CPDLC"           = 'Hoppie PSX CPDLC'
+    "PSX.NET.EFB"           = 'PSX.NET.EFB.Windows'
+    "PSX.NET.MSFS"          = 'PSX.NET MSFS Client'
+    "PSX.NET.MSFS.Router"   = 'PSX.NET MSFS Router'
+    "PSX.NET.Orchestration" = 'PSX.NET Orchestration'
+    "PSX.NET.VATSIM"        = 'PSX.NET.VATSIM.AudioClient'
+    "PSXSounds"             = 'PSX Sounds'
+    "SimObjectRouter"       = 'PSX.NET MSFS SimObject Router'
+    "SRSL-PSX master"       = 'SmartRunway, SmartLanding For PSX'
+    "SRSL-PSX slave"        = 'SmartRunway, SmartLanding For PSX'
+    "vPilot"                = 'vPilot'
+}
+
 
 # Apps launched as-is during sim startup (no custom start script
 # needed).  Override $NonscriptedApps in the override file to replace
