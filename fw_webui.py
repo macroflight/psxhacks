@@ -19,6 +19,12 @@ ctx must provide:
   ctx.send_turb_cmd(cmd: dict)          -> coroutine
   ctx.send_mode_cmd(mode: str)          -> coroutine
   ctx.send_fw_settings_cmd(cmd: dict)   -> coroutine
+
+Optional, standalone-only (used by register_weather_logs_routes/the /weather/logs
+page -- absent on the router's context, since that page has no reason to exist
+on the router UI):
+  ctx.event_log_dir       : str           — directory holding per-run event logs
+  ctx.event_log_path      : str | None    — this run's own event log file
 """
 # pylint: disable=invalid-name,too-many-lines
 import base64
@@ -26,6 +32,7 @@ import datetime
 import gzip
 import json
 import math
+import os
 import time
 
 from aiohttp import web  # pylint: disable=import-error
@@ -894,7 +901,12 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         '<a href="/weather/settings" class="btn btn-gray btn-sm">Weather zones</a>\n'
         '<a href="/weather/turbulence" class="btn btn-gray btn-sm">Extra turbulence</a>\n'
         '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Enroute wind</a>\n'
-        '<a href="/weather/config" class="btn btn-gray btn-sm">Config</a>\n'
+        '<a href="/weather/config" class="btn btn-gray btn-sm">Config</a>\n' +
+        # Only the standalone context has event_log_dir (see fw_webui module
+        # docstring) -- the router UI has no need to browse frankenweather's
+        # own log files.
+        ('<a href="/weather/logs" class="btn btn-gray btn-sm">Logs</a>\n'
+         if getattr(ctx, 'event_log_dir', None) else '') +
         '<button class="btn btn-blue btn-sm" onclick="openFeedback()">Feedback</button>\n'
         '</div>\n'
     )
@@ -2341,3 +2353,116 @@ def register_weather_routes(routes, ctx):  # pylint: disable=too-many-statements
             return web.Response(text="Invalid mode", status=400)
         await ctx.send_mode_cmd(new_mode)
         raise web.HTTPFound('/weather/settings')
+
+
+# ---------------------------------------------------------------------------
+# Event log browser — standalone-only, see register_weather_logs_routes()
+# ---------------------------------------------------------------------------
+
+
+def _fmt_bytes(n: int) -> str:
+    """Format a byte count as e.g. '1.3 MB'."""
+    size = float(n)
+    for unit in ('B', 'KB', 'MB', 'GB'):
+        if size < 1024 or unit == 'GB':
+            return f'{size:.0f} {unit}' if unit == 'B' else f'{size:.1f} {unit}'
+        size /= 1024
+    return f'{size:.1f} GB'
+
+
+def _list_event_logs(log_dir: str) -> list:
+    """Return (name, size_bytes, mtime_epoch) for every event log, newest first."""
+    try:
+        names = os.listdir(log_dir)
+    except OSError:
+        return []
+    entries = []
+    for name in names:
+        if not (name.startswith('frankenweather_') and name.endswith('.log')):
+            continue
+        path = os.path.join(log_dir, name)
+        try:
+            stat = os.stat(path)
+        except OSError:
+            continue
+        entries.append((name, stat.st_size, stat.st_mtime))
+    entries.sort(key=lambda e: e[2], reverse=True)
+    return entries
+
+
+def _build_weather_logs_page(ctx):
+    """Render the /weather/logs page: list this instance's per-run event logs."""
+    color_scheme = ctx.color_scheme
+
+    def _page(body):
+        nav_html = '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
+        return _page_shell(color_scheme, 'Event logs', nav_html, body)
+
+    log_dir = ctx.event_log_dir
+    current = ctx.event_log_path
+    entries = _list_event_logs(log_dir)
+
+    body = (
+        '<p class="note">Each frankenweather run writes its own console output to a '
+        'timestamped log file here (the last '
+        f'{len(entries)} run(s) are kept). If you hit a problem, download the log covering '
+        'that time and send it along with your report.</p>\n'
+        f'<p class="note">Directory: <code>{log_dir}</code></p>\n'
+    )
+
+    if not entries:
+        body += '<div class="card warn"><p style="margin:0">No log files found.</p></div>\n'
+        return _page(body)
+
+    now = time.time()
+    rows = []
+    for name, size, mtime in entries:
+        is_current = current is not None and os.path.basename(current) == name
+        badge = ' <span style="color:#22c55e">(current)</span>' if is_current else ''
+        rows.append(
+            '<tr>'
+            f'<td>{name}{badge}</td>'
+            f'<td style="text-align:right">{_fmt_bytes(size)}</td>'
+            f'<td style="text-align:right">{_fmt_relative_epoch(now, mtime)}</td>'
+            f'<td style="text-align:right">'
+            f'<a href="/weather/logs/download/{name}" class="btn btn-gray btn-sm">Download</a>'
+            '</td></tr>\n'
+        )
+    body += (
+        '<div class="card"><table style="width:100%;border-collapse:collapse">\n'
+        '<tr><th style="text-align:left">File</th><th style="text-align:right">Size</th>'
+        '<th style="text-align:right">Last written</th><th></th></tr>\n' +
+        ''.join(rows) +
+        '</table></div>\n'
+    )
+    return _page(body)
+
+
+def register_weather_logs_routes(routes, ctx):
+    """Register /weather/logs and its download route (standalone server only).
+
+    Not called from the router's web API -- the router has no reason to
+    expose frankenweather's own per-run event logs (see ctx.event_log_dir/
+    ctx.event_log_path in the module docstring, which only the standalone
+    context provides).
+    """
+
+    @routes.get('/weather/logs')
+    async def _weather_logs_get(_):
+        return web.Response(text=_build_weather_logs_page(ctx), content_type='text/html')
+
+    @routes.get('/weather/logs/download/{name}')
+    async def _weather_logs_download(request):
+        name = request.match_info['name']
+        log_dir = ctx.event_log_dir
+        # Exact membership check against the real directory listing, rather
+        # than trusting/sanitizing the requested name into a path -- this is
+        # immune to path traversal (../, absolute paths, symlinks in the
+        # name, etc.) since anything not literally one of these existing
+        # filenames is rejected outright.
+        valid_names = {n for n, _, _ in _list_event_logs(log_dir)}
+        if name not in valid_names:
+            return web.Response(text="Not found", status=404)
+        return web.FileResponse(
+            os.path.join(log_dir, name),
+            headers={'Content-Disposition': f'attachment; filename="{name}"'})

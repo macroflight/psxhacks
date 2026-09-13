@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import copy
+import glob
 import inspect
 import json
 import logging
@@ -82,10 +83,44 @@ _OM_ZONE_CACHE_PATH = os.path.join(
 _OM_ENROUTE_CACHE_PATH = os.path.join(
     os.path.expanduser("~"), ".cache", "frankenweather", "om_enroute.json")
 
+# Per-run event log: every console line, one timestamped file per run, so a
+# problem report (e.g. "Open-Meteo wasn't reachable for 10 minutes") can be
+# diagnosed from a downloadable file instead of reconstructed from memory --
+# see the /weather/logs web UI page. Same ~/.cache/frankenweather/ directory
+# as the caches above, so it exists and is writable on both Linux and
+# Windows without any extra setup.
+_EVENT_LOG_DIR = os.path.join(os.path.expanduser("~"), ".cache", "frankenweather", "logs")
+_EVENT_LOG_GLOB = "frankenweather_*.log"
+_EVENT_LOG_RETAIN = 10  # keep only the most recent N per-run log files
+
 
 def _om_pos_key(lat: float, lon: float) -> str:
     """Return a stable disk-cache key for an Open-Meteo fetch position."""
     return f"{lat:.3f},{lon:.3f}"
+
+
+def _prepare_event_log() -> Optional[str]:
+    """Create this run's per-run log file path, pruning old runs first.
+
+    Returns None (never raises) if the log directory can't be created --
+    e.g. an unwritable home directory -- since this is a best-effort
+    convenience log, not something that should ever prevent frankenweather
+    from starting. Console logging (and --log, if given) work either way.
+    """
+    try:
+        os.makedirs(_EVENT_LOG_DIR, exist_ok=True)
+        existing = sorted(glob.glob(os.path.join(_EVENT_LOG_DIR, _EVENT_LOG_GLOB)))
+        # Prune down to RETAIN-1 now, so this run's new file brings the
+        # directory back up to exactly RETAIN once it starts being written.
+        for old_path in existing[:max(0, len(existing) - (_EVENT_LOG_RETAIN - 1))]:
+            try:
+                os.remove(old_path)
+            except OSError:
+                pass
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        return os.path.join(_EVENT_LOG_DIR, f"frankenweather_{ts}.log")
+    except OSError:
+        return None
 
 
 # Enroute wind importer: fetch Open-Meteo pressure-level wind/temperature for
@@ -1225,6 +1260,21 @@ class StandaloneFWContext:
         """Return True while this instance is paused for a FRANKENWEATHER conflict."""
         return self._fw._conflict_uuid is not None  # pylint: disable=protected-access
 
+    @property
+    def event_log_dir(self):
+        """Return the per-run event log directory (see /weather/logs).
+
+        Only present on the standalone context -- the router UI has no
+        need for this page (see fw_webui.py's nav gating), so RouterFWContext
+        deliberately has no such attribute.
+        """
+        return _EVENT_LOG_DIR
+
+    @property
+    def event_log_path(self):
+        """Return this run's own event log file path, or None if unavailable."""
+        return self._fw._event_log_path  # pylint: disable=protected-access
+
     def cache_get(self, name):
         """Return a PSX-variable-like value from local frankenweather state."""
         return self._fw._web_cache_get(name)  # pylint: disable=protected-access
@@ -1260,6 +1310,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self.taskgroup = None
         self.tasks: set = set()
         self.logger = None
+        self._event_log_path: Optional[str] = None
         self.psx = None
         self.psx_connected = False
         self.psx_paused = False
@@ -5397,6 +5448,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         handlers = [logging.StreamHandler(sys.stdout)]
         if self.args.log:
             handlers.append(logging.FileHandler(self.args.log))
+        self._event_log_path = _prepare_event_log()
+        if self._event_log_path:
+            handlers.append(logging.FileHandler(self._event_log_path))
         logging.basicConfig(
             format="%(asctime)s: %(message)s",
             level=logging.INFO,
@@ -5405,6 +5459,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self.logger = logging.getLogger(__MYNAME__)
         if self.args.debug:
             self.logger.setLevel(logging.DEBUG)
+        if self._event_log_path:
+            self.logger.info("Logging to %s", self._event_log_path)
+        else:
+            self.logger.warning(
+                "Could not create a per-run event log under %s", _EVENT_LOG_DIR)
         self.logger.info("frankenweather version %s starting", __version__)
         self._warn_removed_args()
 
@@ -5447,6 +5506,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             raise _web.HTTPFound('/weather')
 
         _fw_webui.register_weather_routes(routes, ctx)
+        # Standalone-only: the router UI has no need to browse/download
+        # frankenweather's own per-run event logs (see /weather/logs docstring).
+        _fw_webui.register_weather_logs_routes(routes, ctx)
 
         static_path = pathlib.Path(__file__).parent / 'router' / 'frankenrouter' / 'static'
 
