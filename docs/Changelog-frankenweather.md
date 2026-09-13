@@ -1,5 +1,15 @@
 # frankenweather changelog
 
+## 1.2.0 (2026-09-13)
+
+- Always log frankenweather's output to
+  ~/.cache/frankenweather/logs. Keep the last 10 logs, and make them
+  easily downloadable via the web UI
+
+- Coarsen zone-weather Open-Meteo cache to a 1° grid. This makes it a
+  little more likely we can still update or move a weather zone even
+  during a (brief) OpenMeteo outage.
+
 ## 1.1.0 (2026-09-12)
 
 - **New feature: fall back to our own METAR cache instead of ceding to
