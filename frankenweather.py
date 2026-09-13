@@ -5481,10 +5481,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
         handlers = [logging.StreamHandler(sys.stdout)]
         if self.args.log:
-            handlers.append(logging.FileHandler(self.args.log))
+            # Explicit encoding: without it, FileHandler falls back to the
+            # platform default -- e.g. cp1252 on Windows -- which silently
+            # mangles the °/—/× etc. these log messages use, and produces a
+            # file that isn't valid UTF-8 (confirmed live: broke grep/every
+            # standard text tool trying to read one of these logs).
+            handlers.append(logging.FileHandler(self.args.log, encoding='utf-8'))
         self._event_log_path = _prepare_event_log()
         if self._event_log_path:
-            handlers.append(logging.FileHandler(self._event_log_path))
+            handlers.append(logging.FileHandler(self._event_log_path, encoding='utf-8'))
         logging.basicConfig(
             format="%(asctime)s: %(message)s",
             level=logging.INFO,
