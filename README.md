@@ -223,8 +223,28 @@ Cons: You cannot edit the Python script inside if you want to change
 something. You also cannot verify what the binary does, so you have to
 trust the developer...
 
-You can find the binary packages on
-https://drive.google.com/drive/folders/1Eu1uJCNUiLkFg9Qq8YwPCiPd9V7D5FbA
+You can find the binary packages on the project's GitHub Releases page:
+https://github.com/macroflight/psxhacks/releases
+
+Each addon has its own independent list of releases there. Look for the
+tag matching the addon you want:
+
+- Tags named `<addon>-v<version>` (e.g. `frankenweather-v1.2.0`) are
+  built from the `main` branch — the stable, officially released
+  version.
+- Tags named `<addon>-testing-v<version>` are marked "Pre-release" on
+  GitHub and are built from the `testing` branch instead — these let
+  you try out changes before they've been officially released, but may
+  be less stable. Use them if you want the latest fixes/features and
+  are OK reporting problems; stick to the plain `-v<version>` tags
+  otherwise.
+- `psxutils-v<version>`/`psxutils-testing-v<version>` releases are a
+  special case: one release contains a single zip with four small
+  diagnostic utilities (`show_hid.exe`, `show_psx.exe`, `show_usb.exe`,
+  `temporary_weather_logger.exe`) rather than one EXE per release.
+
+See [docs/BuildSystem.md](docs/BuildSystem.md) for the full details of
+how and when these are built.
 
 All the binaries can be run by double-clicking on them or starting
 them in a PowerShell or CMD window.
@@ -235,9 +255,6 @@ PSX variable to monitor, e.g "show_psx.exe Tla".
 In order to use frankenusb.exe you need a config file (copy one from
 the config_examples repo to frankenusb.conf and edit to suit your
 needs).
-
-Also note that the binary packages are not updated very often. If you
-can, use the Python version instead.
 
 ## Short frankenusb tutorial if you use the binary package
 

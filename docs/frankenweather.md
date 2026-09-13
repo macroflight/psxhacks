@@ -39,7 +39,15 @@ etc.) — it does not require frankenrouter, a particular sim topology, or
 any change to how you already run PSX.
 
 A standalone Windows EXE is available, no Python required — download it
-from [Google Drive](https://drive.google.com/drive/folders/1Eu1uJCNUiLkFg9Qq8YwPCiPd9V7D5FbA?usp=drive_link).
+from the project's
+[GitHub Releases page](https://github.com/macroflight/psxhacks/releases).
+Look for a tag named `frankenweather-v<version>` (e.g.
+`frankenweather-v1.2.0`) — built from the `main` branch, the stable,
+officially released version. A tag named
+`frankenweather-testing-v<version>` instead (marked "Pre-release" on
+GitHub) is built from the `testing` branch, for trying out changes
+before they're officially released; see
+[docs/BuildSystem.md](BuildSystem.md) for the full details.
 For most users — a single PC running PSX on its default port — just start
 the EXE and then control everything from
 [http://localhost:9747/](http://localhost:9747/); no setup or arguments

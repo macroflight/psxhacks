@@ -44,7 +44,12 @@ done all the time when we use a shared cockpit setup.
 
 ## Quickstart - connect your PSX sim to an existing shared cockpit setup
 
-- Download the latest binary package from [here](https://drive.google.com/drive/folders/1Eu1uJCNUiLkFg9Qq8YwPCiPd9V7D5FbA).
+- Download the latest binary package from the
+  [GitHub Releases page](https://github.com/macroflight/psxhacks/releases)
+  — look for a tag named `frankenrouter-v<version>` (e.g.
+  `frankenrouter-v1.5.0`). Avoid tags with `-testing-` in the name
+  unless you specifically want to try changes ahead of an official
+  release.
 - Extract frankenrouter.exe from the zip file.
 - Run frankenrouter.exe.
 - Follow the instructions on screen, which tells you to:
@@ -61,9 +66,22 @@ repository in Python script format.
 
 For those not comfortable installing Python we also provide a
 standalone binary `frankenrouter.exe` (created with
-[pyinstaller](https://pyinstaller.org/)). This might not always be
-fully up to date. Reach out to macroflight if you would like the
-binary to be updated. You can find the binary packages [here](https://drive.google.com/drive/folders/1Eu1uJCNUiLkFg9Qq8YwPCiPd9V7D5FbA)
+[pyinstaller](https://pyinstaller.org/)), built and published
+automatically on the project's
+[GitHub Releases page](https://github.com/macroflight/psxhacks/releases)
+whenever the router's own version number changes. There are two kinds
+of release to choose from:
+
+- **`frankenrouter-v<version>`** (e.g. `frankenrouter-v1.5.0`) — built
+  from the `main` branch, the stable, officially released version.
+  This is what most people should use.
+- **`frankenrouter-testing-v<version>`** — marked "Pre-release" on
+  GitHub, built from the `testing` branch. Lets you try a fix or
+  feature before it's been officially released, at the cost of being
+  potentially less stable/tested.
+
+See [docs/BuildSystem.md](../docs/BuildSystem.md) in the main repo for
+the full details of how and when these are built.
 
 To run the Python version of the router:
 
