@@ -3278,6 +3278,35 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             # the message actually gets forwarded to (see rules.py's
             # handle_addon() FRANKENWEATHER case).
             self.cache_frankenweather_addon(line)
+        elif code == RulesCode.PTT:
+            if extra_data and 'synthetic_ground_handling_line' in extra_data:
+                synthetic_line = extra_data['synthetic_ground_handling_line']
+                exclude_sim = extra_data['exclude_simulator']
+                self.logger.info(
+                    "PTT from %s filtered; synthesizing for PSX.NET.Orchestration: %s",
+                    sender_hr, synthetic_line)
+                # Same distribution as a real addon=GROUND.HANDLING message
+                # (see the 'ground_handling_forward' FILTER handling below)
+                # -- every frankenrouter plus locally-connected clients on
+                # the allowlist -- except any frankenrouter still in the
+                # sim the PTT came from, since that sim already got the
+                # real native PTT and doesn't need the substitute.
+                allowed_names = set(self.config.filtering.ground_handling_forward_names)
+                matching_peernames = [
+                    c.peername for c in self.clients.values()
+                    if c.display_name in allowed_names]
+                tasks = [self.client_broadcast(
+                    synthetic_line,
+                    exclude=[
+                        c.peername for c in self.clients.values()
+                        if c.is_frankenrouter and c.simulator_name == exclude_sim],
+                    exclude_non_frankenrouter=True)]
+                if matching_peernames:
+                    tasks.append(self.client_broadcast(synthetic_line, include=matching_peernames))
+                if (self.is_upstream_connected() and self.upstream.is_frankenrouter and
+                        self.upstream.simulator_name != exclude_sim):
+                    tasks.append(self.send_to_upstream(synthetic_line))
+                await asyncio.gather(*tasks)
         elif code == RulesCode.AGAIN:
             self.logger.info("Keyword again from %s forwarded: %s", sender_hr, line)
         elif code == RulesCode.BANG:

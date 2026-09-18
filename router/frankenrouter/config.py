@@ -187,6 +187,18 @@ class _RouterConfigFiltering:  # pylint: disable=missing-class-docstring,too-few
             raise RouterConfigError(
                 "filtering ground_handling_forward_names entries must be strings")
 
+        # When a PTT/audio-panel variable (see rules.py's PTT_KEYWORDS) is
+        # dropped because it crossed a sim boundary, also synthesize an
+        # addon=GROUND.HANDLING PTT event so PSX.NET.Orchestration still
+        # sees a press/release signal in every sim, not just the one the
+        # physical button lives in. On by default since it closes a real
+        # functional gap the PTT filter itself creates.
+        self.ptt_ground_handling_translation = data.get(
+            'ptt_ground_handling_translation', True)
+        if not isinstance(self.ptt_ground_handling_translation, bool):
+            raise RouterConfigError(
+                "filtering ptt_ground_handling_translation must be true or false")
+
 
 class _RouterConfigPerformance:  # pylint: disable=missing-class-docstring,too-few-public-methods,too-many-instance-attributes
     def __init__(self, data):

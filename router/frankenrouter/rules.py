@@ -43,6 +43,31 @@ TRAFFIC_KEYWORDS = frozenset({'Qs450', 'Qs451'})
 # Qh411="SwitchesAudioC"; Qh412="SwitchesAudioR"
 PTT_KEYWORDS = frozenset({'Qh82', 'Qh93', 'Qh410', 'Qh411', 'Qh412'})
 
+# PSX.NET.Orchestration relies on native PTT presses to detect a "doors to
+# manual" PA announcement, but a PTT press from another sim never reaches it
+# there since it's dropped by the PTT_KEYWORDS filter above (by design, to
+# stop cross-sim radio bleed) before Orchestration ever sees it. When that
+# drop fires, route() also synthesizes an addon=GROUND.HANDLING PTT event
+# (see the PTT_KEYWORDS block below) from this table, so every
+# PSX.NET.Orchestration instance in every sim still gets a press/release
+# signal, just via addon= instead of the native PSX variable.
+#
+# key -> (panel, {value: edge}). Deliberately a direct, stateless per-value
+# mapping, not the press-combining state machine described in the
+# PSX.NET.Orchestration integration spec (tracking whether ACP and glarewing
+# are held together, only emitting on the combined edge) -- overlapping ACP
+# + glarewing PTT on the same panel is rare enough that a spurious extra or
+# early edge is an acceptable outcome (worst case: the ~2s simulated PA call
+# needs to be repeated), and skipping it avoids needing any state that could
+# go stale/wrong across a router reconnect.
+PTT_TO_GROUND_HANDLING = {
+    'Qh410': ('LEFT', {'26': 'DOWN', '-1': 'UP'}),
+    'Qh411': ('CENTRE', {'26': 'DOWN', '-1': 'UP'}),
+    'Qh412': ('RIGHT', {'26': 'DOWN', '-1': 'UP'}),
+    'Qh82': ('LEFT', {'1': 'DOWN', '0': 'UP'}),
+    'Qh93': ('RIGHT', {'1': 'DOWN', '0': 'UP'}),
+}
+
 # How long after a connection is established we drop any Qs546
 # ("TkofRefNg", the TAKEOFF REF page's CG/TRIM & RWY/POS no-go string) it
 # sends. A PSX client that joins with a different situ than the host it
@@ -1086,6 +1111,28 @@ class Rules():  # pylint: disable=too-many-public-methods
         """Return a routing decision."""
         return (action, code, message, extra_data)
 
+    def _ptt_ground_handling_extra_data(self, key, value):
+        """Return extra_data for a synthetic addon=GROUND.HANDLING PTT event, or None.
+
+        Called when a PTT/audio-panel variable is about to be dropped for
+        crossing a sim boundary (see PTT_KEYWORDS handling in route()) --
+        see PTT_TO_GROUND_HANDLING's docstring comment for why this is a
+        direct value->edge lookup rather than the press-combining state
+        machine PSX.NET.Orchestration's own integration spec describes.
+        """
+        if not self.router.config.filtering.ptt_ground_handling_translation:
+            return None
+        mapping = PTT_TO_GROUND_HANDLING.get(key)
+        edge = mapping[1].get(value) if mapping else None
+        if edge is None:
+            return None
+        panel = mapping[0]
+        return {
+            'synthetic_ground_handling_line':
+                f"addon=GROUND.HANDLING;;;;V1|EVENT|1|PTT|{panel}|{edge}",
+            'exclude_simulator': self.sender.simulator_name,
+        }
+
     def allow_write(self):
         """Determine if this client is allowed to write."""
         if self.sender.upstream:
@@ -1174,15 +1221,19 @@ class Rules():  # pylint: disable=too-many-public-methods
                     self.sender.display_name, age, QS546_CONNECT_FILTER_WINDOW_S)
                 return self.myreturn(RulesAction.DROP, RulesCode.QS546_CONNECT_FILTER)
 
-        if key in PTT_KEYWORDS:
-            if self.sender.is_frankenrouter:
-                if self.router.config.identity.simulator != self.sender.simulator_name:
-                    audio_panel = key in ('Qh410', 'Qh411', 'Qh412')
-                    if not audio_panel or value in ('26', '-1'):
-                        self.logger.info(
-                            "Dropping PTT/audio variable from %s: %s",
-                            self.sender.simulator_name, self.line)
-                        return self.myreturn(RulesAction.DROP, RulesCode.PTT)
+        if (
+                key in PTT_KEYWORDS and
+                self.sender.is_frankenrouter and
+                self.router.config.identity.simulator != self.sender.simulator_name
+        ):
+            audio_panel = key in ('Qh410', 'Qh411', 'Qh412')
+            if not audio_panel or value in ('26', '-1'):
+                self.logger.info(
+                    "Dropping PTT/audio variable from %s: %s",
+                    self.sender.simulator_name, self.line)
+                return self.myreturn(
+                    RulesAction.DROP, RulesCode.PTT,
+                    extra_data=self._ptt_ground_handling_extra_data(key, value))
 
         if (
                 key in self.router.config.psx.filter_from_other_sim and
@@ -1543,6 +1594,7 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             """Initialize the filtering config."""
             self.ground_handling_forward_names = [
                 'PSX.NET EFB For Windows', 'PSX.NET.Orchestration', 'BA ACARS Simulation']
+            self.ptt_ground_handling_translation = True
 
     class DummyConfig():  # pylint: disable=too-few-public-methods
         """Implement small parts of the router for unit testing."""
@@ -2394,6 +2446,75 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
                 self.assertEqual(code, RulesCode.PTT, msg=f"{key}={val} should use PTT code")
             (action, code, *_) = rules.route(f"{key}=1", testpeer)
             self.assertEqual(action, RulesAction.NORMAL, msg=f"{key}=1 should pass")
+
+    def test_ptt_ground_handling_translation(self):
+        """Test that a cross-sim PTT drop synthesizes an addon=GROUND.HANDLING PTT event."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+
+        router.clients = {
+            ('127.0.0.1', 12345): self.DummyClientConnection(('127.0.0.1', 12345)),
+        }
+        testpeer = router.clients[('127.0.0.1', 12345)]
+        testpeer.is_frankenrouter = True
+        testpeer.simulator_name = 'OtherSim'
+
+        cases = (
+            ('Qh410', '26', 'LEFT', 'DOWN'),
+            ('Qh410', '-1', 'LEFT', 'UP'),
+            ('Qh411', '26', 'CENTRE', 'DOWN'),
+            ('Qh411', '-1', 'CENTRE', 'UP'),
+            ('Qh412', '26', 'RIGHT', 'DOWN'),
+            ('Qh412', '-1', 'RIGHT', 'UP'),
+            ('Qh82', '1', 'LEFT', 'DOWN'),
+            ('Qh82', '0', 'LEFT', 'UP'),
+            ('Qh93', '1', 'RIGHT', 'DOWN'),
+            ('Qh93', '0', 'RIGHT', 'UP'),
+        )
+        for key, val, panel, edge in cases:
+            (action, code, _, extra_data) = rules.route(f"{key}={val}", testpeer)
+            self.assertEqual(action, RulesAction.DROP)
+            self.assertEqual(code, RulesCode.PTT)
+            self.assertEqual(
+                extra_data,
+                {
+                    'synthetic_ground_handling_line':
+                        f"addon=GROUND.HANDLING;;;;V1|EVENT|1|PTT|{panel}|{edge}",
+                    'exclude_simulator': 'OtherSim',
+                },
+                msg=f"{key}={val}")
+
+        # Audio panel selection values (not press/release) never reach the
+        # drop branch at all, so no synthetic line -- already covered by
+        # test_ptt_filter's NORMAL-passthrough assertion, re-checked here
+        # for the extra_data specifically.
+        (action, code, _, extra_data) = rules.route("Qh410=5", testpeer)
+        self.assertEqual(action, RulesAction.NORMAL)
+        self.assertIsNone(extra_data)
+
+        # Same-sim PTT never drops, so never synthesizes either.
+        testpeer.simulator_name = router.config.identity.simulator
+        (action, code, _, extra_data) = rules.route("Qh410=26", testpeer)
+        self.assertEqual(action, RulesAction.NORMAL)
+        self.assertIsNone(extra_data)
+
+    def test_ptt_ground_handling_translation_disabled(self):
+        """Test that ptt_ground_handling_translation=False suppresses the synthetic line."""
+        router = self.DummyFrankenrouter()
+        router.config.filtering.ptt_ground_handling_translation = False
+        rules = Rules(router)
+
+        router.clients = {
+            ('127.0.0.1', 12345): self.DummyClientConnection(('127.0.0.1', 12345)),
+        }
+        testpeer = router.clients[('127.0.0.1', 12345)]
+        testpeer.is_frankenrouter = True
+        testpeer.simulator_name = 'OtherSim'
+
+        (action, code, _, extra_data) = rules.route("Qh410=26", testpeer)
+        self.assertEqual(action, RulesAction.DROP)
+        self.assertEqual(code, RulesCode.PTT)
+        self.assertIsNone(extra_data)
 
     def test_qs546_connect_filter(self):
         """Test the Qs546 (TkofRefNg) connect-window ingress filter."""
