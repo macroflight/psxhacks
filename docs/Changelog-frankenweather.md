@@ -1,5 +1,10 @@
 # frankenweather changelog
 
+## 1.2.1 (2026-09-19)
+
+- **Bug fix: the per-run event log (see 1.2.0) was written in the wrong
+  encoding.**
+
 ## 1.2.0 (2026-09-13)
 
 - Always log frankenweather's output to
