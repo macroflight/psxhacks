@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-19: version 1.6.0
+
+- **New feature: cross-sim PTT presses are now translated into a
+  synthetic `addon=GROUND.HANDLING` event for PSX.NET.Orchestration.**
+  Controlled by the new `[filtering] ptt_ground_handling_translation`
+  config option, on by default.
+
 ## 2026-09-12: version 1.5.0
 
 - **Bug fix / config safety: `[[access]]` rules now reject unknown
