@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-09-23: version 1.6.1
+
+- **Raised the default message-rate-limit thresholds** (`[performance]`
+  `received_messages_per_second_warning_limit`/`_critical_limit` and the
+  `sent_*` equivalents) from 80/120 to 140/175. Forensic analysis of a
+  real EKCH go-around showed the previous limits tripping the cockpit
+  "FRANKENROUTER" master caution during entirely normal, expected
+  traffic: PSX's own flight-control variables (`FltControls` etc.)
+  legitimately run at 20-80 Hz inside PSX's internal high-speed physics
+  loop during active hand-flying, and a go-around itself is a
+  high-event-density maneuver (TOGA, flap/gear retraction, several FMA
+  mode changes in quick succession). There is no evidence the previous
+  limits reflected an actual capacity problem for the router or any
+  addon; this is a false-alarm fix, not a performance change.
+
 ## 2026-09-19: version 1.6.0
 
 - **New feature: cross-sim PTT presses are now translated into a
