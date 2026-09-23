@@ -438,13 +438,21 @@ need to change any of these settings.
   more than this many bytes queued, a critical error is raised and included
   in ROUTERINFO so the master sim can trigger a master caution.
 
+- `received_messages_per_second_warning_limit`: if a connection receives
+  more than this many messages in a second (30s trailing average), a
+  warning is raised. Default: 140.
+
 - `received_messages_per_second_critical_limit`: if a connection receives
-  more than this many messages in a second, a critical error is raised.
-  Default: 60.
+  more than this many messages in a second (30s trailing average), a
+  critical error is raised. Default: 175.
+
+- `sent_messages_per_second_warning_limit`: if a connection sends more
+  than this many messages in a second (30s trailing average), a warning
+  is raised. Default: 140.
 
 - `sent_messages_per_second_critical_limit`: if a connection sends more
-  than this many messages in a second, a critical error is raised.
-  Default: 60.
+  than this many messages in a second (30s trailing average), a critical
+  error is raised. Default: 175.
 
 - `queue_time_warning`: if a message sits for longer than this in the
   router's internal forwarding queue, a warning will be shown.
