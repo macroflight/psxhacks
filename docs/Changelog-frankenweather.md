@@ -1,5 +1,13 @@
 # frankenweather changelog
 
+## 1.2.2 (2026-09-25)
+
+- **New feature: broadcast `addon=FRANKENWEATHER:CORRIDOR_CHANGED:<uuid>`
+  whenever the enroute wind importer actually writes a new wind corridor
+  to PSX** (genuinely new wind data, or a reroute) — not on every hourly
+  poll that ends up resending nothing. Lets other addons react to a wind
+  corridor update without polling `WxCorridorTxt` themselves.
+
 ## 1.2.1 (2026-09-19)
 
 - **Bug fix: the per-run event log (see 1.2.0) was written in the wrong

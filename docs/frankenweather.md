@@ -307,6 +307,11 @@ default; toggleable from the `/weather/enroute-wind` web page (or the
   forces a resend even if the freshly fetched data happens to match:
   otherwise PSX could be left showing the restored flight-plan corridor
   (see "Turning it off" below) indefinitely, mistaken for up to date.
+  Whenever a corridor is actually resent (genuinely new wind data, or a
+  reroute — never a no-op hourly poll), an
+  `addon=FRANKENWEATHER:CORRIDOR_CHANGED:<instance-uuid>` message is
+  broadcast on the PSX network, so other addons can react to a wind
+  corridor update without polling `WxCorridorTxt` themselves.
 
 - **Turning it off.** Disabling the importer — or enabling MSFS wind
   sync, which is mutually exclusive since both write the wind corridor

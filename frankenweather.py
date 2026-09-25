@@ -3096,6 +3096,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.logger.info(
                 "Enroute wind: refreshed WxCorridor for %d waypoint(s) (%d passed)",
                 len(self.route_waypoints), len(self._waypoint_passed))
+            # Notify other addons that we actually wrote a new corridor to PSX --
+            # not on every hourly poll, only when the dedup check above let a
+            # genuinely different corridor through (new wind data, or a reroute).
+            self._psx_send("addon", f"FRANKENWEATHER:CORRIDOR_CHANGED:{self._instance_uuid}")
         else:
             self.logger.debug("Enroute wind: corridor unchanged, not resending to PSX")
         self._apply_enroute_wind_qs497()
