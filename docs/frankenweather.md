@@ -160,7 +160,7 @@ Features:
 
 - Enroute wind importer: simulates requesting an updated enroute wind
   forecast via datalink mid-flight, using Open-Meteo instead of a real
-  dispatch link. Off by default; opt-in from the `/weather/enroute-wind`
+  dispatch link. On by default; toggleable from the `/weather/enroute-wind`
   web page. See [Enroute wind importer](#enroute-wind-importer) below.
 
 - The MSFS in-cloud, QNH and wind data is provided by PSX.NET.MSFS.Client
@@ -247,8 +247,8 @@ frankenweather.
 
 Simulates the real-world behaviour of a crew requesting an updated
 enroute wind/temperature forecast via datalink mid-flight — except the
-forecast comes from Open-Meteo instead of a real dispatch link. Off by
-default; opt-in from the `/weather/enroute-wind` web page (or the
+forecast comes from Open-Meteo instead of a real dispatch link. On by
+default; toggleable from the `/weather/enroute-wind` web page (or the
 `[enroute_wind]` section of the [config file](#configuration-file)).
 
 - **Flight-plan snapshot.** As soon as PSX's wind corridor (`WxCorridorTxt`)
