@@ -50,6 +50,14 @@ class _RouterConfigListen:  # pylint: disable=missing-class-docstring,too-few-pu
         if not isinstance(self.wait_for_upstream_welcome, bool):
             raise RouterConfigError("wait_for_upstream_welcome must be true or false")
 
+        # When true (default), the /efb page shows an "In-flight music" button
+        # linking to the flightofthepenguins.se music player. Set to false to
+        # hide it for users who don't want/use that feature.
+        self.rest_api_efb_music_link_enabled = data.get(
+            'rest_api_efb_music_link_enabled', True)
+        if not isinstance(self.rest_api_efb_music_link_enabled, bool):
+            raise RouterConfigError("rest_api_efb_music_link_enabled must be true or false")
+
 
 class _RouterConfigUpstream:  # pylint: disable=missing-class-docstring,too-few-public-methods
     def __init__(self, data):

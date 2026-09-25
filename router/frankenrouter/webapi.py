@@ -12,6 +12,7 @@ import string
 import sys
 import textwrap
 import time
+import urllib.parse
 
 # Add psxhacks root to sys.path so fw_webui (first-party, at the root) can be imported.
 _PSXHACKS = str(pathlib.Path(__file__).parent.parent.parent)
@@ -1265,11 +1266,21 @@ def _efb_errors_html(errors):
     )
 
 
-def _build_efb_page(router, ctx):
+def _build_efb_page(router, ctx, page_url):
     """Build the compact /efb status+control page for the PSX.NET EFB app."""
     status = _efb_status_dict(router, ctx)
     r, w = status['router'], status['weather']
     loc = _efb_current_location_dict(ctx)
+    music_link = ''
+    if router.config.listen.rest_api_efb_music_link_enabled:
+        music_url = (
+            'https://flightofthepenguins.se/music/player?efb_return=' +
+            urllib.parse.quote(page_url, safe='')
+        )
+        music_link = (
+            f'<a href="{music_url}" '
+            'class="efb-chip efb-chip-sm">In-flight music</a> '
+        )
     return (
         '<!DOCTYPE html>\n<html>\n<head>\n'
         '<meta charset="utf-8">\n'
@@ -1282,7 +1293,8 @@ def _build_efb_page(router, ctx):
         _efb_router_card(r) + _efb_datasources_card(w) +
         _efb_controls_card(w) + _efb_location_wx_card(loc) +
         '</div>\n'
-        '<div style="text-align:right;margin-top:0.5rem">'
+        '<div style="text-align:right;margin-top:0.5rem">' +
+        music_link +
         '<a href="/" class="efb-chip efb-chip-sm">Full router/weather control panel</a></div>\n'
         '<script>\n'
         'function efbPoll() {\n'
@@ -2156,9 +2168,10 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
             _fw_webui.register_weather_routes(routes, _efb_ctx)
 
             @routes.get('/efb')
-            async def handle_efb_get(_):
+            async def handle_efb_get(request):
                 return web.Response(
-                    text=_build_efb_page(router, _efb_ctx), content_type='text/html')
+                    text=_build_efb_page(router, _efb_ctx, str(request.url)),
+                    content_type='text/html')
 
             @routes.get('/api/efb/status')
             async def handle_efb_status_get(_):
