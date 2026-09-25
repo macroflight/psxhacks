@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-26: version 1.6.2
+
+- Add In-flight music link to /efb page
+
 ## 2026-09-23: version 1.6.1
 
 - **Raised the default message-rate-limit thresholds** (`[performance]`
