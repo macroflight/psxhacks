@@ -613,6 +613,56 @@ def _update_metar_qnh(metar: str, qnh_hpa: float) -> str:
     return re.sub(r'\bQ\d{4}\b', f"Q{int(round(qnh_hpa)):04d}", metar)
 
 
+_METAR_OBS_TIME_RE = re.compile(r'\b(\d{2})(\d{2})(\d{2})Z\b')
+
+# A real METAR this old is more likely a dead/non-reporting station (e.g. an
+# airport whose real-world ATC has been shut down, such as several in
+# Ukraine since the 2022 airspace closure -- VATSIM keeps echoing their last
+# real observation indefinitely, sometimes years old) than a genuinely
+# current one. Prefer Open-Meteo over trusting it in that case.
+_METAR_MAX_AGE_HOURS = 2.0
+
+
+def _metar_age_hours(metar: str, now: Optional[datetime] = None) -> Optional[float]:
+    """Return how many hours old metar's own DDHHMMZ observation time is.
+
+    METAR only carries day-of-month/hour/minute, not month/year, so a
+    report could in principle be from any past month sharing that
+    day-of-month/time -- e.g. a station that hasn't reported since 2022.
+    We only need to know whether it's recent, so this checks the two
+    candidates that could plausibly be "recent" (this month, and last
+    month, to handle reports from the tail end of the previous month when
+    `now` is early in a new one) and returns the smaller resulting
+    non-negative age. Returns None if no observation-time group is found.
+    """
+    m = _METAR_OBS_TIME_RE.search(metar)
+    if not m:
+        return None
+    day, hour, minute = (int(g) for g in m.groups())
+    now = now or datetime.now(timezone.utc)
+    best_age_hours = None
+    year, month = now.year, now.month
+    for _ in range(2):
+        try:
+            candidate = datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
+        except ValueError:
+            candidate = None
+        if candidate is not None:
+            age_hours = (now - candidate).total_seconds() / 3600.0
+            if age_hours >= 0 and (best_age_hours is None or age_hours < best_age_hours):
+                best_age_hours = age_hours
+        month -= 1
+        if month == 0:
+            month, year = 12, year - 1
+    return best_age_hours
+
+
+def _metar_is_fresh(metar: str, now: Optional[datetime] = None) -> bool:
+    """Return True if metar's own observation time is within _METAR_MAX_AGE_HOURS."""
+    age = _metar_age_hours(metar, now)
+    return age is not None and age <= _METAR_MAX_AGE_HOURS
+
+
 _WIND_UPDATE_INTERVAL_S = 60.0
 
 _SIGMET_COORD_RE = re.compile(r'([NS])(\d{2})(\d{2})\s+([EW])(\d{3})(\d{2})')
@@ -4429,6 +4479,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         raw_metars: list = []   # real METAR string, or None if Open-Meteo needed
         om_zone_idx: list = []  # indices of zones that need Open-Meteo
         used_icaos: set = set()
+        # zone index -> (icao, age_hours) for zones where a real METAR was
+        # available but discarded for being too old (see _metar_is_fresh) --
+        # surfaced in zone_reason so it's visible in the web UI, not just logs.
+        stale_metar_discarded: dict = {}
 
         for i, (lat, lon, stored_icao) in enumerate(positions):
             if (self._avoid_cb_near_airport and stored_icao and
@@ -4446,30 +4500,53 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 # lightning CB inputs), so the CB decision stays consistent
                 # with the zone's actual (offset) broadcast position.
                 raw = self.vatsim_cache.get(stored_icao)
+                stale_age = None
+                if raw is not None and not _metar_is_fresh(raw):
+                    stale_age = _metar_age_hours(raw)
+                    stale_metar_discarded[i] = (stored_icao, stale_age)
+                    raw = None
                 snap_positions.append((lat, lon))
                 snap_icaos.append(stored_icao)
                 raw_metars.append(raw)
                 used_icaos.add(stored_icao)
                 if raw is None:
                     om_zone_idx.append(i)
-                    self.logger.debug(
-                        "Zone %d: no METAR for %s (CB-avoidance offset zone) — "
-                        "using Open-Meteo", i + 1, stored_icao)
+                    if stale_age is not None:
+                        self.logger.warning(
+                            "Zone %d: discarding stale METAR for %s (%.0fh old, CB-avoidance"
+                            " offset zone) — using Open-Meteo instead",
+                            i + 1, stored_icao, stale_age)
+                    else:
+                        self.logger.debug(
+                            "Zone %d: no METAR for %s (CB-avoidance offset zone) — "
+                            "using Open-Meteo", i + 1, stored_icao)
                 else:
                     self.logger.debug(
                         "Zone %d → %s (VATSIM METAR, CB-avoidance offset zone)",
                         i + 1, stored_icao)
                 continue
+            skipped_stale: list = []
             for icao, alat, alon, dist_nm in zone_candidates[i]:
-                if icao in self.vatsim_cache and icao not in used_icaos:
-                    snap_positions.append((alat, alon))
-                    snap_icaos.append(icao)
-                    raw_metars.append(self.vatsim_cache[icao])
-                    used_icaos.add(icao)
-                    self.logger.debug("Zone %d → %s (VATSIM METAR, %.1fnm)", i + 1, icao, dist_nm)
-                    break
+                if icao not in self.vatsim_cache or icao in used_icaos:
+                    continue
+                candidate_raw = self.vatsim_cache[icao]
+                if not _metar_is_fresh(candidate_raw):
+                    skipped_stale.append((icao, _metar_age_hours(candidate_raw), dist_nm))
+                    continue
+                snap_positions.append((alat, alon))
+                snap_icaos.append(icao)
+                raw_metars.append(candidate_raw)
+                used_icaos.add(icao)
+                self.logger.debug("Zone %d → %s (VATSIM METAR, %.1fnm)", i + 1, icao, dist_nm)
+                break
             else:
-                # No VATSIM METAR — snap to nearest available airport anyway, use Open-Meteo
+                if skipped_stale:
+                    stale_icao, stale_age, stale_dist_nm = skipped_stale[0]
+                    stale_metar_discarded[i] = (stale_icao, stale_age)
+                    self.logger.warning(
+                        "Zone %d: discarding stale METAR for %s (%.0fh old, %.0fnm) — "
+                        "using Open-Meteo instead", i + 1, stale_icao, stale_age, stale_dist_nm)
+                # No (fresh) VATSIM METAR — snap to nearest available airport anyway, use OM
                 best_ap = next(
                     (ap for ap in zone_candidates[i] if ap[0] not in used_icaos), None)
                 if best_ap is not None:
@@ -4626,6 +4703,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             src = "VATSIM" if raw_metars[i] else "OM"
             stored_icao = self.zone_positions.get(i + 1, (None, None, ""))[2]
             reason = f"{src} {snap_icaos[i]}"
+            if i in stale_metar_discarded:
+                stale_icao, stale_age = stale_metar_discarded[i]
+                reason += f" (stale {stale_icao} METAR {stale_age:.0f}h old discarded)"
             if stored_icao in arpt_set:
                 reason += " (dep/dst arpt)"
             if cb_oktas > 0:
@@ -4702,11 +4782,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.zone_mode[zone_num] = wxmode
             self.zone_is_metar[zone_num] = raw_metars[i] is not None
             src = "VATSIM" if raw_metars[i] else "OM"
+            stale_note = ""
+            if i in stale_metar_discarded:
+                stale_icao, stale_age = stale_metar_discarded[i]
+                stale_note = f"  (stale {stale_icao} METAR {stale_age:.0f}h old discarded)"
             self.psx_send_and_set(f"WxMode{zone_num}", wxmode)
-            self.logger.info("Zone %d [%s]: %s @ %.3f/%.3f%s",
+            self.logger.info("Zone %d [%s]: %s @ %.3f/%.3f%s%s",
                              zone_num, src, snap_icaos[i],
                              snap_positions[i][0], snap_positions[i][1],
-                             cb_suffixes[i])
+                             cb_suffixes[i], stale_note)
 
         await asyncio.sleep(1.0)
 

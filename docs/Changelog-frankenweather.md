@@ -1,5 +1,18 @@
 # frankenweather changelog
 
+## 1.2.3 (2026-09-27)
+
+- **Bug fix: a zone anchored on a real airport's own METAR could use an
+  arbitrarily old observation** (discovered live: UKLL's VATSIM METAR was
+  ~18 days old, giving QNH 1011 vs. ~1026 at every neighboring
+  Open-Meteo-synthesized zone) if that airport's real-world reporting had
+  gone dark — as is the case for several closed Ukrainian airports since
+  the 2022 airspace closure, where VATSIM keeps echoing the last real
+  report indefinitely, sometimes years old. A METAR whose own observation
+  time is more than 2 hours old is now discarded in favor of Open-Meteo
+  for that zone, with the discard logged (console) and shown in the
+  zone's reason string (web UI).
+
 ## 1.2.2 (2026-09-25)
 
 - **New feature: broadcast `addon=FRANKENWEATHER:CORRIDOR_CHANGED:<uuid>`
