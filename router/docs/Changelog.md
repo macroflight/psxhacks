@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-09-28: version 1.6.5
+
+- **Bug fix: a "FRANKENROUTER" master caution could get permanently stuck**
+  after an upstream reconnect. `_housekeeping_enable_master_caution()` could
+  run before the upstream's welcome handshake (`load1`/`load2`/`load3`)
+  finished, while `self.routerinfo` was still empty -- a guaranteed false
+  "no sim is sending elevation/vPilot data" positive on every (re)connect. If
+  that false positive wrote `Qs418=FRANKENROUTER` to PSX while its own
+  resync was still in flight, PSX's resync could land moments later and
+  silently reset the cached `Qs418` back to empty behind our back -- which
+  then permanently broke the clear check (`mcmessage == message`), since the
+  cache never again read back exactly what we'd sent, so the router never
+  issued the explicit `Qs418=` clear again. Diagnosed from a real incident:
+  a reconnect during a 50+-client mass-simultaneous-connect event left the
+  caution stuck for the rest of the session. Fixed by not evaluating/acting
+  on error state until `upstream_ever_welcomed` is true.
+
+## 2026-09-28: version 1.6.4
+
+- **New feature: on Windows, closing the router's console window (the X
+  button), logging off, or a system shutdown now also trigger a graceful
+  shutdown**, matching `SIGTERM`/Ctrl-C/the web UI button. Windows delivers
+  these as `CTRL_CLOSE_EVENT`/`CTRL_LOGOFF_EVENT`/`CTRL_SHUTDOWN_EVENT`
+  through a console-control mechanism that's entirely separate from POSIX
+  signals, so none of the existing handling caught them. Requires `pywin32`
+  (a silent no-op if it's not installed, or on non-Windows platforms).
+  Windows still forcibly terminates the process after ~5 seconds regardless,
+  so this is a best-effort grace window, not a guarantee -- and it still
+  doesn't cover `kill -9`/Task Manager "End Task" (`SIGKILL`/
+  `TerminateProcess`), which no process can catch.
+
 ## 2026-09-28: version 1.6.3
 
 - **New feature: `SIGTERM` now triggers the same graceful shutdown as the

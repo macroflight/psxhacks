@@ -2594,11 +2594,26 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 # No Qi198 in cache yet
                 pass
 
-    async def _housekeeping_enable_master_caution(self):
+    async def _housekeeping_enable_master_caution(self):  # pylint: disable=too-many-branches
         """Send master caution if errors detected.
 
-        Only do this check on the master sim router.
+        Only do this check on the master sim router, and only once the upstream
+        connection has completed its initial welcome (load1/load2/load3). Before
+        that, self.routerinfo hasn't been repopulated with even our own fresh
+        entry yet, so every check below looks like "no sim is sending
+        elevation/vPilot data" -- a guaranteed false positive on every
+        (re)connect. Worse, if that false positive writes Qs418=FRANKENROUTER to
+        upstream while its own resync is still in flight, the resync's own
+        (stale) Qs418 value can land moments later and silently overwrite our
+        write in the cache -- which then permanently desyncs the "else" branch's
+        `mcmessage == message` clear check below, since the cache never again
+        reads back exactly what we sent. Real incident: a router restart during
+        a 50+-client mass-reconnect left a "FRANKENROUTER" caution stuck for the
+        rest of the session, because this exact race fired on the very first
+        housekeeping tick after reconnecting.
         """
+        if not self.upstream_ever_welcomed:
+            return
         if self.get_router_type() == 'master':
             message = "FRANKENROUTER"
             filterstatus = self.get_filter_status()
