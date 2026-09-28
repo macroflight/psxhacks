@@ -1,6 +1,7 @@
 """A protocol-aware PSX router."""
 # pylint: disable=invalid-name,too-many-lines,fixme
 from __future__ import annotations
+import _thread
 import argparse
 import asyncio
 import collections
@@ -41,6 +42,13 @@ if _PSXHACKS not in sys.path:
 
 import fw_webui as _fw_webui  # noqa: E402  pylint: disable=wrong-import-position
 from psxhacks_version import get_version  # noqa: E402  pylint: disable=wrong-import-position
+
+try:
+    import win32api as _win32api  # pylint: disable=import-error
+    import win32con as _win32con  # pylint: disable=import-error
+except ImportError:
+    _win32api = None
+    _win32con = None
 
 
 __MYNAME__ = 'frankenrouter'
@@ -3900,8 +3908,45 @@ def _install_sigterm_handler():
     signal.signal(signal.SIGTERM, _handler)
 
 
+def _install_windows_console_handler():
+    """On Windows, make closing the console window/logoff/system shutdown shut down gracefully.
+
+    Windows delivers those as CTRL_CLOSE_EVENT/CTRL_LOGOFF_EVENT/CTRL_SHUTDOWN_EVENT
+    through a console control mechanism that's completely separate from POSIX
+    signals -- Python's signal module never sees them (it only maps
+    CTRL_C_EVENT/CTRL_BREAK_EVENT to SIGINT/SIGBREAK), so neither the SIGINT nor
+    the SIGTERM handling above catches the X button on the console window. This
+    needs pywin32 (a no-op, not an error, if it's not installed -- matches
+    frankenprint.py's win32print handling).
+
+    win32api calls the registered handler on a Windows-created worker thread, not
+    the main thread, so `raise KeyboardInterrupt` here (as SIGTERM does above)
+    would only affect that worker thread and accomplish nothing: _thread.interrupt_main()
+    is the correct primitive to request a KeyboardInterrupt on the *main* thread
+    from another thread -- the same thing CPython itself uses internally to
+    deliver Ctrl-C. Windows gives the handler roughly 5 seconds before forcibly
+    terminating the process regardless of what we do, so this is a best-effort
+    grace window, not a guarantee.
+    """
+    if sys.platform != 'win32' or _win32api is None:
+        return
+
+    def _handler(ctrl_type):
+        if ctrl_type in (
+                _win32con.CTRL_CLOSE_EVENT,
+                _win32con.CTRL_LOGOFF_EVENT,
+                _win32con.CTRL_SHUTDOWN_EVENT,
+        ):
+            _thread.interrupt_main()
+            return True
+        return False
+
+    _win32api.SetConsoleCtrlHandler(_handler, True)
+
+
 if __name__ == '__main__':
     _install_sigterm_handler()
+    _install_windows_console_handler()
     if '--devel' not in sys.argv:
         _install_ctrl_c_guard()
     try:
