@@ -3877,7 +3877,31 @@ def _install_ctrl_c_guard():
     signal.signal(signal.SIGINT, _handler)
 
 
+def _install_sigterm_handler():
+    """Make SIGTERM trigger the same graceful shutdown as Ctrl-C/the web UI's Shutdown button.
+
+    Unlike SIGINT, Python installs no default handler for SIGTERM that raises a
+    catchable exception -- left alone, a SIGTERM (e.g. `kill <pid>`, a process
+    manager or systemd stop) would just kill the process outright, skipping the
+    "exit" messages and clean socket closures that listener_task()/
+    upstream_connector_task() send on cancellation. Raising KeyboardInterrupt
+    directly here (rather than resetting SIGINT to signal.SIG_DFL and
+    re-raising it, which was tried and confirmed NOT to work -- SIG_DFL means
+    "let the OS terminate the process", not "raise KeyboardInterrupt"; only
+    signal.default_int_handler does that) gets the same asyncio.run()
+    cancellation path as a real Ctrl-C, regardless of --devel/the Ctrl-C guard
+    above (that guard only touches SIGINT, never SIGTERM). Not effective
+    against a forceful kill -9/Task Manager "End Task" (SIGKILL/
+    TerminateProcess) -- those are not catchable by any process, by design.
+    """
+    def _handler(signum, frame):  # pylint: disable=unused-argument
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, _handler)
+
+
 if __name__ == '__main__':
+    _install_sigterm_handler()
     if '--devel' not in sys.argv:
         _install_ctrl_c_guard()
     try:

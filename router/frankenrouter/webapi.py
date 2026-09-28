@@ -2382,7 +2382,13 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 loop = asyncio.get_running_loop()
 
                 def _do_shutdown():
-                    signal.signal(signal.SIGINT, signal.SIG_DFL)
+                    # signal.SIG_DFL means "let the OS terminate the process" for
+                    # SIGINT, NOT "raise KeyboardInterrupt" -- that's a different
+                    # thing, signal.default_int_handler. Using SIG_DFL here (as a
+                    # previous version of this code did) meant this button just
+                    # hard-killed the router, skipping the graceful "exit"-to-
+                    # every-client / clean-socket-close shutdown path entirely.
+                    signal.signal(signal.SIGINT, signal.default_int_handler)
                     signal.raise_signal(signal.SIGINT)
 
                 loop.call_later(0.5, _do_shutdown)

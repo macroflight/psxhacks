@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-09-28: version 1.6.3
+
+- **New feature: `SIGTERM` now triggers the same graceful shutdown as the
+  web UI's "Shutdown router" button** (sends `"exit"` to every connected
+  client and the upstream connection, then closes sockets cleanly), instead
+  of killing the process outright. Covers a plain `kill <pid>`, a process
+  manager, or a `systemd stop`. Does not cover a forceful `kill -9`/Task
+  Manager "End Task" (not catchable by any process), or closing a Windows
+  console window (a separate `CTRL_CLOSE_EVENT` mechanism Python doesn't
+  expose without an extra dependency).
+- **Bug fix: the web UI's "Shutdown router" button never actually performed
+  a graceful shutdown.** It reset `SIGINT`'s handler to `signal.SIG_DFL`
+  before re-raising it — but `SIG_DFL` means "let the OS terminate the
+  process", not "raise `KeyboardInterrupt`" (that's `signal.default_int_handler`,
+  a different thing). The button has been hard-killing the router since
+  this code was written, skipping the "exit" messages and clean socket
+  closes entirely. Found and fixed while adding the `SIGTERM` handler above.
+
 ## 2026-09-26: version 1.6.2
 
 - Add In-flight music link to /efb page
