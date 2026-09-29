@@ -171,6 +171,8 @@ _UTILS_PAGE = (
     '<button class="btn btn-gray">Reset printer</button></form>\n'
     '<form method="post" action="/api/utils/force_ground_contact" style="display:inline">'
     '<button class="btn btn-gray">Force wheels onto ground</button></form>\n'
+    '<form method="post" action="/api/utils/hafap/reset" style="display:inline">'
+    '<button class="btn btn-gray">HAFAP(CPDLC) reset</button></form>\n'
     '</body>\n</html>\n'
 )
 
@@ -2332,6 +2334,13 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
             async def handle_printer_reset(_):
                 router.logger.info("API: resetting printer (Qi115=1)")
                 await router.send_to_upstream("Qi115=1")
+                raise web.HTTPFound('/utils')
+
+            @routes.post('/api/utils/hafap/reset')
+            async def handle_hafap_reset(_):
+                router.logger.info("API: resetting HAFAP/CPDLC (addon=HAFAP:1:RESET)")
+                await router.send_to_upstream("addon=HAFAP:1:RESET")
+                await router.client_broadcast("addon=HAFAP:1:RESET")
                 raise web.HTTPFound('/utils')
 
             @routes.post('/api/utils/force_ground_contact')

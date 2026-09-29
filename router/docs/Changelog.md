@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-29: version 1.6.6
+
+- **New feature: "HAFAP(CPDLC) reset" button on the `/utils` page**, sending
+  `addon=HAFAP:1:RESET` (both upstream and to all connected clients, so it
+  reaches Hoppie PSX CPDLC regardless of where in the router mesh it's
+  connected).
+
 ## 2026-09-28: version 1.6.5
 
 - **Bug fix: a "FRANKENROUTER" master caution could get permanently stuck**
