@@ -210,7 +210,16 @@ function Select-Window([string]$addonName) {
                 40 { if ($idx -lt $total-1) { $idx++ } }
                 13 {
                     if ($total -gt 0) {
-                        if ($showStandard -and $idx -eq 0) { return $standardMatch }
+                        if ($showStandard -and $idx -eq 0) {
+                            # Tag the returned window with the pattern that matched it, so
+                            # the caller can save the pattern itself (not today's literal
+                            # title) -- that's the whole point of "standard match": a
+                            # future version of the same addon with a slightly different
+                            # title still matches without reconfiguring.
+                            return ($standardMatch |
+                                Add-Member -NotePropertyName MatchPattern `
+                                    -NotePropertyValue $pattern -Force -PassThru)
+                        }
                         return $filtered[$idx - $standardOffset]
                     }
                 }
@@ -297,6 +306,8 @@ function Read-AddonAction([string]$addonName, [hashtable]$positions) {
         "not configured"
     } elseif ($entry.DoNotPosition) {
         "marked as 'do not position'"
+    } elseif ($entry.TitleIsRegex) {
+        "configured (pattern: " + $entry.Title + ")"
     } else {
         "configured (" + $entry.Title + ")"
     }
@@ -350,7 +361,8 @@ function Export-PositionData([hashtable]$positions) {
         } else {
             $t = $e.Title   -replace "'", "''"
             $m = if ($e.Minimized) { '$true' } else { '$false' }
-            $lines += "`$WindowPositions['" + $k + "'] = @{ Title = '" + $t + "'; X = " + $e.X + "; Y = " + $e.Y + "; Width = " + $e.Width + "; Height = " + $e.Height + "; Minimized = " + $m + " }"
+            $p = if ($e.TitleIsRegex) { '$true' } else { '$false' }
+            $lines += "`$WindowPositions['" + $k + "'] = @{ Title = '" + $t + "'; TitleIsRegex = " + $p + "; X = " + $e.X + "; Y = " + $e.Y + "; Width = " + $e.Width + "; Height = " + $e.Height + "; Minimized = " + $m + " }"
         }
     }
     $lines | Set-Content $PositionsFile -Encoding UTF8
@@ -438,14 +450,19 @@ while ($true) {
 
     $minimized = Read-YesNo "Start this window minimized?" $false
 
+    # If this window was picked via "Use standard match", save the pattern itself
+    # rather than today's literal title -- see MatchPattern in Select-Window.
+    $isPattern = $null -ne $window.PSObject.Properties['MatchPattern']
+
     $positions = Get-PositionData
     $positions[$addon] = @{
-        Title     = $window.Title
-        X         = $rect.Left
-        Y         = $rect.Top
-        Width     = $rect.Right - $rect.Left
-        Height    = $rect.Bottom - $rect.Top
-        Minimized = $minimized
+        Title        = if ($isPattern) { $window.MatchPattern } else { $window.Title }
+        TitleIsRegex = $isPattern
+        X            = $rect.Left
+        Y            = $rect.Top
+        Width        = $rect.Right - $rect.Left
+        Height       = $rect.Bottom - $rect.Top
+        Minimized    = $minimized
     }
     Export-PositionData $positions
 

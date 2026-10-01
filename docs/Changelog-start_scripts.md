@@ -1,5 +1,18 @@
 # start_scripts changelog
 
+## 1.1.1 (2026-10-01)
+
+- **Bug fix: "Use standard match" in `configure_window_positions.ps1` didn't
+  actually make future window-title changes future-proof.** It saved the
+  literal title text of whichever window matched the known-title pattern at
+  config time, instead of the pattern itself -- so it broke exactly like a
+  manual pick the next time the addon's window title changed (e.g. a
+  version-number bump), despite the whole point of offering a regex-based
+  shortcut being to survive that. Now saves the pattern (with a new
+  `TitleIsRegex` flag) when the shortcut is used, and
+  `apply_window_positions.ps1` matches via regex (`-match`) instead of the
+  usual exact/starts-with/contains-anywhere chain when that flag is set.
+
 ## 1.1.0 (2026-09-13)
 
 - **Bug fix: `configure_window_positions.ps1` now automatically removes

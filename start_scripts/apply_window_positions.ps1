@@ -114,12 +114,20 @@ foreach ($addon in $keys) {
     $elapsed = 0.0
     while ($null -eq $match -and $elapsed -lt $WindowPositionSleepSecondsMax) {
         $windows = [WinPosApply]::GetVisibleWindows()
-        $match = $windows | Where-Object { $_.Title -eq $title }    | Select-Object -First 1
-        if ($null -eq $match) {
-            $match = $windows | Where-Object { $_.Title -like "$title*" }  | Select-Object -First 1
-        }
-        if ($null -eq $match) {
-            $match = $windows | Where-Object { $_.Title -like "*$title*" } | Select-Object -First 1
+        if ($entry.TitleIsRegex) {
+            # Saved from "Use standard match" in configure_window_positions.ps1 --
+            # $title is a regex (see $KnownWindowTitlePatterns in common.ps1), not
+            # a literal string, so it matches future versions of the same addon
+            # even if their window title changes slightly (e.g. a version bump).
+            $match = $windows | Where-Object { $_.Title -match $title } | Select-Object -First 1
+        } else {
+            $match = $windows | Where-Object { $_.Title -eq $title }    | Select-Object -First 1
+            if ($null -eq $match) {
+                $match = $windows | Where-Object { $_.Title -like "$title*" }  | Select-Object -First 1
+            }
+            if ($null -eq $match) {
+                $match = $windows | Where-Object { $_.Title -like "*$title*" } | Select-Object -First 1
+            }
         }
         if ($null -eq $match) {
             if ($noRetry) { break }
