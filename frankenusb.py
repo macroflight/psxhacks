@@ -1848,16 +1848,20 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.psx._set(psx_variable, new_psx_value)  # pylint: disable=protected-access
 
     def _set_psx_human_pilot_seat(self, seat):
-        """Set PnfMode (Qi217) bit 0 to match seat ('LEFT'/'RIGHT'), preserving other bits.
+        """Put PSX's automated "Human Pilot" in the seat the real pilot is NOT sitting in.
 
-        PnfMode is a bitmask covering more than just seat selection -- bits
-        other than bit 0 are independent PSX Human Pilot features (callouts,
-        silent tasks, step climbs) that have nothing to do with which seat a
-        real pilot is sitting in. This only owns bit 0 (1 = left seat, 0 =
-        right seat) -- confirmed live against a real PSX instance and the
-        Instructor Station display (Qi217=13, bit0=1 -> "Human pilot: LEFT";
-        Qi217=12, bit0=0 -> "Human pilot: RIGHT", with callouts/silent
-        tasks/S-C all unchanged in both cases).
+        PnfMode (Qi217) bit 0 controls which seat PSX's Human Pilot feature
+        occupies (1 = left seat, 0 = right seat) -- confirmed live against a
+        real PSX instance and the Instructor Station display (Qi217=13,
+        bit0=1 -> "Human pilot: LEFT"; Qi217=12, bit0=0 -> "Human pilot:
+        RIGHT", with callouts/silent tasks/S-C all unchanged in both cases).
+        "Human Pilot" is PSX's own automation that acts as a human pilot in
+        whichever seat is otherwise empty -- it must always be in the
+        OPPOSITE seat from `seat` (the one the real/sim pilot just selected),
+        not the same one. Bits other than bit 0 are independent PSX Human
+        Pilot features (callouts, silent tasks, step climbs) that have
+        nothing to do with seat selection, so only bit 0 is touched here,
+        preserving everything else.
         """
         try:
             current_pnf_mode = int(self.psx.get("PnfMode"))
@@ -1865,9 +1869,11 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             current_pnf_mode = 0
         preserved_bits = current_pnf_mode & ~0b01
         if seat == 'RIGHT':
-            self.psx_send_and_set("Qi217", str(preserved_bits))
-        else:
+            # Real pilot is RIGHT -> Human Pilot goes LEFT (bit0=1).
             self.psx_send_and_set("Qi217", str(preserved_bits | 0b01))
+        else:
+            # Real pilot is LEFT -> Human Pilot goes RIGHT (bit0=0).
+            self.psx_send_and_set("Qi217", str(preserved_bits))
 
     def _set_psxnetvatsim_acp_seat(self, seat):
         """Tell PSX.NET.VATSIM which seat's Audio Control Panel is active."""

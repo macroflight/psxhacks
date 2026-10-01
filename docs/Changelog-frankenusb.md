@@ -1,5 +1,17 @@
 # frankenusb changelog
 
+## 1.2.1 (2026-10-01)
+
+- **Bug fix: the PSX "Human Pilot" seat (`PnfMode`/`Qi217` bit 0) was being
+  set to the same seat as the real/sim pilot, instead of the opposite
+  one.** "Human Pilot" is PSX's own automation that acts as a human pilot
+  in whichever seat is otherwise empty -- it must always be in the seat the
+  real pilot is *not* sitting in. The bit 0 <-> seat mapping confirmed live
+  in 1.1.0/1.2.0 (bit0=1 -> "Human pilot: LEFT" on the Instructor Station)
+  was correct; only the direction `_set_psx_human_pilot_seat()` chose it
+  for was backwards. Selecting RIGHT now sets bit 0 (Human Pilot -> LEFT);
+  selecting LEFT now clears it (Human Pilot -> RIGHT).
+
 ## 1.2.0 (2026-10-01)
 
 - **New feature: on (re)connect, infer the real current seat from PSX and
