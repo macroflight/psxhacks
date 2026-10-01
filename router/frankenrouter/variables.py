@@ -68,13 +68,20 @@ SIMEVENTS_MCP_WINDOW_KEYS = frozenset({
     'Qi35',  # McpWdoAlt - altitude window
 })
 
-# PnfMode (Qi217) bitmask — known bit positions and their meaning.
+# PnfMode (Qi217) bitmask — bit positions and their meaning. Qi217's actual
+# range is 0-15 (Min=0; Max=15 per ~/Variables.txt), i.e. only bits 0-3
+# exist — a previous version of this table listed masks 16 and 256 for
+# "silent tasks"/"S/C alt", which can never occur, along with wrong labels
+# for masks 2 and 4. Confirmed live against a real PSX instance and its
+# Instructor Station display (see frankenusb.py's SEAT_SELECT comment):
+# Qi217=13 (0b1101) showed Human pilot=LEFT, Makes call-outs=OFF, Performs
+# silent tasks=ON, Sets S/C alt=ON, and flipping each bit in turn confirmed
+# the mapping below one at a time.
 PNF_MODE_BITS = {
-    0: 'right seat',     # mask 1
-    1: 'left seat',      # mask 2
-    2: 'callouts',       # mask 4
-    4: 'silent tasks',   # mask 16
-    8: 'S/C alt',        # mask 256
+    0: 'left seat',      # mask 1 — set = left seat, clear = right seat
+    1: 'callouts',       # mask 2 — "Makes call-outs"
+    2: 'silent tasks',   # mask 4 — "Performs silent tasks"
+    3: 's/c alt',        # mask 8 — "Sets S/C alt if VNAV PTH engaged" (step climbs)
 }
 
 

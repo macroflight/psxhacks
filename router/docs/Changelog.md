@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-01: version 1.6.7
+
+- **Bug fix: `PNF_MODE_BITS` (the `PnfMode`/`Qi217` bit-label table used for
+  sim-event logging) didn't match reality.** It listed masks 16 and 256 for
+  "silent tasks"/"S/C alt", which can never occur since `Qi217`'s real
+  range is 0-15 (4 bits), and had masks 2 and 4 mislabeled too. Verified
+  live against a real PSX instance and its Instructor Station display
+  (alongside the related `frankenusb.py` `SEAT_SELECT` fix): mask 1 = seat
+  (set = left, clear = right), mask 2 = callouts, mask 4 = silent tasks,
+  mask 8 = "Sets S/C alt if VNAV PTH engaged" (step climbs).
+
 ## 2026-09-29: version 1.6.6
 
 - **New feature: "HAFAP(CPDLC) reset" button on the `/utils` page**, sending
