@@ -1395,38 +1395,11 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
 
                 # Should we select the human pilot seat?
                 if select_human_pilot:
-                    # PnfMode (Qi217) is a bitmask covering more than just seat
-                    # selection -- bits other than bit 0 are independent PSX
-                    # Human Pilot features (callouts, silent tasks, step
-                    # climbs) that have nothing to do with which seat a real
-                    # pilot is sitting in. A blind overwrite here would
-                    # silently reset those bits every time anyone presses a
-                    # seat-select button, clobbering whatever shared-cockpit
-                    # Human Pilot configuration had been deliberately set,
-                    # possibly hours into a flight. This feature only owns
-                    # bit 0 (1 = left seat, 0 = right seat) -- confirmed live
-                    # against a real PSX instance and the Instructor Station
-                    # display (Qi217=13, bit0=1 -> "Human pilot: LEFT";
-                    # Qi217=12, bit0=0 -> "Human pilot: RIGHT", with
-                    # callouts/silent tasks/S-C all unchanged in both cases).
-                    # Read the current value first and touch only bit 0.
-                    try:
-                        current_pnf_mode = int(self.psx.get("PnfMode"))
-                    except (TypeError, ValueError):
-                        current_pnf_mode = 0
-                    preserved_bits = current_pnf_mode & ~0b01
-                    if seat == 'RIGHT':
-                        # keyboard control RCP R
-                        self.psx_send_and_set("Qi217", str(preserved_bits))
-                    else:
-                        self.psx_send_and_set("Qi217", str(preserved_bits | 0b01))
+                    self._set_psx_human_pilot_seat(seat)
 
                 # Should we select PSX.NET.VATSIM ACP?
                 if select_psxnetvatsim_acp:
-                    if seat == 'RIGHT':
-                        self.psx_send_and_set("addon", "PSXNETVATSIM:SELECT_ACP:RIGHT")
-                    else:
-                        self.psx_send_and_set("addon", "PSXNETVATSIM:SELECT_ACP:LEFT")
+                    self._set_psxnetvatsim_acp_seat(seat)
 
                 if seat != current_seat:
                     self.logger.info("SEAT_SELECT seat changed %s -> %s", current_seat, seat)
@@ -1755,6 +1728,9 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             self.logger.info("Connected to PSX")
             self.psx.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__} {__version__}")
             self.psx.send("clientName", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__} {__version__}")
+            # Called on every load3 (full initial dump complete, including
+            # reconnects), so layout/PnfMode are guaranteed fresh here.
+            self._sync_seat_state_from_psx()
 
         def teardown():
             self.logger.info("Disconnected from PSX, tearing down")
@@ -1791,6 +1767,11 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         # Needed so SEAT_SELECT's human-pilot-seat handling can read-modify-write
         # PnfMode instead of clobbering bits it doesn't own (see SEAT_SELECT below).
         self.psx.subscribe("PnfMode")
+
+        # Needed so _sync_seat_state_from_psx() can infer the real current seat
+        # from PSX's own layout number on (re)connect, instead of always
+        # assuming the left seat.
+        self.psx.subscribe("layout")
 
         # Subscribe to EICAS messages that another addon might set
         self.psx.subscribe(MSG_TYPE_FLT_CTL_LOCK)
@@ -1865,6 +1846,88 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.logger.debug("TO PSX: %s -> %s", psx_variable, new_psx_value)
         self.psx.send(psx_variable, new_psx_value)
         self.psx._set(psx_variable, new_psx_value)  # pylint: disable=protected-access
+
+    def _set_psx_human_pilot_seat(self, seat):
+        """Set PnfMode (Qi217) bit 0 to match seat ('LEFT'/'RIGHT'), preserving other bits.
+
+        PnfMode is a bitmask covering more than just seat selection -- bits
+        other than bit 0 are independent PSX Human Pilot features (callouts,
+        silent tasks, step climbs) that have nothing to do with which seat a
+        real pilot is sitting in. This only owns bit 0 (1 = left seat, 0 =
+        right seat) -- confirmed live against a real PSX instance and the
+        Instructor Station display (Qi217=13, bit0=1 -> "Human pilot: LEFT";
+        Qi217=12, bit0=0 -> "Human pilot: RIGHT", with callouts/silent
+        tasks/S-C all unchanged in both cases).
+        """
+        try:
+            current_pnf_mode = int(self.psx.get("PnfMode"))
+        except (TypeError, ValueError):
+            current_pnf_mode = 0
+        preserved_bits = current_pnf_mode & ~0b01
+        if seat == 'RIGHT':
+            self.psx_send_and_set("Qi217", str(preserved_bits))
+        else:
+            self.psx_send_and_set("Qi217", str(preserved_bits | 0b01))
+
+    def _set_psxnetvatsim_acp_seat(self, seat):
+        """Tell PSX.NET.VATSIM which seat's Audio Control Panel is active."""
+        if seat == 'RIGHT':
+            self.psx_send_and_set("addon", "PSXNETVATSIM:SELECT_ACP:RIGHT")
+        else:
+            self.psx_send_and_set("addon", "PSXNETVATSIM:SELECT_ACP:LEFT")
+
+    def _find_seat_toggle_button_config(self):
+        """Return the first SEAT_SELECT button config using seat=TOGGLE, or None.
+
+        Used at startup to figure out which button (if any) governs seat
+        selection, so its 'layout left right' pair and 'select ...' flags
+        can be reused to sync state from PSX instead of assuming LEFT.
+        """
+        for _, data_outer in self.config.items():
+            for _, data in data_outer.items():
+                for _, action in data.items():
+                    if (action.get('button type') == 'SEAT_SELECT' and
+                            action.get('seat', 'TOGGLE') == 'TOGGLE'):
+                        return action
+        return None
+
+    def _sync_seat_state_from_psx(self):
+        """Infer the real current seat from PSX and bring our seat-dependent state in sync.
+
+        frankenusb always starts up assuming the left seat (self.right_seat
+        defaults to False) -- if the process is restarted after the sim is
+        already running and the real seat is the right one (or SEAT_SELECT
+        was previously toggled), frankenusb's own L/R remapping, the VATSIM
+        ACP selection, and the PSX Human Pilot seat bit would all silently
+        stay out of sync with reality until the next manual seat-select
+        press. Only runs if a SEAT_SELECT button with seat=TOGGLE is
+        configured, since that's the only case with an actual ambiguity to
+        resolve (a fixed seat=RIGHT/LEFT button config is unambiguous on its
+        own and needs no inference).
+        """
+        button_config = self._find_seat_toggle_button_config()
+        if button_config is None:
+            return
+
+        layouts = button_config.get('layout left right', (1, 2))
+        current_layout = self.psx.get("layout")
+        if current_layout is not None and str(current_layout) == str(layouts[1]):
+            seat = 'RIGHT'
+        else:
+            # Matches layouts[0], or anything unexpected -- left seat is the
+            # safe fallback since that's also frankenusb's own default state.
+            seat = 'LEFT'
+        self.logger.info(
+            "Startup seat sync: PSX layout=%s (left=%s, right=%s) -> seat=%s",
+            current_layout, layouts[0], layouts[1], seat)
+
+        if button_config.get('select frankenusb left right swap', True):
+            self.right_seat = seat == 'RIGHT'
+            self.logger.info("Startup seat sync: right_seat -> %s", self.right_seat)
+        if button_config.get('select psxnetvatsim acp', True):
+            self._set_psxnetvatsim_acp_seat(seat)
+        if button_config.get('select psx human pilot seat', True):
+            self._set_psx_human_pilot_seat(seat)
 
     async def psx_axis_sender(self):  # pylint: disable=too-many-branches
         """Send axis data to PSX.
