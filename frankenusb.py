@@ -1395,11 +1395,31 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
 
                 # Should we select the human pilot seat?
                 if select_human_pilot:
+                    # PnfMode (Qi217) is a bitmask covering more than just seat
+                    # selection -- bits other than bit 0 are independent PSX
+                    # Human Pilot features (callouts, silent tasks, step
+                    # climbs) that have nothing to do with which seat a real
+                    # pilot is sitting in. A blind overwrite here would
+                    # silently reset those bits every time anyone presses a
+                    # seat-select button, clobbering whatever shared-cockpit
+                    # Human Pilot configuration had been deliberately set,
+                    # possibly hours into a flight. This feature only owns
+                    # bit 0 (1 = left seat, 0 = right seat) -- confirmed live
+                    # against a real PSX instance and the Instructor Station
+                    # display (Qi217=13, bit0=1 -> "Human pilot: LEFT";
+                    # Qi217=12, bit0=0 -> "Human pilot: RIGHT", with
+                    # callouts/silent tasks/S-C all unchanged in both cases).
+                    # Read the current value first and touch only bit 0.
+                    try:
+                        current_pnf_mode = int(self.psx.get("PnfMode"))
+                    except (TypeError, ValueError):
+                        current_pnf_mode = 0
+                    preserved_bits = current_pnf_mode & ~0b01
                     if seat == 'RIGHT':
                         # keyboard control RCP R
-                        self.psx_send_and_set("Qi217", "7")
+                        self.psx_send_and_set("Qi217", str(preserved_bits))
                     else:
-                        self.psx_send_and_set("Qi217", "6")
+                        self.psx_send_and_set("Qi217", str(preserved_bits | 0b01))
 
                 # Should we select PSX.NET.VATSIM ACP?
                 if select_psxnetvatsim_acp:
@@ -1767,6 +1787,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         # Needed to handle runway entry/exit feature
         self.psx.subscribe("CfgTaxiLight")
         self.psx.subscribe("TcasPanSel")
+
+        # Needed so SEAT_SELECT's human-pilot-seat handling can read-modify-write
+        # PnfMode instead of clobbering bits it doesn't own (see SEAT_SELECT below).
+        self.psx.subscribe("PnfMode")
 
         # Subscribe to EICAS messages that another addon might set
         self.psx.subscribe(MSG_TYPE_FLT_CTL_LOCK)
