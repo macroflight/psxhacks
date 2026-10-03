@@ -139,6 +139,7 @@ _INDEX_PAGE = (
     '<a href="/flightinfo" class="btn btn-gray">Flight Info</a>\n'
     '<a href="/weather" class="btn btn-gray">Weather</a>\n'
     '<a href="/utils" class="btn btn-gray">Utils</a>\n'
+    '<a href="/services" class="btn btn-gray">Services</a>\n'
     '{sessionpwd_button}'
     '</div>\n'
     '<div>\n'
@@ -175,6 +176,73 @@ _UTILS_PAGE = (
     '<button class="btn btn-gray">HAFAP(CPDLC) reset</button></form>\n'
     '</body>\n</html>\n'
 )
+
+
+def _service_action_buttons(key, display_name):
+    """Build the Start/Stop/Restart confirm-gated button group for one service row."""
+    return ''.join(
+        f'<form method="post" action="/api/services/{key}/{action}" '
+        f'style="display:inline" '
+        f'onsubmit="return confirm(\'{action.capitalize()} {display_name}?\')">'
+        f'<button class="btn btn-gray btn-sm">{action.capitalize()}</button></form> '
+        for action in ('start', 'stop', 'restart')
+    )
+
+
+def _service_row_html(key, info):
+    """Build one <tr> for the /services table."""
+    display_name = info.get('display_name', key)
+    running = bool(info.get('running'))
+    state_color = '#22c55e' if running else '#9fb2cc'
+    state_label = 'RUNNING' if running else 'stopped'
+    buttons = _service_action_buttons(key, display_name)
+    return (
+        f'<tr><td>{display_name}</td>'
+        f'<td style="color:{state_color}">{state_label}</td>'
+        f'<td style="text-align:right">{buttons}</td></tr>\n')
+
+
+def _build_services_page(router, color_scheme):
+    """Build the /services page: FrankenControl's monitored service status + controls.
+
+    Entirely driven by whatever router.frankencontrol_status last cached (see
+    cache_frankencontrol_addon() in frankenrouter.py) -- no service list is
+    hardcoded here, so this stays in sync with frankencontrol.py's own
+    SERVICES registry automatically, with no risk of the two drifting apart.
+    """
+    color, label, age = _efb_data_status(
+        time.time(), router.frankencontrol_status_received_at, timeout_s=120.0)
+
+    services = (router.frankencontrol_status or {}).get('services') or {}
+    if services:
+        ordered = sorted(
+            services.items(), key=lambda kv: kv[1].get('display_name', kv[0]))
+        rows = (_service_row_html(key, info) for key, info in ordered)
+        body = (
+            '<table style="width:100%">'
+            '<tr><th>Service</th><th>Status</th><th></th></tr>\n' +
+            ''.join(rows) + '</table>\n')
+    else:
+        body = '<p>No data received from FrankenControl yet.</p>\n'
+
+    return (
+        '<!DOCTYPE html>\n<html>\n<head>\n'
+        f'<meta name="color-scheme" content="{color_scheme}" />\n' +
+        _COMMON_CSS +
+        '\n</head>\n<body>\n'
+        '<div class="page-title">'
+        '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
+        '<h1>Services</h1>'
+        '<div style="margin-left:auto">'
+        '<a href="/services" class="btn btn-gray btn-sm">Refresh</a>'
+        '<a href="/" class="btn btn-gray btn-sm">Back</a>'
+        '</div>'
+        '</div>\n'
+        f'<p style="color:{color}">FrankenControl data: {label} ({age})</p>\n' +
+        body +
+        '</body>\n</html>\n'
+    )
+
 
 _WINDIMPORT_PAGE = (
     '<!DOCTYPE html>\n<html>\n<head>\n'
@@ -2342,6 +2410,27 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 await router.send_to_upstream("addon=HAFAP:1:RESET")
                 await router.client_broadcast("addon=HAFAP:1:RESET")
                 raise web.HTTPFound('/utils')
+
+            @routes.get('/services')
+            async def handle_services_get(_):
+                cs = router.config.listen.rest_api_color_scheme
+                return web.Response(
+                    text=_build_services_page(router, cs), content_type='text/html')
+
+            @routes.post('/api/services/{service}/{action}')
+            async def handle_services_action(request):
+                service = request.match_info['service']
+                action = request.match_info['action']
+                if action not in ('start', 'stop', 'restart'):
+                    return web.Response(text=f"Invalid action: {action}", status=400)
+                router.logger.info("API: requesting %s on service %s", action, service)
+                payload = json.dumps({"action": action, "service": service})
+                line = f"addon=FRANKENCONTROL:1:COMMAND:{payload}"
+                # FrankenControl could be connected on either side of this
+                # router (same pattern as the HAFAP/CPDLC reset button above).
+                await router.send_to_upstream(line)
+                await router.client_broadcast(line)
+                raise web.HTTPFound('/services')
 
             @routes.post('/api/utils/force_ground_contact')
             async def handle_force_ground_contact(_):

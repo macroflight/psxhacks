@@ -287,6 +287,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.frankenweather_turbstate_received_at: float = 0.0
         self.frankenweather_windstate: dict = None
         self.frankenweather_windstate_received_at: float = 0.0
+        self.frankencontrol_status: dict = None
+        self.frankencontrol_status_received_at: float = 0.0
         self.flightinfo = {
             'last_updated_by': '',
             'last_updated_at': '',
@@ -2184,6 +2186,21 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     "Malformed FRANKENWEATHER %s addon: %s (%s)", prefix[:-1], line[:80], exc)
             return
 
+    def cache_frankencontrol_addon(self, line: str) -> None:
+        """Parse and cache a FRANKENCONTROL STATUS addon message for the UI."""
+        # line: "addon=FRANKENCONTROL:1:STATUS:<json>"
+        rest = line[len("addon=FRANKENCONTROL:"):]
+        _version, sep, remainder = rest.partition(':')
+        if not sep or not remainder.startswith("STATUS:"):
+            return
+        payload_str = remainder[len("STATUS:"):]
+        try:
+            self.frankencontrol_status = json.loads(payload_str)
+            self.frankencontrol_status_received_at = time.time()
+        except ValueError as exc:
+            self.logger.warning(
+                "Malformed FRANKENCONTROL STATUS addon: %s (%s)", line[:120], exc)
+
     def _update_gps_spoof_state(self):
         """Recompute the FMC's possibly-spoofed lat/lon/altitude from cached PSX state.
 
@@ -2935,6 +2952,15 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
         self.logger.debug("Message from %s: %s", sender_hr, line)
         sender.from_stream(line)
+
+        # The router's own web UI needs FRANKENCONTROL's status cached
+        # regardless of how the line below ends up being routed/forwarded
+        # (unlike FRANKENWEATHER's equivalent, which is only cached from
+        # inside the FRANKENWEATHER_FILTERED branch further down, this one
+        # has no forwarding restriction to piggyback on, so it's checked
+        # unconditionally here instead).
+        if line.startswith("addon=FRANKENCONTROL:"):
+            self.cache_frankencontrol_addon(line)
 
         # Add message to bucket for this second
         now = int(time.time())

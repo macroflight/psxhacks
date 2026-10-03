@@ -81,7 +81,7 @@ QS546_CONNECT_FILTER_WINDOW_S = 5.0
 # forwarded messages are logged at debug rather than info. FRANKENWEATHER is
 # not listed here since it never reaches this classification -- it is
 # special-cased and forwarded via its own filter in handle_addon() below.
-_KNOWN_ADDONS = frozenset(('FRANKENCDUPROXY', 'FRANKENMSFSBRIDGE'))
+_KNOWN_ADDONS = frozenset(('FRANKENCDUPROXY', 'FRANKENMSFSBRIDGE', 'FRANKENCONTROL'))
 
 # Same idea, but for addons whose messages don't use the normal NAME:payload
 # colon convention (so the "addon" token above ends up being the whole

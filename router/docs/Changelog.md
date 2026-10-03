@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-10-04: version 1.7.0
+
+- **New feature: `/services` page**, showing the status of sim-support
+  services monitored by the new `frankencontrol.py` addon (BACARS,
+  HAFAP/CPDLC, FrankenWeather, SRSL-PSX, CMC-PSX, FrankenTanker,
+  FrankenPush, psx_simlink_bridge), with confirm-gated Start/Stop/Restart
+  buttons per service. The router caches FrankenControl's
+  `addon=FRANKENCONTROL:1:STATUS:<json>` broadcasts unconditionally (not
+  gated on any forwarding restriction), and the page itself is driven
+  entirely by whatever that status contains - no service list is
+  hardcoded on the router side, so it can't drift out of sync with
+  `frankencontrol.py`'s own list. Button presses send
+  `addon=FRANKENCONTROL:1:COMMAND:<json>` both upstream and to all
+  clients, the same pattern as the existing HAFAP/CPDLC reset button.
+
 ## 2026-10-01: version 1.6.7
 
 - **Bug fix: `PNF_MODE_BITS` (the `PnfMode`/`Qi217` bit-label table used for
