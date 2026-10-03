@@ -134,3 +134,103 @@ function Resolve-AddonRepo([string]$repoName) {
     }
     return $dir
 }
+
+# Full path to the file remembering which psxhacks-start-profile-<name>.ps1
+# was chosen by Resolve-StartOverrideFile, so a later script in the same
+# session (in particular a stop/restart script, which must never prompt)
+# can silently reuse the same choice. Lives next to the override file
+# itself, one level above the psxhacks checkout.
+function Get-StartProfileSelectionFile {
+    [System.IO.Path]::GetFullPath("$PSScriptRoot\..\..\psxhacks-start-profile-selected.txt")
+}
+
+# Interactive Up/Down/Enter/Escape picker for choosing one of several start
+# profiles. Returns the chosen name, or $null if the user pressed Escape.
+function Select-StartProfile([string[]]$ProfileNames) {
+    $index = 0
+    $done = $false
+    $cancelled = $false
+
+    Write-Host ""
+    Write-Host "Multiple start profiles found. Up/Down to choose, Enter to select, Escape to cancel:" -ForegroundColor Cyan
+    Write-Host ""
+    $top = [Console]::CursorTop
+
+    while (-not $done) {
+        [Console]::SetCursorPosition(0, $top)
+        for ($i = 0; $i -lt $ProfileNames.Count; $i++) {
+            if ($i -eq $index) {
+                Write-Host ("> " + $ProfileNames[$i]).PadRight(60) `
+                    -ForegroundColor Black -BackgroundColor White
+            } else {
+                Write-Host ("  " + $ProfileNames[$i]).PadRight(60)
+            }
+        }
+        $key = [Console]::ReadKey($true)
+        switch ($key.Key) {
+            'UpArrow'   { $index = ($index - 1 + $ProfileNames.Count) % $ProfileNames.Count }
+            'DownArrow' { $index = ($index + 1) % $ProfileNames.Count }
+            'Enter'     { $done = $true }
+            'Escape'    { $done = $true; $cancelled = $true }
+        }
+    }
+    Write-Host ""
+    if ($cancelled) { return $null }
+    return $ProfileNames[$index]
+}
+
+# Resolve which override file to use when psxhacks-start-override.ps1 (and,
+# for a no-router sim, psxhacks-start-override-norouter.ps1) doesn't exist.
+# Returns $DefaultOverrideFile unchanged if there is nothing else to try -
+# the caller (common.ps1) then reports the normal "override file not
+# found" error for it, same as before this function existed.
+#
+# $IsStopContext (derived by common.ps1 from the name of whichever script
+# dot-sourced it - see $MyInvocation.PSCommandPath there) controls whether
+# the interactive picker below may run at all: a stop/restart must never
+# block the shutdown sequence on a prompt, so it only ever silently reuses
+# an already-saved choice (see Get-StartProfileSelectionFile) and never
+# shows the picker itself.
+#
+# For a start script with no saved choice yet: look for
+# psxhacks-start-profile-<name>.ps1 files next to where the override file
+# would be. None found: fall through to the normal error. One or more
+# found: show Select-StartProfile and save the choice for next time (so
+# the eventual stop script reuses it without prompting again).
+function Resolve-StartOverrideFile([string]$DefaultOverrideFile, [bool]$IsStopContext) {
+    $profileDir = [System.IO.Path]::GetDirectoryName($DefaultOverrideFile)
+    $selectionFile = Get-StartProfileSelectionFile
+
+    if (Test-Path $selectionFile) {
+        $chosen = (Get-Content $selectionFile -Raw).Trim()
+        $chosenFile = Join-Path $profileDir "psxhacks-start-profile-$chosen.ps1"
+        if (Test-Path $chosenFile) {
+            return $chosenFile
+        }
+        Write-Host "Previously selected start profile '$chosen' no longer exists ($chosenFile) - ignoring it." -ForegroundColor Yellow
+    }
+
+    if ($IsStopContext) {
+        return $DefaultOverrideFile
+    }
+
+    $profileFiles = @(Get-ChildItem -Path $profileDir -Filter "psxhacks-start-profile-*.ps1" `
+        -File -ErrorAction SilentlyContinue)
+    if ($profileFiles.Count -eq 0) {
+        return $DefaultOverrideFile
+    }
+
+    $profileNames = $profileFiles | ForEach-Object {
+        $_.BaseName -replace '^psxhacks-start-profile-', ''
+    } | Sort-Object
+
+    $chosen = Select-StartProfile -ProfileNames $profileNames
+    if (-not $chosen) {
+        Show-ErrorAndExit "No start profile selected, exiting."
+    }
+
+    $chosenFile = Join-Path $profileDir "psxhacks-start-profile-$chosen.ps1"
+    Set-Content -Path $selectionFile -Value $chosen
+    Write-Host "Using start profile '$chosen' ($chosenFile)" -ForegroundColor Green
+    return $chosenFile
+}

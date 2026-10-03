@@ -25,6 +25,17 @@
 # own powershell.exe process, each of which dot-sources this file fresh.
 $IsNoRouterSim = ($env:PSXHACKS_NOROUTER -eq "1")
 
+# Whether this file was dot-sourced (directly or via restart_<addon>.ps1,
+# which dot-sources stop_ then start_) from a stop_*.ps1/stopsim_*.ps1
+# script, as opposed to a start_*.ps1/startsim_*.ps1 one - see
+# Resolve-StartOverrideFile's own comment for why this matters. Derived
+# from the name of whichever script dot-sourced THIS file:
+# $MyInvocation.PSCommandPath inside a dot-sourced script is the path of
+# its immediate caller, not of common.ps1 itself, and (confirmed) stays
+# correct across the extra dot-source hop restart_<addon>.ps1 adds, since
+# it's re-evaluated fresh on every dot-source of this file.
+$IsStopContext = (Split-Path -Leaf $MyInvocation.PSCommandPath) -like 'stop*'
+
 # Location of the override file — sim-specific settings live here,
 # outside the git tree. Change this path in-place if your layout
 # differs. Resolved via GetFullPath (not Resolve-Path, which requires the
@@ -44,7 +55,15 @@ if ($IsNoRouterSim) {
     }
 }
 if (-not (Test-Path $OverrideFile)) {
-    Show-ErrorAndExit "Override file not found: $OverrideFile`nCopy start_scripts\psxhacks-start-override-EXAMPLE.ps1 to $OverrideFile and edit it."
+    # No single shared override file - see if a psxhacks-start-profile-<name>.ps1
+    # based setup applies instead (lets more than one person share this
+    # checkout, each with their own profile). Returns $OverrideFile
+    # unchanged if not, so the error below is unchanged too.
+    $OverrideFile = Resolve-StartOverrideFile -DefaultOverrideFile $OverrideFile `
+        -IsStopContext $IsStopContext
+}
+if (-not (Test-Path $OverrideFile)) {
+    Show-ErrorAndExit "Override file not found: $OverrideFile`nCopy start_scripts\psxhacks-start-override-EXAMPLE.ps1 to $OverrideFile and edit it.`nAlternatively, create one or more psxhacks-start-profile-<name>.ps1 files next to it."
 }
 
 # Location of the current flavor file — updated by configure_flavor.ps1.
