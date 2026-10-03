@@ -3286,6 +3286,21 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     reason=message,
                     source=sender.display_name,
                 )
+            # Flight-control-input filtering drops this ingress-side only:
+            # the sender's own local PSX instance has already applied the
+            # change (moved the throttle, armed the speedbrake, etc.) since
+            # that happens locally regardless of what reaches the network.
+            # Send its own last-known-authoritative value straight back so
+            # that sim's controls snap back in sync, instead of silently
+            # drifting from what everyone else actually sees.
+            resync_key = (extra_data or {}).get('resync_key')
+            if resync_key:
+                try:
+                    resync_value = self.cache.get_value(resync_key)
+                except routercache.RouterCacheException:
+                    resync_value = None
+                if resync_value is not None:
+                    await sender.to_stream(f"{resync_key}={resync_value}")
         elif code == RulesCode.KEYVALUE_FILTERED_INGRESS_SILENT:
             self.logger.debug(
                 "Keyword update from %s dropped silently due to ingress filter (%s): %s",
