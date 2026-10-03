@@ -35,6 +35,15 @@ from .routercache import RouterCacheException, RouterCacheTypeError
 # Qh426="Tiller"; Mode=ECON; Min=-999; Max=999;
 FLIGHT_CONTROL_INPUT_KEYWORDS = frozenset({'Qs120', 'Qs357', 'Qs436', 'Qh388', 'Qh426'})
 
+# Exception to the flight-control-input filter above, for Qh388 (SpdBrkLever)
+# only: a non-flying sim is allowed to arm the speedbrake to help the pilot
+# flying, but never to retract it or deploy it further. "Arm" is this exact
+# PSX lever position (confirmed value, not the same as _SPDBRK_ARMED_MAX in
+# variables.py, which is a classification boundary for event-log display).
+# Enforced as increase-only and capped here - see the FLIGHT_CONTROL_INPUT_KEYWORDS
+# block in route().
+SPDBRK_ARM_VALUE = 44
+
 # Same for teh traffic keywords
 TRAFFIC_KEYWORDS = frozenset({'Qs450', 'Qs451'})
 
@@ -1357,7 +1366,38 @@ class Rules():  # pylint: disable=too-many-public-methods
                         )
                     )
                 else:
-                    if flying != self.router.config.identity.simulator:
+                    if flying != self.router.config.identity.simulator and key == 'Qh388':
+                        # Exception: let the non-flying sim arm the speedbrake
+                        # (increase-only, capped at SPDBRK_ARM_VALUE) to help
+                        # the pilot flying - see SPDBRK_ARM_VALUE's comment.
+                        try:
+                            current = int(self.router.cache.get_value(key))
+                        except (RouterCacheException, ValueError, TypeError):
+                            current = 0
+                        try:
+                            requested = int(value)
+                        except ValueError:
+                            requested = None
+                        if requested is not None and current < requested <= SPDBRK_ARM_VALUE:
+                            self.logger.info(
+                                "Allowing SpdBrkLever arm from non-flying sim %s "
+                                "(pilot flying: %s): %s -> %s",
+                                self.router.config.identity.simulator, flying,
+                                current, requested)
+                        else:
+                            self.logger.debug(
+                                "SpdBrkLever update dropped - %s is pilot flying "
+                                "(requested %s, current %s, not a valid arm move)",
+                                flying, value, current)
+                            return self.myreturn(
+                                RulesAction.DROP,
+                                RulesCode.KEYVALUE_FILTERED_INGRESS,
+                                message=(
+                                    f"filtered flight control {key} as we are not the " +
+                                    f"flying sim {flying}"
+                                )
+                            )
+                    elif flying != self.router.config.identity.simulator:
                         # Someone else is pilot flying - filter flight controls.
                         self.logger.debug(
                             "%s update dropped - %s is pilot flying",
@@ -1669,6 +1709,7 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             self.frdp_version = 1
             self.config = TestRules.DummyConfig()
             self.observer_mode = False
+            self.sharedinfo = {"pilot_flying_simulator": "NO_CONTROL_LOCKS"}
 
         def is_upstream_connected(self):
             """Return dummy value."""
@@ -2569,6 +2610,50 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
                 self.assertEqual(code, RulesCode.PTT, msg=f"{key}={val} should use PTT code")
             (action, code, *_) = rules.route(f"{key}=1", testpeer)
             self.assertEqual(action, RulesAction.NORMAL, msg=f"{key}=1 should pass")
+
+    def test_flight_control_speedbrake_arm_exception(self):
+        """Test the SpdBrkLever arm-only exception to the flight-control-input filter."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+        router.get_router_type = lambda: 'slave'
+        router.config.identity.type = 'slave'
+        router.sharedinfo = {"pilot_flying_simulator": "OtherSim"}
+        router.clients = {
+            ('127.0.0.1', 12345): self.DummyClientConnection(('127.0.0.1', 12345)),
+        }
+        testpeer = router.clients[('127.0.0.1', 12345)]
+
+        # A different flight-control keyword gets no exception: dropped as usual.
+        (action, code, *_) = rules.route("Qs357=123", testpeer)
+        self.assertEqual(action, RulesAction.DROP)
+        self.assertEqual(code, RulesCode.KEYVALUE_FILTERED_INGRESS)
+
+        # SpdBrkLever increasing, within the armed range: allowed.
+        router.cache.update('Qh388', 0)
+        (action, code, *_) = rules.route("Qh388=44", testpeer)
+        self.assertEqual(action, RulesAction.NORMAL)
+
+        # SpdBrkLever increasing further, but past the armed position: dropped.
+        router.cache.update('Qh388', 44)
+        (action, code, *_) = rules.route("Qh388=100", testpeer)
+        self.assertEqual(action, RulesAction.DROP)
+        self.assertEqual(code, RulesCode.KEYVALUE_FILTERED_INGRESS)
+
+        # SpdBrkLever decreasing (e.g. the non-flying sim trying to disarm/retract): dropped.
+        router.cache.update('Qh388', 44)
+        (action, code, *_) = rules.route("Qh388=0", testpeer)
+        self.assertEqual(action, RulesAction.DROP)
+        self.assertEqual(code, RulesCode.KEYVALUE_FILTERED_INGRESS)
+
+        # SpdBrkLever unchanged: dropped (not an increase).
+        router.cache.update('Qh388', 44)
+        (action, code, *_) = rules.route("Qh388=44", testpeer)
+        self.assertEqual(action, RulesAction.DROP)
+
+        # We are pilot flying ourselves: no filtering applies at all.
+        router.sharedinfo["pilot_flying_simulator"] = router.config.identity.simulator
+        (action, code, *_) = rules.route("Qh388=500", testpeer)
+        self.assertEqual(action, RulesAction.NORMAL)
 
     def test_ptt_ground_handling_translation(self):
         """Test that a cross-sim PTT drop synthesizes an addon=GROUND.HANDLING PTT event."""
