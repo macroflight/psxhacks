@@ -89,7 +89,7 @@ _KNOWN_ADDONS = frozenset(('FRANKENCDUPROXY', 'FRANKENMSFSBRIDGE', 'FRANKENCONTR
 # instead of exact membership. GROUND.HANDLING isn't listed here even though
 # it uses the same convention -- it's special-cased earlier in handle_addon()
 # and never reaches this classification.
-_KNOWN_ADDON_PREFIXES = ('BACARS.REMOTE', 'GROUND.COMPANIES', 'GEOVR.PSX.')
+_KNOWN_ADDON_PREFIXES = ('BACARS.REMOTE', 'GROUND.COMPANIES', 'GEOVR.PSX.', 'MSFS.CLIENT')
 
 # client_provided_id FrankenWeather identifies itself with on the network
 # (see frankenweather.py's __MY_CLIENT_ID__). Used so that other
