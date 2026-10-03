@@ -13,4 +13,6 @@ $xml.SelectSingleNode("//PSXPort").InnerText = "$FrankenrouterSlavePort"
 $xml.Save($configPath)
 
 Start-Process -WorkingDirectory $PsxSoundsDir "$PsxSoundsDir\PSXSounds.exe"
+
+Delay 5
 Invoke-WindowPosition "PSXSounds"

@@ -1,5 +1,20 @@
 # start_scripts changelog
 
+## 1.3.1 (2026-10-03)
+
+- **Fix: PSX.NET.MSFS.Client and PSXSounds windows sometimes not
+  positioned on sim startup.** Both were slow enough to create their
+  window that the normal positioning retry window (5s) could pass
+  before it appeared, so positioning silently gave up - running
+  `apply_window_positions.ps1` again later (once the window existed)
+  would then move it correctly. Both now get a `Delay 5` before
+  positioning, the same fix previously applied to PSX.NET.VATSIM and
+  SimObjectRouter. `start_psx_net_msfs_client.ps1` also switches from a
+  blocking `&` launch to `Start-Process`, since it launches a separate
+  GUI .exe (not a console-hosted Python addon) - the blocking launch
+  meant positioning ran *before the process had even started*, not
+  just before its window appeared.
+
 ## 1.3.0 (2026-10-03)
 
 - **New addon: FrankenControl**, added to the `start_<x>.ps1`/
