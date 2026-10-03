@@ -245,6 +245,7 @@ class RulesCode(enum.Enum):
     OBSERVER_MODE = enum.auto()
     FRDP_SIMEVENTS = enum.auto()
     JETTISON_MLW_CHANGED = enum.auto()
+    FRDP_DISCONNECT_SIM = enum.auto()
 
 
 class Rules():  # pylint: disable=too-many-public-methods
@@ -553,6 +554,50 @@ class Rules():  # pylint: disable=too-many-public-methods
             RulesCode.KEYVALUE_FILTER_EGRESS,
             extra_data={'exclude_non_frankenrouter': True})
 
+    def handle_addon_frankenrouter_disconnect_sim(self, payload):
+        """Handle a FRDP DISCONNECT_SIM message.
+
+        Format:
+        addon=FRANKENROUTER:<protocol version>:DISCONNECT_SIM:<JSON data>
+        JSON data: {"from_sim": ..., "target_sim": ..., "reason": ...}
+
+        Flooded to every frankenrouter (like ROUTERINFO/SHAREDINFO) since
+        the target sim could be anywhere in the topology, not just
+        upstream/downstream of whoever sent it. Only a slave-type router
+        whose own simulator_name matches target_sim, AND whose own
+        upstream connection is itself to a router in a *different* sim
+        (i.e. we are the "edge" router for our sim, not an internal
+        router within a multi-router sim) actually acts on it; everyone
+        else just forwards it along.
+        """
+        try:
+            data = json.loads(payload)
+        except json.decoder.JSONDecodeError:
+            return self.myreturn(
+                RulesAction.DROP, RulesCode.MESSAGE_INVALID,
+                message=f"Invalid JSON data in FRDP DISCONNECT_SIM message: {self.line}"
+            )
+        if not all(k in data for k in ('from_sim', 'target_sim', 'reason')):
+            self.logger.warning(
+                "DISCARDING FRDP DISCONNECT_SIM message missing fields: %s", self.line)
+            return self.myreturn(RulesAction.DROP, RulesCode.FRDP_DISCONNECT_SIM)
+
+        own_sim = self.router.config.identity.simulator
+        is_edge_router = (
+            self.router.upstream is not None and
+            self.router.upstream.simulator_name != own_sim
+        )
+        extra_data = {'exclude_non_frankenrouter': True}
+        if (
+                self.router.config.identity.type == 'slave' and
+                is_edge_router and
+                data['target_sim'] == own_sim
+        ):
+            extra_data['disconnect_sim'] = data
+        # Forward message to network but only to frankenrouters
+        return self.myreturn(
+            RulesAction.FILTER, RulesCode.FRDP_DISCONNECT_SIM, extra_data=extra_data)
+
     def handle_addon_frankenrouter_sharedinfo(self, payload):  # pylint: disable=too-many-branches
         """Handle a FRDP SHAREDINFO message.
 
@@ -786,6 +831,8 @@ class Rules():  # pylint: disable=too-many-public-methods
             return self.handle_addon_frankenrouter_join(payload)
         if message_type == 'ROUTERINFO':
             return self.handle_addon_frankenrouter_routerinfo(payload)
+        if message_type == 'DISCONNECT_SIM':
+            return self.handle_addon_frankenrouter_disconnect_sim(payload)
         if message_type == 'SHAREDINFO':
             return self.handle_addon_frankenrouter_sharedinfo(payload)
         if message_type == 'FLIGHTINFO':
@@ -1586,6 +1633,7 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         def __init__(self):
             """Initialize the identity config."""
             self.simulator = 'MySim'
+            self.type = 'slave'
 
     class DummyConfigFiltering():  # pylint: disable=too-few-public-methods
         """Implement small parts of the router for unit testing."""
@@ -1858,6 +1906,81 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         self.assertEqual(testpeer.client_provided_id, 'GATEFIND')
         self.assertEqual(testpeer.display_name, 'PSX.NET GateFinder')
         self.assertEqual(testpeer.display_name_source, 'FRDP CLIENTINFO')
+
+    def test_frdp_disconnect_sim(self):
+        """Test the FRDP DISCONNECT_SIM message, including who it applies to."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+        router.upstream = self.DummyUpstreamConnection()
+        router.clients = {
+            ('127.0.0.1', 12345): self.DummyClientConnection(('127.0.0.1', 12345)),
+        }
+        testpeer = router.clients[('127.0.0.1', 12345)]
+
+        # We are a slave router for 'MySim' (DummyConfigIdentity defaults),
+        # and are targeted by name -> this must apply to us.
+        payload = json.dumps({
+            "from_sim": "OtherSim", "target_sim": "MySim", "reason": "Testing"})
+        (action, code, _, extra_data) = rules.route(
+            f"addon=FRANKENROUTER:1:DISCONNECT_SIM:{payload}", testpeer)
+        self.assertEqual(action, RulesAction.FILTER)
+        self.assertEqual(code, RulesCode.FRDP_DISCONNECT_SIM)
+        self.assertTrue(extra_data['exclude_non_frankenrouter'])
+        self.assertEqual(extra_data['disconnect_sim'],
+                         {"from_sim": "OtherSim", "target_sim": "MySim", "reason": "Testing"})
+
+        # Targeting a different sim -> still forwarded, but does not apply to us
+        payload = json.dumps({
+            "from_sim": "OtherSim", "target_sim": "SomeOtherSim", "reason": "Testing"})
+        (action, code, _, extra_data) = rules.route(
+            f"addon=FRANKENROUTER:1:DISCONNECT_SIM:{payload}", testpeer)
+        self.assertEqual(action, RulesAction.FILTER)
+        self.assertEqual(code, RulesCode.FRDP_DISCONNECT_SIM)
+        self.assertNotIn('disconnect_sim', extra_data)
+
+        # Targeting us, but we are not a slave -> does not apply to us
+        router.config.identity.type = 'master'
+        payload = json.dumps({
+            "from_sim": "OtherSim", "target_sim": "MySim", "reason": "Testing"})
+        (action, code, _, extra_data) = rules.route(
+            f"addon=FRANKENROUTER:1:DISCONNECT_SIM:{payload}", testpeer)
+        self.assertEqual(action, RulesAction.FILTER)
+        self.assertNotIn('disconnect_sim', extra_data)
+        router.config.identity.type = 'slave'
+
+        # Targeted, slave, but our upstream is in the *same* sim (we are
+        # an internal router, not the edge router) -> does not apply to us
+        router.upstream.simulator_name = 'MySim'
+        payload = json.dumps({
+            "from_sim": "OtherSim", "target_sim": "MySim", "reason": "Testing"})
+        (action, code, _, extra_data) = rules.route(
+            f"addon=FRANKENROUTER:1:DISCONNECT_SIM:{payload}", testpeer)
+        self.assertEqual(action, RulesAction.FILTER)
+        self.assertNotIn('disconnect_sim', extra_data)
+        router.upstream.simulator_name = 'UnknownSim'
+
+        # Targeted, slave, but we have no upstream at all -> does not apply
+        router.upstream = None
+        payload = json.dumps({
+            "from_sim": "OtherSim", "target_sim": "MySim", "reason": "Testing"})
+        (action, code, _, extra_data) = rules.route(
+            f"addon=FRANKENROUTER:1:DISCONNECT_SIM:{payload}", testpeer)
+        self.assertEqual(action, RulesAction.FILTER)
+        self.assertNotIn('disconnect_sim', extra_data)
+        router.upstream = self.DummyUpstreamConnection()
+
+        # Missing required field -> dropped, not forwarded
+        payload = json.dumps({"from_sim": "OtherSim", "target_sim": "MySim"})
+        (action, code, *_) = rules.route(
+            f"addon=FRANKENROUTER:1:DISCONNECT_SIM:{payload}", testpeer)
+        self.assertEqual(action, RulesAction.DROP)
+        self.assertEqual(code, RulesCode.FRDP_DISCONNECT_SIM)
+
+        # Invalid JSON -> dropped
+        (action, code, *_) = rules.route(
+            "addon=FRANKENROUTER:1:DISCONNECT_SIM:not json", testpeer)
+        self.assertEqual(action, RulesAction.DROP)
+        self.assertEqual(code, RulesCode.MESSAGE_INVALID)
 
     def test_frdp_subscribe(self):
         """Test the FRDP SUBSCRIBE opt-in, and that it stays short of full FRDP peer status."""

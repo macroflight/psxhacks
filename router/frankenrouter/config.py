@@ -76,6 +76,18 @@ class _RouterConfigUpstream:  # pylint: disable=missing-class-docstring,too-few-
                     "(only printable ASCII characters allowed, no spaces)")
         self.use_session_password = data.get('use_session_password', False)
         self.default = data.get('default', False)
+        # Controls what an edge slave router does when forcibly
+        # disconnected from upstream by a FRDP DISCONNECT_SIM message
+        # targeting it (see rules.py/handle_forced_disconnect() in
+        # frankenrouter.py): "disconnect" (default) drops the upstream
+        # connection and stays with none until someone reconnects
+        # manually; "switch" drops it and immediately falls back to this
+        # (the default/configured) upstream instead; "ignore" means this
+        # router never acts on DISCONNECT_SIM at all.
+        self.on_forced_disconnect = data.get('on_forced_disconnect', 'disconnect')
+        if self.on_forced_disconnect not in ('disconnect', 'switch', 'ignore'):
+            raise RouterConfigError(
+                "on_forced_disconnect must be one of 'disconnect', 'switch', 'ignore'")
 
 
 class _RouterConfigLog:  # pylint: disable=missing-class-docstring,too-few-public-methods
@@ -581,6 +593,20 @@ password = 'PW_MATS'
         self.assertEqual(conf.listen.rest_api_shutdown_enabled, True)
         with self.assertRaises(RouterConfigError):
             RouterConfig(config_data="[listen]\nrest_api_shutdown_enabled = 'yes'\n")
+
+    def test_on_forced_disconnect(self):
+        """on_forced_disconnect defaults to 'disconnect' and accepts the other two values."""
+        conf = RouterConfig(config_data="")
+        self.assertEqual(conf.upstream.on_forced_disconnect, 'disconnect')
+        for value in ('disconnect', 'switch', 'ignore'):
+            conf = RouterConfig(config_data=(
+                "[[upstream]]\nname = 'test upstream'\n"
+                f"on_forced_disconnect = '{value}'\n"))
+            self.assertEqual(conf.upstream.on_forced_disconnect, value)
+        with self.assertRaises(RouterConfigError):
+            RouterConfig(config_data=(
+                "[[upstream]]\nname = 'test upstream'\n"
+                "on_forced_disconnect = 'bogus'\n"))
 
     def test_ground_handling_forward_names(self):
         """ground_handling_forward_names has sane defaults and can be overridden in [filtering]."""

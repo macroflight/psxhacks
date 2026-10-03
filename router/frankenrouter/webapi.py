@@ -2,6 +2,7 @@
 # pylint: disable=fixme,invalid-name,too-many-lines
 import asyncio
 import datetime
+import html
 import json
 import pathlib
 import re
@@ -124,6 +125,7 @@ _INDEX_PAGE = (
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5em;align-items:start">\n'
     '<div>\n'
     '{critical_errors}'
+    '{forced_disconnect_notice}'
     '<div class="card {upstream_class}">\n'
     '<table>\n'
     '<tr><td>Router type</td>'
@@ -139,7 +141,6 @@ _INDEX_PAGE = (
     '<a href="/flightinfo" class="btn btn-gray">Flight Info</a>\n'
     '<a href="/weather" class="btn btn-gray">Weather</a>\n'
     '<a href="/utils" class="btn btn-gray">Utils</a>\n'
-    '<a href="/services" class="btn btn-gray">Services</a>\n'
     '{sessionpwd_button}'
     '</div>\n'
     '<div>\n'
@@ -166,6 +167,8 @@ _UTILS_PAGE = (
     '</div>\n'
     '<a href="/utils/windimport" class="btn btn-blue">DLH wind import</a>\n'
     '<a href="/utils/events" class="btn btn-gray">Event log</a>\n'
+    '<a href="/services" class="btn btn-gray">Master sim services</a>\n'
+    '{sims_link}'
     '<form method="post" action="/api/utils/towing/direction" style="display:inline">'
     '<button class="btn btn-gray">Toggle towing direction{towing_direction}</button></form>\n'
     '<form method="post" action="/api/utils/printer/reset" style="display:inline">'
@@ -178,14 +181,20 @@ _UTILS_PAGE = (
 )
 
 
-def _service_action_buttons(key, display_name):
-    """Build the Start/Stop/Restart confirm-gated button group for one service row."""
+def _service_action_buttons(key, display_name, running):
+    """Build the confirm-gated button group for one service row.
+
+    Only the actions that make sense for the service's current state are
+    shown: just Start while stopped, or Stop and Restart while running.
+    """
+    actions = ('stop', 'restart') if running else ('start',)
     return ''.join(
         f'<form method="post" action="/api/services/{key}/{action}" '
         f'style="display:inline" '
         f'onsubmit="return confirm(\'{action.capitalize()} {display_name}?\')">'
-        f'<button class="btn btn-gray btn-sm">{action.capitalize()}</button></form> '
-        for action in ('start', 'stop', 'restart')
+        f'<button class="btn btn-gray btn-sm" style="width:auto">'
+        f'{action.capitalize()}</button></form> '
+        for action in actions
     )
 
 
@@ -195,11 +204,11 @@ def _service_row_html(key, info):
     running = bool(info.get('running'))
     state_color = '#22c55e' if running else '#9fb2cc'
     state_label = 'RUNNING' if running else 'stopped'
-    buttons = _service_action_buttons(key, display_name)
+    buttons = _service_action_buttons(key, display_name, running)
     return (
         f'<tr><td>{display_name}</td>'
         f'<td style="color:{state_color}">{state_label}</td>'
-        f'<td style="text-align:right">{buttons}</td></tr>\n')
+        f'<td style="text-align:right;white-space:nowrap">{buttons}</td></tr>\n')
 
 
 def _build_services_page(router, color_scheme):
@@ -219,26 +228,126 @@ def _build_services_page(router, color_scheme):
             services.items(), key=lambda kv: kv[1].get('display_name', kv[0]))
         rows = (_service_row_html(key, info) for key, info in ordered)
         body = (
-            '<table style="width:100%">'
-            '<tr><th>Service</th><th>Status</th><th></th></tr>\n' +
+            '<table>'
+            '<tr><th style="text-align:left">Service</th>'
+            '<th style="text-align:left">Status</th><th></th></tr>\n' +
             ''.join(rows) + '</table>\n')
     else:
         body = '<p>No data received from FrankenControl yet.</p>\n'
 
     return (
         '<!DOCTYPE html>\n<html>\n<head>\n'
-        f'<meta name="color-scheme" content="{color_scheme}" />\n' +
-        _COMMON_CSS +
+        f'<meta name="color-scheme" content="{color_scheme}" />\n'
+        '<meta http-equiv="refresh" content="5">\n' +
+        _COMMON_CSS.format() +
+        '\n<style>body { max-width: 64em; }</style>\n'
+        '</head>\n<body>\n'
+        '<div class="page-title">'
+        '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
+        '<h1>Master sim services</h1>'
+        '<div style="margin-left:auto">'
+        '<a href="/services" class="btn btn-gray btn-sm">Refresh</a>'
+        '<a href="/utils" class="btn btn-gray btn-sm">Back</a>'
+        '</div>'
+        '</div>\n'
+        f'<p style="color:{color}">FrankenControl data: {label} ({age})</p>\n'
+        '<p class="note">Auto-refreshes every 5 s. After starting, stopping, '
+        'or restarting a service, it may take up to 60 s for its status '
+        'here to update.</p>\n'
+        '<p class="note">Not every service here is necessarily configured '
+        'to start in your setup (e.g. FrankenTanker, psx_simlink_bridge) - '
+        'a "stopped" status for one of those may be expected.</p>\n' +
+        body +
+        '</body>\n</html>\n'
+    )
+
+
+def _sim_row_html(uuid, info, elevation_source, traffic_source):
+    """Build one <tr> for the /utils/sims table (a row we're allowed to disconnect)."""
+    sim_name_raw = info.get('simulator_name', 'unknown')
+    sim_name = html.escape(sim_name_raw)
+    router_name = html.escape(info.get('router_name', 'unknown'))
+    age = int(time.time() - info.get('received', time.time()))
+    badges = ''
+    if sim_name_raw == elevation_source:
+        badges += ' <span title="Elevation master">⛰️</span>'
+    if sim_name_raw == traffic_source:
+        badges += ' <span title="Traffic master">✈️</span>'
+    return (
+        f'<tr><td>{sim_name}{badges}</td><td>{router_name}</td><td>{age}s ago</td>'
+        '<td style="text-align:right">'
+        f'<form method="post" action="/api/sims/{uuid}/disconnect" style="display:inline">'
+        '<input type="hidden" name="reason">'
+        '<button type="button" class="btn btn-red btn-sm" onclick="'
+        f'var r = prompt(\'Reason for disconnecting {sim_name}:\'); '
+        'if (r !== null && r.trim() !== \'\') '
+        '{ this.form.reason.value = r.trim(); this.form.submit(); }">'
+        'Disconnect sim</button>'
+        '</form></td></tr>\n')
+
+
+def _latest_router_per_sim(routerinfo, own_sim):
+    """Reduce routerinfo entries to one (most-recently-seen) per slave sim.
+
+    Only type='slave' routers are considered -- a master (or standalone)
+    sim can never act on DISCONNECT_SIM (see rules.py's edge-router
+    gating), so listing one here would offer a button that silently does
+    nothing. This also excludes our own sim. A sim can have more than one
+    router connected (e.g. a multi-router shared cockpit) -- each shows up
+    as its own ROUTERINFO entry, but "Disconnect sim" targets a sim by
+    name, not a specific router, so this collapses them to a single row
+    per sim rather than showing duplicates (or, worse, a disconnect
+    button for another router within our *own* sim).
+    """
+    latest = {}
+    for uuid, info in routerinfo.items():
+        sim_name = info.get('simulator_name')
+        if not sim_name or sim_name == own_sim or info.get('type') != 'slave':
+            continue
+        received = info.get('received', 0)
+        if sim_name not in latest or received > latest[sim_name][1].get('received', 0):
+            latest[sim_name] = (uuid, info)
+    return latest.values()
+
+
+def _build_sims_page(router, color_scheme):
+    """Build the /utils/sims page.
+
+    Lists all connected sims (from FRDP ROUTERINFO), with a confirm-gated
+    "Disconnect sim" button next to each one except our own. Marks the
+    current elevation/traffic master sim with a small badge. Auto-refreshes
+    every 30s so a disconnect can be watched taking effect.
+    """
+    own_sim = router.config.identity.simulator
+    elevation_source = router.sharedinfo.get('elevation_source_simulator', 'NOSIM')
+    traffic_source = router.sharedinfo.get('traffic_source_simulator', 'NOSIM')
+    rows = ''.join(
+        _sim_row_html(uuid, info, elevation_source, traffic_source)
+        for uuid, info in sorted(
+            _latest_router_per_sim(router.routerinfo, own_sim),
+            key=lambda kv: kv[1].get('simulator_name', ''))
+    )
+    body = (
+        '<table style="width:100%">'
+        '<tr><th>Sim</th><th>Router</th><th>Last seen</th><th></th></tr>\n' +
+        rows + '</table>\n'
+        if rows else '<p>No other connected sims.</p>\n'
+    )
+    return (
+        '<!DOCTYPE html>\n<html>\n<head>\n'
+        f'<meta name="color-scheme" content="{color_scheme}" />\n'
+        '<meta http-equiv="refresh" content="30">\n' +
+        _COMMON_CSS.format() +
         '\n</head>\n<body>\n'
         '<div class="page-title">'
         '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
-        '<h1>Services</h1>'
+        '<h1>Connected slave sims</h1>'
         '<div style="margin-left:auto">'
-        '<a href="/services" class="btn btn-gray btn-sm">Refresh</a>'
-        '<a href="/" class="btn btn-gray btn-sm">Back</a>'
+        '<a href="/utils/sims" class="btn btn-gray btn-sm">Refresh</a>'
+        '<a href="/utils" class="btn btn-gray btn-sm">Back</a>'
         '</div>'
         '</div>\n'
-        f'<p style="color:{color}">FrankenControl data: {label} ({age})</p>\n' +
+        '<p class="note">Auto-refreshes every 30 s</p>\n' +
         body +
         '</body>\n</html>\n'
     )
@@ -1609,6 +1718,18 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     'shared_cockpit_rows': shared_cockpit_rows,
                     'master_buttons': master_buttons,
                     'critical_errors': errors_html,
+                    'forced_disconnect_notice': (
+                        '<div class="card warn">\n'
+                        '<b>Forcibly disconnected from upstream</b> '
+                        f'by {html.escape(router.upstream_disabled_by or "unknown")}.<br>\n'
+                        f'Reason: {html.escape(router.upstream_disabled_reason)}\n'
+                        '<form method="post" action="/api/upstream/reconnect"'
+                        ' style="display:inline">'
+                        '<button class="btn btn-blue">Reconnect to last upstream</button>'
+                        '</form>\n'
+                        '</div>\n'
+                        if router.upstream_disabled_reason and not connected else ''
+                    ),
                     'observer_mode_notice': (
                         '<div class="card warn">\n'
                         '<b>Observer mode active</b> &mdash; '
@@ -1997,6 +2118,15 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     res = {'connected': False}
                 return web.json_response(res)
 
+            @routes.post('/api/upstream/reconnect')
+            async def handle_upstream_reconnect(_):
+                router.logger.info(
+                    "API: reconnect to last upstream requested (was disabled by %s)",
+                    router.upstream_disabled_by)
+                router.upstream_disabled = False
+                router.connection_state_changed()
+                raise web.HTTPFound('/')
+
             @routes.get('/api/sharedinfo')
             async def handle_sharedinfo(_):
                 res = router.sharedinfo
@@ -2294,10 +2424,15 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     )
                 except Exception:  # pylint: disable=broad-exception-caught
                     tow_dir = ''
+                sims_link = (
+                    '' if router.config.identity.type == 'standalone' else
+                    '<a href="/utils/sims" class="btn btn-gray">Connected slave sims</a>\n'
+                )
                 return web.Response(
                     text=_UTILS_PAGE.format(
                         rest_api_color_scheme=cs,
-                        towing_direction=tow_dir),
+                        towing_direction=tow_dir,
+                        sims_link=sims_link),
                     content_type='text/html')
 
             @routes.get('/utils/events')
@@ -2306,6 +2441,46 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 return web.Response(
                     text=_build_events_page(router, cs),
                     content_type='text/html')
+
+            @routes.get('/utils/sims')
+            async def handle_sims_get(_):
+                if router.config.identity.type == 'standalone':
+                    return web.Response(
+                        text="Not available on a standalone router", status=404)
+                cs = router.config.listen.rest_api_color_scheme
+                return web.Response(
+                    text=_build_sims_page(router, cs),
+                    content_type='text/html')
+
+            @routes.post('/api/sims/{uuid}/disconnect')
+            async def handle_sims_disconnect(request):
+                if router.config.identity.type == 'standalone':
+                    return web.Response(
+                        text="Not available on a standalone router", status=404)
+                target_uuid = request.match_info['uuid']
+                data = await request.post()
+                reason = (data.get('reason') or '').strip()
+                if not reason:
+                    return web.Response(text="A reason is required", status=400)
+                target = router.routerinfo.get(target_uuid)
+                if target is None or 'simulator_name' not in target:
+                    return web.Response(text="Unknown sim", status=404)
+                target_sim = target['simulator_name']
+                router.logger.info(
+                    "API: requesting disconnect of sim %s, reason: %s", target_sim, reason)
+                payload = json.dumps({
+                    'from_sim': router.config.identity.simulator,
+                    'target_sim': target_sim,
+                    'reason': reason,
+                })
+                line = f"addon=FRANKENROUTER:{router.frdp_version}:DISCONNECT_SIM:{payload}"
+                # Flooded onward by every router that forwards it (see
+                # handle_addon_frankenrouter_disconnect_sim() in rules.py), so
+                # seeding it in both directions from here reaches target_sim
+                # no matter where it sits in the topology.
+                await router.send_to_upstream(line)
+                await router.client_broadcast(line)
+                raise web.HTTPFound('/utils/sims')
 
             @routes.get('/utils/windimport')
             async def handle_windimport_get(_):

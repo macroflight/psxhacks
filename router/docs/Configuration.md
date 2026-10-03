@@ -97,6 +97,17 @@ be directly to a PSX main server, or to another frankenrouter.
 - `password`: if set, use this password to auenthicate to the upstream
   router. Only use this if the upstream is a frankenrouter that has a
   password configured.
+- `on_forced_disconnect`: only relevant for the edge router of a
+  `slave` sim (i.e. its own upstream connects to a router in a
+  *different* sim, not another router within the same sim) - what to
+  do when another sim sends a FRDP DISCONNECT_SIM message targeting
+  this sim (see the web UI's Utils &rarr; Connected sims page). One of:
+    - `disconnect` (default): drop the upstream connection and stay with
+      no upstream at all until someone clicks "Reconnect to last
+      upstream" on the start page.
+    - `switch`: drop the upstream connection and immediately reconnect to
+      this (the default/configured) upstream instead.
+    - `ignore`: don't act on DISCONNECT_SIM messages at all.
 
 Example - just one upstream:
 

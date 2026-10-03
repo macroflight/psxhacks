@@ -1,6 +1,28 @@
 # Changelog
 
-## 2026-10-04: version 1.7.0
+## 2026-10-03: version 1.8.0
+
+- **New feature: forced sim disconnect.** A new FRDP `DISCONNECT_SIM`
+  addon message (`addon=FRANKENROUTER:<ver>:DISCONNECT_SIM:<json>`,
+  carrying `from_sim`/`target_sim`/`reason`) is flooded to every
+  frankenrouter in the topology, the same way `ROUTERINFO`/`SHAREDINFO`
+  already are. Only the *edge* router of a `slave` sim (the one whose
+  own upstream connects to a router in a different sim, rather than
+  another router within the same sim) matching `target_sim` acts on it,
+  closing its upstream connection. The new `on_forced_disconnect`
+  setting in `[[upstream]]` controls what happens next: `disconnect`
+  (default) stays with no upstream at all, `switch` immediately falls
+  back to the configured upstream instead, and `ignore` opts a router
+  out of DISCONNECT_SIM entirely. The start page now shows a banner
+  with who disconnected us and why, plus a "Reconnect to last upstream"
+  button (`POST /api/upstream/reconnect`).
+- **New Utils page: Connected sims** (`/utils/sims`), listing every sim
+  currently visible via `ROUTERINFO` (excluding our own), each with a
+  "Disconnect sim" button that requires a free-text reason and
+  confirmation before sending the `DISCONNECT_SIM` message. The page
+  auto-refreshes every 5s.
+
+## 2026-10-03: version 1.7.0
 
 - **New feature: `/services` page**, showing the status of sim-support
   services monitored by the new `frankencontrol.py` addon (BACARS,

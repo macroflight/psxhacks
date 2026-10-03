@@ -270,6 +270,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.clients = {}
         self.upstream = None
         self.upstream_connections = 0
+        # Set True by a FRDP DISCONNECT_SIM message targeting us (slave only)
+        # to make upstream_connector_task sit idle instead of reconnecting.
+        # Cleared on a successful reconnect or by the "Reconnect to last
+        # upstream" button.
+        self.upstream_disabled = False
+        self.upstream_disabled_reason = None
+        self.upstream_disabled_by = None
         self.log_traffic_filename = None
         self.start_time = int(time.time())
         self.allowed_clients = {}
@@ -1105,6 +1112,28 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.logger.info("Closed upstream connection %s", peername)
         self.connection_state_changed()
 
+    async def handle_forced_disconnect(self, from_sim, reason):
+        """Act on a FRDP DISCONNECT_SIM message targeting this (edge, slave) router.
+
+        Behavior is controlled by on_forced_disconnect in the [[upstream]]
+        config section: "disconnect" (default) leaves us with no upstream
+        at all; "switch" immediately falls back to the configured/default
+        upstream instead; "ignore" means we don't act on this at all.
+        """
+        action = self.config.upstream.on_forced_disconnect
+        if action == 'ignore':
+            self.logger.info(
+                "Ignoring forced disconnect from %s (on_forced_disconnect=ignore)", from_sim)
+            return
+        self.logger.warning(
+            "Forcibly disconnected from upstream by %s, reason: %s", from_sim, reason)
+        self.upstream_disabled_by = from_sim
+        self.upstream_disabled_reason = reason
+        self.upstream_disabled = action != 'switch'
+        if self.is_upstream_connected():
+            await self.close_upstream_connection()
+        self.connection_state_changed()
+
     async def handle_new_connection_cb(self, reader, writer):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         """Handle a new client connection."""
         # asyncio will intentionally not propagate exceptions from a
@@ -1355,6 +1384,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         try:  # pylint: disable=too-many-nested-blocks
             reconnect_delay = 1.0
             while True:  # pylint: disable=too-many-nested-blocks
+                # Sit idle without reconnecting while a forced disconnect is
+                # in effect (see handle_forced_disconnect()); the "Reconnect
+                # to last upstream" button clears this flag.
+                if self.upstream_disabled:
+                    await asyncio.sleep(1.0)
+                    continue
                 # Pause clients when we have no upstream connection
                 try:
                     reader, writer = await asyncio.open_connection(
@@ -1396,6 +1431,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
                 # Remove some information that might have come from another upstream
                 self.reset_after_upstream_connect()
+
+                # A successful (re)connection clears any forced-disconnect banner
+                self.upstream_disabled_reason = None
+                self.upstream_disabled_by = None
 
                 # Enable elevation and traffic filter so we don't accidentally
                 # leak data upstream. Especially the elevation injections can be
@@ -2063,6 +2102,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             "timestamp": time.time(),
             "router_name": self.config.identity.router,
             "simulator_name": self.config.identity.simulator,
+            "type": self.config.identity.type,
             "uuid": self.uuid,
             "performance": {
                 "uptime": int(time.perf_counter() - self.starttime),
@@ -3387,6 +3427,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 "Observer mode: dropped key-value from %s: %s", sender_hr, line)
         elif code == RulesCode.FRDP_SIMEVENTS:
             self.logger.debug("Got FRDP SIMEVENTS from %s", sender_hr)
+        elif code == RulesCode.FRDP_DISCONNECT_SIM:
+            disconnect_data = (extra_data or {}).get('disconnect_sim')
+            if disconnect_data:
+                await self.handle_forced_disconnect(
+                    disconnect_data['from_sim'], disconnect_data['reason'])
 
         # Take action
         if action == RulesAction.DROP:
