@@ -22,23 +22,30 @@ Write-Host ""
 
 # Stop PSX and all addon processes, then restart background apps
 
+# PSX.NET.MSFS.Client (no "2024") and PSXVibrate have no restart_*.ps1 of
+# their own (legacy/no addon-managed stop script exists), so they're still
+# killed directly here rather than via a stop_*.ps1.
 KillProcess "PSX.NET.MSFS.Client"
-KillProcess "PSX.NET.MSFS2024.Client"
-KillProcess "PSX.NET.MSFS.Router"
-KillProcess "PSX.NET.Orchestration"
-KillProcess "PSX.NET.MSFS.Temporary.SimObjectRouter"
-KillProcess "PSXSounds"
 KillProcess "PSXVibrate"
-KillProcess "PSX.NET.EFB.Windows"
-KillProcess "vPilot"
-KillProcess "GeoVR.PSX.Client.Wpf"
-KillProcess "CockpitSimulator"
 
-KillPythonScript "frankenrouter_ident.py"
-KillPythonScript "frankencduproxy.py"
-KillPythonScript "frankenprint.py"
-KillJavaJar "AcarsPrint.jar"
-KillJavaJar "$SrslPsxSlaveDir\SRSL-PSX.jar"
+. "$PSScriptRoot\stop_psx_net_msfs_client.ps1"
+. "$PSScriptRoot\stop_psx_net_msfs_router.ps1"
+. "$PSScriptRoot\stop_psx_net_orchestration.ps1"
+. "$PSScriptRoot\stop_sim_object_router.ps1"
+. "$PSScriptRoot\stop_psxsounds.ps1"
+. "$PSScriptRoot\stop_psx_net_efb.ps1"
+. "$PSScriptRoot\stop_vpilot.ps1"
+. "$PSScriptRoot\stop_psx_net_vatsim.ps1"
+. "$PSScriptRoot\stop_cs_cdu.ps1"
+. "$PSScriptRoot\stop_frankenident.ps1"
+. "$PSScriptRoot\stop_frankencduproxy.ps1"
+. "$PSScriptRoot\stop_frankenprint.ps1"
+. "$PSScriptRoot\stop_acarsprint.ps1"
+. "$PSScriptRoot\stop_srsl_psx_slave.ps1"
+
+# The stop_*.ps1 scripts above each set their own window title; restore
+# ours now that they're done, since this window has more work to do yet.
+$Host.UI.RawUI.WindowTitle = "Stop Slave Sim"
 
 # Ask PSX server to shut down gracefully before killing java.exe
 $env:PYTHONPATH = $PsxhacksDevel

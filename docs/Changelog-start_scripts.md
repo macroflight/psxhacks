@@ -1,5 +1,27 @@
 # start_scripts changelog
 
+## 1.2.0 (2026-10-03)
+
+- **New: every addon now has a `start_<addon>.ps1` and `stop_<addon>.ps1`,
+  not just `restart_<addon>.ps1`.** Each `restart_<addon>.ps1` is now a
+  thin wrapper that dot-sources `stop_<addon>.ps1` then
+  `start_<addon>.ps1` - no behavior change for existing callers, but stop
+  and start are now independently usable (e.g. by a future addon-control
+  tool that wants to stop a service without immediately restarting it, or
+  start one that isn't running without first trying to kill it).
+  `stopsim_master.ps1`/`stopsim_slave.ps1` now call the new
+  `stop_<addon>.ps1` scripts instead of duplicating the same
+  `KillProcess`/`KillPythonScript`/`KillJavaJar` calls inline.
+- **Window positioning moved into each `start_<addon>.ps1`**, called right
+  after that addon's process is launched, instead of from
+  `startsim_master.ps1`/`startsim_slave.ps1` after each `Start-Process`.
+  `Invoke-WindowPosition` itself moved from a function duplicated in both
+  `startsim_*.ps1` files into the shared `functions.ps1`. This means
+  positioning now happens consistently no matter what started the addon,
+  not just when `startsim_*.ps1` did it. Two addons (`PSX.NET.VATSIM`,
+  `SimObjectRouter`) keep their extra startup delay before positioning,
+  now inside their own `start_*.ps1` instead of at the call site.
+
 ## 1.1.1 (2026-10-01)
 
 - **Bug fix: "Use standard match" in `configure_window_positions.ps1` didn't

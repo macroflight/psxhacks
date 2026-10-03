@@ -1,6 +1,2 @@
-. "$PSScriptRoot\common.ps1"
-
-$Host.UI.RawUI.WindowTitle = "ACARS Print"
-KillJavaJar "AcarsPrint.jar"
-
-Start-Process java -ArgumentList "-jar", "AcarsPrint.jar" -WorkingDirectory $AcarsPrintDir -WindowStyle Hidden
+. "$PSScriptRoot\stop_acarsprint.ps1"
+. "$PSScriptRoot\start_acarsprint.ps1"

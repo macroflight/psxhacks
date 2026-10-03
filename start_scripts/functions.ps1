@@ -107,6 +107,20 @@ function Test-PythonRequirement {
     }
 }
 
+# Position (or minimize) an addon's window per its saved entry in
+# psxhacks-current-positions.ps1, if $ChangeWindowPositions is on. Called
+# from each start_<addon>.ps1, at the end, once the addon's process has
+# been launched - not from the startsim_*.ps1/frankencontrol.py callers,
+# so positioning always happens consistently regardless of who triggered
+# the start. A no-op (with no output) if $ChangeWindowPositions is off.
+function Invoke-WindowPosition([string]$addon) {
+    if ($ChangeWindowPositions) {
+        $name = if ($SimAddonNames.Contains($addon)) { $SimAddonNames[$addon] } else { $addon }
+        Write-Output ("Positioning " + $name + "...")
+        & "$PSScriptRoot\apply_window_positions.ps1" -Addon $addon
+    }
+}
+
 # Returns the psxhacks directory for a given addon.
 # If $repoName is set, resolves $SimBase\$repoName and verifies it exists;
 # otherwise returns $PsxhacksDevel (a $Franken*Repo override should

@@ -21,18 +21,18 @@ if ($StopSimConfirm) {
 
 Write-Host ""
 
-# Tell restart_cpdlc.ps1's window (if still open) that this stop is
-# expected, so it doesn't mistake the forced kill below for a crash.
-New-Item -Path $CpdlcExpectedStopFlag -ItemType File -Force | Out-Null
-KillPythonScript "psx-acars.py"
-KillPythonScript "frankentanker.py"
-KillPythonScript "frankenweather.py"
-KillPythonScript "frankenpush.py"
+. "$PSScriptRoot\stop_cpdlc.ps1"
+. "$PSScriptRoot\stop_frankentanker.ps1"
+. "$PSScriptRoot\stop_frankenweather.ps1"
+. "$PSScriptRoot\stop_frankenpush.ps1"
+. "$PSScriptRoot\stop_bacars.ps1"
+. "$PSScriptRoot\stop_srsl_psx_master.ps1"
+. "$PSScriptRoot\stop_cmc_psx.ps1"
+. "$PSScriptRoot\stop_psx_simlink_bridge.ps1"
 
-KillProcess "PSX.Bacars.UI"
-KillJavaJar "$SrslPsxMasterDir\SRSL-PSX.jar"
-KillJavaJar "$CmcPsxDir\CMC-PSX.jar"
-KillProcess "psx_simlink_bridge*"
+# The stop_*.ps1 scripts above each set their own window title; restore
+# ours now that they're done, since this window has more work to do yet.
+$Host.UI.RawUI.WindowTitle = "Stop Master Sim"
 
 # Ask PSX server to shut down gracefully before killing java.exe
 Write-Output "Shutting down PSX server..."
