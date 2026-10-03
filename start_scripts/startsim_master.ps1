@@ -57,3 +57,8 @@ if ($StartPsxSimlinkBridge ) {
     Write-Output "Starting psx_simlink_bridge..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_simlink_bridge.ps1"
 }
+
+if ($StartFrankencontrol ) {
+    Write-Output "Starting FrankenControl..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankencontrol.ps1"
+}

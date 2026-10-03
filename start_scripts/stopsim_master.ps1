@@ -29,6 +29,7 @@ Write-Host ""
 . "$PSScriptRoot\stop_srsl_psx_master.ps1"
 . "$PSScriptRoot\stop_cmc_psx.ps1"
 . "$PSScriptRoot\stop_psx_simlink_bridge.ps1"
+. "$PSScriptRoot\stop_frankencontrol.ps1"
 
 # The stop_*.ps1 scripts above each set their own window title; restore
 # ours now that they're done, since this window has more work to do yet.

@@ -1,5 +1,15 @@
 # start_scripts changelog
 
+## 1.3.0 (2026-10-03)
+
+- **New addon: FrankenControl**, added to the `start_<x>.ps1`/
+  `stop_<x>.ps1`/`restart_<x>.ps1` framework like every other master-sim
+  addon, with one difference - `$StartFrankencontrol` defaults to `$true`
+  in `common.ps1` instead of `$false`, since it's meant to be always
+  running rather than opt-in; set it to `$false` in the override file to
+  opt out. Started from `startsim_master.ps1` and stopped from
+  `stopsim_master.ps1`, same as the other master-sim addons.
+
 ## 1.2.0 (2026-10-03)
 
 - **New: every addon now has a `start_<addon>.ps1` and `stop_<addon>.ps1`,

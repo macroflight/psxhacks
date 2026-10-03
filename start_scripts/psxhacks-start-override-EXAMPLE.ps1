@@ -507,6 +507,19 @@
 
 
 # ---------------------------------------------------------------------------
+# FrankenControl settings (master sim)
+#
+# NOTE: started from startsim_master.ps1 - see the FrankenTanker settings
+# note above regarding the PSX port. Unlike every other addon in this
+# file, $StartFrankencontrol defaults to $true in common.ps1 - uncomment
+# the line below and set it to $false instead if you want to opt out.
+# ---------------------------------------------------------------------------
+#$StartFrankencontrol  = $false   # opt out of FrankenControl
+#$FrankencontrolOptions = @()
+#$FrankencontrolRepo    = $null
+
+
+# ---------------------------------------------------------------------------
 # Non-scripted apps
 # Anything here is launched as-is (Start-Process) at the end of
 # startsim_slave.ps1 - use this for simple apps that don't need their own

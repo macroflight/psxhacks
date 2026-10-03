@@ -162,6 +162,7 @@ $FrankenidentOptions = @()
 $FrankencduproxyOptions = @()
 $FrankenprintOptions = @()
 $FrankenpushOptions  = @()
+$FrankencontrolOptions = @()
 
 # Per-addon alternative psxhacks repo directory name.
 # Set to the name of a sibling directory to run that addon from a different
@@ -180,6 +181,7 @@ $FrankenusbRepo         = $null
 $FrankenwindRepo        = $null
 $FrankenprintRepo       = $null
 $FrankenpushRepo        = $null
+$FrankencontrolRepo     = $null
 
 # Which of the addons that we can manage you actually want started in
 # your sim. You can override these in the override file.
@@ -208,6 +210,11 @@ $StartPsxNetOrchestration = $false
 $StartFrankencduproxy = $false
 $StartCsCdu           = $false
 $StartPsxSimlinkBridge = $false
+
+# Unlike every other addon above, FrankenControl defaults to enabled: it
+# just monitors/controls the other master-sim services and is meant to be
+# always running. Set to $false in the override file to opt out.
+$StartFrankencontrol = $true
 
 $StartSrslPsxMaster = $false
 $StartSrslPsxSlave  = $false
@@ -255,6 +262,7 @@ $SimAddonNames = [ordered]@{
     "frankencduproxy"      = "FrankenCDU Proxy"
     "frankenprint"         = "FrankenPrinter"
     "frankenpush"          = "FrankenPush"
+    "frankencontrol"       = "FrankenControl"
     "frankenrouter slave"    = "FrankenRouter (slave)"
     "frankenrouter master"   = "FrankenRouter (master)"
     "SimObjectRouter"        = "SimObjectRouter"
@@ -284,6 +292,7 @@ $KnownWindowTitlePatterns = @{
     "ACARS Print App"      = 'Thermal ACARS Printer for PSX'
     "CMC-PSX"               = 'Central Maintenance Computer For PSX'
     "frankencduproxy"       = 'FrankenCDUProxy'
+    "frankencontrol"        = 'FrankenControl'
     "frankenident"          = 'FrankenRouterIDENT'
     "frankenprint"          = 'FrankenPrinter'
     "frankenpush"           = 'FrankenPUSH'
