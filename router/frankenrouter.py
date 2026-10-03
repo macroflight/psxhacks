@@ -2672,7 +2672,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         if not self.upstream_ever_welcomed:
             return
         if self.get_router_type() == 'master':
-            message = "FRANKENROUTER"
+            # Parenthesized rather than a bare word so this doesn't look like
+            # a genuine Boeing master caution message on the EICAS.
+            message = "(ROUTER)"
             filterstatus = self.get_filter_status()
             state_ok = True
             if len(filterstatus['elevation']['disabled']) > 1:
