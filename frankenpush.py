@@ -124,6 +124,10 @@ _STATIONARY_SPEED_THRESHOLD_KT = 5.0
 # Between full sends only changed fields are sent to reduce bandwidth.
 _FULL_SEND_INTERVAL = 300.0
 
+# WorldFlight musical web shop purchase alerts (opt-in, see --worldflight-shop-alerts).
+_WORLDFLIGHT_SALES_URL = "https://flightofthepenguins.se/api/sales"
+_WORLDFLIGHT_TYPE_LABELS = {"merch": "MERCH", "ticket": "TICKET"}
+
 # PSX FMC route parsing — mirrors psccfc/connector/frdp.py (kept in sync by hand).
 _WAYPOINT_PREFIX_LEN = 10
 _WAYPOINT_SENTINEL_LATLON = "9.0/9.0"
@@ -378,6 +382,18 @@ class Script():  # pylint: disable=too-many-instance-attributes
         # Delta tracking: records the last-sent value of each slow-changing field.
         # Reset to {} on each portal (re)connection to force a full first send.
         self._sent_state: dict = {}
+
+        # WorldFlight musical web shop purchase alerts (--worldflight-shop-alerts).
+        # Highest sale id already alerted on (or ignored at startup) - seeded
+        # once from the API by worldflight_shop_coro() before any polling.
+        self._worldflight_last_seen_id = 0
+        # Set by _on_mastwarn() when either side's master warning/caution
+        # reset switch is pressed (a 0->1 edge on bit 0), to unblock whichever
+        # purchase is currently waiting for acknowledgement in
+        # _process_worldflight_purchase().
+        self._worldflight_ack_event = asyncio.Event()
+        self._worldflight_prev_mastwarn_cp = 0
+        self._worldflight_prev_mastwarn_fo = 0
 
     # --- PSX callbacks ---
 
@@ -699,6 +715,25 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self._sent_state["controls"] = (
                 self._flap_lever, self._gear_lever, self._spd_brk_lever)
 
+    def _on_mastwarn(self, key, value):
+        """Detect a 0->1 edge on bit 0 of MastWarnCp/MastWarnFo (Qh114/Qh115).
+
+        Either side's master warning/caution reset switch sets bit 0; the
+        rest of the value carries other, unrelated state (seen values
+        include 1 and 129), so only bit 0 matters here. Edge-triggered
+        (not level-triggered) so an already-set bit at subscribe time isn't
+        mistaken for a fresh press.
+        """
+        prev_attr = '_worldflight_prev_mastwarn_cp' if key == 'MastWarnCp' \
+            else '_worldflight_prev_mastwarn_fo'
+        try:
+            bit0 = int(value) & 1
+        except ValueError:
+            return
+        if bit0 and not getattr(self, prev_attr):
+            self._worldflight_ack_event.set()
+        setattr(self, prev_attr, bit0)
+
     # --- coroutines ---
 
     async def get_psx_connection_coro(self):
@@ -759,6 +794,11 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.psx.subscribe("GearLever", self._on_gear_lever)
             self.psx.subscribe("SpdBrkLever", self._on_spd_brk_lever)
             self.psx.subscribe("addon", self._handle_addon_message)
+            # Qh114/Qh115 - watched for --worldflight-shop-alerts regardless
+            # of whether it's enabled, per the "subscribe once, for the
+            # process lifetime" rule (see CLAUDE.md).
+            self.psx.subscribe("MastWarnCp", self._on_mastwarn)
+            self.psx.subscribe("MastWarnFo", self._on_mastwarn)
 
             self.psx.logger = self.logger.debug
 
@@ -1135,6 +1175,89 @@ class Script():  # pylint: disable=too-many-instance-attributes
                     self.logger.warning("Failed to read autosave file: %s", exc)
             await asyncio.sleep(30.0)
 
+    @staticmethod
+    def _format_worldflight_message(sale):
+        """Build the (short, <=16 char) EICAS message text for one sale."""
+        type_label = _WORLDFLIGHT_TYPE_LABELS.get(
+            sale.get('type'), str(sale.get('type', '?')).upper())
+        total = sale.get('total')
+        total_str = f"{total:g}" if isinstance(total, (int, float)) else str(total)
+        return f"({type_label}: {total_str})"[:16]
+
+    @staticmethod
+    async def _fetch_worldflight_sales(session):
+        """Fetch the current list of recent sales from the WorldFlight shop API."""
+        async with session.get(
+                _WORLDFLIGHT_SALES_URL, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+    async def _process_worldflight_purchase(self, sale):
+        """Alert on one new WorldFlight shop purchase and wait for it to be acknowledged.
+
+        Sends the master caution message, then blocks until either side's
+        master warning/caution reset switch is pressed (see _on_mastwarn()),
+        then clears it. Purchases are processed one at a time by the caller
+        (worldflight_shop_coro), so only one of these runs at once.
+        """
+        message = self._format_worldflight_message(sale)
+        self.logger.warning(
+            "WorldFlight shop purchase #%s: %s - sending master caution",
+            sale.get('id'), message)
+        self._worldflight_ack_event.clear()
+        self.psx.send("FreeMsgW", message)
+        await self._worldflight_ack_event.wait()
+        self.psx.send("FreeMsgW", "")
+        self.logger.info(
+            "WorldFlight shop purchase #%s acknowledged, caution cleared", sale.get('id'))
+
+    async def worldflight_shop_coro(self):
+        """Poll the WorldFlight shop sales API and alert on new purchases via EICAS.
+
+        On startup, fetches the current sales list once and remembers the
+        highest id present without alerting on any of them (so purchases
+        made while the sim was offline are ignored) - then polls every
+        --worldflight-shop-check-interval seconds and alerts on anything
+        newer, one at a time and in id order.
+        """
+        try:
+            self.logger.debug("Starting %s", inspect.currentframe().f_code.co_name)
+            async with aiohttp.ClientSession() as session:
+                try:
+                    sales = await self._fetch_worldflight_sales(session)
+                    self._worldflight_last_seen_id = max(
+                        (sale['id'] for sale in sales), default=0)
+                except (aiohttp.ClientError, OSError, ValueError, TypeError, KeyError) as exc:
+                    self.logger.warning(
+                        "WorldFlight shop: initial fetch failed, starting from id 0: %s", exc)
+                self.logger.info(
+                    "WorldFlight shop: ignoring purchases up to id %d, "
+                    "checking for new ones every %.0f s",
+                    self._worldflight_last_seen_id, self.args.worldflight_shop_check_interval)
+
+                while True:
+                    await asyncio.sleep(self.args.worldflight_shop_check_interval)
+                    try:
+                        sales = await self._fetch_worldflight_sales(session)
+                    except (aiohttp.ClientError, OSError, ValueError) as exc:
+                        self.logger.warning("WorldFlight shop: fetch failed: %s", exc)
+                        continue
+                    new_sales = sorted(
+                        (sale for sale in sales
+                         if sale.get('id', 0) > self._worldflight_last_seen_id),
+                        key=lambda sale: sale['id'])
+                    if not new_sales:
+                        continue
+                    self._worldflight_last_seen_id = max(sale['id'] for sale in new_sales)
+                    for sale in new_sales:
+                        await self._process_worldflight_purchase(sale)
+
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical(
+                "Unhandled exception %s in %s, shutting down",
+                exc, inspect.currentframe().f_code.co_name)
+            self.logger.critical(traceback.format_exc())
+
     async def monitor_coro(self):
         """Monitor the coroutines and start/restart as needed."""
         try:
@@ -1163,6 +1286,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 if self.args.upload_autosave_from:
                     all_coros.append(
                         ("AutosaveMonitor", self._monitor_autosave_coro))
+                if self.args.worldflight_shop_alerts:
+                    all_coros.append(
+                        ("WorldFlightShop", self.worldflight_shop_coro))
                 for name, coro_fn in all_coros:
                     if name not in running:
                         self.logger.info("Starting %s ...", name)
@@ -1229,6 +1355,17 @@ class Script():  # pylint: disable=too-many-instance-attributes
             '--simevents',
             action='store_true',
             help="Forward SIMEVENTS from the router to Flight Centre.",
+        )
+        parser.add_argument(
+            '--worldflight-shop-alerts',
+            action='store_true',
+            help="Show an EICAS master caution alert when a purchase is made in the "
+                 "WorldFlight musical web shop.",
+        )
+        parser.add_argument(
+            '--worldflight-shop-check-interval',
+            type=float, action='store', default=60.0, metavar='SECONDS',
+            help="How often to check the WorldFlight shop for new purchases.",
         )
         parser.add_argument(
             '--show-sent-to-fc',
