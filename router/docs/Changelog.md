@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-03: version 1.8.1
+
+- **Change: the master caution text for a router/filter-state error is
+  now `(ROUTER)` instead of `FRANKENROUTER`** (Qs418/FreeMsgW), so it
+  reads as an obvious addon-generated message rather than something
+  that could pass for a genuine Boeing EICAS caution.
+- **Quieter logging for `addon=MSFS.CLIENT` messages** (PSX.NET.MSFS
+  Client's jetway control traffic, e.g. `QUERYJETWAY`/`TOGGLEJETWAY`/
+  `STOPJETWAY`) - now logged at debug instead of info, like the other
+  known-noisy addons.
+
 ## 2026-10-03: version 1.8.0
 
 - **New feature: forced sim disconnect.** A new FRDP `DISCONNECT_SIM`
