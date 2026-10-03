@@ -5279,7 +5279,27 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
             self.logger.critical(traceback.format_exc())
 
-    async def get_psx_connection_coro(self) -> None:
+    def _psx_log(self, msg: str) -> None:
+        """Route psx.Client's own log messages: connection status to INFO, rest to DEBUG.
+
+        psx.Client's default logger is a no-op, so without this, retrying
+        while PSX is unreachable (e.g. not started yet) produces no console
+        output at all -- just silence every ~12s. Surfaces its
+        connect/retry/disconnect messages at INFO so that's visible by
+        default; everything else it logs (every TX/RX, every subscription)
+        is far too noisy for that and goes to DEBUG instead.
+        """
+        if msg.startswith((
+                "Connecting to PSX Main Server",
+                "Oops, that failed",
+                "Will retry in",
+                "Disconnected by PSX Main Server",
+        )):
+            self.logger.info("PSX: %s", msg)
+        else:
+            self.logger.debug("PSX: %s", msg)
+
+    async def get_psx_connection_coro(self) -> None:  # pylint: disable=too-many-statements
         """Maintain PSX connection."""
         myname = inspect.currentframe().f_code.co_name
         try:
@@ -5319,6 +5339,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.psx.onDisconnect = disconnected
             self.psx.onConnect = lambda: None
             self.psx.onResume = onresume
+            self.psx.logger = self._psx_log
 
             self.psx.subscribe("id")
             self.psx.subscribe("version", connected)
