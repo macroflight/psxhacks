@@ -20,6 +20,12 @@
   the rest of the shared cockpit actually sees. The router now sends
   that one sim's own cached (last authoritative) value straight back to
   it, snapping its controls back into sync.
+- **Change: flight control inputs (ailerons/elevator/rudder, brakes,
+  throttle levers, speedbrake, tiller) are no longer written to the
+  router event log at all, filtered or not.** These were either noisy
+  (continuous axis input) or, for the speedbrake, redundant with the
+  resync behavior above - removed the dedicated `spdbrk_change` event
+  type entirely rather than just hiding it.
 
 ## 2026-10-03: version 1.9.0
 
