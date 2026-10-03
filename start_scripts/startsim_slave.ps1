@@ -42,6 +42,11 @@ if ($StartPsxSounds ) {
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psxsounds.ps1"
 }
 
+if ($StartPsxVibrate ) {
+    Write-Output "Starting PSXVibrate..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psxvibrate.ps1"
+}
+
 if ($StartFrankenusb ) {
     Write-Output "Starting FrankenUSB..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenusb.ps1"

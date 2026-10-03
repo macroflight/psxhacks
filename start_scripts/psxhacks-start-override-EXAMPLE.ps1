@@ -211,6 +211,19 @@
 
 
 # ---------------------------------------------------------------------------
+# PSXVibrate (PSX.NET.Vibrate) settings
+# $PsxVibrateDir has no default in common.ps1 - it is REQUIRED if
+# $StartPsxVibrate is $true (checked at startup: must point at a directory
+# containing PSX.NET.Vibrate.exe). Both lines below are commented out since
+# the default is not to start PSXVibrate. To enable it: uncomment BOTH
+# lines below AND edit $PsxVibrateDir to the actual path of your
+# PSX.NET.Vibrate installation.
+# ---------------------------------------------------------------------------
+#$StartPsxVibrate = $true   # PSXVibrate
+#$PsxVibrateDir    = "$SimBase\psx_net_vibrate\2026-07-08"
+
+
+# ---------------------------------------------------------------------------
 # HAFAP/CPDLC settings
 # NOTE: HAFAP/CPDLC is started from startsim_master.ps1. restart_cpdlc.ps1
 # already takes care of pointing it at the MASTER sim's PSX port for you -

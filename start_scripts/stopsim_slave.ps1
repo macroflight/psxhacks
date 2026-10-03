@@ -22,17 +22,17 @@ Write-Host ""
 
 # Stop PSX and all addon processes, then restart background apps
 
-# PSX.NET.MSFS.Client (no "2024") and PSXVibrate have no restart_*.ps1 of
-# their own (legacy/no addon-managed stop script exists), so they're still
-# killed directly here rather than via a stop_*.ps1.
+# PSX.NET.MSFS.Client (no "2024") has no restart_*.ps1 of its own
+# (legacy/no addon-managed stop script exists), so it's still killed
+# directly here rather than via a stop_*.ps1.
 KillProcess "PSX.NET.MSFS.Client"
-KillProcess "PSXVibrate"
 
 . "$PSScriptRoot\stop_psx_net_msfs_client.ps1"
 . "$PSScriptRoot\stop_psx_net_msfs_router.ps1"
 . "$PSScriptRoot\stop_psx_net_orchestration.ps1"
 . "$PSScriptRoot\stop_sim_object_router.ps1"
 . "$PSScriptRoot\stop_psxsounds.ps1"
+. "$PSScriptRoot\stop_psxvibrate.ps1"
 . "$PSScriptRoot\stop_psx_net_efb.ps1"
 . "$PSScriptRoot\stop_vpilot.ps1"
 . "$PSScriptRoot\stop_psx_net_vatsim.ps1"

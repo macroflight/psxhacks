@@ -1,5 +1,16 @@
 # start_scripts changelog
 
+## 1.4.0 (2026-10-03)
+
+- **New addon: PSXVibrate (PSX.NET.Vibrate)**, added to the
+  `start_<x>.ps1`/`stop_<x>.ps1`/`restart_<x>.ps1` framework and started
+  from `startsim_slave.ps1` (opt-in, `$StartPsxVibrate`/`$PsxVibrateDir`,
+  both unset by default - see `psxhacks-start-override-EXAMPLE.ps1`).
+  `start_psxvibrate.ps1` rewrites `PSXServerIP`/`PSXPort` in its config to
+  point at the slave sim's router, same as `start_psxsounds.ps1`.
+  `stopsim_slave.ps1` now stops it via the new `stop_psxvibrate.ps1`
+  instead of its previous bare `KillProcess "PSXVibrate"` call.
+
 ## 1.3.1 (2026-10-03)
 
 - **Fix: PSX.NET.MSFS.Client and PSXSounds windows sometimes not

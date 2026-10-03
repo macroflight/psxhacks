@@ -195,6 +195,7 @@ $StartFrankentanker  = $false
 $StartFrankenusb    = $false
 $StartFrankenident  = $false
 $StartPsxSounds     = $false
+$StartPsxVibrate    = $false
 $StartVpilot        = $false
 $StartPsxNetVatsim  = $false
 $StartAcarsPrint    = $false
@@ -250,6 +251,7 @@ $SimAddonNames = [ordered]@{
     "PSX.NET.MSFS.Router"  = "PSX.NET MSFS Router"
     "PSX.NET.Orchestration" = "PSX.NET Orchestration"
     "PSXSounds"            = "PSX Sounds"
+    "psxvibrate"           = "PSXVibrate"
     "HAFAP/CPDLC"          = "HAFAP/CPDLC"
     "vPilot"               = "vPilot"
     "PSX.NET.VATSIM"       = "PSX.NET.VATSIM"
@@ -476,6 +478,19 @@ if ($StartPsxSounds) {
         Show-ErrorAndExit "`$PsxSoundsDir not found: $PsxSoundsDir`nEdit $OverrideFile and set `$PsxSoundsDir to your PSXSounds installation directory."
     } elseif (-not (Test-Path (Join-Path $PsxSoundsDir "PSXSounds.exe"))) {
         Show-ErrorAndExit "`$PsxSoundsDir does not look like a PSXSounds installation (no PSXSounds.exe found): $PsxSoundsDir`nEdit $OverrideFile and set `$PsxSoundsDir to your PSXSounds installation directory."
+    }
+}
+
+# $PsxVibrateDir has no default - it must be set in the override file (see
+# psxhacks-start-override-EXAMPLE.ps1) and point at a real PSX.NET.Vibrate
+# install, but only if PSXVibrate is actually enabled.
+if ($StartPsxVibrate) {
+    if ([string]::IsNullOrWhiteSpace($PsxVibrateDir)) {
+        Show-ErrorAndExit "`$StartPsxVibrate is `$true but `$PsxVibrateDir is not set.`nEdit $OverrideFile and set `$PsxVibrateDir to your PSX.NET.Vibrate installation directory."
+    } elseif (-not (Test-Path $PsxVibrateDir -PathType Container)) {
+        Show-ErrorAndExit "`$PsxVibrateDir not found: $PsxVibrateDir`nEdit $OverrideFile and set `$PsxVibrateDir to your PSX.NET.Vibrate installation directory."
+    } elseif (-not (Test-Path (Join-Path $PsxVibrateDir "PSX.NET.Vibrate.exe"))) {
+        Show-ErrorAndExit "`$PsxVibrateDir does not look like a PSX.NET.Vibrate installation (no PSX.NET.Vibrate.exe found): $PsxVibrateDir`nEdit $OverrideFile and set `$PsxVibrateDir to your PSX.NET.Vibrate installation directory."
     }
 }
 
