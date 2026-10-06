@@ -1733,6 +1733,8 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             """Initialize the connection."""
             self.frdp_ping_sent = 0.0
             self.frdp_ping_rtts = []
+            self.frdp_ping_request_id = None
+            self.uuid = None
             self.simulator_name = 'UnknownSim'
             self.router_name = 'UnknownRouter'
             self.display_name = 'UnknownDisplay'

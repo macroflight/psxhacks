@@ -306,7 +306,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         # Apply static zones to pygame axis value
         if 'static zones' in axis_config:
             for zone in axis_config['static zones']:
-                if event.value >= zone[0] and event.value <= zone[1]:
+                if zone[0] <= event.value <= zone[1]:
                     self.logger.debug("In static zone: %s -> %s", event.value, zone[2])
                     event.value = zone[2]
         # Swap axis if neede
