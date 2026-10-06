@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-10-03: version 1.9.0
+
+- **New: Weather Mode preset on the `/efb` page.** A 3-way toggle - Full,
+  PSX Auto, PSX Manual - sets FrankenWeather's mode, turbulence, and
+  enroute wind in one tap instead of three. Full turns everything on;
+  PSX Auto turns FrankenWeather off and lets PSX fetch its own
+  automatic METAR-based weather; PSX Manual turns FrankenWeather off
+  and freezes weather at its last state for manual control from the
+  instructor station (addresses PSX not immediately updating zone
+  weather after switching away from FrankenWeather mid-flight). Reuses
+  FrankenWeather's existing `enabled`/`paused`/`disabled` modes - no
+  frankenweather.py changes were needed. The turbulence half of each
+  preset goes out as its own `addon=FRANKENWEATHER:TURBCOMMAND:`
+  message (`mode`/`enroute_wind_enabled` use a separate `COMMAND:`
+  message) - they're handled by two different functions in
+  frankenweather.py and aren't interchangeable, which an earlier build
+  of this feature got wrong (the chip never highlighted after switching
+  away from Full, since turbulence silently didn't follow the preset).
+
 ## 2026-10-03: version 1.8.1
 
 - **Change: the master caution text for a router/filter-state error is

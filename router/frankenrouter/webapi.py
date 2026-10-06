@@ -1263,11 +1263,60 @@ def _efb_bool_chip_row(action, field, current, true_label='Enabled', false_label
     return f'<div class="efb-chip-row">{_chip(True, true_label)}{_chip(False, false_label)}</div>\n'
 
 
+# Each preset bundles FrankenWeather's fw_mode together with the turbulence
+# and enroute-wind toggles, so one tap sets all three at once instead of
+# requiring three separate taps to get a fully "on" or fully "off" state.
+# 'mode'/'enroute_wind_enabled' go out in one addon=FRANKENWEATHER:COMMAND:
+# message (RouterFWContext.send_fw_settings_cmd, handled by
+# frankenweather.py's _handle_fw_command()); 'enabled' (turbulence) is a
+# *different* message type, addon=FRANKENWEATHER:TURBCOMMAND: (send_turb_cmd,
+# handled by _handle_turb_command()) -- the two are not interchangeable, see
+# handle_efb_weather_preset_post().
+_WEATHER_PRESET_CMDS = {
+    'full': {'mode': 'enabled', 'enabled': True, 'enroute_wind_enabled': True},
+    'psx_auto': {'mode': 'disabled', 'enabled': False, 'enroute_wind_enabled': False},
+    'psx_manual': {'mode': 'paused', 'enabled': False, 'enroute_wind_enabled': False},
+}
+
+_WEATHER_PRESET_LABELS = (
+    ('full', 'Full'),
+    ('psx_auto', 'PSX Auto'),
+    ('psx_manual', 'PSX Manual'),
+)
+
+
+def _efb_weather_preset(w):
+    """Return the current combined weather-mode preset key, or None if mixed/custom."""
+    mode, turb, enroute = w['fw_mode'], w['turb_enabled'], w['enroute_wind_enabled']
+    for preset, cmd in _WEATHER_PRESET_CMDS.items():
+        if (mode, turb, enroute) == (cmd['mode'], cmd['enabled'], cmd['enroute_wind_enabled']):
+            return preset
+    return None
+
+
+def _efb_weather_mode_row(current):
+    """Render the 3-way Full/PSX Auto/PSX Manual weather-mode chip row."""
+    chips = ''.join(
+        f'<form class="efb-inline" method="post" action="/api/efb/weather-preset">'
+        f'<input type="hidden" name="preset" value="{preset}">'
+        f'<button type="submit" class="efb-chip{" active" if current == preset else ""}">'
+        f'{label}</button></form>\n'
+        for preset, label in _WEATHER_PRESET_LABELS
+    )
+    return f'<div class="efb-chip-row">{chips}</div>\n'
+
+
 def _efb_controls_card(w):
-    """Render the turbulence and CB-avoidance control card."""
+    """Render the weather-mode, turbulence, and CB-avoidance control card."""
     return (
         '<div class="efb-card" id="efb-controls-card">\n'
-        '<div class="efb-eyebrow">Extra Turbulence</div>\n' +
+        '<div class="efb-eyebrow">Weather Mode</div>\n' +
+        _efb_weather_mode_row(_efb_weather_preset(w)) +
+        '<p class="efb-hint">Full: FrankenWeather zones, turbulence, and enroute wind '
+        "all active. PSX Auto: FrankenWeather off, PSX's own automatic METAR-based "
+        'weather active. PSX Manual: FrankenWeather off, weather frozen for manual '
+        'control from the instructor station.</p>\n'
+        '<div class="efb-eyebrow" style="margin-top:0.9rem">Extra Turbulence</div>\n' +
         _efb_bool_chip_row('/api/efb/turb-toggle', 'enabled', w['turb_enabled']) +
         '<p class="efb-hint">Adds extra turbulence based on wind, terrain, '
         'convection, CB proximity, etc.</p>\n'
@@ -2394,6 +2443,17 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 mode = data.get('mode')
                 if mode in ('enabled', 'paused', 'disabled', 'manual'):
                     await _efb_ctx.send_mode_cmd(mode)
+                raise web.HTTPFound('/efb')
+
+            @routes.post('/api/efb/weather-preset')
+            async def handle_efb_weather_preset_post(request):
+                data = await request.post()
+                cmd = _WEATHER_PRESET_CMDS.get(data.get('preset'))
+                if cmd:
+                    await _efb_ctx.send_fw_settings_cmd(
+                        {'mode': cmd['mode'], 'enroute_wind_enabled': cmd['enroute_wind_enabled']})
+                    await _efb_ctx.send_turb_cmd({'enabled': cmd['enabled']})
+                    await asyncio.sleep(3)
                 raise web.HTTPFound('/efb')
 
             @routes.post('/api/efb/toggle')
