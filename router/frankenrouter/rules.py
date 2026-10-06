@@ -38,10 +38,8 @@ FLIGHT_CONTROL_INPUT_KEYWORDS = frozenset({'Qs120', 'Qs357', 'Qs436', 'Qh388', '
 # Exception to the flight-control-input filter above, for Qh388 (SpdBrkLever)
 # only: a non-flying sim is allowed to arm the speedbrake to help the pilot
 # flying, but never to retract it or deploy it further. "Arm" is this exact
-# PSX lever position (confirmed value, not the same as _SPDBRK_ARMED_MAX in
-# variables.py, which is a classification boundary for event-log display).
-# Enforced as increase-only and capped here - see the FLIGHT_CONTROL_INPUT_KEYWORDS
-# block in route().
+# confirmed PSX lever position. Enforced as increase-only and capped here -
+# see the FLIGHT_CONTROL_INPUT_KEYWORDS block in route().
 SPDBRK_ARM_VALUE = 44
 
 # Same for teh traffic keywords

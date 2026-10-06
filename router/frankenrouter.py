@@ -32,7 +32,8 @@ from frankenrouter import connection
 from frankenrouter import variables
 from frankenrouter import routercache
 
-from frankenrouter.rules import RulesAction, RulesCode, Rules, START_PRIVATE_WINDOW_S
+from frankenrouter.rules import (
+    RulesAction, RulesCode, Rules, START_PRIVATE_WINDOW_S, FLIGHT_CONTROL_INPUT_KEYWORDS)
 from frankenrouter.webapi import RouterWebAPI
 
 # Add psxhacks root to sys.path so fw_webui (first-party, at the root) can be imported.
@@ -1889,12 +1890,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             labels = variables.pnf_mode_labels(value)
             prev_labels = variables.pnf_mode_labels(prev)
             return f"{prefix} pnf_mode_change: {prev_labels} -> {labels}"
-        if etype == 'spdbrk_change':
-            state = event.get('state', '?').upper()
-            value = event.get('value', '?')
-            source = event.get('source', '')
-            src_str = f' from {source}' if source else ''
-            return f"{prefix} spdbrk_change: SpdBrkLever {state} ({value}){src_str}"
         if etype in ('bang', 'start', 'load1', 'load2', 'load3'):
             source = event.get('source', '')
             src_str = f' from {source}' if source else ''
@@ -3026,7 +3021,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         _mcp_prev = None
         _afds_prev_fma = None
         _pnf_mode_prev = None
-        _spdbrk_prev_state = None
         if '=' in line:
             _line_key = line.split('=', 1)[0]
             if not sender.upstream and not sender.is_frankenrouter:
@@ -3036,12 +3030,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         _simevent_prev = self.cache.get_value(_simevent_key)
                     except routercache.RouterCacheException:
                         pass  # first time seeing this key — prev stays None
-                if _line_key == 'Qh388':
-                    try:
-                        _spdbrk_prev_state = variables.spdbrk_lever_state(
-                            int(self.cache.get_value('Qh388')))
-                    except (routercache.RouterCacheException, ValueError):
-                        pass
             if _line_key in variables.SIMEVENTS_MCP_WINDOW_KEYS:
                 _mcp_key = _line_key
                 try:
@@ -3123,20 +3111,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 if _pnf_mode_new != _pnf_mode_prev:
                     self.record_sim_event('pnf_mode_change',
                                           value=_pnf_mode_new, prev=_pnf_mode_prev)
-            except (ValueError, IndexError):
-                pass
-
-        # Record speedbrake lever state transitions (stowed/armed/opened) from downstream.
-        if (_spdbrk_prev_state is not None and
-                action not in (RulesAction.DROP, RulesAction.DISCONNECT) and
-                self.last_load1 <= self.last_load3):
-            try:
-                _spdbrk_new_val = int(line.split('=', 1)[1])
-                _spdbrk_new_state = variables.spdbrk_lever_state(_spdbrk_new_val)
-                if _spdbrk_new_state != _spdbrk_prev_state:
-                    self.record_sim_event('spdbrk_change',
-                                          state=_spdbrk_new_state, value=_spdbrk_new_val,
-                                          source=sender.display_name)
             except (ValueError, IndexError):
                 pass
 
@@ -3280,12 +3254,15 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 sender_hr, message, line)
             if not sender.upstream and not sender.is_frankenrouter and '=' in line:
                 _fi_key, _fi_val = line.split('=', 1)
-                self.record_sim_event(
-                    'ingress_filtered',
-                    key=_fi_key, value=_fi_val,
-                    reason=message,
-                    source=sender.display_name,
-                )
+                # Flight control inputs are never event-logged, filtered or
+                # not - see FLIGHT_CONTROL_INPUT_KEYWORDS.
+                if _fi_key not in FLIGHT_CONTROL_INPUT_KEYWORDS:
+                    self.record_sim_event(
+                        'ingress_filtered',
+                        key=_fi_key, value=_fi_val,
+                        reason=message,
+                        source=sender.display_name,
+                    )
             # Flight-control-input filtering drops this ingress-side only:
             # the sender's own local PSX instance has already applied the
             # change (moved the throttle, armed the speedbrake, etc.) since
