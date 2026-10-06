@@ -1204,6 +1204,8 @@ def _efb_status_dict(router, ctx):  # pylint: disable=too-many-locals
         'enroute_wind_enabled': bool(cfg.get('enroute_wind_enabled', False)),
         'avoid_cb_near_airport': bool(cfg.get('avoid_cb_near_airport', False)),
         'cb_airport_clearance_nm': cfg.get('cb_airport_clearance_nm', 15),
+        'disable_psx_sigmets': bool(cfg.get('disable_psx_sigmets', False)),
+        'sigmet_hazards': list((state or {}).get('sigmet_hazards', [])),
         'src_router_color': fw_color, 'src_router_label': fw_label, 'src_router_age': fw_age,
         'src_msfs_color': msfs_color,
         'src_msfs_label': 'connected' if msfs_active else 'not connected',
@@ -1326,6 +1328,13 @@ def _efb_controls_card(w):
             '/api/efb/toggle', 'avoid_cb_near_airport', w['avoid_cb_near_airport']) +
         '<p class="efb-hint">This will shift the position of CBs in the departure or '
         'arrival airport weather zones away from the airport.</p>\n'
+        '<div class="efb-eyebrow" style="margin-top:0.9rem">SIGMETs</div>\n' +
+        _efb_bool_chip_row(
+            '/api/efb/toggle', 'disable_psx_sigmets', w['disable_psx_sigmets'],
+            true_label='PSX SIGMETs Off', false_label='PSX SIGMETs On') +
+        '<p class="efb-hint">FrankenWeather always downloads and parses SIGMETs for '
+        "its own CB logic either way; this only controls whether PSX's own weather "
+        'engine also consumes them.</p>\n'
         '</div>\n'
     )
 
@@ -1455,7 +1464,7 @@ def _efb_current_location_dict(ctx):
     return fields
 
 
-def _efb_location_wx_card(loc):
+def _efb_location_wx_card(loc, sigmet_hazards=()):
     """Render the currently-focused zone's weather detail card."""
     if loc is None:
         body = '<p style="margin:0;color:#64748b">No weather data available.</p>\n'
@@ -1473,7 +1482,10 @@ def _efb_location_wx_card(loc):
             _efb_src_row('Temperature', '#3b82f6', f"{loc['temp_c']}°C") +
             _efb_src_row('Visibility', '#3b82f6', f"{loc['visibility_m']:,} m") +
             _efb_src_row('Clouds', '#3b82f6', clouds) +
-            _efb_src_row('Convective (CB)', '#3b82f6', cb)
+            _efb_src_row('Convective (CB)', '#3b82f6', cb) +
+            _efb_src_row(
+                'In SIGMET area', '#f4d100' if sigmet_hazards else '#64748b',
+                ', '.join(sigmet_hazards) if sigmet_hazards else 'No')
         )
     return (
         '<div class="efb-card" id="efb-location-card">\n'
@@ -1519,7 +1531,7 @@ def _build_efb_page(router, ctx, page_url):
         f'<div id="efb-errors">{_efb_errors_html(r["errors"])}</div>\n'
         '<div class="efb-grid wide">' +
         _efb_router_card(r) + _efb_datasources_card(w) +
-        _efb_controls_card(w) + _efb_location_wx_card(loc) +
+        _efb_controls_card(w) + _efb_location_wx_card(loc, w['sigmet_hazards']) +
         '</div>\n'
         '<div style="text-align:right;margin-top:0.5rem">' +
         music_link +
@@ -2418,9 +2430,14 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
 
             @routes.get('/efb')
             async def handle_efb_get(request):
+                # Served state (router/weather/turb status) changes continuously
+                # and can be changed from elsewhere (FrankenWeather's own web UI,
+                # a config file load, etc.) -- never let a browser serve a stale
+                # cached copy of this page on reload.
                 return web.Response(
                     text=_build_efb_page(router, _efb_ctx, str(request.url)),
-                    content_type='text/html')
+                    content_type='text/html',
+                    headers={'Cache-Control': 'no-store'})
 
             @routes.get('/api/efb/status')
             async def handle_efb_status_get(_):
@@ -2434,8 +2451,8 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     'router_html': _efb_router_card(r),
                     'controls_html': _efb_controls_card(w),
                     'datasources_html': _efb_datasources_card(w),
-                    'location_html': _efb_location_wx_card(loc),
-                })
+                    'location_html': _efb_location_wx_card(loc, w['sigmet_hazards']),
+                }, headers={'Cache-Control': 'no-store'})
 
             @routes.post('/api/efb/mode')
             async def handle_efb_mode_post(request):
@@ -2460,7 +2477,8 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
             async def handle_efb_toggle_post(request):
                 data = await request.post()
                 field = data.get('field')
-                if field in ('enroute_wind_enabled', 'avoid_cb_near_airport'):
+                if field in ('enroute_wind_enabled', 'avoid_cb_near_airport',
+                             'disable_psx_sigmets'):
                     await _efb_ctx.send_fw_settings_cmd({field: data.get('value') == '1'})
                 raise web.HTTPFound('/efb')
 
