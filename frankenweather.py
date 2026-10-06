@@ -1020,6 +1020,22 @@ def metar_to_wx_string(parsed: dict) -> str:
     return ";".join(data)
 
 
+def _wx_wind_qnh(wx: str) -> tuple:
+    """Extract (wind_dir_deg, wind_spd_kt, qnh_hpa) from a PSX Wx semicolon string.
+
+    Field 18 is the wind encoding ("000" + 3-digit dir + 2-digit speed,
+    written by both metar_to_wx_string() and om_to_wx_string()); field 23 is
+    QNH in PSX's own inHg*100 units. Used only to log when a zone's weather
+    content changes between update cycles -- see _update_zones().
+    """
+    parts = wx.split(';')
+    wind_field = parts[18]
+    wind_dir = int(wind_field[3:6])
+    wind_spd = int(wind_field[6:8])
+    qnh_hpa = int(parts[23]) / 2.953
+    return wind_dir, wind_spd, qnh_hpa
+
+
 def om_to_wx_string(om: dict, radar_echo: int = 0,  # pylint: disable=too-many-locals
                     lightning: bool = False) -> str:
     """Convert Open-Meteo current-weather dict to PSX Wx semicolon string."""
@@ -3641,14 +3657,23 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return False
         return nearest_nm > self.args.wxautoset_handoff_dist
 
-    def _nearest_zone_dist_nm(self) -> Optional[float]:
-        """Return the distance in nm from the aircraft to its nearest zone, or None."""
+    def _nearest_zone_num(self) -> Optional[int]:
+        """Return the zone number of the zone nearest the aircraft, or None."""
         if not self.zone_positions or self.ac_lat is None:
             return None
         return min(
-            self._dist_nm(self.ac_lat, self.ac_lon, lat, lon)
-            for lat, lon, _ in self.zone_positions.values()
+            self.zone_positions,
+            key=lambda zn: self._dist_nm(
+                self.ac_lat, self.ac_lon, *self.zone_positions[zn][:2])
         )
+
+    def _nearest_zone_dist_nm(self) -> Optional[float]:
+        """Return the distance in nm from the aircraft to its nearest zone, or None."""
+        zone_num = self._nearest_zone_num()
+        if zone_num is None:
+            return None
+        lat, lon, _ = self.zone_positions[zone_num]
+        return self._dist_nm(self.ac_lat, self.ac_lon, lat, lon)
 
     def _check_and_relocate(self) -> bool:  # pylint: disable=too-many-locals
         """Relocate zones that are no longer useful given aircraft position and altitude.
@@ -3656,11 +3681,26 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         In cruise (>= cruise_alt ft): relocate a zone that is more than
         cruise_behind_dist nm behind the aircraft (aft hemisphere).
         Below cruise alt: relocate any zone more than low_alt_dist nm away.
+        The nearest zone and PSX's own reported FocussedWxZone (self.focused_zone
+        -- almost always the same zone, since PSX picks its active zone by
+        proximity, but not guaranteed to flip the instant the nearest one
+        changes) are always left in place, regardless of what the relocation
+        test above would otherwise say. Either is normally the zone PSX is
+        actually using for the aircraft's local weather, and protecting them
+        is the only thing stopping every zone from relocating in the same
+        pass (e.g. after a long descent ages several zones behind the
+        aircraft at once) -- which would otherwise strip away every nearby
+        zone simultaneously and force an abrupt handoff to a brand-new,
+        unblended zone, defeating the "new zones appear far ahead and don't
+        affect the aircraft until it catches up to them" design.
         Returns True if any zone was moved.
         """
         in_cruise = (self.ac_alt_ft is not None and
                      self.ac_alt_ft >= 18000.0)
         arpt_icaos = {icao for icao, _, _ in self._arpt_coverage_needed()}
+        protected_zones = {self._nearest_zone_num()}
+        if self.focused_zone:
+            protected_zones.add(self.focused_zone)
         any_moved = False
         now = time.time()
         for zone_num in range(1, 8):
@@ -3669,6 +3709,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             lat, lon, icao = self.zone_positions[zone_num]
             reason = self._zone_relocate_reason(zone_num, in_cruise, arpt_icaos)
             if reason is None:
+                continue
+            if zone_num in protected_zones:
+                self.logger.info(
+                    "Zone %d: relocation due (%s) but zone is protected"
+                    " (nearest and/or PSX's FocussedWxZone) — left in place",
+                    zone_num, reason)
                 continue
             if not in_cruise or self._maneuvering:
                 if now - self.zone_relocated_time.get(zone_num, 0) < _REFRESH_MAX_S:
@@ -4800,6 +4846,20 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self.psx_send_and_set("WxBasic", new_wxs[0])
         for i, wx in enumerate(new_wxs):
             zone_num = i + 1
+            old_wx = self.zone_wx.get(zone_num)
+            if old_wx:
+                try:
+                    old_dir, old_spd, old_qnh = _wx_wind_qnh(old_wx)
+                    new_dir, new_spd, new_qnh = _wx_wind_qnh(wx)
+                    dir_delta = abs((new_dir - old_dir + 180) % 360 - 180)
+                    if (abs(new_qnh - old_qnh) >= 1.0 or abs(new_spd - old_spd) >= 3 or
+                            dir_delta >= 10):
+                        self.logger.info(
+                            "Zone %d weather content changed: QNH %.0f→%.0fhPa"
+                            " wind %03d°/%dkt→%03d°/%dkt",
+                            zone_num, old_qnh, new_qnh, old_dir, old_spd, new_dir, new_spd)
+                except (ValueError, IndexError):
+                    pass
             self.zone_wx[zone_num] = wx
             self.psx_send_and_set(f"Wx{zone_num}", wx)
 
