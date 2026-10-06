@@ -1,5 +1,33 @@
 # frankenweather changelog
 
+## 1.4.0 (2026-10-06)
+
+- **New: the SIGMET parser now extracts every hazard type** (TS, TURB,
+  ICE, VA, TC, MTW), not just thunderstorms. Several real-world format
+  gaps were fixed along the way, found against two real downloaded SIGMET
+  feeds: inconsistent `Hazard:`/`HAZARD:` casing, entries that omit the
+  `WI` polygon anchor entirely, missing whitespace between the lat/lon
+  groups, and altitude ranges in several formats the old TOP-FL-only
+  parser didn't handle. An entry describing an open boundary (e.g. `N OF
+  LINE ...`) is deliberately skipped rather than approximated, since
+  connecting a boundary line's own endpoints into a polygon would draw a
+  shape nothing like the real (unbounded) hazard area. CB generation
+  stays TS-only as before; the new hazard types are additive.
+- **New: a "disable PSX SIGMETs" control**, exposed on the router's `/efb`
+  page next to a new "in SIGMET area" indicator (showing every hazard
+  type the aircraft's current position is inside, not just TS).
+  `SigmetOn` (`Qi262`) is a 0-15 bitmask with only two documented bits
+  (embed in the planet weather model; trigger an immediate download), so
+  the write now tracks PSX's own live value and read-modify-writes just
+  those two bits instead of ever sending a bare literal that could
+  clobber the other, undocumented bits. FrankenWeather keeps downloading
+  and parsing SIGMETs for its own CB logic regardless of this toggle; it
+  only controls whether PSX's own weather engine also consumes them.
+- **Fix: the "zone protected from relocation" log line could repeat
+  dozens of times for one ongoing situation** — a protected zone can stay
+  due-for-relocation for many minutes as the aircraft continues past it.
+  Now throttled to once per 5 minutes per zone.
+
 ## 1.3.0 (2026-10-06)
 
 - **Bug fix: a long cruise descent could relocate every weather zone in

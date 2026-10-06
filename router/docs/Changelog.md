@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-10-06: version 1.11.0
+
+- **New: `/efb` shows an "in SIGMET area" indicator and a "PSX SIGMETs
+  On/Off" toggle.** The indicator (in the Current Location Weather card)
+  reports every hazard type (TS, TURB, ICE, VA, TC, MTW) FrankenWeather
+  currently finds the aircraft's position inside, not just thunderstorms.
+  The toggle, next to the existing CB-avoidance toggle, flips
+  FrankenWeather's new `disable_psx_sigmets` setting through the same
+  generic `/api/efb/toggle` route already used for other settings.
+- **Fix: `/efb` and `/api/efb/status` could serve a stale page after
+  reload.** Neither response had any `Cache-Control` header, so a browser
+  was free to serve a cached copy instead of re-fetching current state —
+  even though the underlying data (FrankenWeather's state broadcast → the
+  router's cache → this page) was already up to date. Both now send
+  `Cache-Control: no-store`.
+
 ## 2026-10-03: version 1.10.0
 
 - **New: a non-flying sim can now arm the speedbrake.** The flight-control
