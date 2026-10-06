@@ -1,5 +1,23 @@
 # start_scripts changelog
 
+## 1.5.0 (2026-10-03)
+
+- **New: multiple start profiles, so several people can share one
+  checkout.** When `psxhacks-start-override.ps1` doesn't exist,
+  `common.ps1` now looks for `psxhacks-start-profile-<name>.ps1` files
+  next to it. None found: same error as before. One or more found: a
+  start script (but never a stop script, which always reuses whatever
+  was last chosen instead) shows an interactive Up/Down/Enter/Escape
+  picker, then remembers the choice in `psxhacks-start-profile-selected.txt`
+  for the rest of the session. New shared functions in `functions.ps1`:
+  `Select-StartProfile`, `Resolve-StartOverrideFile`,
+  `Get-StartProfileSelectionFile`. Whether a given dot-source of
+  `common.ps1` is a "stop context" (and must therefore never prompt) is
+  derived from the filename of whichever script dot-sourced it
+  (`$MyInvocation.PSCommandPath`), not a flag threaded through every
+  individual script - so this needed no changes to any of the existing
+  `start_<addon>.ps1`/`stop_<addon>.ps1` files.
+
 ## 1.4.0 (2026-10-03)
 
 - **New addon: PSXVibrate (PSX.NET.Vibrate)**, added to the

@@ -154,6 +154,12 @@ This file holds most of the settings used by the other scripts and their default
 
 Any overrides of settings in `common.ps1` go in your own override file. It does not exist by default - copy `start_scripts\psxhacks-start-override-EXAMPLE.ps1` to `psxhacks-start-override.ps1` one directory above the **psxhacks** Git repo checkout (e.g. `C:\fs\psxhacks-start-override.ps1`) and edit your copy. `common.ps1` will refuse to start (with an error explaining what to do) if this file is missing. With this setup, new settings and functions in the repository can be pulled from Github and your overrides will be preserved.
 
+#### Multiple profiles (sharing one checkout between several people)
+
+If `psxhacks-start-override.ps1` doesn't exist, `common.ps1` looks instead for one or more `psxhacks-start-profile-<name>.ps1` files next to where it would be (e.g. `C:\fs\psxhacks-start-profile-martin.ps1`) - each one is a complete override file in its own right, just under a different name. This lets more than one person share the same checkout while keeping their own settings. If none exist, you get the usual "override file not found" error.
+
+If one or more profile files exist, a start script (`startsim_*.ps1`, or any individual `start_<addon>.ps1`/`restart_<addon>.ps1` run on its own) shows an interactive picker - Up/Down to choose, Enter to select, Escape to cancel - and remembers the choice in `psxhacks-start-profile-selected.txt` (next to the profile files) for the rest of the session. A stop script (`stopsim_*.ps1`, or any individual `stop_<addon>.ps1`) never prompts - it silently reuses whatever was last chosen, so shutdown is never blocked waiting for input.
+
 ### configure_flavor.ps1
 
 Run this once (and again whenever you want to change these values) to interactively set a handful of sim-specific values - Hoppie logon code(s), vPilot plugin, etc. - that are saved to `psxhacks-current-flavor.ps1`, next to your override file. Some settings (like `$HoppieLogonCodes`, a hashtable of named entries) are picked from by name here rather than being set directly in the override file.

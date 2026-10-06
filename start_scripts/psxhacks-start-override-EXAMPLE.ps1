@@ -38,6 +38,11 @@
 #     required, but only if you enable BACARS or HAFAP/CPDLC.
 #     See each setting's own section below for details.
 #
+#  5. SHARING this checkout between several people instead? Each person can
+#     name their copy psxhacks-start-profile-<name>.ps1 instead (same
+#     location, same contents) and a start script will offer a picker to
+#     choose between them - see "Multiple profiles" in start_scripts\README.md.
+#
 ##############################################################################
 
 
