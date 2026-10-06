@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-03: version 1.10.0
+
+- **New: a non-flying sim can now arm the speedbrake.** The flight-control
+  input filter (which normally drops a slave sim's own `SpdBrkLever`
+  updates entirely when it isn't the pilot-flying sim) now lets an
+  increase through as long as it doesn't exceed the lever's armed
+  position (value 44) - so the pilot not flying can arm the speedbrake
+  to help the pilot flying. Decreasing, or any value past 44, is still
+  dropped as before - once armed, only the flying sim can change it
+  further. No config option; this applies automatically wherever
+  `SpdBrkLever` was already being filtered.
+
 ## 2026-10-03: version 1.9.0
 
 - **New: Weather Mode preset on the `/efb` page.** A 3-way toggle - Full,
