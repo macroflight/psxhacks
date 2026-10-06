@@ -270,6 +270,7 @@ _CB_AIRPORT_CLEARANCE_NM = 15.0
 _CB_AVOIDANCE_BEARING_DEG = 0.0       # fixed direction to offset in; arbitrary but stable
 _REPOSITION_DIST_NM = 500.0           # zone this far away → aircraft was repositioned
 _REFRESH_MAX_S = 300                  # always refresh weather after this many seconds
+_ZONE_PROTECTED_LOG_INTERVAL_S = 300   # throttle for the "due but protected" log line
 _PUSH_COOLDOWN_S = 5.0                # ignore Wx echo-backs for this long after our write
 # METAR TEMPO/PROBnn trend-group CB modulation (see Script._trend_cb_contribution):
 # how long a TEMPO segment's "on"/"off" state is held before randomly toggling again.
@@ -1457,6 +1458,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # Fixed zone positions: zone_num (1-7) → (lat, lon, icao)
         self.zone_positions: dict = {}
         self.zone_relocated_time: dict = {}  # zone_num → last relocation timestamp
+        # zone_num → last time we logged "due but protected" for it -- a zone
+        # can sit protected for many minutes at a time (see _check_and_relocate()),
+        # so this is throttled rather than logged on every single check.
+        self._zone_protected_last_logged: dict = {}
 
         # FMC route state — dep/dst airports get a dedicated zone when within range
         self.fmc_dep_icao: Optional[str] = None
@@ -3717,10 +3722,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             if reason is None:
                 continue
             if zone_num in protected_zones:
-                self.logger.info(
-                    "Zone %d: relocation due (%s) but zone is protected"
-                    " (nearest and/or PSX's FocussedWxZone) — left in place",
-                    zone_num, reason)
+                last_logged = self._zone_protected_last_logged.get(zone_num, 0)
+                if now - last_logged >= _ZONE_PROTECTED_LOG_INTERVAL_S:
+                    self._zone_protected_last_logged[zone_num] = now
+                    self.logger.info(
+                        "Zone %d: relocation due (%s) but zone is protected"
+                        " (nearest and/or PSX's FocussedWxZone) — left in place",
+                        zone_num, reason)
                 continue
             if not in_cruise or self._maneuvering:
                 if now - self.zone_relocated_time.get(zone_num, 0) < _REFRESH_MAX_S:
