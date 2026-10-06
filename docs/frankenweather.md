@@ -123,10 +123,11 @@ Features:
     survives a zone relocating to point at a different station and
     persists correctly if the same station comes back into scope later.
 
-- Zone placement adapts to flight phase: in cruise (above 18 000 ft)
-  stale zones behind the aircraft are relocated ahead; at low altitude
-  all zones are kept within a tighter radius. The FMC departure and
-  destination airports always get their own dedicated zone.
+- Zone placement and relocation adapt to flight phase (cruise vs.
+  maneuvering), and a zone currently ahead of the aircraft is never moved
+  out from under a CB the pilot might be watching. The FMC departure and
+  destination airports always get their own dedicated zone. See
+  [Zone placement and relocation](#zone-placement-and-relocation) below.
 
 - Terrain turbulence (from the `frankenturb` engine, now integrated):
   fetches real-time wind from Open-Meteo and terrain elevation from
@@ -213,6 +214,48 @@ Key options:
 --save-logs DIR      [DEVELOPMENT] Save enroute wind diff data per flight
 --debug              Verbose logging
 ```
+
+### Zone placement and relocation
+
+Up to 7 PSX weather zones are placed around the aircraft and relocated as
+needed. Two things don't depend on flight phase: a zone serving the FMC
+departure or destination airport is never relocated, and the single zone
+nearest the aircraft — which is almost always also the one PSX itself
+reports as its active weather zone (`FocussedWxZone`) — is never relocated
+either, even when it would otherwise qualify below. Relocating either would
+strip away the zone actually influencing the aircraft and force an abrupt
+handoff to unrelated weather with no gradual transition.
+
+Everything else follows the current flight phase:
+
+- **Cruise** (aircraft at or above 18 000 ft, and not maneuvering): new or
+  relocated zones are placed ahead of the aircraft, in a forward-biased fan
+  (a range of distances ahead, with some lateral spread either side of
+  track). A zone only becomes eligible for relocation once the aircraft has
+  actually flown past it — the zone must be more than 90° off the nose —
+  and then only once it's more than `cruise_behind_dist` (default 50 nm)
+  behind.
+- **Maneuvering** (a hold, vectoring, or any heading change greater than
+  180° within 5 minutes — see below — or below cruise altitude): new or
+  relocated zones are scattered all around the aircraft at a random bearing
+  instead of ahead of it, since the aircraft's track is no longer a
+  reliable predictor of where it's headed next. The same "must be behind"
+  rule still applies before a zone becomes eligible, but the distance
+  threshold is `low_alt_dist` (default 200 nm) instead.
+
+In both phases, a zone that is still ahead of (or abeam) the aircraft is
+never relocated — real CBs only ever drift slowly with the wind, so
+nothing currently in front of the aircraft, where it could be visible on
+radar, is allowed to disappear or jump.
+
+**Entering/exiting maneuvering mode:** true airspeed below 200 kt (taxi,
+takeoff roll, approach, landing) always forces maneuvering mode. Above
+200 kt, frankenweather tracks the aircraft's total heading change over a
+trailing 5-minute window: accumulating more than 180° of change enters
+maneuvering mode (a hold or vectoring pattern), and dropping back below
+60° of change exits it back to normal cruise placement. The 180°/60° gap
+is deliberate hysteresis so the mode doesn't flap back and forth near the
+boundary.
 
 ### Time sync
 

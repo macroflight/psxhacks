@@ -3612,27 +3612,31 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self, zone_num: int, in_cruise: bool, arpt_icaos: set) -> Optional[str]:
         """Return why zone_num is due for relocation, or None if it's still useful.
 
-        Shared distance/bearing test used by both _check_and_relocate() (which
-        actually relocates due zones) and _zones_all_stale() (which only
-        checks, to decide whether a persistent Open-Meteo outage has made
-        every zone irrelevant — see _update_zones()). Does not apply
-        _check_and_relocate()'s extra "don't relocate more than once per
-        refresh interval" throttle, since that's specific to actually moving
-        a zone, not to asking whether it geographically still matters.
+        A zone ahead of (or abeam) the aircraft is never due, in cruise or
+        maneuvering alike: it may hold a CB, and real CBs only ever drift
+        slowly with the wind, never teleport -- so nothing currently in
+        front of the aircraft (i.e. potentially visible on radar) gets
+        relocated out from under the pilot. Only once a zone has actually
+        passed behind does distance matter: cruise_behind_dist in cruise,
+        low_alt_dist below cruise altitude or while maneuvering.
+        Does not apply _check_and_relocate()'s extra "don't relocate more
+        than once per refresh interval" throttle, since that's specific to
+        actually moving a zone, not to asking whether it geographically
+        still matters.
         """
         lat, lon, icao = self.zone_positions[zone_num]
         if icao in arpt_icaos:
             return None  # dep/dst airport — never relocate, always relevant
         az_to_zone, _, dist_nm = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
         dist_nm /= _NM_TO_M
-        if in_cruise and not self._maneuvering:
-            is_behind = abs((az_to_zone - self.ac_hdg + 180) % 360 - 180) > 90.0
-            if not (is_behind and dist_nm > self.args.cruise_behind_dist):
-                return None
-            return f"{dist_nm:.0f}nm behind (limit {self.args.cruise_behind_dist:.0f}nm)"
-        if dist_nm <= self.args.low_alt_dist:
+        is_behind = abs((az_to_zone - self.ac_hdg + 180) % 360 - 180) > 90.0
+        if not is_behind:
             return None
-        return f"{dist_nm:.0f}nm away (limit {self.args.low_alt_dist:.0f}nm)"
+        limit = (self.args.cruise_behind_dist if in_cruise and not self._maneuvering
+                 else self.args.low_alt_dist)
+        if dist_nm <= limit:
+            return None
+        return f"{dist_nm:.0f}nm behind (limit {limit:.0f}nm)"
 
     def _zones_all_stale(self) -> bool:
         """Return True if the aircraft is too far from every zone for PSX to use them.
@@ -3678,9 +3682,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
     def _check_and_relocate(self) -> bool:  # pylint: disable=too-many-locals
         """Relocate zones that are no longer useful given aircraft position and altitude.
 
-        In cruise (>= cruise_alt ft): relocate a zone that is more than
-        cruise_behind_dist nm behind the aircraft (aft hemisphere).
-        Below cruise alt: relocate any zone more than low_alt_dist nm away.
+        A zone must have passed behind the aircraft (aft hemisphere) before
+        distance is even considered -- see _zone_relocate_reason() for why.
+        In cruise (>= cruise_alt ft): relocate once more than
+        cruise_behind_dist nm behind. Below cruise alt, or while maneuvering:
+        relocate once more than low_alt_dist nm behind.
         The nearest zone and PSX's own reported FocussedWxZone (self.focused_zone
         -- almost always the same zone, since PSX picks its active zone by
         proximity, but not guaranteed to flip the instant the nearest one

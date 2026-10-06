@@ -1,5 +1,29 @@
 # frankenweather changelog
 
+## 1.3.0 (2026-10-06)
+
+- **Bug fix: a long cruise descent could relocate every weather zone in
+  the same pass**, including whichever one was actually influencing the
+  aircraft — discovered via forensic log analysis of a real flight where
+  the PFD altitude briefly jumped ~95 ft with no corresponding desync
+  anywhere in the router/network layer. `_check_and_relocate()` now always
+  leaves the single nearest zone and PSX's own reported `FocussedWxZone`
+  in place, even when they'd otherwise qualify for relocation, and logs
+  when that protection actually blocks a due relocation.
+- **Bug fix: a zone still ahead of (or abeam) the aircraft could be
+  relocated while maneuvering** (a hold, vectoring, or below cruise
+  altitude) — the "must have passed behind first" rule previously only
+  applied in cruise. Real CBs only drift slowly with the wind, so a zone
+  that might be holding one and is still visible ahead must never
+  disappear or jump; this is now enforced in both flight phases.
+- **New: `_update_zones()` logs when a zone's QNH or wind content changes
+  materially** (≥1 hPa or ≥3 kt/10°) between update cycles, instead of
+  only ever printing the current snapshot — reconstructing the incident
+  above required diffing raw METAR traffic by hand because the log never
+  said anything had changed.
+- Documented the zone placement/relocation rules (cruise vs. maneuvering,
+  and the phase-switch thresholds) in `docs/frankenweather.md`.
+
 ## 1.2.4 (2026-10-03)
 
 - **Fix: no console output while retrying the PSX connection** (e.g. PSX
