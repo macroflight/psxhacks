@@ -1,5 +1,15 @@
 # frankenweather changelog
 
+## 1.2.4 (2026-10-03)
+
+- **Fix: no console output while retrying the PSX connection** (e.g. PSX
+  not started yet at launch) - `psx.Client`'s default logger is a no-op,
+  and frankenweather never wired it up, so a down/not-yet-started PSX
+  produced total silence every ~12s instead of any visible retry
+  feedback. Its connect/retry/disconnect messages are now logged at INFO
+  by default; everything else it logs (every TX/RX, every subscription)
+  stays at DEBUG.
+
 ## 1.2.3 (2026-09-27)
 
 - **Bug fix: a zone anchored on a real airport's own METAR could use an
