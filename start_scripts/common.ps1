@@ -263,6 +263,21 @@ $WindowPositionInitialDelay    = 2
 $WindowPositionSleepSeconds    = 0.5
 $WindowPositionSleepSecondsMax = 5
 
+# Delays (seconds) in the startsim_master.ps1/startsim_slave.ps1 addon
+# startup sequence. Set any of these in the override file to change them.
+# $DelayAfterPsxMainServerStart: after starting the PSX main server, before
+#   starting the sim's own router (master only -- the slave has no main
+#   server of its own).
+# $DelayAfterRouterStart: after starting a sim's router, before starting
+#   any of that sim's addons. Used by both startsim_master.ps1 and
+#   startsim_slave.ps1 (the slave skips it when $StopAfterSlaveRouterStart
+#   stops for an interactive prompt instead).
+# $DelayBetweenAddons: generic delay before each addon is started, applied
+#   in addition to the two delays above. 0 (no delay) unless set otherwise.
+$DelayAfterPsxMainServerStart = 5
+$DelayAfterRouterStart        = 5
+$DelayBetweenAddons           = 0
+
 # Human-readable display names for each sim addon key used in window-positioning scripts
 $SimAddonNames = [ordered]@{
     "BACARS"               = "BACARS"

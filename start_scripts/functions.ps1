@@ -50,8 +50,19 @@ function Delay([int]$seconds) {
     Start-Sleep -Seconds $seconds
 }
 
+# Called before each addon in startsim_master.ps1/startsim_slave.ps1. A
+# plain `Delay $DelayBetweenAddons` would print "Waiting 0 seconds..."
+# before every single addon at the default (disabled) setting - this stays
+# quiet unless the override file actually set it to something.
+function AddonDelay {
+    if ($DelayBetweenAddons -gt 0) {
+        Delay $DelayBetweenAddons
+    }
+}
+
 function start_nonscripted_apps {
     foreach ($app in $NonscriptedApps) {
+        AddonDelay
         Write-Output "Starting $app..."
         Start-Process $app
     }

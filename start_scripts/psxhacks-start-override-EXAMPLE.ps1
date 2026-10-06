@@ -570,6 +570,22 @@ $ChangeWindowPositions = $false
 
 
 # ---------------------------------------------------------------------------
+# Delays (seconds) in the startsim_master.ps1/startsim_slave.ps1 addon
+# startup sequence.
+# $DelayAfterPsxMainServerStart — after starting the PSX main server,
+#   before starting the sim's own router.
+# $DelayAfterRouterStart — after starting a sim's router, before starting
+#   any of that sim's addons.
+# $DelayBetweenAddons — generic delay before each addon is started, on top
+#   of the two delays above. 0 (no delay) by default.
+# All three default to 5/5/0 in common.ps1.
+# ---------------------------------------------------------------------------
+#$DelayAfterPsxMainServerStart = 5
+#$DelayAfterRouterStart        = 5
+#$DelayBetweenAddons           = 0
+
+
+# ---------------------------------------------------------------------------
 # Confirmation prompt in stopsim_master.ps1/stopsim_slave.ps1
 # Defaults to $true in common.ps1 (asks "Are you sure?" before stopping).
 # Set to $false to stop the sim immediately with no confirmation prompt.
