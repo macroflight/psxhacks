@@ -177,7 +177,14 @@ _UTILS_PAGE = (
     '<button class="btn btn-gray">Force wheels onto ground</button></form>\n'
     '<form method="post" action="/api/utils/hafap/reset" style="display:inline">'
     '<button class="btn btn-gray">HAFAP(CPDLC) reset</button></form>\n'
+    '{global_bang_button}'
     '</body>\n</html>\n'
+)
+
+_GLOBAL_BANG_CONFIRM = (
+    "Forcing a BANG is normally not needed, but might help syncing the "
+    "sims up in some cases. Note: sending a bang can result in sound "
+    "being played, etc. You have been warned"
 )
 
 
@@ -2506,11 +2513,18 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     '' if router.config.identity.type == 'standalone' else
                     '<a href="/utils/sims" class="btn btn-gray">Connected slave sims</a>\n'
                 )
+                global_bang_button = (
+                    '<form method="post" action="/api/utils/global_bang" style="display:inline" '
+                    f'onsubmit="return confirm(\'{_GLOBAL_BANG_CONFIRM}\')">'
+                    '<button class="btn btn-gray">Global BANG</button></form>\n'
+                    if router.config.identity.type in ('master', 'slave') else ''
+                )
                 return web.Response(
                     text=_UTILS_PAGE.format(
                         rest_api_color_scheme=cs,
                         towing_direction=tow_dir,
-                        sims_link=sims_link),
+                        sims_link=sims_link,
+                        global_bang_button=global_bang_button),
                     content_type='text/html')
 
             @routes.get('/utils/events')
@@ -2662,6 +2676,24 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 router.logger.info("API: resetting HAFAP/CPDLC (addon=HAFAP:1:RESET)")
                 await router.send_to_upstream("addon=HAFAP:1:RESET")
                 await router.client_broadcast("addon=HAFAP:1:RESET")
+                raise web.HTTPFound('/utils')
+
+            @routes.post('/api/utils/global_bang')
+            async def handle_global_bang(_):
+                # Master (and standalone, though the button isn't shown for
+                # it) is directly connected to the real PSX Main Server, so
+                # it can bang it right away. A slave has no such connection
+                # -- it sends MASTER_BANG upstream instead, which bubbles up
+                # the router chain (see handle_addon_frankenrouter_master_bang
+                # in rules.py) until it reaches the router that can.
+                if router.is_sharedinfo_authority():
+                    router.logger.info("API: global BANG requested -- sending bang upstream")
+                    await router.send_to_upstream("bang")
+                else:
+                    router.logger.info(
+                        "API: global BANG requested -- forwarding MASTER_BANG upstream")
+                    await router.send_to_upstream(
+                        f"addon=FRANKENROUTER:{router.frdp_version}:MASTER_BANG")
                 raise web.HTTPFound('/utils')
 
             @routes.get('/services')

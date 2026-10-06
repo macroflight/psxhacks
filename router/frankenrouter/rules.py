@@ -205,6 +205,7 @@ class RulesCode(enum.Enum):
     FRDP_FLIGHTCONTROLS = enum.auto()
     FRDP_ELEVATION_SOURCE = enum.auto()
     FRDP_TRAFFIC_SOURCE = enum.auto()
+    FRDP_MASTER_BANG = enum.auto()
     FRDP_JOIN = enum.auto()
     FRDP_SUBSCRIBE = enum.auto()
     FRDP_CLIENTINFO = enum.auto()
@@ -430,6 +431,22 @@ class Rules():  # pylint: disable=too-many-public-methods
                     value=payload, prev=prev)
             return self.myreturn(RulesAction.DROP, RulesCode.FRDP_TRAFFIC_SOURCE)
         return self.myreturn(RulesAction.UPSTREAM_ONLY, RulesCode.FRDP_TRAFFIC_SOURCE)
+
+    def handle_addon_frankenrouter_master_bang(self):
+        """Handle a FRDP MASTER_BANG message.
+
+        Format: addon=FRANKENROUTER:<protocol version>:MASTER_BANG
+
+        Sent by a slave router's "Global BANG" util button, which cannot
+        bang its own upstream directly (that's the master router, not the
+        real PSX Main Server). When this router is the SHAREDINFO
+        authority (master or standalone), it is the one actually connected
+        to the real Main Server, so it sends "bang" there and stops the
+        message here. Otherwise forward upstream toward the master.
+        """
+        if self.router.is_sharedinfo_authority():
+            return self.myreturn(RulesAction.DROP, RulesCode.FRDP_MASTER_BANG)
+        return self.myreturn(RulesAction.UPSTREAM_ONLY, RulesCode.FRDP_MASTER_BANG)
 
     def handle_addon_frankenrouter_flightcontrols(self, payload):
         """Handle a FRDP FLIGHTCONTROLS message.
@@ -834,6 +851,8 @@ class Rules():  # pylint: disable=too-many-public-methods
             return self.handle_addon_frankenrouter_elevation_source(payload)
         if message_type == 'TRAFFIC_SOURCE':
             return self.handle_addon_frankenrouter_traffic_source(payload)
+        if message_type == 'MASTER_BANG':
+            return self.handle_addon_frankenrouter_master_bang()
         if message_type == 'JOIN':
             return self.handle_addon_frankenrouter_join(payload)
         if message_type == 'ROUTERINFO':
@@ -1716,6 +1735,10 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             """Return dummy value."""
             return False
 
+        def is_sharedinfo_authority(self):
+            """Mirror the real router's own is_sharedinfo_authority method."""
+            return self.config.identity.type in ('master', 'standalone')
+
         def get_router_type(self):
             """Return dummy value."""
             return "unknown"
@@ -2047,6 +2070,24 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         # would defeat the point (FRDP-ping traffic, router-to-router-only
         # behaviors like PTT/audio cross-sim filtering, etc.).
         self.assertFalse(testpeer.is_frankenrouter)
+
+    def test_frdp_master_bang(self):
+        """Test the FRDP MASTER_BANG message, who it applies to."""
+        for identity_type, expected_action in (
+                ('master', RulesAction.DROP),
+                ('standalone', RulesAction.DROP),
+                ('slave', RulesAction.UPSTREAM_ONLY)):
+            router = self.DummyFrankenrouter()
+            router.config.identity.type = identity_type
+            rules = Rules(router)
+            router.clients = {
+                ('127.0.0.1', 12345): self.DummyClientConnection(('127.0.0.1', 12345)),
+            }
+            sender = router.clients[('127.0.0.1', 12345)]
+
+            (action, code, *_) = rules.route("addon=FRANKENROUTER:1:MASTER_BANG", sender)
+            self.assertEqual(action, expected_action, identity_type)
+            self.assertEqual(code, RulesCode.FRDP_MASTER_BANG, identity_type)
 
     def test_frdp_client_auth(self):  # pylint: disable=too-many-statements
         """Test FRDP messages from client."""

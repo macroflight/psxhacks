@@ -3184,6 +3184,18 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.info(
                 "Got FRDP TRAFFIC_SOURCE message from %s: %s",
                 sender_hr, line)
+        elif code == RulesCode.FRDP_MASTER_BANG:
+            self.logger.info(
+                "Got FRDP MASTER_BANG message from %s: %s",
+                sender_hr, line)
+            if action == RulesAction.DROP:
+                # We're the SHAREDINFO authority (the one actually connected
+                # to the real PSX Main Server) -- act on it here. Otherwise
+                # rules.py already set action=UPSTREAM_ONLY, which forwards
+                # this same message on toward the real authority generically;
+                # nothing extra to do on this router in that case.
+                self.logger.info("Global BANG requested -- sending bang upstream")
+                await self.send_to_upstream("bang")
         elif code == RulesCode.FRDP_IDENT:
             self.logger.debug(
                 "Got FRDP IDENT message from %s: %s",
