@@ -11,6 +11,15 @@
   dropped as before - once armed, only the flying sim can change it
   further. No config option; this applies automatically wherever
   `SpdBrkLever` was already being filtered.
+- **Fix: a flight-control input dropped by this filter now gets its own
+  local PSX resynced.** A sim's own hardware/PSX window applies a
+  throttle, speedbrake, etc. change locally regardless of whether the
+  router lets it reach the network, so when the filter above (or the
+  all-control-locks or armed-exception-overshoot case) drops it, that
+  sim's instruments/levers would silently drift out of sync with what
+  the rest of the shared cockpit actually sees. The router now sends
+  that one sim's own cached (last authoritative) value straight back to
+  it, snapping its controls back into sync.
 
 ## 2026-10-03: version 1.9.0
 

@@ -1363,7 +1363,8 @@ class Rules():  # pylint: disable=too-many-public-methods
                         RulesCode.KEYVALUE_FILTERED_INGRESS,
                         message=(
                             f"filtered flight control {key} as all control locks are in"
-                        )
+                        ),
+                        extra_data={'resync_key': key},
                     )
                 else:
                     if flying != self.router.config.identity.simulator and key == 'Qh388':
@@ -1395,7 +1396,8 @@ class Rules():  # pylint: disable=too-many-public-methods
                                 message=(
                                     f"filtered flight control {key} as we are not the " +
                                     f"flying sim {flying}"
-                                )
+                                ),
+                                extra_data={'resync_key': key},
                             )
                     elif flying != self.router.config.identity.simulator:
                         # Someone else is pilot flying - filter flight controls.
@@ -1409,7 +1411,8 @@ class Rules():  # pylint: disable=too-many-public-methods
                             message=(
                                 f"filtered flight control {key} as we are not the " +
                                 f"flying sim {flying}"
-                            )
+                            ),
+                            extra_data={'resync_key': key},
                         )
 
         # Qs357="Brakes"; Mode=ECON; Min=3; Max=9;
@@ -2623,21 +2626,25 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         }
         testpeer = router.clients[('127.0.0.1', 12345)]
 
-        # A different flight-control keyword gets no exception: dropped as usual.
-        (action, code, *_) = rules.route("Qs357=123", testpeer)
+        # A different flight-control keyword gets no exception: dropped as usual,
+        # with a resync_key so the sender's own local PSX gets corrected back.
+        (action, code, _, extra_data) = rules.route("Qs357=123", testpeer)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.KEYVALUE_FILTERED_INGRESS)
+        self.assertEqual(extra_data, {'resync_key': 'Qs357'})
 
         # SpdBrkLever increasing, within the armed range: allowed.
         router.cache.update('Qh388', 0)
         (action, code, *_) = rules.route("Qh388=44", testpeer)
         self.assertEqual(action, RulesAction.NORMAL)
 
-        # SpdBrkLever increasing further, but past the armed position: dropped.
+        # SpdBrkLever increasing further, but past the armed position: dropped,
+        # with a resync_key so the sender's own lever snaps back to 44.
         router.cache.update('Qh388', 44)
-        (action, code, *_) = rules.route("Qh388=100", testpeer)
+        (action, code, _, extra_data) = rules.route("Qh388=100", testpeer)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.KEYVALUE_FILTERED_INGRESS)
+        self.assertEqual(extra_data, {'resync_key': 'Qh388'})
 
         # SpdBrkLever decreasing (e.g. the non-flying sim trying to disarm/retract): dropped.
         router.cache.update('Qh388', 44)
@@ -2649,6 +2656,14 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         router.cache.update('Qh388', 44)
         (action, code, *_) = rules.route("Qh388=44", testpeer)
         self.assertEqual(action, RulesAction.DROP)
+
+        # All control locks in: dropped too, also with a resync_key.
+        router.sharedinfo["pilot_flying_simulator"] = "ALL_CONTROL_LOCKS"
+        (action, code, _, extra_data) = rules.route("Qh388=44", testpeer)
+        self.assertEqual(action, RulesAction.DROP)
+        self.assertEqual(code, RulesCode.KEYVALUE_FILTERED_INGRESS)
+        self.assertEqual(extra_data, {'resync_key': 'Qh388'})
+        router.sharedinfo["pilot_flying_simulator"] = "OtherSim"
 
         # We are pilot flying ourselves: no filtering applies at all.
         router.sharedinfo["pilot_flying_simulator"] = router.config.identity.simulator
