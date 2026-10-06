@@ -237,6 +237,11 @@ _NOAA_METAR_CYCLE_URL = "https://tgftp.nws.noaa.gov/data/observations/metar/cycl
 _NOAA_METAR_CACHE_MAX_S = 1800
 _METAR_FALLBACK_ZONE_COUNT = 7
 _SIGMET_REFRESH_MAX_S = 1800           # re-request PSX's own SIGMET download every 30 minutes
+# SigmetOn (Qi262) is a 0-15 bitmask; only these two bits are documented --
+# bit 2 and bit 8 are unknown and must never be touched. See _write_sigmet_on().
+_SIGMET_EMBED_BIT = 1                 # SIGMETs embedded in the planet weather model
+_SIGMET_DOWNLOAD_BIT = 4              # trigger an immediate download (self-clearing)
+_SIGMET_KNOWN_BITS = _SIGMET_EMBED_BIT | _SIGMET_DOWNLOAD_BIT
 _DATIS_LINE_MAX_CHARS = 24            # PSX MetarsUp (Qs464): max chars per '^'-delimited line
 # Split a MetarsUp (Qs464) value into per-airport blocks. PSX terminates every
 # airport's block -- found or not -- with a blank line, i.e. two consecutive
@@ -666,28 +671,74 @@ def _metar_is_fresh(metar: str, now: Optional[datetime] = None) -> bool:
 
 _WIND_UPDATE_INTERVAL_S = 60.0
 
-_SIGMET_COORD_RE = re.compile(r'([NS])(\d{2})(\d{2})\s+([EW])(\d{3})(\d{2})')
+_SIGMET_HAZARDS = frozenset({'TS', 'TURB', 'ICE', 'VA', 'TC', 'MTW'})
+_SIGMET_COORD_RE = re.compile(r'([NS])(\d{2})(\d{2})\s*([EW])(\d{3})(\d{2})')
+_SIGMET_COORD_GAP_MAX = 12            # max chars between coords still one polygon
+_SIGMET_LINE_RE = re.compile(r'\bLINE\b', re.IGNORECASE)
 _SIGMET_ALT_RE = re.compile(
-    r'(?:TOP\s+FL(\d{3}))'
+    r'(?:(?:TOP\s+)?ABV\s+FL(\d{3}))'
+    r'|(?:TOP\s+FL(\d{3}))'
     r'|(?:FL(\d{3})/(?:FL)?(\d{3}))'
     r'|(?:SFC/FL(\d{3}))'
-    r'|(?:(\d+)FT/FL(\d{3}))')
+    r'|(?:(\d+)FT/FL(\d{3}))'
+    r'|(?:SFC/(\d+)FT)')
 
 
-def _sigmet_top_ft(text: str) -> int:
-    """Return the upper altitude limit in feet from SIGMET text, or 35000 if not found."""
+def _sigmet_alt_range(text: str) -> tuple:  # pylint: disable=too-many-return-statements
+    """Return (base_ft, top_ft) from SIGMET text, defaulting to (0, 35000) if not found."""
     m = _SIGMET_ALT_RE.search(text)
     if not m:
-        return 35000
-    if m.group(1):      # TOP FL260
-        return int(m.group(1)) * 100
-    if m.group(2):      # FL140/180
-        return int(m.group(3)) * 100
-    if m.group(4):      # SFC/FL100
-        return int(m.group(4)) * 100
-    if m.group(5):      # 3000FT/FL240
-        return int(m.group(6)) * 100
-    return 35000
+        return 0, 35000
+    if m.group(1):       # "TOP ABV FL500" or bare "ABV FL360" -- top only
+        return 0, int(m.group(1)) * 100
+    if m.group(2):       # TOP FL260
+        return 0, int(m.group(2)) * 100
+    if m.group(3):       # FL140/180 or FL065/080
+        return int(m.group(3)) * 100, int(m.group(4)) * 100
+    if m.group(5):       # SFC/FL100
+        return 0, int(m.group(5)) * 100
+    if m.group(6):       # 8000FT/FL180
+        return int(m.group(6)), int(m.group(7)) * 100
+    if m.group(8):       # SFC/6000FT
+        return 0, int(m.group(8))
+    return 0, 35000
+
+
+def _sigmet_first_polygon(text: str) -> list:
+    """Return the first closed-area coordinate list (>=3 points) in SIGMET text, or [].
+
+    Takes only the first run of coordinates close enough together to
+    plausibly be one polygon -- a later run (e.g. a separate forecast-time
+    polygon in the same entry) is ignored in favor of the near-term/observed
+    one. Entries describing an open boundary ("N OF LINE ...", "WI 60NM WID
+    LINE BTN ...") rather than a closed area are skipped outright: connecting
+    a boundary line's own endpoints into a polygon would draw a shape
+    nothing like the real (unbounded) hazard area, which is worse than
+    having none. Not aiming for perfect coverage here -- real-world SIGMET
+    text is inconsistent enough that PSX's own built-in parser doesn't get
+    every entry right either.
+    """
+    matches = list(_SIGMET_COORD_RE.finditer(text))
+    if not matches:
+        return []
+    clusters = [[matches[0]]]
+    for prev, cur in zip(matches, matches[1:]):
+        if cur.start() - prev.end() <= _SIGMET_COORD_GAP_MAX:
+            clusters[-1].append(cur)
+        else:
+            clusters.append([cur])
+    for cluster in clusters:
+        if len(cluster) < 3:
+            continue
+        preceding = text[max(0, cluster[0].start() - 25):cluster[0].start()]
+        if _SIGMET_LINE_RE.search(preceding):
+            continue
+        return [
+            ((-1 if m.group(1) == 'S' else 1) * (int(m.group(2)) + int(m.group(3)) / 60.0),
+             (-1 if m.group(4) == 'W' else 1) * (int(m.group(5)) + int(m.group(6)) / 60.0))
+            for m in cluster
+        ]
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -753,39 +804,50 @@ def _point_in_polygon(lat: float, lon: float, polygon: list) -> bool:
     return inside
 
 
-def _parse_ts_sigmets(raw: str) -> list:
-    """Parse WxSigmet string into a list of active TS SIGMET dicts.
+def _parse_sigmets(raw: str) -> list:
+    """Parse WxSigmet string into a list of active SIGMET dicts, any recognized hazard.
 
-    Each dict has 'polygon' (list of (lat, lon) tuples) and 'top_ft' (int).
-    Only TS hazard entries with at least 3 polygon points are returned.
+    Each dict has 'hazard' (e.g. 'TS'/'TURB'/'ICE'/'VA'/'TC'/'MTW'), 'polygon'
+    (list of (lat, lon) tuples, >=3 points) and 'base_ft'/'top_ft'. Entries
+    with an unrecognized hazard tag, or no usable polygon (see
+    _sigmet_first_polygon), are skipped. PSX's WxSigmet feed also includes
+    unstructured US "CONVECTIVE SIGMET" text blocks (no "Hazard:" tag, areas
+    given as distance+bearing from named navaids rather than lat/lon) --
+    those would need a navaid position database to resolve and aren't
+    parsed; they're silently skipped here since they have no "Hazard:" line
+    to match in the first place.
     """
     result = []
     lines = raw.split('^')
     idx = 0
     while idx < len(lines):
-        if lines[idx].strip() != 'Hazard: TS':
+        stripped = lines[idx].strip()
+        # PSX's own casing for this line is unconfirmed -- samples seen have used
+        # both "Hazard:" and "HAZARD:" -- so match case-insensitively throughout.
+        if not stripped.upper().startswith('HAZARD:'):
             idx += 1
             continue
+        hazard = stripped[len('Hazard:'):].strip().upper()
         idx += 1
         entry_lines = []
         while idx < len(lines):
             ln = lines[idx].strip()
-            if ln.startswith('---') or ln.startswith('Hazard:'):
+            if ln.startswith('---') or ln.upper().startswith('HAZARD:'):
                 break
             entry_lines.append(ln)
             idx += 1
-        text = ' '.join(entry_lines)
-        wi_pos = text.find(' WI ')
-        if wi_pos < 0:
+        if hazard not in _SIGMET_HAZARDS:
             continue
-        coords = [
-            ((-1 if m.group(1) == 'S' else 1) * (int(m.group(2)) + int(m.group(3)) / 60.0),
-             (-1 if m.group(4) == 'W' else 1) * (int(m.group(5)) + int(m.group(6)) / 60.0))
-            for m in _SIGMET_COORD_RE.finditer(text, wi_pos)
-        ]
+        text = ' '.join(entry_lines)
+        coords = _sigmet_first_polygon(text)
         if len(coords) < 3:
             continue
-        result.append({'polygon': coords, 'top_ft': max(_sigmet_top_ft(text[wi_pos:]), 25000)})
+        base_ft, top_ft = _sigmet_alt_range(text)
+        if hazard == 'TS':
+            # _sigmet_cb_override() wants a sane minimum CB top even when the
+            # SIGMET text itself under-reports it.
+            top_ft = max(top_ft, 25000)
+        result.append({'hazard': hazard, 'polygon': coords, 'base_ft': base_ft, 'top_ft': top_ft})
     return result
 
 
@@ -1202,6 +1264,7 @@ _CONFIG_TIMESYNC_FIELDS = (
 )
 _CONFIG_SIGMET_FIELDS = (
     ("use_sigmets", "_use_sigmets", bool),
+    ("disable_psx_sigmets", "_disable_psx_sigmets", bool),
 )
 _CONFIG_CB_AVOIDANCE_FIELDS = (
     ("avoid_cb_near_airport", "_avoid_cb_near_airport", bool),
@@ -1493,7 +1556,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._web_windstate: Optional[dict] = None
         self._web_windstate_received_at: float = 0.0
 
-        # Parsed TS SIGMETs used to lift WMO/showers CB suppression when CAPE agrees
+        # All parsed SIGMETs (any recognized hazard type), and ts_sigmets, the
+        # TS-only subset used to lift WMO/showers CB suppression when CAPE agrees.
+        self.sigmets: list = []
         self.ts_sigmets: list = []
 
         # MSFS bridge state (via PSX.NET.MSFS.Client's addon=FRANKENMSFSBRIDGE: messages)
@@ -1521,10 +1586,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # SIGMET downloads (they share a fetch cycle in PSX) -- with this
         # off, PSX's SIGMET data (and our own ts_sigmets, parsed from the
         # same WxSigmet/Qs499 PSX populates) goes stale for the whole
-        # flight. Qi262=5 sets both "SIGMETs embedded in the planet
-        # weather model" (bit 0) and triggers an immediate download
-        # (bit 2) -- confirmed live 2026-09-08.
+        # flight. See _write_sigmet_on() for the bitmask this drives.
         self._use_sigmets: bool = True
+        # Whether PSX's own "SIGMETs embedded in the planet weather model"
+        # bit should be kept off -- frankenweather still downloads/parses
+        # SIGMETs for its own CB-override logic either way, this only
+        # controls whether PSX's own weather engine also consumes them.
+        self._disable_psx_sigmets: bool = False
+        # Last-seen SigmetOn (Qi262) value from PSX, tracked via subscription
+        # purely so _write_sigmet_on() can read-modify-write without ever
+        # touching the unknown bits (2, 8).
+        self._sigmet_on_bits: int = 0
         # Whether to offset the departure/destination zone's centre away
         # from the real airport (see _arpt_coverage_needed()) so any CB
         # PSX generates there can never land within _CB_AIRPORT_CLEARANCE_NM
@@ -2018,10 +2090,48 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.logger.warning("Enroute wind: failed to save log: %s", exc)
 
     def handle_sigmet_change(self, _key: str, value: str) -> None:
-        """Re-parse TS SIGMETs when PSX downloads updated SIGMET data."""
-        self.ts_sigmets = _parse_ts_sigmets(value)
-        self.logger.info("SIGMETs: %d active TS areas (raw %d bytes)",
-                         len(self.ts_sigmets), len(value))
+        """Re-parse all SIGMETs when PSX downloads updated SIGMET data."""
+        self.sigmets = _parse_sigmets(value)
+        self.ts_sigmets = [s for s in self.sigmets if s['hazard'] == 'TS']
+        self.logger.info("SIGMETs: %d active areas (%d TS) (raw %d bytes)",
+                         len(self.sigmets), len(self.ts_sigmets), len(value))
+
+    def handle_sigmet_on(self, _key: str, value: str) -> None:
+        """Track PSX's own live SigmetOn bitmask, for _write_sigmet_on()'s read-modify-write."""
+        try:
+            self._sigmet_on_bits = int(value)
+        except ValueError:
+            pass
+
+    def _write_sigmet_on(self, embed: bool, trigger_download: bool) -> None:
+        """Write SigmetOn (Qi262), touching only the embed/download bits.
+
+        Read-modify-write against the last value PSX itself reported
+        (self._sigmet_on_bits), not a bare literal -- SigmetOn is a 0-15
+        bitmask and bits 2/8 are undocumented; whatever they mean, this
+        must never change them.
+        """
+        new_value = self._sigmet_on_bits & ~_SIGMET_KNOWN_BITS
+        if embed:
+            new_value |= _SIGMET_EMBED_BIT
+        if trigger_download:
+            new_value |= _SIGMET_DOWNLOAD_BIT
+        self.psx_send_and_set("SigmetOn", str(new_value))
+
+    def _aircraft_sigmet_hazards(self) -> list:
+        """Return the sorted, deduplicated hazard types of every SIGMET the aircraft is in.
+
+        Empty if the aircraft isn't inside any parsed SIGMET polygon (which,
+        per _parse_sigmets()/_sigmet_first_polygon(), excludes any SIGMET we
+        couldn't represent as a closed area). Usually one hazard, but
+        overlapping SIGMETs (e.g. TS inside a wider TURB area) can give more.
+        """
+        if self.ac_lat is None or self.ac_lon is None:
+            return []
+        return sorted({
+            sig['hazard'] for sig in self.sigmets
+            if _point_in_polygon(self.ac_lat, self.ac_lon, sig['polygon'])
+        })
 
     def _handle_addon(self, _key: str, value: str) -> None:
         """Process addon messages: FRANKENMSFSBRIDGE (slave sim) and FRANKENWEATHER (conflict)."""
@@ -2250,6 +2360,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if "use_sigmets" in cmd:
             self._use_sigmets = bool(cmd["use_sigmets"])
             self.logger.info("use_sigmets → %s", self._use_sigmets)
+            settings_changed = True
+        if "disable_psx_sigmets" in cmd:
+            self._disable_psx_sigmets = bool(cmd["disable_psx_sigmets"])
+            self.logger.info("disable_psx_sigmets → %s", self._disable_psx_sigmets)
+            # Apply immediately rather than waiting for the next scheduled
+            # sigmet_refresh_coro() cycle (up to 30 min) -- no download
+            # trigger here, just the embed bit, so toggling this doesn't
+            # also force an unwanted re-download.
+            self._write_sigmet_on(embed=not self._disable_psx_sigmets, trigger_download=False)
             settings_changed = True
         if "avoid_cb_near_airport" in cmd:
             self._avoid_cb_near_airport = bool(cmd["avoid_cb_near_airport"])
@@ -2548,6 +2667,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 self._turb_engine.clear_fixed_wind()
                 if self._turb_wind_mode == "psx" and self.psx_connected:
                     self._turb_update_psx_wind()
+        if self.psx_connected:
+            self._write_sigmet_on(embed=not self._disable_psx_sigmets, trigger_download=False)
         if self._enroute_wind_enabled:
             self._enable_enroute_wind()
         else:
@@ -4910,6 +5031,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "timesync_on_situ_load": self._timesync_on_situ_load,
             "timesync_periodic": self._timesync_periodic,
             "use_sigmets": self._use_sigmets,
+            "disable_psx_sigmets": self._disable_psx_sigmets,
             "avoid_cb_near_airport": self._avoid_cb_near_airport,
             "cb_airport_clearance_nm": _CB_AIRPORT_CLEARANCE_NM,
             "config_file": cfg.config_file,
@@ -4971,6 +5093,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "last_om_fetch_failed": self._last_om_fetch_failed,
             "vatsim_cache_time": self.vatsim_cache_time or None,
             "mode": "MANEUVERING" if self._maneuvering else "CRUISE",
+            "sigmet_hazards": self._aircraft_sigmet_hazards(),
             "ac_lat": round(self.ac_lat, 4) if self.ac_lat is not None else None,
             "ac_lon": round(self.ac_lon, 4) if self.ac_lon is not None else None,
             "ac_hdg": round(self.ac_hdg, 1) if self.ac_hdg is not None else None,
@@ -5027,12 +5150,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         disables its SIGMET downloads (they share a fetch cycle in PSX) --
         left alone, PSX's SIGMET data (and our own ts_sigmets, parsed from
         the same WxSigmet/Qs499 PSX populates -- see handle_sigmet_change)
-        goes stale for the whole flight. Writing Qi262=5 (SigmetOn) sets
-        "SIGMETs embedded in the planet weather model" (bit 0) and
-        triggers an immediate download (bit 2) in one write -- confirmed
-        live 2026-09-08. Gated on _use_sigmets and only while
-        frankenweather is actively driving the weather zones, matching
-        the D-ATIS/ALTN-supplement gating.
+        goes stale for the whole flight. Always triggers a download (so our
+        own ts_sigmets/CB-override logic keeps working) and separately sets
+        the "embedded in planet weather model" bit based on
+        self._disable_psx_sigmets, which the /efb "disable PSX SIGMETs"
+        toggle controls (immediately, via _handle_fw_command -- this loop
+        just keeps re-downloading). See _write_sigmet_on() for the bitmask
+        details. Gated on _use_sigmets and only while frankenweather is
+        actively driving the weather zones, matching the D-ATIS/ALTN-
+        supplement gating.
         """
         myname = inspect.currentframe().f_code.co_name
         last_refresh = 0.0
@@ -5047,8 +5173,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 if time.time() - last_refresh < _SIGMET_REFRESH_MAX_S:
                     continue
                 last_refresh = time.time()
-                self.psx_send_and_set("SigmetOn", "5")
-                self.logger.info("SIGMET: requested a fresh PSX download (Qi262=5)")
+                self._write_sigmet_on(embed=not self._disable_psx_sigmets, trigger_download=True)
+                self.logger.info("SIGMET: requested a fresh PSX download")
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
             self.logger.critical(traceback.format_exc())
@@ -5424,6 +5550,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.psx.subscribe("FmcRte1", self.handle_fmc_change)
             self.psx.subscribe("FmcRte2", self.handle_fmc_change)
             self.psx.subscribe("WxSigmet", self.handle_sigmet_change)
+            self.psx.subscribe("SigmetOn", self.handle_sigmet_on)
             self.psx.subscribe("addon", self._handle_addon)
             self.psx.subscribe("WxCorridorTxt", self._handle_corridor)
             self.psx.subscribe("MetarsUp", self._handle_metars_up)
