@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-07: version 1.12.0
+
+- **New: "Global BANG" button on `/utils`**, for master and slave routers
+  (not standalone), guarded by a confirmation prompt warning that it can
+  trigger sound playback etc. A master (or standalone) router sends
+  `bang` straight to its own upstream (the real PSX Main Server), which
+  makes it re-send every variable -- a blunt but sometimes useful way to
+  resync a shared cockpit. A slave router has no such connection, so it
+  instead sends a new FRDP message, `addon=FRANKENROUTER:<version>:
+  MASTER_BANG`, which bubbles upstream (via the same forwarding logic
+  already used for `ELEVATION_SOURCE`/`TRAFFIC_SOURCE`) until it reaches
+  the router that actually owns the upstream connection to the real Main
+  Server, which then sends the real `bang`.
+
 ## 2026-10-06: version 1.11.0
 
 - **New: `/efb` shows an "in SIGMET area" indicator and a "PSX SIGMETs

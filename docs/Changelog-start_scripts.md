@@ -1,5 +1,34 @@
 # start_scripts changelog
 
+## 1.6.0 (2026-10-07)
+
+- **New: configurable delays in the `startsim_master.ps1`/
+  `startsim_slave.ps1` addon startup sequence.** `$DelayAfterPsxMainServerStart`
+  (after starting the PSX main server, before the router -- was a fixed 1s)
+  and `$DelayAfterRouterStart` (after starting a sim's router, before any
+  of that sim's addons -- was a fixed 5s, master only) both default to 5s
+  and are now set in one place in `common.ps1`. `startsim_slave.ps1` gets
+  `$DelayAfterRouterStart` too, applied only when it isn't instead pausing
+  for the interactive `$StopAfterSlaveRouterStart` prompt. Also added
+  `$DelayBetweenAddons` (default 0s), a generic delay before every single
+  addon start in both scripts (and `start_nonscripted_apps`), via a new
+  `AddonDelay` helper in `functions.ps1` that stays silent at the default.
+  Removed the special one-off extra delay that used to apply only before
+  HAFAP/CPDLC.
+- **Fix: `$PsxNetConfigDir`/`$PsxNetEfbConfigDir` could point at a Documents
+  folder that doesn't exist.** Both were built from
+  `"$env:USERPROFILE\Documents\..."`, which silently stops being correct
+  once OneDrive's "Known Folder Move" redirects Documents elsewhere --
+  confirmed live, where it broke `start_psx_net_vatsim.ps1`'s config
+  rewrite with four confusing cascading PowerShell errors for one real
+  cause. Both now derive from `[Environment]::GetFolderPath('MyDocuments')`,
+  which Windows already keeps correct across such redirection. Also added
+  a `RequireConfigFile` guard (in `functions.ps1`, used by the seven
+  `start_*.ps1` scripts that rewrite a PSX.NET-style XML config before
+  launching) that fails with one clear, actionable message if the config
+  file still isn't where expected, instead of letting a missing file
+  cascade into unrelated-looking XML errors.
+
 ## 1.5.0 (2026-10-03)
 
 - **New: multiple start profiles, so several people can share one
