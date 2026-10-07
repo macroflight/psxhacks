@@ -5,6 +5,7 @@ $Host.UI.RawUI.WindowTitle = "Restart MSFS Router"
 # PSX.NET.MSFS.Router is started from startsim_slave.ps1, so it must connect
 # to the SLAVE sim's router port.
 $configPath = "$PsxNetConfigDir\PSX.NET.MSFS.Router.xml"
+RequireConfigFile $configPath '$PsxNetConfigDir'
 $xml = New-Object System.Xml.XmlDocument
 $xml.Load($configPath)
 $xml.SelectSingleNode("//PsxServerIP").InnerText = "127.0.0.1"

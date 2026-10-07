@@ -6,6 +6,7 @@ $Host.UI.RawUI.WindowTitle = "Restart PSX.NET.Orchestration"
 # slave sims only, not the master sim), so it must connect to the SLAVE
 # sim's router port.
 $configPath = "$PsxNetConfigDir\PSX.NET.Orchestration.Config.xml"
+RequireConfigFile $configPath '$PsxNetConfigDir'
 $xml = New-Object System.Xml.XmlDocument
 $xml.Load($configPath)
 $xml.SelectSingleNode("//PsxHost").InnerText = "127.0.0.1"

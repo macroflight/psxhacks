@@ -5,6 +5,7 @@ $Host.UI.RawUI.WindowTitle = "Restart BACARS"
 # BACARS (now part of the PSX.NET suite) keeps its config alongside the
 # other PSX.NET.*.xml files rather than next to its own .exe.
 $configPath = "$PsxNetConfigDir\PSX.NET.BACARS.xml"
+RequireConfigFile $configPath '$PsxNetConfigDir'
 $xml = New-Object System.Xml.XmlDocument
 $xml.Load($configPath)
 $xml.SelectSingleNode("//HoppieLogon").InnerText = $HoppieLogonCode

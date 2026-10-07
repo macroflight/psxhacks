@@ -19,6 +19,24 @@ function Show-ErrorAndExit([string]$message) {
     [Environment]::Exit(1)
 }
 
+# Fail fast with one clear, actionable error instead of letting a missing
+# config file cascade into several confusing ones out of $xml.Load():
+# when Load() throws, $xml stays an empty XmlDocument, so
+# SelectSingleNode() returns $null, .InnerText on $null fails, and
+# Save() then complains about a missing root element - four cryptic
+# errors for one real cause. A redirected Documents folder (OneDrive,
+# etc.) not reflected in the relevant config-dir variable is a common
+# real-world way to hit this (confirmed live).
+function RequireConfigFile([string]$ConfigPath, [string]$DirVariableName) {
+    if (-not (Test-Path $ConfigPath -PathType Leaf)) {
+        Show-ErrorAndExit (
+            "Config file not found: $ConfigPath`n" +
+            "Check that $DirVariableName in $OverrideFile points at the right " +
+            "directory - a redirected Documents folder (OneDrive, etc.) is a " +
+            "common cause.")
+    }
+}
+
 # Display a warning message and wait for the user to press Enter before
 # continuing script execution. Use this for recoverable issues the user
 # should be aware of but that do not need to stop the script.

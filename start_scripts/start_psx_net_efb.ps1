@@ -3,6 +3,7 @@
 $Host.UI.RawUI.WindowTitle = "Start PSX.NET.EFB"
 
 $configPath = "$PsxNetEfbConfigDir\PSX.NET.EFB.Windows.Config.xml"
+RequireConfigFile $configPath '$PsxNetEfbConfigDir'
 $xml = New-Object System.Xml.XmlDocument
 $xml.Load($configPath)
 # PSX.NET.EFB is started from startsim_slave.ps1, so it must connect to the

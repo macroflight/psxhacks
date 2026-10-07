@@ -109,14 +109,22 @@ $AerowinxMainServerPrefFile = "main-server.pref"
 # Which radio/voice app to start. Override in the override file if needed.
 $RadioApp           = "vPilot"
 
+# [Environment]::GetFolderPath('MyDocuments') asks Windows for the real,
+# current Documents folder rather than assuming "$env:USERPROFILE\Documents"
+# -- the two differ once OneDrive's "Known Folder Move" redirects Documents
+# elsewhere, which $env:USERPROFILE knows nothing about (confirmed live: a
+# user's Documents was OneDrive-redirected, so the old string-built path
+# didn't exist and $xml.Load() below failed with a confusing error cascade).
+$RealDocumentsDir = [Environment]::GetFolderPath('MyDocuments')
+
 #  Where the EFB config file is located (the EFB controls this and
 #  expect the file to be in this location, so don't override this)
-$PsxNetEfbConfigDir = "$env:USERPROFILE\Documents\PSX.NET.EFB"
+$PsxNetEfbConfigDir = "$RealDocumentsDir\PSX.NET.EFB"
 
 #  Where the PSX.NET.MSFS.Router/PSX.NET.VATSIM/PSX.NET.Orchestration/
 #  PSXSounds config files are located (each addon controls this and expects
 #  its file in this shared location, so don't override this)
-$PsxNetConfigDir = "$env:USERPROFILE\Documents\PSX.NET"
+$PsxNetConfigDir = "$RealDocumentsDir\PSX.NET"
 
 # Flavor-derived variables — overridden at runtime by psxhacks-current-flavor.ps1.
 # These defaults apply when configure_flavor.ps1 has not yet been run.

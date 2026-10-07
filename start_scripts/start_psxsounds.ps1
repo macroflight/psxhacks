@@ -3,6 +3,7 @@
 $Host.UI.RawUI.WindowTitle = "Restart PSXSounds"
 
 $configPath = "$PsxNetConfigDir\PSX.NET.Sounds.xml"
+RequireConfigFile $configPath '$PsxNetConfigDir'
 $xml = New-Object System.Xml.XmlDocument
 $xml.Load($configPath)
 $xml.SelectSingleNode("//RB211").InnerText = $PsxSoundsRb211
