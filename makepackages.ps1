@@ -96,6 +96,10 @@ Write-Output ""
 Write-Output "Copying sample config files ..."
 Copy-Item config_examples\*.conf dist\
 Copy-Item router\config_examples\*.conf dist\
+# frankenrouter.toml is the default config file frankenrouter reads when
+# no --config-file option is given (see docs/Configuration.md), so it
+# ships next to the router EXE rather than as a config_examples/ sample.
+Copy-Item router\frankenrouter.toml dist\
 
 $Date    = Get-Date -Format 'yyyy-MM-dd'
 $ZipName = "psxhacks-$Date.zip"

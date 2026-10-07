@@ -1,28 +1,58 @@
-# The default frankenrouter config
+# A sample frankenrouter config for use in a normal
+# (non-shared-cockpit) PSX sim.
+#
+# It listens for client connections on port 10748 and connects to a
+# PSX main server on 127.0.0.1 port 10747.  No access control, any
+# client can connect. All network traffic is logged.
+#
+
+# If you want to insert your frankenrouter between your PSX main
+# server and the rest of the sim:
+#
+# - Change the listen port to whatever port the PSX main server
+#   listens to. Then all clients will connect to the frankenrouter
+#   without reconfiguration.
+#
+# - Change the listen port of your PSX main server (e.g by changing
+#   the Port10747= or Port10748= line in the .pref file) to the
+#   upstream port in this file.
+#
+# - Start your PSX main server
+#
+# - Start frankenrouter
+#
+# - Start your other clients
+#
+# - Verify in the PSX main server network tab that only one client is
+#   connected, the frankenrouter
+#
+# - Verify that all your expected clients are seen in the
+#   frankenrouter window.
 #
 # The file format is TOML (https://toml.io/). See
-# docs/Configuration.md for details.
+# https://github.com/macroflight/psxhacks/blob/main/router/docs/Configuration.md
+# for details.
 
 [identity]
-simulator = "ExampleSim"
-router = "router1"
+simulator = "MySim"
+router = "frankenrouter"
+type = "standalone"
 
 [listen]
-port = 10748
-
-[upstream]
-host = "127.0.0.1"
+# This is the port that your clients (PSX main clients, addons, other
+# routers, etc. connect to.
 port = 10747
 
-[log]
-traffic = false
+[[upstream]]
+# This is your "upstream" - usually a PSX main server
+name = "PSX main server"
+host = "127.0.0.1"
+port = 10748
 
-[psx]
-variables = 'C:\fs\PSX\Variables.txt'
+[log]
+traffic = true
 
 [[access]]
-display_name = "Any local client"
-# Note: you might need to add your local IP, e.g
-# match_ipv4 = [ "127.0.0.1/32", "192.168.17.42/32" ]
-match_ipv4 = [ "127.0.0.1/32" ]
+display_name = "Allow all clients"
+match_ip = [ "ANY" ]
 level = "full"
