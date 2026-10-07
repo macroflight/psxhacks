@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-07: version 1.12.1
+
+- Update frankenrouter.toml and include in EXE ZIP
+
 ## 2026-10-07: version 1.12.0
 
 - **New: "Global BANG" button on `/utils`**, for master and slave routers
