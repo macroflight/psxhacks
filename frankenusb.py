@@ -25,9 +25,6 @@ __version__ = get_version("frankenusb", __file__)
 # Qs421="FreeMsgM"; white text on upper EICAS
 # Qs422="FreeMsgS"; status message, trigger "STATUS" on EICAS but only shown when STAT selected
 
-# The type of message we use to display the tiller status
-MSG_TYPE_TILLER = "FreeMsgA"
-
 # Map left-seat PSX variable names to their right-seat equivalents.
 # When right-seat mode is active, any button_config 'psx variable' that
 # appears here is automatically redirected to the right-seat version.
@@ -294,6 +291,18 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             'indexes': [1],
             'value': 0,
         })
+
+    async def enable_tiller_mode(self):
+        """Turn tiller mode on: centre, enable mapping."""
+        self.logger.info("Tiller turned on")
+        await self.centre_ailerons_and_tiller()
+        self.aileron_tiller_active = True
+
+    async def disable_tiller_mode(self):
+        """Turn tiller mode off: centre, disable mapping."""
+        self.logger.info("Tiller turned off")
+        await self.centre_ailerons_and_tiller()
+        self.aileron_tiller_active = False
 
     async def handle_axis_motion_normal(self, event, axis_config):
         """Handle motion on a normal axis."""
@@ -1270,18 +1279,15 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             elif button_config['button type'] == 'FLIGHT_CONTROL_ALL_CONTROL_LOCKS':
                 self.all_control_locks()
             elif button_config['button type'] == 'TILLER_TOGGLE':
-                if self.aileron_tiller_active:
-                    # Remove warning, centre aileron and tiller, disable tiller mode
-                    self.logger.info("Tiller toggled off")
-                    self.psx.send(MSG_TYPE_TILLER, "")
-                    await self.centre_ailerons_and_tiller()
-                    self.aileron_tiller_active = False
+                tiller_set = button_config.get('set')
+                if tiller_set == 'on':
+                    await self.enable_tiller_mode()
+                elif tiller_set == 'off':
+                    await self.disable_tiller_mode()
+                elif self.aileron_tiller_active:
+                    await self.disable_tiller_mode()
                 else:
-                    # Display warning message, centre aileron and tiller, enable tiller mode
-                    self.logger.info("Tiller toggled on")
-                    self.psx.send(MSG_TYPE_TILLER, "TILLER ACTIVE")
-                    await self.centre_ailerons_and_tiller()
-                    self.aileron_tiller_active = True
+                    await self.enable_tiller_mode()
             elif button_config['button type'] == 'ACTION_FLIGHT_PHASE_TRIGGER':
                 for button, phase in button_config['button to phase'].items():
                     if self.joystick_get_button_position(joystick_name, button) == 1:
@@ -1731,7 +1737,6 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
 
         def teardown():
             self.logger.info("Disconnected from PSX, tearing down")
-            self.psx.send(MSG_TYPE_TILLER, "")
             self.psx_connected = False
 
         def connected(key, value):
@@ -1776,7 +1781,6 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             if gs > 40.0 and self.aileron_tiller_active:
                 self.logger.info("Ground speed %.1f kt > 40 kt, disabling tiller", gs)
                 self.aileron_tiller_active = False
-                self.psx.send(MSG_TYPE_TILLER, "")
                 asyncio.create_task(self.centre_ailerons_and_tiller())
         self.psx.subscribe("GroundSpeed", groundspeed)
 
