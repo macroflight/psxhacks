@@ -483,6 +483,17 @@ need to change any of these settings.
 - `frdp_rtt_warning`: warn if the FRDP RTT is longer than this many
   seconds.
 
+- `clock_skew_warning`: only checked by the master router. If another
+  router's clock (as self-reported in its own FRDP ROUTERINFO, and
+  corrected for network delay using the measured FRDP PING/PONG round
+  trip time where available) differs from the master's own clock by
+  more than this many seconds, a local warning is printed. Default: 5.0.
+
+- `clock_skew_critical`: only checked by the master router. Same check
+  as `clock_skew_warning`, but at this level a critical error is
+  raised and included in ROUTERINFO, so it is visible network-wide and
+  can trigger a master caution. Default: 30.0.
+
 Example:
 
 ```text

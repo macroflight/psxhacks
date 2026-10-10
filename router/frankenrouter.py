@@ -812,15 +812,19 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         else:
                             upstream = f"frankenrouter {con['display_name']}"
                             upstream += f" ({trimstring(con['uuid'])})"
+                skew = self._clock_skew(routeruuid, info)
+                skew_str = "unknown" if skew is None else f"{skew:+.1f}s"
                 self.logger.info(
-                    "Remote %s (%s) v%s in sim %s has %d clients, up %d s (data age %.0fs)",
+                    "Remote %s (%s) v%s in sim %s has %d clients, up %d s"
+                    " (data age %.0fs, clock skew %s)",
                     info['router_name'],
                     trimstring(info['uuid']),
                     info.get('version', 'unknown'),
                     info['simulator_name'],
                     clients,
                     info['performance']['uptime'],
-                    time.time() - info['received']
+                    time.time() - info['received'],
+                    skew_str,
                 )
                 if upstream is not None:
                     self.logger.info(
@@ -2394,7 +2398,71 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     matches.append((router.get('simulator_name', '?'), conn.get('display_name')))
         return matches
 
-    def get_errors(self):  # pylint: disable=too-many-branches
+    def _direct_rtt(self, router_uuid):
+        """Return the most recent FRDP PING RTT (seconds) measured directly to router_uuid.
+
+        Returns None if router_uuid is not a direct neighbour (our
+        upstream, or one of our clients) or no PONG has been received
+        from it yet. PING/PONG is never forwarded -- see
+        handle_addon_frankenrouter_ping() -- so this is only ever
+        available one hop away, never for a router several hops away
+        whose ROUTERINFO merely passed through us.
+        """
+        candidates = list(self.clients.values())
+        if self.upstream is not None:
+            candidates.append(self.upstream)
+        for con in candidates:
+            if con.uuid == router_uuid and con.frdp_ping_rtts:
+                return statistics.median(con.frdp_ping_rtts[-FRDP_KEEP_RTT_SAMPLES:])
+        return None
+
+    def _clock_skews(self):
+        """Return (display_name, skew_seconds) for every other known router's clock.
+
+        Every FRDP ROUTERINFO already carries the sender's own "timestamp"
+        (time.time(), i.e. UTC) -- no separate message type is needed.
+        The raw skew is our local clock (self.routerinfo[router_uuid]
+        ['received'], stamped the instant that ROUTERINFO arrived -- see
+        handle_addon_frankenrouter_routerinfo() in rules.py) minus the
+        sender's self-reported timestamp from that same message --
+        positive means our clock is ahead of theirs. That raw figure is
+        inflated by however long the ROUTERINFO took to reach us, so when
+        router_uuid is a direct neighbour we also have a measured FRDP
+        PING/PONG round-trip time for (see _direct_rtt()), we subtract
+        half of it: assuming the link's delay is roughly symmetric, the
+        one-way transit time is ~RTT/2, which is the standard NTP-style
+        one-way offset correction. For a router more than one hop away
+        we have no RTT to it, so we fall back to the uncorrected raw
+        skew.
+        """
+        skews = []
+        for router_uuid, info in self.routerinfo.items():
+            if router_uuid == self.uuid:
+                continue
+            skew = self._clock_skew(router_uuid, info)
+            if skew is None:
+                continue
+            name = info.get('router_name') or router_uuid
+            skews.append((name, skew))
+        return skews
+
+    def _clock_skew(self, router_uuid, info):
+        """Return the (RTT-corrected, if possible) clock skew in seconds for one router.
+
+        info is this router's entry in self.routerinfo. Returns None if
+        info does not (yet) carry both a "timestamp" and a "received"
+        field. See _clock_skews() for the full explanation of the
+        calculation and its RTT correction.
+        """
+        if 'received' not in info or 'timestamp' not in info:
+            return None
+        skew = info['received'] - info['timestamp']
+        rtt = self._direct_rtt(router_uuid)
+        if rtt is not None:
+            skew -= rtt / 2.0
+        return skew
+
+    def get_errors(self):  # pylint: disable=too-many-branches,too-many-locals
         """Return errors for this router (sent in FRDP ROUTERINFO)."""
         errors = []
         if self.args.add_fake_error:
@@ -2450,6 +2518,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 errors.append("No sim is sending MSFS elevation to PSX")
             if len(filterstatus['traffic']['disabled']) < 1:
                 errors.append("No sim is sending vPilot traffic data")
+            critical_s = self.config.performance.clock_skew_critical
+            for name, skew in self._clock_skews():
+                if abs(skew) > critical_s:
+                    errors.append(
+                        f"Router {name}'s clock is off by {skew:+.1f}s"
+                        f" (limit {critical_s:.0f}s)")
         if self.config.identity.type == 'master':
             for pattern in MASTER_ADDON_PATTERNS:
                 matches = self._find_network_clients_matching(pattern)
@@ -2460,7 +2534,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         f" {', '.join(sim for sim, _ in matches)})")
         return errors
 
-    def get_warnings(self):  # pylint: disable=too-many-branches
+    def get_warnings(self):  # pylint: disable=too-many-branches,too-many-locals
         """Return warnings for this router (printed locally, not sent in ROUTERINFO)."""
         warnings = []
         conns = list(self.clients.values())
@@ -2492,6 +2566,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     f"Sent message rate for {con.display_name} is {tx:.0f}/s"
                     f" ({rate_window}s avg,"
                     f" limit {perf.sent_messages_per_second_warning_limit})")
+        if self.get_router_type() == 'master':
+            for name, skew in self._clock_skews():
+                if perf.clock_skew_warning < abs(skew) <= perf.clock_skew_critical:
+                    warnings.append(
+                        f"Router {name}'s clock is off by {skew:+.1f}s"
+                        f" (limit {perf.clock_skew_warning:.0f}s)")
         checks = self.config.check
         if checks is None:
             return warnings
