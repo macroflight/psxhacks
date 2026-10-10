@@ -1326,15 +1326,18 @@ def _efb_router_card(info):
     )
 
 
-def _efb_bool_chip_row(action, field, current, true_label='Enabled', false_label='Disabled'):
+def _efb_bool_chip_row(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        action, field, current, true_label='Enabled', false_label='Disabled', small=False):
     """Render a two-state (true/false) chip toggle row posting an absolute value."""
+    cls = 'efb-chip efb-chip-sm' if small else 'efb-chip'
+
     def _chip(value, label):
         active = ' active' if current == value else ''
         val = '1' if value else '0'
         return (f'<form class="efb-inline" method="post" action="{action}">'
                 f'<input type="hidden" name="field" value="{field}">'
                 f'<input type="hidden" name="value" value="{val}">'
-                f'<button type="submit" class="efb-chip{active}">{label}</button></form>\n')
+                f'<button type="submit" class="{cls}{active}">{label}</button></form>\n')
     return f'<div class="efb-chip-row">{_chip(True, true_label)}{_chip(False, false_label)}</div>\n'
 
 
@@ -1374,7 +1377,8 @@ def _efb_weather_mode_row(current):
     chips = ''.join(
         f'<form class="efb-inline" method="post" action="/api/efb/weather-preset">'
         f'<input type="hidden" name="preset" value="{preset}">'
-        f'<button type="submit" class="efb-chip{" active" if current == preset else ""}">'
+        f'<button type="submit" '
+        f'class="efb-chip efb-chip-sm{" active" if current == preset else ""}">'
         f'{label}</button></form>\n'
         for preset, label in _WEATHER_PRESET_LABELS
     )
@@ -1382,32 +1386,48 @@ def _efb_weather_mode_row(current):
 
 
 def _efb_controls_card(w):
-    """Render the weather-mode, turbulence, and CB-avoidance control card."""
+    """Render the weather-mode, turbulence, and CB-avoidance control card.
+
+    If FrankenWeather itself isn't running (no STATE message ever
+    received, or none recently -- see _efb_data_status()), none of
+    these controls can do anything: posting a preset/toggle still
+    works mechanically (the router accepts the request), but there is
+    no FrankenWeather process on the other end to act on it or to
+    report back a new state, so the buttons would appear to do nothing
+    and the weather-mode 3-way row would never match any preset (see
+    _efb_weather_preset()) and so never highlight. Show a dimmed,
+    control-free card instead of a set of dead buttons.
+    """
+    if w['status_label'] != 'OK':
+        return (
+            '<div class="efb-card" id="efb-controls-card" style="opacity:0.55">\n'
+            '<div class="efb-eyebrow">Weather Mode</div>\n'
+            '<div class="efb-banner" style="margin-top:0">FrankenWeather is not running '
+            '-- weather controls unavailable.</div>\n'
+            '</div>\n'
+        )
     return (
         '<div class="efb-card" id="efb-controls-card">\n'
         '<div class="efb-eyebrow">Weather Mode</div>\n' +
         _efb_weather_mode_row(_efb_weather_preset(w)) +
-        '<p class="efb-hint">Full: FrankenWeather zones, turbulence, and enroute wind '
-        "all active. PSX Auto: FrankenWeather off, PSX's own automatic METAR-based "
-        'weather active. PSX Manual: FrankenWeather off, weather frozen for manual '
-        'control from the instructor station.</p>\n'
-        '<div class="efb-eyebrow" style="margin-top:0.9rem">Extra Turbulence</div>\n' +
-        _efb_bool_chip_row('/api/efb/turb-toggle', 'enabled', w['turb_enabled']) +
-        '<p class="efb-hint">Adds extra turbulence based on wind, terrain, '
-        'convection, CB proximity, etc.</p>\n'
-        '<div class="efb-eyebrow" style="margin-top:0.9rem">'
-        'Avoid CB Near Departure And Arrival Airport</div>\n' +
+        '<p class="efb-hint">Full: FrankenWeather active. PSX Auto: '
+        "PSX's own METAR weather. PSX Manual: weather frozen, instructor "
+        'control.</p>\n'
+        '<div class="efb-eyebrow" style="margin-top:0.6rem">Extra Turbulence</div>\n' +
         _efb_bool_chip_row(
-            '/api/efb/toggle', 'avoid_cb_near_airport', w['avoid_cb_near_airport']) +
-        '<p class="efb-hint">This will shift the position of CBs in the departure or '
-        'arrival airport weather zones away from the airport.</p>\n'
-        '<div class="efb-eyebrow" style="margin-top:0.9rem">SIGMETs</div>\n' +
+            '/api/efb/turb-toggle', 'enabled', w['turb_enabled'], small=True) +
+        '<p class="efb-hint">Wind, terrain, convection, CB proximity, etc.</p>\n'
+        '<div class="efb-eyebrow" style="margin-top:0.6rem">Avoid CB Near Airport</div>\n' +
+        _efb_bool_chip_row(
+            '/api/efb/toggle', 'avoid_cb_near_airport', w['avoid_cb_near_airport'],
+            small=True) +
+        '<p class="efb-hint">Shifts departure/arrival CBs away from the airport.</p>\n'
+        '<div class="efb-eyebrow" style="margin-top:0.6rem">SIGMETs</div>\n' +
         _efb_bool_chip_row(
             '/api/efb/toggle', 'disable_psx_sigmets', w['disable_psx_sigmets'],
-            true_label='PSX SIGMETs Off', false_label='PSX SIGMETs On') +
-        '<p class="efb-hint">FrankenWeather always downloads and parses SIGMETs for '
-        "its own CB logic either way; this only controls whether PSX's own weather "
-        'engine also consumes them.</p>\n'
+            true_label='PSX SIGMETs Off', false_label='PSX SIGMETs On', small=True) +
+        '<p class="efb-hint">Controls whether PSX\'s own weather engine uses SIGMETs '
+        "(FrankenWeather's own CB logic always does).</p>\n"
         '</div>\n'
     )
 
