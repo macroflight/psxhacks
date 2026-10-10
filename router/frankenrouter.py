@@ -128,6 +128,10 @@ PSX_RESUME_ELEVATION_AFTER = 60
 # How often to sent master caution if filter status is bad
 FILTER_WARNING_INTERVAL = 60
 
+# How long a connection may sit as "auth pending" (no access and no
+# self-announced name) before housekeeping closes and purges it.
+AUTH_PENDING_TIMEOUT = 30.0
+
 # Seconds to wait after all IRSes reach ≥60000 before broadcasting the alignment fix
 IRS_ALIGN_FIX_DELAY = 5.0
 
@@ -3142,6 +3146,31 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.record_sim_event('client_connected', ts=conn_ts,
                                   client_name=client.peername)
 
+    async def _housekeeping_purge_stale_auth_pending(self):
+        """Close and remove connections stuck as 'auth pending' too long.
+
+        A connection shows as 'auth pending' when it has no access
+        level yet and hasn't announced a name (see
+        ClientConnection.update_access_level() in connection.py). A
+        real client authenticates or identifies itself within
+        seconds; one that doesn't is either misbehaving or abandoned
+        (e.g. a stale scanner connection), so close it once it has sat
+        unauthenticated for AUTH_PENDING_TIMEOUT seconds. Already-closed
+        connections are purged separately, unconditionally, by the
+        "Remove closed client connections" step in housekeeping_task().
+        """
+        for client in list(self.clients.values()):
+            if client.display_name != 'auth pending':
+                continue
+            if client.closed or client.is_closing:
+                continue
+            if time.perf_counter() - client.connected_at <= AUTH_PENDING_TIMEOUT:
+                continue
+            self.logger.warning(
+                "Closing connection %s, stuck as 'auth pending' for over %d s",
+                client.peername, AUTH_PENDING_TIMEOUT)
+            await self.close_client_connection(client, clean=False)
+
     def _housekeeping_mcp_window(self):
         """Log pending MCP window values that have been stable for more than 5 seconds."""
         if self.config.identity.type not in ('master', 'standalone'):
@@ -3290,6 +3319,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     # Call housekeeping functions
                     self._housekeeping_check_router_type()
                     self._housekeeping_disable_filters_if_standalone()
+                    await self._housekeeping_purge_stale_auth_pending()
                     await self._housekeeping_enable_psx_elevation_database()
                     await self._housekeeping_enable_master_caution()
                     self._housekeeping_remove_stale_masters()
