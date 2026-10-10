@@ -487,12 +487,22 @@ need to change any of these settings.
   router's clock (as self-reported in its own FRDP ROUTERINFO, and
   corrected for network delay using the measured FRDP PING/PONG round
   trip time where available) differs from the master's own clock by
-  more than this many seconds, a local warning is printed. Default: 5.0.
+  more than this many seconds, a local warning is printed. Default: 30.0.
 
 - `clock_skew_critical`: only checked by the master router. Same check
   as `clock_skew_warning`, but at this level a critical error is
   raised and included in ROUTERINFO, so it is visible network-wide and
-  can trigger a master caution. Default: 30.0.
+  can trigger a master caution. Default: 120.0.
+
+- `clock_sync_script`: local path to `start_scripts/sync_clock.ps1` (or
+  an equivalent script). Checked by every router (not just master): the
+  first time after connecting to its own upstream that this router
+  notices its clock differs from its upstream's by more than
+  `clock_skew_warning`, it launches this script once (fire-and-forget)
+  to force a Windows clock resync. Empty (default) disables the
+  feature; only useful on Windows. See `start_scripts/README.md` for
+  the script itself, which self-elevates via UAC and has its own
+  `$ClockSyncEnabled` opt-out.
 
 Example:
 
