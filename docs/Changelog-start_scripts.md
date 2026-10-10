@@ -1,5 +1,21 @@
 # start_scripts changelog
 
+## 1.7.0 (2026-10-09)
+
+- **New: `sync_clock.ps1`, a self-elevating Windows clock resync
+  script**, plus `$ClockSyncEnabled` (default `$true` in `common.ps1`,
+  settable in the override file). Forces `w32tm /resync /force`,
+  prompting for UAC elevation if not already running as Administrator
+  and giving up after a minute if that's never approved; exits
+  immediately with a "time sync not enabled" message if
+  `$ClockSyncEnabled` is `$false`. `startsim_master.ps1`/
+  `startsim_slave.ps1` now call it at startup (via the new
+  `Test-ClockSyncNeeded` in `functions.ps1`) if the Windows clock
+  hasn't had a successful NTP sync in the last 24h. Also launched
+  directly by the router itself when it detects a clock skew against
+  its upstream -- see `router/docs/Changelog.md` version 1.15.0's
+  `[performance] clock_sync_script`.
+
 ## 1.6.0 (2026-10-07)
 
 - **New: configurable delays in the `startsim_master.ps1`/

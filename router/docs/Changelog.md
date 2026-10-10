@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-10-09: version 1.15.0
+
+- **Default clock skew limits raised**: `clock_skew_warning` 5.0 -> 30.0s,
+  `clock_skew_critical` 30.0 -> 120.0s (see `[performance]` in
+  `docs/Configuration.md`).
+- **New: `[performance] clock_sync_script`.** If set to the local path of
+  `start_scripts/sync_clock.ps1` (or an equivalent script), every router
+  (not just master) now launches it once, fire-and-forget, the first
+  time after connecting to its own upstream that it notices its clock
+  differs from its upstream's by more than `clock_skew_warning`. The
+  script forces a Windows clock resync (`w32tm /resync /force`), self-
+  elevating via UAC if needed, and gives up after a minute if the
+  prompt is never approved. Empty (default) disables the feature; only
+  useful on Windows. See `docs/Configuration.md` and
+  `docs/Changelog-start_scripts.md` (version 1.7.0) for the
+  startup-time half of this ("has the clock synced in the last 24h at
+  all, independent of any router").
+
 ## 2026-10-09: version 1.14.0
 
 - **New: "Reset clients" button on a slave router's `/utils` page.**
