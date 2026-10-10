@@ -603,11 +603,7 @@ adapt the relevant example.
   semicolon-field `'increment index'`/`'fields'` mechanism.
 - **`frankenusb-honeycomb-bravo.conf`** — a TCA Boeing yoke + Honeycomb
   Bravo throttle quadrant setup with four independent
-  `THROTTLE_WITH_REVERSE_BUTTON` axes and tiller mode on the yoke. Note:
-  this file also still contains a couple of button types
-  (`TOWING_MODE_TOGGLE`/`TOWING_DIRECTION_TOGGLE`/`TOWING_HEADING`/
-  `FLIGHT_CONTROL_LOCK_TOGGLE`) that have since been removed from
-  frankenusb itself — don't copy those specific entries.
+  `THROTTLE_WITH_REVERSE_BUTTON` axes and tiller mode on the yoke.
 
 ## Help
 
