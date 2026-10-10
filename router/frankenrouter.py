@@ -1776,6 +1776,33 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             return
         # End of upstream_connector_task()
 
+    def _abort_proxy_server_clients(self):
+        """Force-close any client transports asyncio.Server is still tracking.
+
+        Since Python 3.12, Server.wait_closed() does not return until
+        every client-connection task the server spawned has itself
+        finished -- not just the listening socket -- but those
+        per-connection tasks (handle_new_connection_cb(), one per
+        accepted client) are not part of our TaskGroup, so Ctrl-C never
+        cancels them. One mid-graceful-close (Connection.close()'s own
+        send-exit-then-sleep(0.5)-then-close sequence, e.g. from a
+        client that sent "exit" right as we were shutting down) is
+        enough to make wait_closed() hang well past our own graceful
+        close_client_connection() loop above, which only waits for our
+        own bookkeeping (self.clients), not the server's. Server.close()
+        alone does not touch already-accepted connections, so call this
+        right after it and before wait_closed() to abort every
+        transport the server itself still knows about and guarantee
+        wait_closed() returns promptly. abort_clients() (added
+        alongside close_clients() in Python 3.12) doesn't wait for
+        pending writes, which is fine here -- we already tried a clean
+        "exit" via our own closures above.
+        """
+        abort_clients = getattr(self.proxy_server, 'abort_clients', None)
+        if abort_clients is not None:
+            self.logger.debug("Aborting any still-tracked client transports")
+            abort_clients()
+
     async def listener_task(self, name):
         """Run the client listener."""
         try:
@@ -1820,6 +1847,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             if self.proxy_server is not None:
                 self.logger.info("Proxy server shutting down itself")
                 self.proxy_server.close()
+                self._abort_proxy_server_clients()
                 await self.proxy_server.wait_closed()
                 self.proxy_server = None
                 self.logger.info("Proxy server shut down")
@@ -1831,6 +1859,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.critical(traceback.format_exc())
             if self.proxy_server is not None:
                 self.proxy_server.close()
+                self._abort_proxy_server_clients()
                 await self.proxy_server.wait_closed()
                 self.proxy_server = None
             self.clients = {}
