@@ -594,6 +594,20 @@ $ChangeWindowPositions = $false
 
 
 # ---------------------------------------------------------------------------
+# start_scripts\sync_clock.ps1 — forces a Windows clock resync (shows a
+# UAC prompt unless already running elevated). Run by
+# startsim_master.ps1/startsim_slave.ps1 at startup if the clock hasn't
+# synced successfully in the last 24h, and by the router itself
+# (frankenrouter.py's [performance] clock_sync_script) if it notices a
+# clock skew against its upstream.
+# Defaults to $true in common.ps1. Set to $false to disable entirely --
+# sync_clock.ps1 then exits immediately with a "time sync not enabled"
+# message instead of ever prompting for elevation.
+# ---------------------------------------------------------------------------
+#$ClockSyncEnabled = $true
+
+
+# ---------------------------------------------------------------------------
 # Confirmation prompt in stopsim_master.ps1/stopsim_slave.ps1
 # Defaults to $true in common.ps1 (asks "Are you sure?" before stopping).
 # Set to $false to stop the sim immediately with no confirmation prompt.

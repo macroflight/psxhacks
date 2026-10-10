@@ -20,6 +20,7 @@ import re
 import secrets
 import signal
 import statistics
+import subprocess
 import string
 import sys
 import time
@@ -271,6 +272,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.clients = {}
         self.upstream = None
         self.upstream_connections = 0
+        # Latches True once maybe_sync_clock_from_upstream_skew() has
+        # tried (successfully or not) for the current upstream
+        # connection; reset in reset_after_upstream_connect().
+        self._clock_sync_attempted = False
         # Set True by a FRDP DISCONNECT_SIM message targeting us (slave only)
         # to make upstream_connector_task sit idle instead of reconnecting.
         # Cleared on a successful reconnect or by the "Reconnect to last
@@ -436,6 +441,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # Track when we last sent FRDP ROUTERINFO and SHAREDINFO
         self.last_frdp_routerinfo = 0.0
         self.last_frdp_sharedinfo = 0.0
+        # Give the new connection its own chance to trigger a clock sync.
+        self._clock_sync_attempted = False
 
     def connection_state_changed(self):
         """Run when connection state has changed.
@@ -2519,6 +2526,50 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         if rtt is not None:
             skew -= rtt / 2.0
         return skew
+
+    def maybe_sync_clock_from_upstream_skew(self, upstream_uuid):
+        """Best-effort: launch the configured clock-sync script, once per upstream connection.
+
+        Called by rules.py's handle_addon_frankenrouter_routerinfo()
+        right after storing a freshly-received ROUTERINFO that arrived
+        on our own upstream connection -- our one chance to notice a
+        skew before a later resync (ours or anyone else's) corrects it
+        and hides the problem. self._clock_sync_attempted latches so
+        this only ever runs once per connection; reset in
+        reset_after_upstream_connect() so a fresh connection gets its
+        own chance.
+
+        config.performance.clock_sync_script (empty by default) must be
+        set to the local path of start_scripts/sync_clock.ps1 (or an
+        equivalent script) for this to do anything -- see that script
+        for what actually happens: it self-elevates via UAC and gives
+        up after 1 minute if the prompt is never approved, and respects
+        its own $ClockSyncEnabled opt-out, so launching it here is
+        always fire-and-forget (Popen() returns immediately) and never
+        risks blocking the router.
+        """
+        if self._clock_sync_attempted:
+            return
+        script = self.config.performance.clock_sync_script
+        if not script:
+            return
+        self._clock_sync_attempted = True
+        skew = self._clock_skew(upstream_uuid, self.routerinfo[upstream_uuid])
+        if skew is None or abs(skew) <= self.config.performance.clock_skew_warning:
+            return
+        if sys.platform != 'win32':
+            self.logger.debug(
+                "Clock skew %+.1fs with upstream, but not on Windows -- not launching %s",
+                skew, script)
+            return
+        self.logger.warning(
+            "Clock skew %+.1fs with upstream detected, launching clock sync script %s",
+            skew, script)
+        try:
+            subprocess.Popen(  # pylint: disable=consider-using-with
+                ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script])
+        except OSError:
+            self.logger.warning("Failed to launch clock sync script %s", script, exc_info=True)
 
     def get_errors(self):  # pylint: disable=too-many-branches,too-many-locals
         """Return errors for this router (sent in FRDP ROUTERINFO)."""

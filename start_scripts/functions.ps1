@@ -188,6 +188,64 @@ function Test-PythonRequirement {
     }
 }
 
+# Returns $true if the Windows clock hasn't had a successful NTP sync in
+# the last 24h (or we can't tell either way), $false if it has. Called
+# once at startup by startsim_master.ps1/startsim_slave.ps1, which then
+# runs sync_clock.ps1 if this returns $true - not from common.ps1, for
+# the same reason as Test-PythonRequirement above (too slow to run on
+# every single script that dot-sources common.ps1), and so a clock
+# that's already fine doesn't trigger a UAC prompt on every startup.
+function Test-ClockSyncNeeded {
+    # Primary source: the registry LastKnownGoodTime value the Windows
+    # Time service itself updates whenever it makes a trusted correction
+    # -- a FILETIME (REG_QWORD), reliably populated even on a non-domain
+    # machine. Confirmed live to be more trustworthy than the next
+    # fallback: w32tm /query /status's own "Last Successful Sync Time"
+    # text field frequently reads "unspecified" on a non-domain machine
+    # even when the clock is in fact synced and accurate, which used to
+    # make this function always return $true (treating "can't parse
+    # unspecified" the same as "definitely stale") -- the opposite of
+    # what the 24h check is for, forcing a UAC prompt on every startup.
+    $lastSync = $null
+    try {
+        $raw = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\Config' `
+            -Name 'LastKnownGoodTime' -ErrorAction Stop).LastKnownGoodTime
+        if ($raw) {
+            $lastSync = [DateTime]::FromFileTime($raw)
+        }
+    } catch {
+        # Key/value not present -- fall through to the w32tm text below.
+        $lastSync = $null
+    }
+    if (-not $lastSync) {
+        $statusOutput = w32tm /query /status 2>$null
+        foreach ($line in $statusOutput) {
+            if ($line -match '^Last Successful Sync Time:\s*(.+)$') {
+                $value = $Matches[1].Trim()
+                if ($value -and $value -ne 'unspecified') {
+                    try {
+                        $lastSync = [DateTime]::Parse($value)
+                    } catch {
+                        # Leave $lastSync unset -- handled below.
+                        $lastSync = $null
+                    }
+                }
+                break
+            }
+        }
+    }
+    if (-not $lastSync) {
+        # Still can't tell either way -- do NOT force a sync (and the UAC
+        # prompt that comes with it) just because we're uncertain; this
+        # is common even on a perfectly healthy, recently-synced
+        # machine (see comment above). The router's own live clock-skew
+        # check (config.performance.clock_sync_script) is the real
+        # safety net for an actually-wrong clock.
+        return $false
+    }
+    return ((Get-Date) - $lastSync) -gt (New-TimeSpan -Days 1)
+}
+
 # Position (or minimize) an addon's window per its saved entry in
 # psxhacks-current-positions.ps1, if $ChangeWindowPositions is on. Called
 # from each start_<addon>.ps1, at the end, once the addon's process has

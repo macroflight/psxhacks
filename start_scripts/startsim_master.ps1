@@ -6,6 +6,11 @@ Write-Output "start_scripts version $(Get-StartScriptsVersion)"
 
 Test-PythonRequirement
 
+if (Test-ClockSyncNeeded) {
+    Write-Output "Windows clock hasn't synced in the last 24h, forcing a resync..."
+    & "$PSScriptRoot\sync_clock.ps1"
+}
+
 Write-Output "Starting PSX main server..."
 Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_psx_main_server.ps1"
 

@@ -572,6 +572,11 @@ class Rules():  # pylint: disable=too-many-public-methods
         self.router.routerinfo[routerinfo['uuid']] = routerinfo
         # Add received timestamp
         self.router.routerinfo[routerinfo['uuid']]['received'] = time.time()
+        # This is our own upstream's self-reported ROUTERINFO -- our one
+        # chance to notice a clock skew against it before it's corrected.
+        # See Frankenrouter.maybe_sync_clock_from_upstream_skew().
+        if self.sender is self.router.upstream:
+            self.router.maybe_sync_clock_from_upstream_skew(routerinfo['uuid'])
         # Forward message to network but only to frankenrouters
         return self.myreturn(
             RulesAction.FILTER,

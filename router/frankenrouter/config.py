@@ -291,6 +291,17 @@ class _RouterConfigPerformance:  # pylint: disable=missing-class-docstring,too-f
         if not isinstance(self.clock_skew_critical, float):
             raise RouterConfigError("performance clock_skew_critical must be an float")
 
+        # Local path to start_scripts/sync_clock.ps1 (or an equivalent
+        # script) that forces a Windows clock resync. If set, this router
+        # launches it (fire-and-forget, once per upstream connection) when
+        # it notices its own clock differs from its upstream's by more
+        # than clock_skew_warning -- see
+        # Frankenrouter.maybe_sync_clock_from_upstream_skew(). Empty
+        # (default) disables the feature; only useful on Windows.
+        self.clock_sync_script = data.get('clock_sync_script', '')
+        if not isinstance(self.clock_sync_script, str):
+            raise RouterConfigError("performance clock_sync_script must be a string")
+
 
 _ACCESS_KEYS = {
     'display_name', 'match_ip', 'match_ipv4', 'is_frankenrouter',

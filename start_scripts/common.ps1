@@ -286,6 +286,19 @@ $DelayAfterPsxMainServerStart = 5
 $DelayAfterRouterStart        = 5
 $DelayBetweenAddons           = 0
 
+# Whether sync_clock.ps1 is allowed to do anything. Used both by
+# startsim_master.ps1/startsim_slave.ps1 at startup (via
+# Test-ClockSyncNeeded in functions.ps1, only if the Windows clock
+# hasn't successfully synced in the last 24h) and by the router itself
+# (frankenrouter.py's [performance] clock_sync_script) if it notices a
+# clock skew against its upstream after connecting. Forcing a resync
+# needs an elevated (Administrator) process, so sync_clock.ps1 shows a
+# UAC prompt unless already running elevated. Set to $false in the
+# override file to disable entirely -- sync_clock.ps1 then exits
+# immediately with a "time sync not enabled" message instead of ever
+# prompting for elevation.
+$ClockSyncEnabled = $true
+
 # Human-readable display names for each sim addon key used in window-positioning scripts
 $SimAddonNames = [ordered]@{
     "BACARS"               = "BACARS"

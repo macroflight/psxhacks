@@ -6,6 +6,11 @@ Write-Output "start_scripts version $(Get-StartScriptsVersion)"
 
 Test-PythonRequirement
 
+if (Test-ClockSyncNeeded) {
+    Write-Output "Windows clock hasn't synced in the last 24h, forcing a resync..."
+    & "$PSScriptRoot\sync_clock.ps1"
+}
+
 Write-Output "Starting slave sim router..."
 Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_router_slave.ps1"
 Invoke-WindowPosition "frankenrouter slave"
