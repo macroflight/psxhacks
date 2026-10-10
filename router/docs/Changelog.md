@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-10-08: version 1.13.0
+
+- **New: the master router detects clock skew between routers.** Every
+  FRDP ROUTERINFO already carried the sender's own UTC clock, so no wire
+  protocol change was needed -- only the master router now compares each
+  other router's self-reported clock against its own, correcting for
+  network delay using the measured FRDP PING/PONG round trip time where
+  one is available (i.e. for a directly-connected router; a router more
+  than one hop away falls back to the uncorrected figure). If the skew
+  exceeds `clock_skew_warning` (default 5.0s), a local warning is
+  printed; if it exceeds `clock_skew_critical` (default 30.0s), a
+  critical error is raised and included in ROUTERINFO, visible
+  network-wide. Both limits are configurable in `[performance]`, see
+  `docs/Configuration.md`.
+- Each router's clock skew (as seen by the master) is now also shown in
+  the "Remote ..." status line for that router.
+
 ## 2026-10-07: version 1.12.1
 
 - Update frankenrouter.toml and include in EXE ZIP
