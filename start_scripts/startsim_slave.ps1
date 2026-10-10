@@ -103,6 +103,12 @@ if ($StartCsCdu ) {
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_cs_cdu.ps1"
 }
 
+if ($StartCpflightFsCom ) {
+    AddonDelay
+    Write-Output "Starting CPFlight FS_COM..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_cpflight_fscom.ps1"
+}
+
 if ($StartPsxNetMsfsClient) {
     AddonDelay
     Write-Output "Starting PSX.NET.MSFS.Client..."

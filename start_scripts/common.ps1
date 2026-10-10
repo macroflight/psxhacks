@@ -237,6 +237,7 @@ $StartPsxNetOrchestration = $false
 
 $StartFrankencduproxy = $false
 $StartCsCdu           = $false
+$StartCpflightFsCom   = $false
 $StartPsxSimlinkBridge = $false
 
 # Unlike every other addon above, FrankenControl defaults to enabled: it
@@ -317,6 +318,7 @@ $SimAddonNames = [ordered]@{
     "frankentanker"        = "FrankenTanker"
     "frankenident"         = "FrankenIDENT"
     "frankencduproxy"      = "FrankenCDU Proxy"
+    "CPFlight FS_COM"       = "CPFlight MCP/EFIS"
     "frankenprint"         = "FrankenPrinter"
     "frankenpush"          = "FrankenPush"
     "frankencontrol"       = "FrankenControl"
@@ -337,8 +339,8 @@ $SimAddonNames = [ordered]@{
 # e.g. a version number) -- a version number itself can be matched with a
 # wildcard, e.g. 'BACARS v\d+\.\d+', once/if a real format is known.
 #
-# BACARS, CS CDU, and psx_simlink_bridge have no entry -- their real
-# window title isn't confirmed yet.
+# BACARS, CS CDU, CPFlight FS_COM, and psx_simlink_bridge have no entry
+# -- their real window title isn't confirmed yet.
 #
 # Note: SRSL-PSX master and slave share the exact same title text, so
 # when both are running at once (a normal shared-cockpit setup) neither
@@ -629,6 +631,20 @@ if ($StartCsCdu) {
         Show-ErrorAndExit "`$CsCduExe not found: $CsCduExe`nEdit $OverrideFile and set `$CsCduExe to the path of your CS CDU Bridge (CockpitSimulator) .exe."
     } elseif ([System.IO.Path]::GetExtension($CsCduExe) -ne ".exe") {
         Show-ErrorAndExit "`$CsCduExe is not an .exe file: $CsCduExe`nEdit $OverrideFile and set `$CsCduExe to the path of your CS CDU Bridge (CockpitSimulator) .exe."
+    }
+}
+
+# $CpflightFsComDir has no default - it must be set in the override file
+# (see psxhacks-start-override-EXAMPLE.ps1) and point at a real
+# FS_COM_PSX_747 (CPFlight MCP/EFIS driver) installation, but only if it
+# is actually enabled.
+if ($StartCpflightFsCom) {
+    if ([string]::IsNullOrWhiteSpace($CpflightFsComDir)) {
+        Show-ErrorAndExit "`$StartCpflightFsCom is `$true but `$CpflightFsComDir is not set.`nEdit $OverrideFile and set `$CpflightFsComDir to your CPFlight FS_COM_PSX_747 installation directory."
+    } elseif (-not (Test-Path $CpflightFsComDir -PathType Container)) {
+        Show-ErrorAndExit "`$CpflightFsComDir not found: $CpflightFsComDir`nEdit $OverrideFile and set `$CpflightFsComDir to your CPFlight FS_COM_PSX_747 installation directory."
+    } elseif (-not (Test-Path (Join-Path $CpflightFsComDir "FS_COM_PSX_747.EXE"))) {
+        Show-ErrorAndExit "`$CpflightFsComDir does not look like a CPFlight FS_COM_PSX_747 installation (no FS_COM_PSX_747.EXE found): $CpflightFsComDir`nEdit $OverrideFile and set `$CpflightFsComDir to your CPFlight FS_COM_PSX_747 installation directory."
     }
 }
 

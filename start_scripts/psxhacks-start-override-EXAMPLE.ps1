@@ -332,6 +332,19 @@
 
 
 # ---------------------------------------------------------------------------
+# CPFlight FS_COM settings (CPFlight MCP/EFIS driver)
+# $CpflightFsComDir has no default in common.ps1 - it is REQUIRED if
+# $StartCpflightFsCom is $true (checked at startup: must point at a
+# directory containing FS_COM_PSX_747.EXE). Both lines below are
+# commented out since the default is not to start it. To enable it:
+# uncomment BOTH lines below AND edit $CpflightFsComDir to the actual
+# path of your CPFlight FS_COM_PSX_747 installation.
+# ---------------------------------------------------------------------------
+#$StartCpflightFsCom = $true   # CPFlight MCP/EFIS hardware driver
+#$CpflightFsComDir    = "$SimBase\hw\cpflight_mcp"
+
+
+# ---------------------------------------------------------------------------
 # psx_simlink_bridge settings
 # Download: https://aerowinx.com/board/index.php/topic,8010.msg86285.html#msg86285
 # $PsxSimlinkBridgeExe has no default in common.ps1 - it is REQUIRED if
