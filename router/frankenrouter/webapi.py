@@ -179,6 +179,7 @@ _UTILS_PAGE = (
     '<button class="btn btn-gray">HAFAP(CPDLC) reset</button></form>\n'
     '{global_bang_button}'
     '{reset_clients_link}'
+    '{load_marker_pause_link}'
     '</body>\n</html>\n'
 )
 
@@ -250,6 +251,58 @@ _RESET_CLIENTS_SENT_SECTION = (
     '</div>\n'
     '<div class="btn-row">\n'
     '<a href="/utils/reset_clients" class="btn btn-gray">Back to list</a>\n'
+    '</div>\n'
+)
+
+_LOAD_MARKER_PAUSE_PAGE = (
+    '<!DOCTYPE html>\n<html>\n<head>\n'
+    '<meta name="color-scheme" content="{rest_api_color_scheme}" />\n' +
+    _COMMON_CSS +
+    '\n</head>\n<body>\n'
+    '<div class="page-title">'
+    '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
+    '<h1>Load marker pause</h1>'
+    '<div style="margin-left:auto">'
+    '<a href="/utils" class="btn btn-gray btn-sm">Back</a>'
+    '</div>'
+    '</div>\n'
+    '<div class="card">\n'
+    '<p style="margin:0">Experimental, unproven mitigation for a PSX Main '
+    'Client occasionally ending up with diverged state (wrong engine/gear/'
+    'LNAV state, stuck attitude, ...) after a situ load or a fresh connect. '
+    'When enabled, this router pauses briefly, both right before and right '
+    'after sending each load1/load2/load3 marker to a real PSX Main Client '
+    'or Server, restoring some of the small natural gap a live PSX Main '
+    'Server would have. This setting is shared network-wide: changing it '
+    'here broadcasts the new value to every connected slave sim.</p>\n'
+    '</div>\n'
+    '{result_section}'
+    '<form method="post" action="/api/utils/load_marker_pause">\n'
+    '<label class="toggle-row">'
+    '<span class="toggle-switch">'
+    '<input type="checkbox" name="enabled" value="1"{enabled_checked}>'
+    '<span class="toggle-track"></span>'
+    '</span>'
+    '<span>Enabled</span>'
+    '</label>\n'
+    '<label for="load_marker_pause_delay">Pause duration (seconds)</label>\n'
+    '<input type="text" id="load_marker_pause_delay" name="delay" value="{delay}">\n'
+    '<div class="btn-row">\n'
+    '<button type="submit" class="btn btn-green">Save</button>\n'
+    '</div>\n'
+    '</form>\n'
+    '</body>\n</html>\n'
+)
+
+_LOAD_MARKER_PAUSE_SAVED_SECTION = (
+    '<div class="card ok">\n'
+    '<p style="margin:0">Saved and broadcast to the network.</p>\n'
+    '</div>\n'
+)
+
+_LOAD_MARKER_PAUSE_ERROR_SECTION = (
+    '<div class="card warn">\n'
+    '<p style="margin:0">{message}</p>\n'
     '</div>\n'
 )
 
@@ -2609,13 +2662,19 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     '<a href="/utils/reset_clients" class="btn btn-gray">Reset clients</a>\n'
                     if router.config.identity.type == 'slave' else ''
                 )
+                load_marker_pause_link = (
+                    '<a href="/utils/load_marker_pause" class="btn btn-gray">'
+                    'Load marker pause (experimental)</a>\n'
+                    if router.config.identity.type == 'master' else ''
+                )
                 return web.Response(
                     text=_UTILS_PAGE.format(
                         rest_api_color_scheme=cs,
                         towing_direction=tow_dir,
                         sims_link=sims_link,
                         reset_clients_link=reset_clients_link,
-                        global_bang_button=global_bang_button),
+                        global_bang_button=global_bang_button,
+                        load_marker_pause_link=load_marker_pause_link),
                     content_type='text/html')
 
             @routes.get('/utils/events')
@@ -2845,6 +2904,75 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                         list_section='',
                         result_section=_RESET_CLIENTS_SENT_SECTION.format(count=len(targets)),
                     ),
+                    content_type='text/html')
+
+            @routes.get('/utils/load_marker_pause')
+            async def handle_load_marker_pause_get(_):
+                # Master-router-only (enforced here too, not just by hiding
+                # the link on /utils): this router is the only one that can
+                # change the network-wide setting, see
+                # send_frdp_sharedinfo()/handle_addon_frankenrouter_sharedinfo().
+                if router.config.identity.type != 'master':
+                    raise web.HTTPFound('/utils')
+                cs = router.config.listen.rest_api_color_scheme
+                return web.Response(
+                    text=_LOAD_MARKER_PAUSE_PAGE.format(
+                        rest_api_color_scheme=cs,
+                        result_section='',
+                        enabled_checked=' checked' if router.load_marker_pause_enabled else '',
+                        delay=f"{router.load_marker_pause_delay:.3f}"),
+                    content_type='text/html')
+
+            @routes.post('/api/utils/load_marker_pause')
+            async def handle_load_marker_pause_post(request):
+                # Master-router-only, see handle_load_marker_pause_get().
+                if router.config.identity.type != 'master':
+                    raise web.HTTPFound('/utils')
+                cs = router.config.listen.rest_api_color_scheme
+                post = await request.post()
+                enabled = post.get('enabled') == '1'
+                raw_delay = post.get('delay', '')
+                try:
+                    delay = float(raw_delay)
+                except (TypeError, ValueError):
+                    delay = -1.0
+                if delay < 0:
+                    return web.Response(
+                        text=_LOAD_MARKER_PAUSE_PAGE.format(
+                            rest_api_color_scheme=cs,
+                            result_section=_LOAD_MARKER_PAUSE_ERROR_SECTION.format(
+                                message="Pause duration must be a non-negative number "
+                                        "of seconds"),
+                            enabled_checked=' checked' if enabled else '',
+                            delay=html.escape(raw_delay)),
+                        content_type='text/html', status=400)
+
+                prev_enabled = router.load_marker_pause_enabled
+                prev_delay = router.load_marker_pause_delay
+                router.load_marker_pause_enabled = enabled
+                router.load_marker_pause_delay = delay
+                if (enabled, delay) != (prev_enabled, prev_delay):
+                    router.logger.info(
+                        "API: load_marker_pause changed: enabled=%s delay=%.3f "
+                        "(was enabled=%s delay=%.3f)",
+                        enabled, delay, prev_enabled, prev_delay)
+                    if enabled != prev_enabled:
+                        router.record_sim_event(
+                            'sharedinfo_change', field='load_marker_pause_enabled',
+                            value=enabled, prev=prev_enabled, reason='changed via /utils')
+                    if delay != prev_delay:
+                        router.record_sim_event(
+                            'sharedinfo_change', field='load_marker_pause_delay',
+                            value=delay, prev=prev_delay, reason='changed via /utils')
+                    # Broadcast the new state to the network now rather
+                    # than waiting for the next periodic SHAREDINFO send.
+                    router.frdp_sharedinfo_requested = True
+                return web.Response(
+                    text=_LOAD_MARKER_PAUSE_PAGE.format(
+                        rest_api_color_scheme=cs,
+                        result_section=_LOAD_MARKER_PAUSE_SAVED_SECTION,
+                        enabled_checked=' checked' if enabled else '',
+                        delay=f"{delay:.3f}"),
                     content_type='text/html')
 
             @routes.get('/services')

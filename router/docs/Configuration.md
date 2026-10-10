@@ -504,6 +504,40 @@ need to change any of these settings.
   the script itself, which self-elevates via UAC and has its own
   `$ClockSyncEnabled` opt-out.
 
+- `load_marker_pause_enabled` / `load_marker_pause_delay`: experimental,
+  unproven mitigation for a PSX Main Client occasionally ending up with
+  diverged internal state (wrong engine/gear/LNAV state, stuck
+  attitude, ...) after a situ load or a fresh connect. When enabled,
+  the router pauses for `load_marker_pause_delay` seconds, both right
+  before and right after sending/forwarding each of
+  `load1`/`load2`/`load3` to downstream clients, after first flushing
+  any writes already batched for throughput (see
+  `Frankenrouter._pause_for_load_marker()`). One theory is that the
+  router's own write batching can deliver `load1` and the burst of new
+  state right behind it with none of the small natural gap a live PSX
+  Main Server would have, leaving the client no time to act on `load1`
+  (pause the sim) before new data arrives -- A/B testing could not
+  reliably reproduce the original problem even with the pause
+  disabled, so treat this as likely to help but not proven. Only
+  applied for non-frankenrouter connections (a real PSX Main Client, or
+  a real PSX Main Server upstream) -- a frankenrouter child applies its
+  own pause when it relays further downstream, so pausing for it here
+  too would just stack latency across hops.
+
+  This is a live, network-wide setting, not a fixed per-router value:
+  these two config options are only ever read as the *initial*
+  on-connect state of a `master` router; from then on the current
+  enabled/delay is distributed to every connected router over FRDP
+  SHAREDINFO, and can only be changed live from a `master` router's own
+  `/utils` &rarr; "Load marker pause" web page. A `slave` router's copy
+  of these two options is ignored -- it only ever learns the current
+  state from an incoming SHAREDINFO message. It can only ever be
+  enabled on a `master` or `slave` router; a `standalone` router has no
+  other router to synchronize with and refuses to start if
+  `load_marker_pause_enabled = true` is set in its config.
+  Default: `load_marker_pause_enabled = false`,
+  `load_marker_pause_delay = 0.1`.
+
 Example:
 
 ```text

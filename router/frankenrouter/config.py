@@ -235,7 +235,7 @@ class _RouterConfigFiltering:  # pylint: disable=missing-class-docstring,too-few
 
 
 class _RouterConfigPerformance:  # pylint: disable=missing-class-docstring,too-few-public-methods,too-many-instance-attributes
-    def __init__(self, data):
+    def __init__(self, data):  # pylint: disable=too-many-branches
         self.write_buffer_critical_limit = data.get('write_buffer_critical_limit', 100000)
         if not isinstance(self.write_buffer_critical_limit, int):
             raise RouterConfigError("performance write_buffer_critical_limit must be an integer")
@@ -301,6 +301,51 @@ class _RouterConfigPerformance:  # pylint: disable=missing-class-docstring,too-f
         self.clock_sync_script = data.get('clock_sync_script', '')
         if not isinstance(self.clock_sync_script, str):
             raise RouterConfigError("performance clock_sync_script must be a string")
+
+        # Experimental: pause briefly, both right before and right after
+        # forwarding/sending each of load1/load2/load3 to downstream
+        # clients, after first flushing any buffered writes so the
+        # marker (and everything batched around it) has actually
+        # reached the wire -- see Frankenrouter._pause_for_load_marker()
+        # and client_add_to_network(). Investigation found that a PSX
+        # Main Client occasionally ends up with diverged internal state
+        # (wrong engine/gear/LNAV state, stuck attitude, ...) after a
+        # situ load or a fresh connect; one theory is that the router's
+        # own write batching (several lines coalesced into one
+        # writer.write() for throughput) can deliver load1 and the
+        # burst of new state right behind it with none of the small
+        # natural gap a live PSX Main Server would have, leaving the
+        # client's own pause/reload logic no time to act before new
+        # data arrives. This is a candidate mitigation for that theory,
+        # not a confirmed fix -- later A/B testing could not reliably
+        # reproduce the original problem even with the pause disabled.
+        # Only applied for non-frankenrouter connections (a real PSX
+        # Main Client, or a real PSX Main Server upstream) -- a
+        # frankenrouter child isn't a flight simulator and will apply
+        # its own pause when it relays further downstream, so pausing
+        # for it here too would just stack latency across hops for no
+        # benefit.
+        #
+        # Still unproven and off by default. These two options are only
+        # ever read as the *initial* on-connect state of a 'master'
+        # router (see RouterConfig.__init__'s identity.type cross-check
+        # below, and Frankenrouter.__init__): from then on the feature is
+        # a live, network-wide setting distributed via FRDP SHAREDINFO,
+        # changeable at runtime only from a 'master' router's own
+        # /utils/load_marker_pause web page (see webapi.py). A 'slave'
+        # router's copy of these two config options is ignored -- it
+        # only ever gets the current enabled/delay from an incoming
+        # SHAREDINFO message. It can only ever be enabled on a 'master'
+        # or 'slave' router; a 'standalone' router has no other router
+        # to synchronize with and can never turn it on.
+        self.load_marker_pause_enabled = data.get('load_marker_pause_enabled', False)
+        if not isinstance(self.load_marker_pause_enabled, bool):
+            raise RouterConfigError(
+                "performance load_marker_pause_enabled must be true or false")
+
+        self.load_marker_pause_delay = data.get('load_marker_pause_delay', 0.1)
+        if not isinstance(self.load_marker_pause_delay, float):
+            raise RouterConfigError("performance load_marker_pause_delay must be a float")
 
 
 _ACCESS_KEYS = {
@@ -421,6 +466,14 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
         self.log = _RouterConfigLog(config.get('log', {}))
         self.psx = _RouterConfigPsx(config.get('psx', {}))
         self.performance = _RouterConfigPerformance(config.get('performance', {}))
+        if (
+                self.performance.load_marker_pause_enabled and
+                self.identity.type not in ('master', 'slave')
+        ):
+            raise RouterConfigError(
+                "performance.load_marker_pause_enabled can only be set for "
+                "identity.type 'master' or 'slave' -- a standalone router has "
+                "no other router to synchronize with")
         self.sharedinfo = _RouterConfigSharedinfo(config.get('sharedinfo', {}))
         if self.sharedinfo.deprecated_keys_present:
             self.logger.warning(
@@ -611,6 +664,33 @@ password = 'PW_MATS'
         self.assertEqual(conf.psx.gps_spoofing_egress, True)
         with self.assertRaises(RouterConfigError):
             RouterConfig(config_data="[psx]\ngps_spoofing_egress = 'yes'\n")
+
+    def test_load_marker_pause(self):
+        """load_marker_pause_enabled defaults to off; can be enabled for master/slave only."""
+        conf = RouterConfig(config_data="")
+        self.assertEqual(conf.performance.load_marker_pause_enabled, False)
+        self.assertEqual(conf.performance.load_marker_pause_delay, 0.1)
+        conf = RouterConfig(config_data=(
+            "[identity]\ntype = 'master'\n"
+            "[performance]\nload_marker_pause_enabled = true\n"
+            "load_marker_pause_delay = 0.25\n"))
+        self.assertEqual(conf.performance.load_marker_pause_enabled, True)
+        self.assertEqual(conf.performance.load_marker_pause_delay, 0.25)
+        conf = RouterConfig(config_data=(
+            "[identity]\ntype = 'slave'\n"
+            "[performance]\nload_marker_pause_enabled = true\n"))
+        self.assertEqual(conf.performance.load_marker_pause_enabled, True)
+        with self.assertRaises(RouterConfigError):
+            RouterConfig(config_data="[performance]\nload_marker_pause_enabled = 'yes'\n")
+        with self.assertRaises(RouterConfigError):
+            RouterConfig(config_data="[performance]\nload_marker_pause_delay = 1\n")
+
+    def test_load_marker_pause_rejected_for_standalone(self):
+        """A standalone router has no other router to synchronize with."""
+        with self.assertRaises(RouterConfigError):
+            RouterConfig(config_data=(
+                "[identity]\ntype = 'standalone'\n"
+                "[performance]\nload_marker_pause_enabled = true\n"))
 
     def test_jettison_resync_fix(self):
         """jettison_resync_fix defaults to on and can be disabled in [psx]."""

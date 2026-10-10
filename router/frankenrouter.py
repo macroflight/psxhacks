@@ -392,6 +392,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.filter_traffic = True
         self.filter_elevation = True
 
+        # Experimental load_marker_pause feature state (see
+        # config.performance.load_marker_pause_enabled/_delay and
+        # _pause_for_load_marker()). Safe default; actually seeded from
+        # config once it is loaded, in main() -- see the comment there.
+        self.load_marker_pause_enabled = False
+        self.load_marker_pause_delay = 0.1
+
         # Keep track of our Qs121 keepalive
         self.qs121_keepalive_last_warning = 0.0
         self.qs121_keepalive_flip = False
@@ -1006,8 +1013,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         await send_if_unsent(key)
 
             # This pauses the client. We use drain here to make sure this
-            # is not delayed by buffering.
+            # is not delayed by buffering. See _pause_for_load_marker()
+            # for why we also pause briefly around it.
+            await self._pause_for_load_marker()
             await send_line("load1", drain=True)
+            await self._pause_for_load_marker()
 
         # Send "start" upstream
         self.logger.debug("Sending start upstream to get fresh data for client")
@@ -1050,7 +1060,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             await send_if_unsent(keyword)
 
         if not bang_reply:
+            await self._pause_for_load_marker()
             await send_line("load2", drain=True)
+            await self._pause_for_load_marker()
 
         for prefix in [
                 "Qi",
@@ -1062,7 +1074,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     await send_if_unsent(key)
 
         if not bang_reply:
+            await self._pause_for_load_marker()
             await send_line("load3", drain=True)
+            await self._pause_for_load_marker()
             await send_if_unsent("metar", drain=True)
             # Identify ourselves to the client (in case it's another
             # frankenrouter)
@@ -1308,6 +1322,60 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.info("Connection %s shut down", this_client.peername)
             return
         # END OF handle_new_connection_cb
+
+    async def _pause_for_load_marker(self):
+        """Flush every connection's pending write buffer, then pause briefly.
+
+        Called both right before and right after forwarding/sending a
+        load1/load2/load3 line to clients -- once from
+        client_add_to_network()'s welcome/reset sequence (around each
+        of its three drain=True send_line("loadN") calls) and once
+        from handle_message()'s generic RulesAction.NORMAL branch
+        (around a load1/load2/load3 line forwarded from a live situ
+        load on the real PSX Main Server).
+
+        Normal traffic is deliberately batched into as few
+        writer.write() calls as possible for throughput (see
+        forwarder_task()'s "burst batching" comment) -- but that
+        batching can squash the small, natural inter-line gaps a live
+        PSX Main Server would have right down to zero, delivering
+        load1 and the whole burst of new state right behind it in one
+        write() with no gap at all for the receiving client to act on
+        load1 (pause the sim) before new data arrives, or for load2/
+        load3 to "land" before the next burst starts. Explicitly
+        flushing here, so everything batched so far actually reaches
+        the wire now rather than whenever the rest of the in-flight
+        batch happens to finish, and then pausing, restores some of
+        that natural spacing -- at the cost of the situ load/welcome
+        taking a little longer overall. In client_add_to_network()'s
+        case the marker itself is already sent with drain=True (so
+        already flushed immediately regardless), but other clients'
+        batched writes still benefit from the explicit flush here.
+
+        Only non-frankenrouter connections (a real PSX Main Client, or
+        a real PSX Main Server upstream) are flushed/paused for: a
+        frankenrouter child isn't itself a flight simulator and doesn't
+        need this gap, and it will apply its own pause when it, in
+        turn, relays to its own real endpoints -- pausing here too
+        would just stack extra latency on every hop in a multi-router
+        chain for no benefit. If every current connection is itself a
+        frankenrouter, there is nothing to pause for at all.
+
+        self.load_marker_pause_enabled=False (the default) disables this
+        entirely (and skips the flush, which is otherwise harmless but
+        pointless).
+        """
+        if not self.load_marker_pause_enabled:
+            return
+        plain_clients = [c for c in self.clients.values() if not c.is_frankenrouter]
+        plain_upstream = self.is_upstream_connected() and not self.upstream.is_frankenrouter
+        if not plain_clients and not plain_upstream:
+            return
+        for client in plain_clients:
+            client.flush_write_buffer()
+        if plain_upstream:
+            self.upstream.flush_write_buffer()
+        await asyncio.sleep(self.load_marker_pause_delay)
 
     async def client_broadcast(
             self, line, exclude=None, include=None,
@@ -2224,6 +2292,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             "elevation_source_simulator": self.sharedinfo["elevation_source_simulator"],
             "traffic_source_simulator": self.sharedinfo["traffic_source_simulator"],
             "errors": self.get_errors(),
+            "load_marker_pause_enabled": self.load_marker_pause_enabled,
+            "load_marker_pause_delay": self.load_marker_pause_delay,
         }
         payload_json = json.dumps(payload)
         # Store our own sharedinfo so we have all the data in the same place
@@ -3420,16 +3490,25 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             # the same idiom).
             self.connection_state_changed()
         elif code == RulesCode.LOAD1:
-            self.logger.info("Got load1 message from %s", sender_hr)
+            self.logger.info(
+                "Got load1 message from %s "
+                "(load_marker_pause_enabled=%s, load_marker_pause_delay=%.3f)",
+                sender_hr, self.load_marker_pause_enabled, self.load_marker_pause_delay)
             self._mcp_window_pending.clear()
             if not sender.upstream and not sender.is_frankenrouter:
                 self.record_sim_event('load1', source=sender.display_name)
         elif code == RulesCode.LOAD2:
-            self.logger.info("Got load2 message from %s", sender_hr)
+            self.logger.info(
+                "Got load2 message from %s "
+                "(load_marker_pause_enabled=%s, load_marker_pause_delay=%.3f)",
+                sender_hr, self.load_marker_pause_enabled, self.load_marker_pause_delay)
             if not sender.upstream and not sender.is_frankenrouter:
                 self.record_sim_event('load2', source=sender.display_name)
         elif code == RulesCode.LOAD3:
-            self.logger.info("Got load3 message from %s", sender_hr)
+            self.logger.info(
+                "Got load3 message from %s "
+                "(load_marker_pause_enabled=%s, load_marker_pause_delay=%.3f)",
+                sender_hr, self.load_marker_pause_enabled, self.load_marker_pause_delay)
             if sender.upstream and not self.upstream_ever_welcomed:
                 self.upstream_ever_welcomed = True
                 self.logger.info("Upstream welcome complete; client listener may start")
@@ -3646,6 +3725,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             await self.send_to_upstream(line, sender.peername)
         elif action == RulesAction.NORMAL:
             self.logger.debug("sending normally: %s", line)
+            is_load_marker = code in (RulesCode.LOAD1, RulesCode.LOAD2, RulesCode.LOAD3)
+            if is_load_marker:
+                await self._pause_for_load_marker()
             if sender.upstream:
                 if line.startswith('Qs121='):
                     await self._broadcast_qs121_with_spoofing(line.split('=', 1)[1])
@@ -3656,6 +3738,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.send_to_upstream(line, sender.peername),
                     self.client_broadcast(line, exclude=[sender.peername]),
                 )
+            if is_load_marker:
+                await self._pause_for_load_marker()
 
         elif action == RulesAction.FILTER:
             # There are several different types of filtering:
@@ -4077,6 +4161,17 @@ shared cockpit master sim.
         if self.config.identity.type in ('master', 'standalone'):
             self.filter_elevation = False
             self.filter_traffic = False
+
+        # Experimental load_marker_pause feature: only a 'master' router
+        # gets its initial on/off+delay from config -- a 'slave' router
+        # always boots with it off and only ever learns the current
+        # network-wide state from an incoming FRDP SHAREDINFO message
+        # (see handle_addon_frankenrouter_sharedinfo() in rules.py); a
+        # 'standalone' router can never have it enabled at all (enforced
+        # in RouterConfig's identity.type cross-check at load time).
+        if self.config.identity.type == 'master':
+            self.load_marker_pause_enabled = self.config.performance.load_marker_pause_enabled
+            self.load_marker_pause_delay = self.config.performance.load_marker_pause_delay
 
         # Get information from Variables.txt
         self.variables = variables.Variables(self.config, vfilepath=self.config.psx.variables)

@@ -687,6 +687,19 @@ class Rules():  # pylint: disable=too-many-public-methods
                 self.router.status_display_requested = True
                 self.router.frdp_routerinfo_requested = True
 
+            # Apply the experimental load_marker_pause feature's current
+            # network-wide state (see config.performance.load_marker_pause_enabled/
+            # _delay and Frankenrouter._pause_for_load_marker()). Only a
+            # 'master' router ever includes these fields (see
+            # send_frdp_sharedinfo()), so a 'slave' router simply mirrors
+            # whatever it was last told; absent fields (e.g. during a
+            # rolling upgrade against an older master) leave our current
+            # value untouched.
+            if 'load_marker_pause_enabled' in sharedinfo:
+                self.router.load_marker_pause_enabled = sharedinfo['load_marker_pause_enabled']
+            if 'load_marker_pause_delay' in sharedinfo:
+                self.router.load_marker_pause_delay = sharedinfo['load_marker_pause_delay']
+
         # Forward message to network but only to frankenrouters
         return self.myreturn(
             RulesAction.FILTER,
@@ -1735,6 +1748,8 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             self.config = TestRules.DummyConfig()
             self.observer_mode = False
             self.sharedinfo = {"pilot_flying_simulator": "NO_CONTROL_LOCKS"}
+            self.load_marker_pause_enabled = False
+            self.load_marker_pause_delay = 0.1
 
         def is_upstream_connected(self):
             """Return dummy value."""
@@ -2075,6 +2090,33 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         # would defeat the point (FRDP-ping traffic, router-to-router-only
         # behaviors like PTT/audio cross-sim filtering, etc.).
         self.assertFalse(testpeer.is_frankenrouter)
+
+    def test_frdp_sharedinfo_load_marker_pause(self):
+        """A slave applies load_marker_pause fields from an incoming SHAREDINFO."""
+        router = self.DummyFrankenrouter()
+        router.config.identity.type = 'slave'
+        rules = Rules(router)
+        sender = self.DummyUpstreamConnection()
+        sender.is_frankenrouter = True
+
+        payload = json.dumps({
+            'master_uuid': 'some-uuid',
+            'load_marker_pause_enabled': True,
+            'load_marker_pause_delay': 0.25,
+        })
+        (_, code, *_) = rules.route(
+            f"addon=FRANKENROUTER:1:SHAREDINFO:{payload}", sender)
+        self.assertEqual(code, RulesCode.KEYVALUE_FILTER_EGRESS)
+        self.assertTrue(router.load_marker_pause_enabled)
+        self.assertEqual(router.load_marker_pause_delay, 0.25)
+
+        # A SHAREDINFO message omitting the fields (e.g. from an older
+        # master during a rolling upgrade) leaves our current value alone.
+        payload = json.dumps({'master_uuid': 'some-uuid'})
+        (_, code, *_) = rules.route(
+            f"addon=FRANKENROUTER:1:SHAREDINFO:{payload}", sender)
+        self.assertTrue(router.load_marker_pause_enabled)
+        self.assertEqual(router.load_marker_pause_delay, 0.25)
 
     def test_frdp_master_bang(self):
         """Test the FRDP MASTER_BANG message, who it applies to."""

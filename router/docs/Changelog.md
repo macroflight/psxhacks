@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-10-09: version 1.16.0
+
+- **New: `[performance] load_marker_pause_enabled` / `load_marker_pause_delay`**
+  (default off, 0.1s), a candidate mitigation for this session's
+  situ-load/connect state-divergence investigation -- **likely to
+  help, but not proven**; later, more careful A/B testing could not
+  reliably reproduce the original problem even with the pause
+  disabled, so the mechanism remains a theory, not a confirmed fix, and
+  is treated as experimental: off by default, and only a `master` or
+  `slave` router can ever turn it on (a `standalone` router has no
+  other router to synchronize with and refuses to start if it's
+  enabled in its config). It's a live, network-wide setting rather than
+  a fixed per-router value: only a `master` router reads these two
+  config options, as its initial on-connect state; from then on the
+  current enabled/delay is distributed to every router over FRDP
+  SHAREDINFO, and can only be changed live from a `master` router's own
+  new `/utils` &rarr; "Load marker pause" web page -- a `slave` router's
+  own copy of the config options is ignored. When enabled, pauses
+  briefly both right before and right after sending/forwarding each of
+  `load1`/`load2`/`load3` to downstream clients, flushing any writes
+  already batched for throughput first so the pause is real on the
+  wire, not just in the router's own processing -- see
+  `Frankenrouter._pause_for_load_marker()`. Theory: the router's "burst
+  batching" (coalescing many lines into one `writer.write()` for
+  throughput) could deliver `load1` and the burst of new state right
+  behind it with none of the small natural gap a live PSX Main Server
+  would have, leaving a PSX Main Client no time to act on `load1`
+  (pause the sim) before new data arrived. The "Reset clients" button
+  (version 1.14.0) stays as a manual recovery option for corner cases
+  (e.g. a plain reconnect) this does not cover.
+
 ## 2026-10-09: version 1.15.0
 
 - **Default clock skew limits raised**: `clock_skew_warning` 5.0 -> 30.0s,
