@@ -457,10 +457,13 @@ class Rules():  # pylint: disable=too-many-public-methods
 
         For a visual indicator, we use Qs421="FreeMsgM"; Mode=ECON; Min=0; Max=16;
 
+        The message is wrapped in parentheses so it can be told apart from a
+        real 747 EICAS message at a glance.
+
         e.g
-        Qs421=PF: MACRO
-        Qs421=PF: ALL
-        Qs421=PF: NONE
+        Qs421=(PF: MACRO)
+        Qs421=(PF: ALL)
+        Qs421=(PF: NONE)
         """
         prev = self.router.sharedinfo['pilot_flying_simulator']
         # Update sharedinfo
@@ -469,12 +472,13 @@ class Rules():  # pylint: disable=too-many-public-methods
             message = "Qs421="
         elif payload == 'ALL_CONTROL_LOCKS':
             self.router.sharedinfo['pilot_flying_simulator'] = "ALL_CONTROL_LOCKS"
-            message = "Qs421=PF: NOONE"
+            message = "Qs421=(PF: NOONE)"
         else:
             self.router.sharedinfo['pilot_flying_simulator'] = payload
-            # We limit the length of the sim identifier so it fits on EICAS
-            ident = self.router.sharedinfo['pilot_flying_simulator'][:11].upper()
-            message = f"Qs421=PF: {ident}"
+            # We limit the length of the sim identifier so the parenthesized
+            # message still fits within Qs421's 16-character limit.
+            ident = self.router.sharedinfo['pilot_flying_simulator'][:10].upper()
+            message = f"Qs421=(PF: {ident})"
         self.router.frdp_sharedinfo_requested = True
         new_val = self.router.sharedinfo['pilot_flying_simulator']
         if self.router.is_sharedinfo_authority() and new_val != prev:
