@@ -542,9 +542,17 @@
 # Anything here is launched as-is (Start-Process) at the end of
 # startsim_slave.ps1 - use this for simple apps that don't need their own
 # restart script (no config file editing, no repo/PYTHONPATH handling).
+# Each entry is a full command line, not just an executable path - add
+# arguments after the executable, e.g. to run a Python script. Quote any
+# part that contains spaces (e.g. the executable path itself), exactly as
+# you would on a Windows command line.
 # Defaults to an empty list in common.ps1.
 # ---------------------------------------------------------------------------
-#$NonscriptedApps = @("C:\fs\some_tool\some_tool.exe", "notepad.exe")
+#$NonscriptedApps = @(
+#    "C:\fs\some_tool\some_tool.exe",
+#    "notepad.exe",
+#    "C:\fs\python\psxhacks-1\Scripts\python.exe D:\FS\psx\python\psx-cockpit\rcp\psx-rcp.py"
+#)
 
 
 # ---------------------------------------------------------------------------

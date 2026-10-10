@@ -360,8 +360,10 @@ $KnownWindowTitlePatterns = @{
 
 
 # Apps launched as-is during sim startup (no custom start script
-# needed).  Override $NonscriptedApps in the override file to replace
-# this list entirely.
+# needed). Each entry is a full command line (executable plus any
+# arguments), not just an executable path - see Split-CommandLine in
+# functions.ps1. Override $NonscriptedApps in the override file to
+# replace this list entirely.
 $NonscriptedApps = @()
 
 # $OverrideFile's existence was already verified above (Show-ErrorAndExit

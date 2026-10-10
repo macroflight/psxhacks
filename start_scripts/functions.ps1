@@ -78,11 +78,63 @@ function AddonDelay {
     }
 }
 
+# Split a single $NonscriptedApps entry into an executable path and its
+# arguments (if any). An entry can be just an executable
+# ("notepad.exe") or a full command line ("C:\...\python.exe
+# D:\...\script.py --flag") - quote any part that itself contains
+# spaces (e.g. the executable path), exactly as you would on a Windows
+# command line.
+function Split-CommandLine {
+    param([string]$CommandLine)
+    $tokenMatches = [regex]::Matches($CommandLine, '"[^"]*"|\S+')
+    $values = @($tokenMatches | ForEach-Object { $_.Value.Trim('"') })
+    # The leading "," suppresses PowerShell's usual pipeline-output
+    # enumeration, which would otherwise unwrap a single-token result
+    # (e.g. "notepad.exe", no arguments) from a 1-element array back
+    # into a plain string at the caller -- silently breaking $values[0]
+    # into a single-character index into that string instead.
+    return ,$values
+}
+
 function start_nonscripted_apps {
     foreach ($app in $NonscriptedApps) {
         AddonDelay
-        Write-Output "Starting $app..."
-        Start-Process $app
+        $tokens = Split-CommandLine $app
+        $exePath = $tokens[0]
+        $arguments = @()
+        if ($tokens.Count -gt 1) {
+            $arguments = $tokens[1..($tokens.Count - 1)]
+        }
+        Write-Output "Starting non-scripted app: $exePath"
+        if ($arguments.Count -gt 0) {
+            Write-Output "  Arguments: $($arguments -join ' ')"
+        }
+        if (-not (Test-Path -LiteralPath $exePath)) {
+            Write-Warning "  Executable not found, skipping: $exePath"
+            continue
+        }
+        try {
+            if ($arguments.Count -gt 0) {
+                $proc = Start-Process -FilePath $exePath -ArgumentList $arguments -PassThru -ErrorAction Stop
+            } else {
+                $proc = Start-Process -FilePath $exePath -PassThru -ErrorAction Stop
+            }
+        } catch {
+            Write-Warning "  FAILED to start: $($_.Exception.Message)"
+            continue
+        }
+        # Start-Process returns as soon as the OS has launched the
+        # process, before we know if it actually survives - a brief
+        # pause lets us catch (and report) a near-instant crash (e.g.
+        # from a missing DLL or a bad argument) instead of silently
+        # reporting success for a process that is already gone. This
+        # will not catch a slower startup failure.
+        Start-Sleep -Milliseconds 500
+        if ($proc.HasExited) {
+            Write-Warning "  Exited immediately with exit code $($proc.ExitCode) - it may have failed to start"
+        } else {
+            Write-Output "  Started OK, PID $($proc.Id)"
+        }
     }
 }
 
