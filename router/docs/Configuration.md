@@ -503,6 +503,27 @@ Example:
 frdp_rtt_warning = 0.5
 ```
 
+### `[filtering]`
+
+- `client_reset_blacklist`: `display_name` values to skip for the
+  `/utils` "Reset clients" button (a slave-router-only feature that
+  re-sends `load1`/`load2`/`load3` and a full state refresh to every
+  locally-connected client, as a self-service recovery option when a
+  sim has ended up in a bad state -- see
+  `Frankenrouter.resettable_clients()`/`reset_client_welcomes()`).
+  Empty by default; some addons are known to misbehave on an
+  unsolicited situ-load-like sequence (e.g. PSX Sound plays a sound on
+  `Qi191`, some `PSX.NET.Router` versions jump into the air on
+  `loadX` -- see `router/docs/NOTES.md`), so list their display names
+  here if you connect them to a slave router.
+
+Example:
+
+```text
+[filtering]
+client_reset_blacklist = ["PSX Sound"]
+```
+
 <!---
 https://github.com/markdownlint/markdownlint
 https://github.com/markdownlint/markdownlint/blob/main/docs/RULES.md

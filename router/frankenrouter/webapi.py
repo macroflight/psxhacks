@@ -178,6 +178,7 @@ _UTILS_PAGE = (
     '<form method="post" action="/api/utils/hafap/reset" style="display:inline">'
     '<button class="btn btn-gray">HAFAP(CPDLC) reset</button></form>\n'
     '{global_bang_button}'
+    '{reset_clients_link}'
     '</body>\n</html>\n'
 )
 
@@ -185,6 +186,71 @@ _GLOBAL_BANG_CONFIRM = (
     "Forcing a BANG is normally not needed, but might help syncing the "
     "sims up in some cases. Note: sending a bang can result in sound "
     "being played, etc. You have been warned"
+)
+
+_RESET_CLIENTS_PAGE = (
+    '<!DOCTYPE html>\n<html>\n<head>\n'
+    '<meta name="color-scheme" content="{rest_api_color_scheme}" />\n' +
+    _COMMON_CSS +
+    '\n</head>\n<body>\n'
+    '<div class="page-title">'
+    '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
+    '<h1>Reset clients</h1>'
+    '<div style="margin-left:auto">'
+    '<a href="/utils" class="btn btn-gray btn-sm">Back</a>'
+    '</div>'
+    '</div>\n'
+    '<div class="card">\n'
+    '<p style="margin:0">Select which connected clients should get a fresh '
+    'load1/load2/load3 and full state refresh -- the same sequence a client '
+    'gets on first connect. Use this if this sim has ended up in a bad '
+    'state (e.g. after a situ load) and nothing else has fixed it. Normally '
+    'unnoticeable, but may cause a brief visible glitch. Clients matching '
+    'this router\'s client_reset_blacklist config start unchecked, but you '
+    'can check them anyway if you really want to.</p>\n'
+    '</div>\n'
+    '{list_section}'
+    '{result_section}'
+    '</body>\n</html>\n'
+)
+
+_RESET_CLIENTS_CHECKBOX_ROW = (
+    '<label style="display:block;margin:0.3em 0">'
+    '<input type="checkbox" name="clients" value="{client_id}"{checked}> '
+    '{display_name}'
+    '</label>\n'
+)
+
+_RESET_CLIENTS_LIST_SECTION = (
+    '<form method="post" action="/api/utils/reset_clients">\n'
+    '<div class="btn-row">\n'
+    "<button type=\"button\" class=\"btn btn-gray\" onclick=\""
+    "document.querySelectorAll('input[name=clients]').forEach(function(cb) "
+    "{{ cb.checked = true; }})\">Select all</button>\n"
+    "<button type=\"button\" class=\"btn btn-gray\" onclick=\""
+    "document.querySelectorAll('input[name=clients]').forEach(function(cb) "
+    "{{ cb.checked = false; }})\">Deselect all</button>\n"
+    '</div>\n'
+    '{checkbox_rows}'
+    '<div class="btn-row">\n'
+    '<button type="submit" class="btn btn-green">Reset selected</button>\n'
+    '</div>\n'
+    '</form>\n'
+)
+
+_RESET_CLIENTS_EMPTY_SECTION = (
+    '<div class="card warn">\n'
+    '<p style="margin:0">No eligible clients connected.</p>\n'
+    '</div>\n'
+)
+
+_RESET_CLIENTS_SENT_SECTION = (
+    '<div class="card ok">\n'
+    '<p style="margin:0">Reset sent to {count} client(s).</p>\n'
+    '</div>\n'
+    '<div class="btn-row">\n'
+    '<a href="/utils/reset_clients" class="btn btn-gray">Back to list</a>\n'
+    '</div>\n'
 )
 
 
@@ -2519,11 +2585,16 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     '<button class="btn btn-gray">Global BANG</button></form>\n'
                     if router.config.identity.type in ('master', 'slave') else ''
                 )
+                reset_clients_link = (
+                    '<a href="/utils/reset_clients" class="btn btn-gray">Reset clients</a>\n'
+                    if router.config.identity.type == 'slave' else ''
+                )
                 return web.Response(
                     text=_UTILS_PAGE.format(
                         rest_api_color_scheme=cs,
                         towing_direction=tow_dir,
                         sims_link=sims_link,
+                        reset_clients_link=reset_clients_link,
                         global_bang_button=global_bang_button),
                     content_type='text/html')
 
@@ -2695,6 +2766,66 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     await router.send_to_upstream(
                         f"addon=FRANKENROUTER:{router.frdp_version}:MASTER_BANG")
                 raise web.HTTPFound('/utils')
+
+            @routes.get('/utils/reset_clients')
+            async def handle_reset_clients_get(_):
+                # Slave-router-only (enforced here too, not just by hiding
+                # the link on /utils): deliberately local to this
+                # router's own clients, see resettable_clients().
+                if router.config.identity.type != 'slave':
+                    raise web.HTTPFound('/utils')
+                cs = router.config.listen.rest_api_color_scheme
+                blacklist = set(router.config.filtering.client_reset_blacklist)
+                candidates = router.resettable_clients()
+                if candidates:
+                    checkbox_rows = ''.join(
+                        _RESET_CLIENTS_CHECKBOX_ROW.format(
+                            client_id=client.client_id,
+                            checked='' if client.display_name in blacklist else ' checked',
+                            display_name=html.escape(client.display_name),
+                        )
+                        for client in candidates
+                    )
+                    list_section = _RESET_CLIENTS_LIST_SECTION.format(checkbox_rows=checkbox_rows)
+                else:
+                    list_section = _RESET_CLIENTS_EMPTY_SECTION
+                return web.Response(
+                    text=_RESET_CLIENTS_PAGE.format(
+                        rest_api_color_scheme=cs,
+                        list_section=list_section,
+                        result_section='',
+                    ),
+                    content_type='text/html')
+
+            @routes.post('/api/utils/reset_clients')
+            async def handle_reset_clients_send(request):
+                # Slave-router-only (enforced here too, not just by hiding
+                # the link on /utils): deliberately local to this
+                # router's own clients, see reset_client_welcomes().
+                if router.config.identity.type != 'slave':
+                    raise web.HTTPFound('/utils')
+                cs = router.config.listen.rest_api_color_scheme
+                post = await request.post()
+                selected_ids = set()
+                for raw_id in post.getall('clients', []):
+                    try:
+                        selected_ids.add(int(raw_id))
+                    except (TypeError, ValueError):
+                        continue
+                targets = [
+                    client for client in router.resettable_clients()
+                    if client.client_id in selected_ids
+                ]
+                router.logger.info(
+                    "API: resetting %d selected client welcome(s)", len(targets))
+                await router.reset_client_welcomes(targets)
+                return web.Response(
+                    text=_RESET_CLIENTS_PAGE.format(
+                        rest_api_color_scheme=cs,
+                        list_section='',
+                        result_section=_RESET_CLIENTS_SENT_SECTION.format(count=len(targets)),
+                    ),
+                    content_type='text/html')
 
             @routes.get('/services')
             async def handle_services_get(_):

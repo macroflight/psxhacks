@@ -1085,6 +1085,64 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 await send_line(line)
             client.messages_to_send_after_welcome = []
 
+    async def reset_client_welcome(self, client):
+        """Re-run the welcome handshake for an already-connected client.
+
+        client_add_to_network() skips any keyword already in
+        client.welcome_keywords_sent, since it is normally only called
+        once, at initial connect. Resetting that (and welcome_sent, for
+        the same pending-message-queueing protection a real welcome
+        gets -- see "When sending a keyword to a client" in
+        router/docs/NOTES.md) before calling it again makes it safe to
+        re-run: the client gets a full load1 / START variables / load2 /
+        rest-of-cache / load3 sequence, exactly as if it had just
+        reconnected, without actually dropping its TCP connection.
+
+        See resettable_clients()/reset_client_welcomes() for the
+        slave-router-only /utils button that calls this for every
+        eligible client -- a self-service recovery path for the
+        stuck/diverged-client problem investigated this session (a hard
+        reset, whether via a fresh situ load or a reconnect, is what
+        actually recovers a client stuck in a persistent bad local
+        state; simply re-sending current values, e.g. via bang, does
+        not).
+        """
+        client.welcome_sent = False
+        client.welcome_keywords_sent = set()
+        await self.client_add_to_network(client)
+
+    def resettable_clients(self):
+        """Return locally-connected, non-frankenrouter clients eligible for a welcome reset.
+
+        Used by the slave-router-only /utils/reset_clients page (see
+        webapi.py) to list candidates with a checkbox each. Other
+        frankenrouters are never included -- resetting a child
+        router's own welcome state is a different, cascading operation
+        this feature is not meant to trigger. config.filtering.
+        client_reset_blacklist (by display_name) only affects which of
+        these the page pre-checks by default; the operator can still
+        select a blacklisted client explicitly, since they can see
+        exactly what they are about to reset.
+        """
+        return [client for client in self.clients.values() if not client.is_frankenrouter]
+
+    async def reset_client_welcomes(self, clients):
+        """Reset the welcome handshake for exactly the given clients.
+
+        Intended to be called only from the slave-router-only
+        /utils/reset_clients page (see handle_reset_clients_send() in
+        webapi.py) -- deliberately local to this one router's own
+        clients, not something that bubbles up the router chain the
+        way MASTER_BANG does, since it is meant to let one site's own
+        pilot recover their own sim.
+        """
+        clients = list(clients)
+        self.logger.info("Resetting %d client welcome(s)", len(clients))
+        if clients:
+            await asyncio.gather(
+                *(self.reset_client_welcome(client) for client in clients),
+                return_exceptions=True)
+
     async def close_client_connection(self, client, clean=True):
         """Close a client connection and remove client data."""
         if client.is_closing:

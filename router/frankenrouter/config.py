@@ -207,6 +207,20 @@ class _RouterConfigFiltering:  # pylint: disable=missing-class-docstring,too-few
             raise RouterConfigError(
                 "filtering ground_handling_forward_names entries must be strings")
 
+        # display_name values to skip for the /utils "Reset clients" button
+        # (a slave-router-only feature -- see
+        # Frankenrouter.resettable_clients()/reset_client_welcomes()).
+        # Empty by default; some addons are known to misbehave on an
+        # unsolicited load1/load2/load3 (e.g. PSX Sound plays a sound on
+        # Qi191, some PSX.NET.Router versions jump into the air on
+        # loadX -- see router/docs/NOTES.md), so sites that connect such
+        # addons to a slave router should list their display names here.
+        self.client_reset_blacklist = data.get('client_reset_blacklist', [])
+        if not isinstance(self.client_reset_blacklist, list):
+            raise RouterConfigError("filtering client_reset_blacklist must be a list")
+        if not all(isinstance(k, str) for k in self.client_reset_blacklist):
+            raise RouterConfigError("filtering client_reset_blacklist entries must be strings")
+
         # When a PTT/audio-panel variable (see rules.py's PTT_KEYWORDS) is
         # dropped because it crossed a sim boundary, also synthesize an
         # addon=GROUND.HANDLING PTT event so PSX.NET.Orchestration still
