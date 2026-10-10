@@ -28,9 +28,6 @@ __version__ = get_version("frankenusb", __file__)
 # The type of message we use to display the tiller status
 MSG_TYPE_TILLER = "FreeMsgA"
 
-# The type of message we use to display when the flight control lock is enabled
-MSG_TYPE_FLT_CTL_LOCK = "FreeMsgM"
-
 # Map left-seat PSX variable names to their right-seat equivalents.
 # When right-seat mode is active, any button_config 'psx variable' that
 # appears here is automatically redirected to the right-seat version.
@@ -1772,9 +1769,6 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         # from PSX's own layout number on (re)connect, instead of always
         # assuming the left seat.
         self.psx.subscribe("layout")
-
-        # Subscribe to EICAS messages that another addon might set
-        self.psx.subscribe(MSG_TYPE_FLT_CTL_LOCK)
 
         # Disable tiller above 40 kt
         def groundspeed(_, value):
