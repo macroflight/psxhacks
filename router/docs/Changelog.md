@@ -1,5 +1,47 @@
 # Changelog
 
+## 2026-10-10: version 1.17.0
+
+- **New: `notify=` client keyword.** A protocol extension some
+  third-party routers/clients speak (e.g. Simstack Switch) that is not
+  itself a real PSX keyword: a client sends e.g.
+  `notify=Qs323;Qs324;` to ask to receive only that set of Q-code
+  variables from then on, instead of everything. The router terminates
+  the message (never forwards it) and stores the parsed set on that
+  one connection; every other system command (`bang`,
+  `load1`/`load2`/`load3`, `start`, `exit`, ...) and every non-Q-code
+  key=value line (`name=`, `addon=`, `version=`, `metar=`, ...) still
+  reaches the client unfiltered -- only Q-code *variables* are
+  restricted, matching how Simstack Switch itself documents the
+  feature. An empty `notify=` clears the filter back to the default
+  (send everything). Applies to both ordinary live traffic and any
+  full resend to that connection (a bang reply, or "Reset clients").
+  Added for the same CS Technologies-style lighting boards as
+  `egress_name_filter` above, which do speak this convention
+  themselves.
+- **New: `[[egress_name_filter]]`** -- withholds specific keywords
+  (Q-codes) from any connected client whose display name matches a
+  configured regular expression, regardless of that client's own
+  `nolong` state. A config-side workaround for hardware that can't be
+  relied on to request PSX's own `nolong` protection itself (e.g.
+  boards connecting through a third-party router that never sends
+  `nolong` on their behalf) but still can't handle particular
+  variables -- prompted by a user report of CS Technologies-style
+  lighting boards disconnecting after receiving long printer/flight-plan
+  text. Besides literal Q-codes, a filter entry's `keywords` list can
+  include the special name `ALLNOLONG`, shorthand for every keyword the
+  real `nolong` protection would withhold. Each entry can optionally log
+  every message it drops at `INFO` level. Applies everywhere a keyword
+  could reach a matching client: ordinary live traffic, the initial
+  welcome, and any full resend (a bang reply, or "Reset clients"). See
+  `Configuration.md` for the full syntax and an example.
+- **Fix: rare traceback on shutdown.** `listener_task()`'s cleanup
+  handlers unconditionally called `.close()` on `self.proxy_server`,
+  which is still `None` if the router is stopped (e.g. via Ctrl-C)
+  while still waiting for its upstream's welcome -- i.e. before
+  `asyncio.start_server()` ever ran. Both handlers now guard on
+  `self.proxy_server is not None` first.
+
 ## 2026-10-09: version 1.16.0
 
 - **New: `[performance] load_marker_pause_enabled` / `load_marker_pause_delay`**

@@ -431,6 +431,42 @@ class _RouterConfigCheck:  # pylint: disable=missing-class-docstring,too-few-pub
         self.limit_max = data.get('limit_max', None)
 
 
+class _RouterConfigEgressNameFilter:  # pylint: disable=missing-class-docstring,too-few-public-methods
+    """A per-client-name egress keyword filter.
+
+    Config-side workaround for clients that cannot be relied on to
+    request PSX's own "nolong" protection themselves (e.g. hardware
+    boards sitting behind a third-party router that never sends
+    "nolong" on their behalf) but still need specific keywords withheld
+    -- see Frankenrouter.client_broadcast(). `keywords` may list literal
+    Q-codes and/or the special name "ALLNOLONG", shorthand for every
+    keyword the real "nolong" protection would withhold (see
+    Variables.keywords_with_mode('NOLONG')).
+    """
+
+    def __init__(self, data):
+        self.match_name = data.get('match_name', None)
+        if not isinstance(self.match_name, str) or not self.match_name:
+            raise RouterConfigError(
+                "egress_name_filter entries must have a non-empty match_name")
+        try:
+            self.match_name_re = re.compile(self.match_name)
+        except re.error as exc:
+            raise RouterConfigError(
+                f"Invalid egress_name_filter match_name regexp "
+                f"{self.match_name!r}: {exc}") from exc
+
+        self.keywords = data.get('keywords', [])
+        if (not isinstance(self.keywords, list) or not self.keywords or
+                not all(isinstance(k, str) for k in self.keywords)):
+            raise RouterConfigError(
+                "egress_name_filter keywords must be a non-empty list of strings")
+
+        self.log = data.get('log', False)
+        if not isinstance(self.log, bool):
+            raise RouterConfigError("egress_name_filter log must be true or false")
+
+
 class RouterConfigError(Exception):
     """Main Exception class."""
 
@@ -548,6 +584,11 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
             for elem in config['check']:
                 self.check.append(_RouterConfigCheck(elem))
 
+        self.egress_name_filter = []
+        if 'egress_name_filter' in config:
+            for elem in config['egress_name_filter']:
+                self.egress_name_filter.append(_RouterConfigEgressNameFilter(elem))
+
     def __str__(self):
         """Output human-readable version of the config data."""
         return f"""
@@ -664,6 +705,46 @@ password = 'PW_MATS'
         self.assertEqual(conf.psx.gps_spoofing_egress, True)
         with self.assertRaises(RouterConfigError):
             RouterConfig(config_data="[psx]\ngps_spoofing_egress = 'yes'\n")
+
+    def test_egress_name_filter(self):
+        """egress_name_filter is empty by default and parses a valid entry."""
+        conf = RouterConfig(config_data="")
+        self.assertEqual(conf.egress_name_filter, [])
+        conf = RouterConfig(config_data=r"""
+[[egress_name_filter]]
+match_name = '^dumbclient.*$'
+keywords = ["Qs123", "Qs666", "ALLNOLONG"]
+log = true
+""")
+        self.assertEqual(len(conf.egress_name_filter), 1)
+        entry = conf.egress_name_filter[0]
+        self.assertEqual(entry.match_name, '^dumbclient.*$')
+        self.assertTrue(entry.match_name_re.match('dumbclient1'))
+        self.assertFalse(entry.match_name_re.match('normalclient'))
+        self.assertEqual(entry.keywords, ["Qs123", "Qs666", "ALLNOLONG"])
+        self.assertEqual(entry.log, True)
+
+    def test_egress_name_filter_log_defaults_off(self):
+        """egress_name_filter.log defaults to false when omitted."""
+        conf = RouterConfig(config_data=r"""
+[[egress_name_filter]]
+match_name = '^dumbclient.*$'
+keywords = ["Qs123"]
+""")
+        self.assertEqual(conf.egress_name_filter[0].log, False)
+
+    def test_egress_name_filter_rejects_bad_input(self):
+        """egress_name_filter validates match_name, keywords and log."""
+        with self.assertRaises(RouterConfigError):
+            RouterConfig(config_data="[[egress_name_filter]]\nkeywords = ['Qs123']\n")
+        with self.assertRaises(RouterConfigError):
+            RouterConfig(config_data=(
+                "[[egress_name_filter]]\nmatch_name = '('\nkeywords = ['Qs123']\n"))
+        with self.assertRaises(RouterConfigError):
+            RouterConfig(config_data="[[egress_name_filter]]\nmatch_name = '.*'\nkeywords = []\n")
+        with self.assertRaises(RouterConfigError):
+            RouterConfig(config_data=(
+                "[[egress_name_filter]]\nmatch_name = '.*'\nkeywords = ['Qs123']\nlog = 'yes'\n"))
 
     def test_load_marker_pause(self):
         """load_marker_pause_enabled defaults to off; can be enabled for master/slave only."""

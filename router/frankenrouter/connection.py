@@ -345,6 +345,12 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
         # Set to true if the client has requested nolong
         self.nolong = False
 
+        # None (default) means "send everything" -- once the client has
+        # sent a "notify=Qxxx;Qyyy;" line, set to a frozenset of exactly
+        # the keywords it should ever receive (see
+        # Frankenrouter.client_broadcast() and Rules.handle_notify()).
+        self.notify_keywords = None
+
         # True if the client has been sent the welcome message
         self.welcome_sent = False
         # We keep track of welcome keywords sent so to this client

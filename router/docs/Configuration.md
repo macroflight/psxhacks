@@ -384,6 +384,49 @@ limit_max = 1
 comment = "There should be exactly one BACARS"
 ```
 
+### `[[egress_name_filter]]`
+
+A per-client-name egress keyword filter: withholds specific keywords
+(Q-codes) from any connected client whose display name matches a given
+regular expression. This is a config-side workaround for clients that
+cannot be relied on to request PSX's own `nolong` protection
+themselves -- e.g. hardware boards connecting through a third-party
+router that never sends `nolong` on their behalf, but that still can't
+handle particular long or otherwise unwanted variables. It applies
+regardless of the sending client's own `nolong` state, and regardless
+of whether the keyword is tagged `NOLONG` in `Variables.txt`.
+
+Applies everywhere a keyword could reach a matching client, not just
+ordinary live traffic: also the initial welcome a client gets on
+connect, and any later full resend to it (a bang reply, or "Reset
+clients").
+
+This section can be (and usually will be) listed several times in the
+file -- one entry per group of clients/keywords to filter.
+
+- `match_name`: a regular expression matched against the client's
+  display name (the same name shown elsewhere in the router, e.g. in
+  `[[check]]`/`[[access]]`).
+- `keywords`: a non-empty list of keywords to withhold from matching
+  clients. Besides literal Q-codes, the special name `ALLNOLONG` can be
+  included as shorthand for every keyword the real `nolong` protection
+  would withhold (i.e. every keyword tagged `NOLONG` in
+  `Variables.txt`) -- useful for a client that would benefit from
+  `nolong` but never sends it.
+- `log`: if `true`, every dropped message is logged at `INFO` level
+  (useful while setting this up); defaults to `false` (silent, logged
+  at `DEBUG` only).
+
+Example (withhold the BACARS/weather-printer text and two extra
+keywords from any client whose name starts with "dumbclient"):
+
+```text
+[[egress_name_filter]]
+match_name = '^dumbclient.*$'
+keywords = ["Qs119", "Qs123", "Qs666", "ALLNOLONG"]
+log = true
+```
+
 ### `[sharedinfo]`
 
 This section configures the dropdown options shown on the flight info

@@ -137,6 +137,15 @@ Send a fake "PSX welcome message" to the client:
 - Special handling for
     - If `demand=`: add variable to client connection's list of
       demanded variables
+    - If `notify=Qxxx;Qyyy;...`: a protocol extension some third-party
+      routers/clients (e.g. Simstack Switch) speak, not a real PSX
+      keyword. Terminate (drop, do not forward) and store the parsed
+      keyword set on the connection; from then on only those Q-code
+      variables are ever sent to this client -- every system command
+      (`bang`, `load1`/`load2`/`load3`, `start`, `exit`, ...) and every
+      non-Q-code key=value line (`name=`, `addon=`, `version=`,
+      `metar=`, ...) still goes through unfiltered. An empty
+      `notify=` clears the filter back to "send everything".
 - Forward to upstream unless otherwise stated in special handling
 - Forward to all clients except the one sending the message
 
@@ -154,6 +163,8 @@ Send a fake "PSX welcome message" to the client:
         - else
             - do nothing
     - Do not forward `nolong` variables to clients with the `nolong` flag set
+    - Do not forward a Q-code variable to a client that has sent
+      `notify=` unless that variable is in its notify list
 - If no custom rules match, forward to all clients
 
 ### When sending a keyword to a client

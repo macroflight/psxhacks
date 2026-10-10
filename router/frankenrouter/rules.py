@@ -222,6 +222,7 @@ class RulesCode(enum.Enum):
     NAME_NOCHANGE = enum.auto()
     NAME_REJECTED = enum.auto()
     NOLONG = enum.auto()
+    NOTIFY = enum.auto()
     NONPSX = enum.auto()
     NOWRITE = enum.auto()
     DEMAND = enum.auto()
@@ -1080,6 +1081,37 @@ class Rules():  # pylint: disable=too-many-public-methods
         self.sender.nolong = not self.sender.nolong
         return self.myreturn(RulesAction.DROP, RulesCode.NOLONG)
 
+    def handle_notify(self, value):
+        """Handle the notify keyword.
+
+        Not a PSX protocol keyword -- a convention some hardware
+        clients speak (and that the third-party Simstack Switch router
+        honours), e.g. "notify=Qs323;Qs324;", to ask for only a
+        specific set of Q-code variables rather than everything. Once
+        set, client_broadcast() sends this client only the listed
+        keywords, plus the normal protocol control traffic every
+        client still needs regardless (load1/load2/load3, start, bang,
+        exit, name=, addon=, Lexicon entries, ...) -- see
+        ClientConnection.notify_keywords. Always terminated here
+        rather than forwarded: this is purely a subscription
+        preference for this one local connection, nothing upstream or
+        any other client has a reason to see it. An empty list (e.g.
+        "notify=" or "notify=;") clears the filter back to "send
+        everything", the default.
+        """
+        if self.sender.upstream:
+            return self.myreturn(
+                RulesAction.DROP, RulesCode.MESSAGE_INVALID,
+                message=f"Got notify message from upstream: {self.line}"
+            )
+        keywords = frozenset(k for k in value.split(';') if k)
+        self.sender.notify_keywords = keywords or None
+        self.logger.info(
+            "Got notify from %s, restricting to: %s",
+            self.sender.display_name,
+            sorted(keywords) if keywords else "(cleared, sending everything again)")
+        return self.myreturn(RulesAction.DROP, RulesCode.NOTIFY)
+
     def handle_demand(self, value):
         """Handle the demand keyword."""
         if self.sender.upstream:
@@ -1365,6 +1397,9 @@ class Rules():  # pylint: disable=too-many-public-methods
 
         if key == 'nolong':
             return self.handle_nolong()
+
+        if key == 'notify':
+            return self.handle_notify(value)
 
         # Non-PSX keywords: forward with warning
         # FIXME: make configurable - strict mode?
@@ -1801,6 +1836,7 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             self.is_upstream = False
             self.access_level = 'full'
             self.nolong = False
+            self.notify_keywords = None
             self.demands = set()
             self.peername = peername
             self.last_start_relayed_at = 0.0
@@ -2398,6 +2434,34 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.NOLONG)
         self.assertFalse(testpeer.nolong)
+
+    def test_notify(self):
+        """Test the notify (Simstack-Switch-style variable subscription) keyword."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+
+        router.upstream = self.DummyUpstreamConnection()
+        router.clients = {
+            ('127.0.0.1', 12345): self.DummyClientConnection(('127.0.0.1', 12345)),
+        }
+        testpeer = router.clients[('127.0.0.1', 12345)]
+
+        self.assertIsNone(testpeer.notify_keywords)
+        (action, code, *_) = rules.route("notify=Qs323;Qs324;", testpeer)
+        self.assertEqual(action, RulesAction.DROP)
+        self.assertEqual(code, RulesCode.NOTIFY)
+        self.assertEqual(testpeer.notify_keywords, frozenset({'Qs323', 'Qs324'}))
+
+        # Not forwarded upstream -- purely a local connection preference.
+        (action, code, *_) = rules.route("notify=Qs1;", self.DummyUpstreamConnection())
+        self.assertEqual(action, RulesAction.DROP)
+        self.assertEqual(code, RulesCode.MESSAGE_INVALID)
+
+        # An empty notify clears the filter back to "send everything".
+        (action, code, *_) = rules.route("notify=", testpeer)
+        self.assertEqual(action, RulesAction.DROP)
+        self.assertEqual(code, RulesCode.NOTIFY)
+        self.assertIsNone(testpeer.notify_keywords)
 
     def test_ingress_filtered(self):
         """Test ingress filter."""

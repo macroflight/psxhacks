@@ -949,6 +949,25 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.logger.info("Keyword %s not in cache, cannot send", key)
                 return
             if (
+                    client.notify_keywords is not None and key.startswith('Q') and
+                    key not in client.notify_keywords
+            ):
+                self.logger.debug(
+                    "Not sending %s to %s: not in its notify list", key, client.peername)
+                return
+            egress_entry = self._egress_blocking_entry(
+                self._egress_filter_entries_for_key(key), client)
+            if egress_entry is not None:
+                if egress_entry.log:
+                    self.logger.info(
+                        "Egress-filtered %s to %s during welcome (name matches "
+                        "egress_name_filter %r)", key, client.display_name, egress_entry.match_name)
+                else:
+                    self.logger.debug(
+                        "Egress-filtered %s to %s during welcome (name matches "
+                        "egress_name_filter %r)", key, client.display_name, egress_entry.match_name)
+                return
+            if (
                     key in self.variables.keywords_with_mode('DELTA') and
                     key not in self.variables.keywords_with_mode('ECON')
             ):
@@ -1377,6 +1396,34 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.upstream.flush_write_buffer()
         await asyncio.sleep(self.load_marker_pause_delay)
 
+    def _egress_filter_entries_for_key(self, key):
+        """Return configured egress_name_filter entries whose keyword list covers `key`.
+
+        See config.egress_name_filter / Configuration.md. Returns an
+        empty list immediately when unconfigured (the common case), to
+        keep this cheap on the hot path. Used by both client_broadcast()
+        (ongoing traffic) and client_add_to_network()'s send_if_unsent()
+        (the welcome, and any full resend such as a bang reply or
+        "Reset clients") so the filter applies everywhere a keyword
+        could reach a client, not just live updates.
+        """
+        if not self.config.egress_name_filter:
+            return []
+        return [
+            entry for entry in self.config.egress_name_filter
+            if key in entry.keywords or (
+                'ALLNOLONG' in entry.keywords and
+                key in self.variables.keywords_with_mode('NOLONG'))
+        ]
+
+    @staticmethod
+    def _egress_blocking_entry(matching_entries, client):
+        """Return the first of `matching_entries` whose match_name matches `client`, if any."""
+        return next(
+            (entry for entry in matching_entries
+             if entry.match_name_re.match(client.display_name)),
+            None)
+
     async def client_broadcast(
             self, line, exclude=None, include=None,
             islong=False, isonlystart=False,
@@ -1407,6 +1454,23 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         queue_to_clients = []
 
         compiled_regexp = re.compile(exclude_name_regexp) if exclude_name_regexp is not None else None  # pylint: disable=line-too-long
+
+        # The keyword this line carries (if any) -- "Qxxx" for a normal
+        # variable, or just the whole line itself for a non-keyvalue
+        # control line like "load1" (never matches a real keyword, so
+        # harmless). Computed once per broadcast rather than per client;
+        # used below by both the egress_name_filter and notify checks.
+        message_key = line.partition('=')[0]
+
+        # Per-client-name egress keyword filter (see
+        # config.egress_name_filter / Configuration.md): a config-side
+        # workaround for clients that cannot be relied on to request PSX's
+        # own "nolong" protection themselves (e.g. hardware boards behind
+        # a third-party router that doesn't send it), but still need
+        # specific keywords withheld. Skipped entirely when unconfigured
+        # (the common case) or when this line's keyword isn't filtered
+        # for anyone, to keep this cheap on the hot path.
+        egress_filter_matches = self._egress_filter_entries_for_key(message_key)
 
         in_situ_load = False
         now = time.perf_counter()
@@ -1457,6 +1521,27 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.logger.debug(
                     "Not sending own addon message to nolong client %s: %s",
                     client.peername, line)
+                continue
+            if egress_filter_matches:
+                blocking_entry = self._egress_blocking_entry(egress_filter_matches, client)
+                if blocking_entry is not None:
+                    if blocking_entry.log:
+                        self.logger.info(
+                            "Egress-filtered %s to %s (name matches "
+                            "egress_name_filter %r): %s",
+                            message_key, client.display_name,
+                            blocking_entry.match_name, line)
+                    else:
+                        self.logger.debug(
+                            "Egress-filtered %s to %s (name matches "
+                            "egress_name_filter %r)",
+                            message_key, client.display_name, blocking_entry.match_name)
+                    continue
+            if (client.notify_keywords is not None and message_key.startswith('Q') and
+                    message_key not in client.notify_keywords):
+                self.logger.debug(
+                    "Not sending %s to %s: not in its notify list",
+                    message_key, client.peername)
                 continue
             if isonlystart:
                 # A pure START keyword should only be sent to normal
