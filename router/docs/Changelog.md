@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-10-09: version 1.14.0
+
+- **New: "Reset clients" button on a slave router's `/utils` page.**
+  Lists every locally-connected, non-router client with a checkbox
+  (all checked by default except any `display_name` listed in the new
+  `[filtering]` `client_reset_blacklist` config option, see
+  `docs/Configuration.md`), plus "Select all"/"Deselect all". Sending
+  it re-runs the normal welcome handshake for each selected client --
+  a fresh `load1`/`load2`/`load3` and full state refresh, exactly as
+  if it had just reconnected, without dropping its TCP connection.
+  Investigation this session found that a situ load or even a plain
+  PSX Main Client reconnect can occasionally leave a client's engines,
+  gear, LNAV, or other non-continuously-synced systems state
+  diverged from the rest of the shared cockpit; a fresh welcome
+  reliably recovers it, giving each site a self-service fix without
+  needing a real network disconnect/reconnect from the Instructor
+  station.
+- `/efb`'s Weather Mode card now detects when FrankenWeather itself
+  isn't running (no recent STATE message) and shows a dimmed
+  "FrankenWeather is not running" banner instead of a set of controls
+  that would otherwise appear active but do nothing.
+- `/efb`'s Weather Mode, Extra Turbulence, Avoid CB, and SIGMETs
+  buttons are smaller and their explanatory text shorter, so the card
+  fits without scrolling on a typical EFB-sized display.
+
 ## 2026-10-08: version 1.13.0
 
 - **New: the master router detects clock skew between routers.** Every
