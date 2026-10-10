@@ -1730,20 +1730,24 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 closures.append(self.close_client_connection(this_client, clean=True))
             await asyncio.gather(*closures)
             await asyncio.sleep(1.0)
-            self.logger.info("Proxy server shutting down itself")
-            self.proxy_server.close()
-            await self.proxy_server.wait_closed()
-            self.proxy_server = None
+            # proxy_server is still None if we were cancelled while waiting
+            # for the upstream welcome, before asyncio.start_server() ever ran.
+            if self.proxy_server is not None:
+                self.logger.info("Proxy server shutting down itself")
+                self.proxy_server.close()
+                await self.proxy_server.wait_closed()
+                self.proxy_server = None
+                self.logger.info("Proxy server shut down")
             self.clients = {}
-            self.logger.info("Proxy server shut down")
             raise
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s, shutting down",
                                  exc, name)
             self.logger.critical(traceback.format_exc())
-            self.proxy_server.close()
-            await self.proxy_server.wait_closed()
-            self.proxy_server = None
+            if self.proxy_server is not None:
+                self.proxy_server.close()
+                await self.proxy_server.wait_closed()
+                self.proxy_server = None
             self.clients = {}
             return
         # End of listener_task()
