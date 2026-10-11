@@ -26,6 +26,44 @@ NETWORK_MODES = [
     'MIXED',
 ]
 
+# A PSX Main Server's own welcome message includes a "Lexicon": raw wire
+# entries like "Ls0(E)=CfgRego", "Lh0(Y)=DeltaStbyIasBug1",
+# "Li0(E)=CfgVariant", one per Qs/Qh/Qi keyword it knows about, each
+# giving that keyword's friendly name and network mode using a
+# single-letter code. Confirmed against a live capture
+# (~/mastersim_connect_and_situ_load.log) cross-checked with
+# ~/Variables.txt: "Ls0(E)=CfgRego" <-> Qs0="CfgRego"; Mode=ECON. The
+# number after the prefix is the Q-code's own numeric suffix (Ls0 <->
+# Qs0, Lh0 <-> Qh0, Li0 <-> Qi0) -- this is not documented anywhere by
+# Aerowinx, it was reverse-engineered from that capture.
+LEXICON_PREFIX_TO_QCODE_PREFIX = {
+    'Ls': 'Qs',
+    'Lh': 'Qh',
+    'Li': 'Qi',
+}
+
+# Single-letter Lexicon mode code -> full NETWORK_MODES name, also
+# reverse-engineered from the same capture (e.g. "Lh63(M)=McpPshThr" <->
+# Qh63="McpPshThr"; Mode=MCPMOM).
+LEXICON_MODE_LETTERS = {
+    'E': 'ECON',
+    'D': 'DELTA',
+    'S': 'START',
+    'Z': 'XECON',
+    'N': 'DEMAND',
+    'Y': 'XDELTA',
+    'M': 'MCPMOM',
+    'B': 'BIGMOM',
+    'F': 'GUAMOM4',
+    'G': 'GUAMOM2',
+    'K': 'CDUKEYB',
+    'R': 'RCP',
+    'A': 'ACP',
+    'X': 'MIXED',
+}
+
+LEXICON_ENTRY_RE = re.compile(r'^(Ls|Lh|Li)(\d+)\(([A-Za-z])\)$')
+
 # Qh variables to NOT log as sim events (noisy rotary encoders and brightness dimmers).
 # All other Qh variables are logged when they change from a downstream client.
 SIMEVENTS_QH_IGNORE = frozenset({
@@ -380,6 +418,67 @@ class Variables():  # pylint: disable=too-few-public-methods
                 return keyword
         return None
 
+    def reconcile_lexicon_entry(self, key, name):
+        """Reconcile one live Lexicon entry against our definitions.
+
+        Variables.txt (loaded at startup) is only an initial seed; once
+        we're actually talking to a real upstream (a PSX Main Server, or
+        another frankenrouter relaying its own upstream's Lexicon), the
+        Lexicon it sends as part of its welcome message is authoritative
+        for that connection, since it's specific to the exact PSX version
+        running there. key/name are the raw key=value pair as received,
+        e.g. key="Ls0(E)", name="CfgRego" (see LEXICON_PREFIX_TO_QCODE_PREFIX
+        and LEXICON_MODE_LETTERS for how this maps to Qs0/mode ECON).
+
+        Any Q-code present in the live Lexicon but missing from
+        Variables.txt is added. Any Q-code already known whose name or
+        mode disagrees with the live Lexicon has that logged as a
+        warning and is overwritten with the live data -- so a stale or
+        version-mismatched local Variables.txt self-heals rather than
+        quietly producing wrong translations.
+
+        Returns True if key matched the Lexicon entry format (whether or
+        not anything needed to change), False otherwise, so callers can
+        tell a true Lexicon entry apart from an ordinary variable.
+        """
+        match = LEXICON_ENTRY_RE.match(key)
+        if not match:
+            return False
+        prefix, number, mode_letter = match.groups()
+        keyword = f"{LEXICON_PREFIX_TO_QCODE_PREFIX[prefix]}{number}"
+        mode = LEXICON_MODE_LETTERS.get(mode_letter)
+        if mode is None:
+            self.logger.warning(
+                "Lexicon entry %s=%s uses unknown mode letter %r, ignoring",
+                key, name, mode_letter)
+            return True
+
+        existing = self.variables.get(keyword)
+        if existing is None:
+            self.logger.info(
+                "Lexicon: adding %s (name=%r, mode=%s), not present in Variables.txt",
+                keyword, name, mode)
+            self.variables[keyword] = {'name': name, 'mode': mode}
+            self._mode_cache = {}
+            return True
+
+        changed = False
+        if existing.get('name') != name:
+            self.logger.warning(
+                "Lexicon: %s name %r from upstream differs from Variables.txt's %r, "
+                "using upstream's", keyword, name, existing.get('name'))
+            existing['name'] = name
+            changed = True
+        if existing.get('mode') != mode:
+            self.logger.warning(
+                "Lexicon: %s mode %r from upstream differs from Variables.txt's %r, "
+                "using upstream's", keyword, mode, existing.get('mode'))
+            existing['mode'] = mode
+            changed = True
+        if changed:
+            self._mode_cache = {}
+        return True
+
     def keywords_for_simevents(self):
         """Return frozenset of keywords to monitor for sim event logging.
 
@@ -490,6 +589,41 @@ Qs411="CduRteCa"; Mode=ECON; Min=15; Max=50000;
         self.assertEqual(
             me.sort_psx_keywords(["Qs1", "Qs100", "Qs999", "Qs42"]),
             ["Qs1", "Qs42", "Qs100", "Qs999"])
+
+    def test_reconcile_lexicon_entry(self):
+        """Test reconciling live upstream Lexicon entries."""
+        me = Variables(None, vfiledata=self.good_data_2)
+
+        # Not a Lexicon entry at all -- untouched, caller should fall
+        # back to treating it as an ordinary variable.
+        self.assertEqual(me.reconcile_lexicon_entry("Qs0", "CfgRego"), False)
+
+        # Matches Variables.txt exactly -- no change, no warning.
+        self.assertEqual(me.reconcile_lexicon_entry("Ls0(E)", "CfgRego"), True)
+        self.assertEqual(me.variables['Qs0'], {
+            'name': 'CfgRego', 'mode': 'ECON', 'min': 0, 'max': 8})
+
+        # Unknown Q-code -- added with just name/mode.
+        self.assertNotIn('Qs9999', me.variables)
+        self.assertEqual(me.reconcile_lexicon_entry("Ls9999(D)", "SomeNewVar"), True)
+        self.assertEqual(me.variables['Qs9999'], {'name': 'SomeNewVar', 'mode': 'DELTA'})
+        self.assertIn('Qs9999', me.keywords_with_mode('DELTA'))
+
+        # Known Q-code, but upstream disagrees on name -- overwritten.
+        self.assertEqual(me.reconcile_lexicon_entry("Ls1(E)", "SomethingElse"), True)
+        self.assertEqual(me.variables['Qs1']['name'], 'SomethingElse')
+
+        # Known Q-code, but upstream disagrees on mode -- overwritten,
+        # and the mode cache is invalidated so lookups reflect it.
+        self.assertIn('Qs2', me.keywords_with_mode('ECON'))
+        self.assertEqual(me.reconcile_lexicon_entry("Ls2(D)", "CfgCoId"), True)
+        self.assertEqual(me.variables['Qs2']['mode'], 'DELTA')
+        self.assertNotIn('Qs2', me.keywords_with_mode('ECON'))
+        self.assertIn('Qs2', me.keywords_with_mode('DELTA'))
+
+        # Unknown mode letter -- logged and ignored, not added.
+        self.assertEqual(me.reconcile_lexicon_entry("Li500(Q)", "Whatever"), True)
+        self.assertNotIn('Qi500', me.variables)
 
 
 class TestGpsSpoof(unittest.TestCase):

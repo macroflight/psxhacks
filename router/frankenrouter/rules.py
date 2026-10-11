@@ -1562,6 +1562,17 @@ class Rules():  # pylint: disable=too-many-public-methods
                         RulesCode.KEYVALUE_FILTERED_INGRESS_SILENT,
                         message=f"filtered {key} as filter_traffic is set")
 
+        # A real upstream's (or another frankenrouter relaying its own
+        # upstream's) welcome message includes a "Lexicon" -- raw entries
+        # like "Ls0(E)=CfgRego" -- which is authoritative for that
+        # connection's exact PSX version. Reconcile it against our
+        # Variables.txt-seeded definitions (adding unknown Q-codes,
+        # warning and overwriting on any mismatch) before falling
+        # through to the normal cache update below, which still caches
+        # and forwards the raw entry exactly as before.
+        if self.sender.upstream:
+            self.router.variables.reconcile_lexicon_entry(key, value)
+
         # Snapshot the value we had cached for this key (if any) before
         # we overwrite it below - used both to detect a genuine Qi25
         # change and to recognize echoes of our own upstream "bang"
@@ -1717,6 +1728,10 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             if mode == "ECON":
                 return ['Qs997']
             return []
+
+        def reconcile_lexicon_entry(self, _key, _name):
+            """Fake Lexicon reconciliation: no-op, never matches."""
+            return False
 
     class DummyCache():  # pylint: disable=too-few-public-methods
         """Implement small parts of the router for unit testing."""
