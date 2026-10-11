@@ -19,10 +19,6 @@ to confirm the changelog has actually been updated.
 <addon> is one of: frankencduproxy, frankenprint, frankenpush, frankenrouter,
 frankentanker, frankenusb, frankenweather, psxutils, start_scripts.
 
-frankenrouter_ident is not a separate release target -- it always reports
-frankenrouter's own version (see frankenrouter_ident.py), so bumping
-frankenrouter's version covers it too.
-
 psxutils is a shared version number for a group of small diagnostic
 utilities (show_hid, show_psx, show_usb, temporary_weather_logger) that are
 published together as one release containing a zip of all four EXEs, rather
@@ -106,9 +102,7 @@ _ADDON_PATHS = {
     'frankencduproxy': (['frankencduproxy.py', 'frankencduproxy.spec'], []),
     'frankenprint': (['frankenprint.py', 'frankenprint.spec'], []),
     'frankenpush': (['frankenpush.py', 'frankenpush.spec'], []),
-    'frankenrouter': (
-        ['router/', 'frankenrouter_ident.py', 'frankenrouter_ident.spec'],
-        ['router']),
+    'frankenrouter': (['router/'], ['router']),
     'frankentanker': (['frankentanker.py', 'frankentanker.spec'], []),
     'frankenusb': (['frankenusb.py', 'frankenusb.spec'], []),
     'frankenweather': (
@@ -251,13 +245,7 @@ def _confirm(prompt: str, default: bool) -> bool:
 
 
 def _map_changed_files(paths) -> list:
-    """Return the sorted addon names whose .version file appears in `paths`.
-
-    router/frankenrouter.version implies both 'frankenrouter' and
-    'frankenrouter_ident', since frankenrouter_ident has no version file of
-    its own -- it always mirrors frankenrouter's (see get_version()'s
-    version_dir override in frankenrouter_ident.py).
-    """
+    """Return the sorted addon names whose .version file appears in `paths`."""
     version_file_to_addon = {
         version_file.relative_to(_ROOT).as_posix(): name
         for name, (version_file, _) in _ADDONS.items()
@@ -268,8 +256,6 @@ def _map_changed_files(paths) -> list:
         if addon is None:
             continue
         addons.add(addon)
-        if addon == 'frankenrouter':
-            addons.add('frankenrouter_ident')
     return sorted(addons)
 
 

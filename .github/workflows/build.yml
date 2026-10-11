@@ -181,9 +181,9 @@ jobs:
               # dev-machine path that doesn't exist on a hosted runner).
               .\makepackages.ps1 -Addon $addon -PythonDir $env:pythonLocation
 
-              # frankenrouter_ident has no .version file of its own -- it
-              # always mirrors frankenrouter's (see psxhacks_version.py).
-              if ($addon -eq 'frankenrouter' -or $addon -eq 'frankenrouter_ident') {
+              # frankenrouter's own version file lives inside router/, not
+              # at the repo root like every other addon's.
+              if ($addon -eq 'frankenrouter') {
                   $versionFile = "router\frankenrouter.version"
               } else {
                   $versionFile = "$addon.version"

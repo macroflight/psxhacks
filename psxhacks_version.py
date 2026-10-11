@@ -15,27 +15,18 @@ exact same file format the source checkout uses.
 """
 import sys
 from pathlib import Path
-from typing import Optional
 
 _UNKNOWN_VERSION = "unknown"
 
 
-def get_version(name: str, script_file: str, version_dir: Optional[str] = None) -> str:
+def get_version(name: str, script_file: str) -> str:
     """Return the version string for the addon named `name`.
 
     `script_file` should be the calling script's own __file__ -- used to
-    locate the sibling <name>.version file when running from source and
-    version_dir is not given. `version_dir`, when given, overrides that
-    lookup directory for the non-frozen case only; it is for addons like
-    frankenrouter_ident.py that report another addon's version (frankenrouter's)
-    rather than having one of their own -- it has no effect once frozen,
-    since a frozen build always bundles its own addon's .version file at
-    the bundle root regardless of which directory it originally came from.
+    locate the sibling <name>.version file when running from source.
     """
     if getattr(sys, 'frozen', False):
         base_dir = Path(sys._MEIPASS)  # pylint: disable=protected-access,no-member
-    elif version_dir is not None:
-        base_dir = Path(version_dir)
     else:
         base_dir = Path(script_file).resolve().parent
 

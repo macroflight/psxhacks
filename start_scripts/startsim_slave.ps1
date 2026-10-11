@@ -21,12 +21,6 @@ if ($StopAfterSlaveRouterStart) {
     Delay $DelayAfterRouterStart
 }
 
-if ($StartFrankenident ) {
-    AddonDelay
-    Write-Output "Starting FrankenIDENT..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenident.ps1"
-}
-
 AddonDelay
 Write-Output "Starting PSX main clients..."
 Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_psx_main_clients.ps1"

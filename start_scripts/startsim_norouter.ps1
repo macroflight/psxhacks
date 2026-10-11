@@ -30,12 +30,6 @@ Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_psx_main_se
 
 Delay 5
 
-if ($StartFrankenident ) {
-    Write-Output "Starting FrankenIDENT..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenident.ps1"
-    Invoke-WindowPosition "frankenident"
-}
-
 Write-Output "Starting PSX main clients..."
 Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_psx_main_clients.ps1"
 

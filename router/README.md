@@ -201,35 +201,6 @@ has ever been established during this run.
 The router has a (currently very small) REST API. See
 [this page](docs/API.md).
 
-## The addon that identifies PSX clients by their window name "frankenrouter_ident"
-
-The router will always identify addons that send the special `name=`
-keyword to the network. Unfortunately PSX main clients do not do this,
-and many addons don't. So you end up with a router status display that
-only shows IP addresses and ports, and that makes it harder to know
-which addons are actually connected.
-
-To improve the situation, I wrote a small addon that tries to identify
-PSX main clients and addons by their window title and send that
-information to the router. PSX main clients use the layout name as
-part of their window title, and that allows us to identify all PSX
-instances by simply giving the layouts descriptive names. This addon
-can also identify those addons that have a window with a useful title.
-
-This addon needs the `pywin32` and `psutil` modules installed, e.g
-using a virtual environment:
-
-``` text
-python3 -m venv router1
-. router1/bin/activate
-pip install pywin32
-pip install psutil
-python3 frankenrouter_ident.py
-```
-
-To start this addon, start a new terminal window and run `python
-frankenrouter_ident.py` from the psxhacks directory.
-
 ## Control the router from PSX.NET.EFB
 
 Recent versions of the router can be controlled from within PSX.NET.EFB, which [can be found here](https://aerowinx.com/board/index.php?topic=7680.0). This is done through the router's web API and requires two changes:

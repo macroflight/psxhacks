@@ -498,15 +498,6 @@
 
 
 # ---------------------------------------------------------------------------
-# FrankenIDENT settings (slave sim)
-# frankenrouter_ident.py
-# ---------------------------------------------------------------------------
-#$StartFrankenident  = $true   # FrankenIDENT
-#$FrankenidentOptions = @()
-#$FrankenidentRepo    = $null
-
-
-# ---------------------------------------------------------------------------
 # FrankenPrinter settings (slave sim)
 # Replacement for the ACARS Print App.
 # ---------------------------------------------------------------------------

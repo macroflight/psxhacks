@@ -47,7 +47,6 @@ KillProcess "vPilot"
 KillProcess "GeoVR.PSX.Client.Wpf"
 KillProcess "CockpitSimulator"
 
-KillPythonScript "frankenrouter_ident.py"
 KillPythonScript "frankencduproxy.py"
 KillPythonScript "frankenprint.py"
 KillJavaJar "AcarsPrint.jar"

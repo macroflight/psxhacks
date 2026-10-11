@@ -38,11 +38,6 @@ thing that ever writes (see the repo's main `CLAUDE.md` /
 changed get built; if none did, the (expensive, Windows) `build` job is
 skipped entirely.
 
-Special case: `router/frankenrouter.version` changing triggers builds of
-**both** `frankenrouter` and `frankenrouter_ident`, since
-`frankenrouter_ident` has no version file of its own — it always mirrors
-frankenrouter's version (see `frankenrouter_ident.py`).
-
 Special case: `psxutils` is a shared version number for four small
 diagnostic utilities — `show_hid`, `show_psx`, `show_usb`,
 `temporary_weather_logger` — that don't need independent versioning or
@@ -77,8 +72,7 @@ For each addon that needs building, the `build` job:
    locally — see its own header comment and `docs/BuildSystem.md`'s
    sibling, the repo's main README, for manual usage).
 1. Reads the resulting version string from the addon's `.version` file
-   (or `router/frankenrouter.version` for `frankenrouter`/
-   `frankenrouter_ident`).
+   (or `router/frankenrouter.version` for `frankenrouter`).
 1. Creates a GitHub Release tagged `<addon>-v<version>` (`main`) or
    `<addon>-testing-v<version>` (`testing`, marked pre-release), with the
    bare `dist\<addon>.exe` as the only release asset.

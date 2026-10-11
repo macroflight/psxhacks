@@ -54,7 +54,6 @@ $AddonSpecs = [ordered]@{
     'frankenpush'          = @('frankenpush.spec')
     'frankencduproxy'      = @('frankencduproxy.spec')
     'frankenprint'         = @('frankenprint.spec')
-    'frankenrouter_ident'  = @('frankenrouter_ident.spec')
     'psx_shutdown'         = @('psx_shutdown.spec')
     'temporary_weather_logger' = @('temporary_weather_logger.spec')
     'show_psx'             = @('show_psx.spec')
