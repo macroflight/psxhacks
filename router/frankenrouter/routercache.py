@@ -52,6 +52,10 @@ class RouterCache():  # pylint: disable=too-few-public-methods
         """Return a list of all keywords in the cache."""
         return self.cache.keys()
 
+    def clear(self):
+        """Remove every keyword from the cache."""
+        self.cache = {}
+
     def update(self, keyword, value, updated=None):
         """Update a variable in the cache.
 
@@ -93,6 +97,16 @@ class TestVariablesParser(unittest.TestCase):
         self.assertEqual(me.get_value("Qs128"), "somestring")
         with self.assertRaises(RouterCacheException):
             me.get_value("Qs999")
+
+    def test_clear(self):
+        """clear() empties the cache."""
+        me = RouterCache()
+        me.update("Qs123", 456)
+        self.assertEqual(me.get_size(), 1)
+        me.clear()
+        self.assertEqual(me.get_size(), 0)
+        with self.assertRaises(RouterCacheException):
+            me.get_value("Qs123")
 
 
 if __name__ == '__main__':

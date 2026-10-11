@@ -132,6 +132,45 @@ FILTER_WARNING_INTERVAL = 60
 # self-announced name) before housekeeping closes and purges it.
 AUTH_PENDING_TIMEOUT = 30.0
 
+# How long to wait, before and after loading the known-good situ, around
+# [psx] known_good_situ_enabled -- see
+# Frankenrouter._load_known_good_situ() and its two callers.
+KNOWN_GOOD_SITU_DELAY = 5.0
+
+# The "Description=...^-^-^-^ End of description ^-^-^-^" block in a .situ
+# file can be several lines; _load_known_good_situ() skips all of it,
+# recognising the end by this exact marker line.
+KNOWN_GOOD_SITU_DESCRIPTION_END_MARKER = '^-^-^-^ End of description ^-^-^-^'
+
+# Cache keywords _load_known_good_situ() preserves across its
+# self.cache.clear() rather than letting them be wiped. These are
+# connection-level protocol fields, not PSX variables -- a .situ file
+# never contains them as plain data (confirmed: the only place
+# "version" appears in one is the bracketed "[Version 10.195]" header
+# line, which is skipped as non-data, same as every other bracketed
+# line), so once cleared there is nothing in the situ file to restore
+# them. Left genuinely missing, they stay missing until the next
+# client connect, at which point client_add_to_network() may paper
+# over the gap with a stale fallback (e.g. PSX_DEFAULT_VERSION) instead
+# of the real upstream's actual value. Start minimal; only add a
+# keyword here if the same problem turns up for it too.
+KNOWN_GOOD_SITU_PRESERVE_KEYWORDS = frozenset({'version'})
+
+
+def _known_good_situ_path():
+    """Return the path to the bundled router/known-good.situ file.
+
+    Resolved relative to sys._MEIPASS (the PyInstaller bundle root) when
+    frozen -- see frankenrouter.spec's datas -- or relative to this
+    script's own directory when run from source.
+    """
+    if getattr(sys, 'frozen', False):
+        base_dir = pathlib.Path(sys._MEIPASS)  # pylint: disable=protected-access,no-member
+    else:
+        base_dir = pathlib.Path(__file__).resolve().parent
+    return base_dir / 'known-good.situ'
+
+
 # Seconds to wait after all IRSes reach ≥60000 before broadcasting the alignment fix
 IRS_ALIGN_FIX_DELAY = 5.0
 
@@ -280,6 +319,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # tried (successfully or not) for the current upstream
         # connection; reset in reset_after_upstream_connect().
         self._clock_sync_attempted = False
+        # True whenever a 'slave' router is about to attempt an upstream
+        # connection (including the very first one) without having yet
+        # loaded the known-good situ for this disconnected period --
+        # see upstream_connector_task() and close_upstream_connection().
+        # Only meaningful when [psx] known_good_situ_enabled
+        # is set; otherwise never consulted.
+        self._known_good_situ_pending = True
         # Set True by a FRDP DISCONNECT_SIM message targeting us (slave only)
         # to make upstream_connector_task sit idle instead of reconnecting.
         # Cleared on a successful reconnect or by the "Reconnect to last
@@ -1216,6 +1262,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # Destroy upstream connection object
         await self.log_connect_evt(peername, disconnect=True)
         self.upstream = None
+        # Re-arm the known-good-situ load for the next connection attempt
+        # (see upstream_connector_task()) -- this disconnected period
+        # hasn't had its own chance at it yet.
+        self._known_good_situ_pending = True
         self.logger.info("Closed upstream connection %s", peername)
         self.connection_state_changed()
 
@@ -1606,6 +1656,135 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         await self.upstream.to_stream(line, log=True)
         self.logger.debug("To upstream from %s: %s", client_addr, line)
 
+    def _load_known_good_situ(self):  # pylint: disable=too-many-branches
+        """Replace the router's own cache with the bundled known-good situ.
+
+        Opt-in safety net ([psx] known_good_situ_enabled,
+        default off). Reads router/known-good.situ, translates each
+        friendly name to its Q-code keyword via self.variables, logs a
+        warning and skips any name that doesn't resolve, then empties the
+        cache and loads the translated values into it -- except for
+        KNOWN_GOOD_SITU_PRESERVE_KEYWORDS (currently just 'version') and
+        every raw Lexicon entry already in the cache (keys matching
+        variables.LEXICON_ENTRY_RE, e.g. "Ls0(E)" -- see
+        client_add_to_network()'s "Send the Lexicon" loop, which sends
+        exactly these keys to a newly-welcomed client), all of which are
+        snapshotted before the clear and restored right after it,
+        untouched by the situ file. Confirmed live: without preserving
+        the Lexicon entries too, a clear() here wipes them entirely, and
+        since a real PSX Main Server only ever sends its Lexicon once (on
+        initial connection, or on request via the literal "lexicon"
+        command -- see router/docs/NOTES.md), every client welcomed after
+        that point gets none at all, with no way to recover until the
+        router's own upstream connection itself reconnects. 'version'
+        holds whatever the real upstream PSX Main Server actually told us
+        in its own welcome message, which we must keep reporting to
+        clients regardless of what this bundled, possibly-older situ file
+        says -- a stale "[Version ...]" header in it is metadata about the
+        file, not something to apply. Returns the translated
+        (keyword, value) list, in the file's own order, so a caller can
+        also replay it onto a real connection (see
+        _inject_known_good_situ_upstream()) without re-parsing the file.
+
+        Only touches our own cache -- does not itself talk to any
+        connection. This affects what a client is welcomed with (see
+        client_add_to_network()/reset_client_welcome()), not the live
+        simulation's actual state; a caller that also wants the real
+        upstream PSX Main Server's own state changed must separately call
+        _inject_known_good_situ_upstream() with the returned list (see
+        listener_task(), the only caller that does). Callers are also
+        responsible for resetting any already-connected client that needs
+        to see the new values (there usually aren't any yet -- see
+        listener_task() and upstream_connector_task(), the only two
+        callers of this method).
+        """
+        path = _known_good_situ_path()
+        try:
+            text = path.read_text(encoding='utf-8', errors='replace')
+        except OSError as exc:
+            self.logger.warning("Could not read known-good situ %s: %s", path, exc)
+            return []
+
+        translated = []
+        unknown_names = []
+        in_description = False
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith('[') and line.endswith(']'):
+                continue  # [Aerowinx ...], [Version ...], [End of file]
+            if line.startswith('Description='):
+                in_description = True
+                continue
+            if in_description:
+                if line == KNOWN_GOOD_SITU_DESCRIPTION_END_MARKER:
+                    in_description = False
+                continue
+            name, sep, value = line.partition('=')
+            if not sep:
+                continue
+            keyword = self.variables.get_keyword_for_name(name)
+            if keyword is None:
+                unknown_names.append(name)
+                continue
+            translated.append((keyword, value))
+
+        for name in unknown_names:
+            self.logger.warning("Known-good situ: unknown variable name %r, skipping", name)
+
+        preserved = {}
+        for keyword in KNOWN_GOOD_SITU_PRESERVE_KEYWORDS:
+            if self.cache.has_keyword(keyword):
+                preserved[keyword] = self.cache.get_value(keyword)
+        for keyword in self.cache.get_keywords():
+            if variables.LEXICON_ENTRY_RE.match(keyword):
+                preserved[keyword] = self.cache.get_value(keyword)
+
+        self.cache.clear()
+        for keyword, value in preserved.items():
+            self.cache.update(keyword, value)
+
+        for keyword, value in translated:
+            try:
+                self.cache.update(keyword, value)
+            except routercache.RouterCacheTypeError as exc:
+                self.logger.warning("Known-good situ: %s", exc)
+
+        self.logger.info(
+            "Loaded known-good situ %s into cache: %d variables (%d unknown name(s) skipped)",
+            path, len(translated), len(unknown_names))
+        return translated
+
+    async def _inject_known_good_situ_upstream(self, translated):
+        """Replay a translated known-good situ onto the real upstream link.
+
+        Only meaningful for a 'master' router, whose upstream connection
+        is the actual PSX Main Server -- a slave's upstream is another
+        router, and scenario B (upstream_connector_task()) deliberately
+        runs this before that connection even exists, so it never calls
+        this method.
+
+        Mimics exactly what a real PSX Main Server sends when an
+        Instructor loads a situation, confirmed via a live capture
+        (`nc` against a real Main Server while loading a situ from the
+        Instructor interface): `load1` and `load2` sent back-to-back with
+        no variables in between, then every variable as a plain
+        Qxxx=value line (already in that format -- this is exactly what
+        _load_known_good_situ() already translates friendly names into),
+        then `load3`. Sending this same sequence upstream relies on the
+        same fact that makes a normal situ load work at all: the real
+        server accepts and applies externally-supplied Qi/Qh/Qs state
+        from any connected client, including this router.
+        """
+        self.last_load1 = time.perf_counter()
+        await self.send_to_upstream("load1")
+        await self.send_to_upstream("load2")
+        for keyword, value in translated:
+            await self.send_to_upstream(f"{keyword}={value}")
+        self.last_load3 = time.perf_counter()
+        await self.send_to_upstream("load3")
+
     async def upstream_connector_task(self, name):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         """Upstream connector Task."""
         try:  # pylint: disable=too-many-nested-blocks
@@ -1617,6 +1796,27 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 if self.upstream_disabled:
                     await asyncio.sleep(1.0)
                     continue
+
+                if (self._known_good_situ_pending and
+                        self.config.psx.known_good_situ_enabled and
+                        self.config.identity.type == 'slave'):
+                    if self.upstream is not None:
+                        # Should never happen -- by the time we get here
+                        # self.upstream is already None, either from
+                        # __init__, or from whatever closed the previous
+                        # connection before looping back. Checked anyway
+                        # since closing the old connection first is a hard
+                        # requirement, not just an optimization.
+                        self.logger.info(
+                            "Closing old upstream connection before loading known-good situ")
+                        await self.close_upstream_connection()
+                    self.logger.info(
+                        "Loading known-good situ before connecting to upstream")
+                    self._load_known_good_situ()
+                    await self.reset_client_welcomes(self.resettable_clients())
+                    self._known_good_situ_pending = False
+                    await asyncio.sleep(KNOWN_GOOD_SITU_DELAY)
+
                 # Pause clients when we have no upstream connection
                 try:
                     reader, writer = await asyncio.open_connection(
@@ -1823,6 +2023,30 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     "Waiting for upstream welcome before accepting client connections...")
                 while not self.upstream_ever_welcomed:
                     await asyncio.sleep(1.0)
+
+            # Opt-in safety net ([psx] known_good_situ_enabled):
+            # on a 'master' router, once (at startup only -- there is no
+            # "reconnect" equivalent for this case, unlike the slave one in
+            # upstream_connector_task()), replace the cache with the bundled
+            # known-good situ and push the same situ to the real upstream
+            # PSX Main Server, before any client is ever allowed to
+            # connect, so the live simulation and the very first welcome
+            # every client gets both start from it.
+            if (self.config.psx.known_good_situ_enabled and
+                    self.config.identity.type == 'master' and
+                    self.config.upstream is not None):
+                if not self.upstream_ever_welcomed:
+                    self.logger.info(
+                        "Waiting for upstream welcome before loading known-good situ...")
+                    while not self.upstream_ever_welcomed:
+                        await asyncio.sleep(1.0)
+                await asyncio.sleep(KNOWN_GOOD_SITU_DELAY)
+                self.logger.info(
+                    "Loading known-good situ and pushing it to the real upstream "
+                    "PSX Main Server before accepting client connections")
+                translated = self._load_known_good_situ()
+                await self._inject_known_good_situ_upstream(translated)
+                await asyncio.sleep(KNOWN_GOOD_SITU_DELAY)
 
             try:
                 self.proxy_server = await asyncio.start_server(

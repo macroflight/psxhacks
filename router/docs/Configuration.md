@@ -240,6 +240,32 @@ directory = 'C:\fs\PSX\Routerlogs'
   effects, e.g some addons react to a variable arriving even if its
   value is unchanged), so set this to false to disable it if that
   causes problems for you.
+- `known_good_situ_enabled`: defaults to false. Opt-in safety net that
+  resets the router's own cached variable state to a known-good baseline
+  (the bundled `router/known-good.situ`) before any client is welcomed
+  with it. Behavior depends on `[identity] type`:
+    - `master`: once at startup, after this router's own upstream has
+      sent its welcome, wait 5s, load the known-good situ into the
+      cache **and replay it onto the real upstream PSX Main Server**
+      (a genuine `load1`/`load2`/&lt;burst&gt;/`load3` sequence, matching
+      what a real Instructor-triggered situ load looks like on the
+      wire -- confirmed via a live capture of one), then wait another 5s
+      before starting to accept any client connections -- so the live
+      simulation itself, and the very first welcome every client ever
+      gets, both start from it.
+    - `slave`: before each attempt to (re)connect to this router's own
+      upstream (including the first one), load the known-good situ into
+      the cache and reset every already-connected client's welcome
+      (`load1`/.../`load3`, same as the `/utils` &rarr; "Reset clients"
+      button), then wait 5s before actually connecting. There is no real
+      PSX Main Server on the other end of a slave's upstream link at that
+      point (it hasn't connected yet), so nothing is sent upstream in
+      this case -- only `master` touches the real simulation.
+    - `standalone`: no effect -- neither case applies.
+
+  Friendly names in the situ file that don't resolve to a known Q-code
+  are logged as a warning and skipped; everything else still loads. Set
+  this to true to enable it.
 
 Example:
 

@@ -168,6 +168,28 @@ class _RouterConfigPsx:  # pylint: disable=missing-class-docstring,too-few-publi
         self.jettison_resync_fix = data.get('jettison_resync_fix', True)
         if not isinstance(self.jettison_resync_fix, bool):
             raise RouterConfigError("psx jettison_resync_fix must be true or false")
+        # Opt-in safety net: reset the router's own cached variable state
+        # to a known-good baseline (the bundled router/known-good.situ)
+        # before any client gets welcomed with it -- see
+        # Frankenrouter._load_known_good_situ(). On a 'master' router this
+        # happens once, shortly after its own upstream connects and before
+        # it starts accepting client connections (listener_task()); the
+        # same known-good situ is also replayed onto that real upstream
+        # PSX Main Server itself (see
+        # Frankenrouter._inject_known_good_situ_upstream()), as a genuine
+        # load1/load2/<burst>/load3 sequence matching what a real
+        # Instructor-triggered situ load looks like on the wire, so the
+        # live simulation itself resets too, not just the router's cache.
+        # On a 'slave' router it happens before each (re)connect to its
+        # own upstream (upstream_connector_task()), resetting that slave's
+        # own already-connected clients first -- there is no real PSX
+        # Main Server on the other end of a slave's upstream link at that
+        # point (it hasn't connected yet), so nothing is sent upstream in
+        # that case. No effect on a 'standalone' router (neither case
+        # applies).
+        self.known_good_situ_enabled = data.get('known_good_situ_enabled', False)
+        if not isinstance(self.known_good_situ_enabled, bool):
+            raise RouterConfigError("psx known_good_situ_enabled must be true or false")
 
 
 # crew/airframes/portal_account/airline_icao/checklist used to be configured
