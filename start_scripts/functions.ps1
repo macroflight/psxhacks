@@ -188,6 +188,47 @@ function Test-PythonRequirement {
     }
 }
 
+# Re-hashes the live psxhacks tree against the manifest psxhacks-updater.exe
+# (a separate tool, see ../../psxhacks-updater) wrote after its last
+# successful sync. Returns $null if no manifest exists -- not an error,
+# many users still have a plain git clone that was never managed by that
+# tool -- or a list of relative paths that differ ("(missing)"/"(modified)"/
+# "(added)"). Skips __pycache__ (created automatically the moment
+# python.exe imports any addon script, never part of the updater's own
+# ZIP sync) and the manifest file itself.
+function Test-PsxhacksManifest([string]$PsxhacksDir) {
+    $manifestPath = Join-Path $PsxhacksDir ".psxhacks-manifest.json"
+    if (-not (Test-Path $manifestPath -PathType Leaf)) { return $null }
+    try {
+        $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+    } catch {
+        # Unreadable/corrupt manifest -- treat the same as "not managed",
+        # don't block startup over it.
+        return $null
+    }
+
+    $drifted = @()
+    $seen = @{}
+    foreach ($prop in $manifest.files.PSObject.Properties) {
+        $seen[$prop.Name] = $true
+        $full = Join-Path $PsxhacksDir $prop.Name
+        if (-not (Test-Path $full -PathType Leaf)) {
+            $drifted += "$($prop.Name) (missing)"
+            continue
+        }
+        if ((Get-FileHash -Path $full -Algorithm SHA256).Hash -ne $prop.Value) {
+            $drifted += "$($prop.Name) (modified)"
+        }
+    }
+    Get-ChildItem -Path $PsxhacksDir -Recurse -File |
+        Where-Object { $_.FullName -notlike "*\__pycache__\*" -and $_.Name -ne ".psxhacks-manifest.json" } |
+        ForEach-Object {
+            $rel = $_.FullName.Substring($PsxhacksDir.Length + 1)
+            if (-not $seen.ContainsKey($rel)) { $drifted += "$rel (added)" }
+        }
+    return $drifted
+}
+
 # Returns $true if the Windows clock hasn't had a successful NTP sync in
 # the last 24h (or we can't tell either way), $false if it has. Called
 # once at startup by startsim_master.ps1/startsim_slave.ps1, which then

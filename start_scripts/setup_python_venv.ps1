@@ -305,4 +305,14 @@ Write-Host ""
 Write-Host ('  $PsxhacksPython = "' + $venvPython + '"') -ForegroundColor Yellow
 Write-Host ""
 
+# Machine-parsable marker line for psxhacks-updater.exe, which launches
+# this script with only stdout piped (stdin left inherited so the prompts
+# above keep working) when it needs to drive the venv setup itself. Must
+# be Write-Output, not Write-Host like every other line in this script --
+# Write-Host writes directly to the console host UI and bypasses the
+# stdout stream entirely, which is exactly why it still displays live even
+# when a caller pipes stdout; this is the one line that needs to actually
+# travel through that pipe instead.
+Write-Output "VENV_PYTHON=$venvPython"
+
 Read-Host -Prompt "Press Enter to close"

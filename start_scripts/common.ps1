@@ -84,6 +84,29 @@ $PsxhacksDevel = Split-Path $PSScriptRoot -Parent
 # file and flavor file live, outside the Git tree.
 $SimBase       = Split-Path $PsxhacksDevel -Parent
 
+# Checkout-integrity preflight: refuse to start (not to stop/restart --
+# blocking a shutdown over unrelated local file drift would be the wrong
+# failure mode) if psxhacks-updater.exe's own manifest shows the checkout
+# has drifted (local edits, or a partial manual update). Skipped entirely
+# if the checkout was never managed by that tool (Test-PsxhacksManifest
+# returns $null) - a plain git clone remains fully supported.
+#
+# Cached via an environment variable (same mechanism already used for
+# $IsNoRouterSim, which also must survive the Start-Process boundary):
+# common.ps1 is dot-sourced fresh by every start_<addon>.ps1 spawned as
+# its own powershell.exe process during a single sim startup, and a full
+# SHA256 tree-walk on every one of those would repeat real disk I/O
+# dozens of times per startup - this bounds the cost to once per
+# sim-startup process tree, the same reasoning that keeps
+# Test-PythonRequirement/Test-ClockSyncNeeded out of this file entirely.
+if (-not $IsStopContext -and -not $env:PSXHACKS_MANIFEST_OK) {
+    $psxhacksDrift = Test-PsxhacksManifest -PsxhacksDir $PsxhacksDevel
+    if ($psxhacksDrift -and $psxhacksDrift.Count -gt 0) {
+        Show-ErrorAndExit "Your psxhacks checkout does not match the last update's manifest -- $($psxhacksDrift.Count) file(s) differ:`n  $($psxhacksDrift -join "`n  ")`n`nRun psxhacks-updater.exe to discard local changes and get a clean, up-to-date checkout."
+    }
+    $env:PSXHACKS_MANIFEST_OK = "1"
+}
+
 # Flag file used to tell restart_cpdlc.ps1's window (if still open) that
 # HAFAP/CPDLC (psx-acars.py) is being killed intentionally (e.g. by
 # stopsim_master.ps1) rather than having crashed on its own, so it knows
