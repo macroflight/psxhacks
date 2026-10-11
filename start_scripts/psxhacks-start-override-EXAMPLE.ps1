@@ -216,16 +216,16 @@
 
 
 # ---------------------------------------------------------------------------
-# PSXVibrate (PSX.NET.Vibrate) settings
-# $PsxVibrateDir has no default in common.ps1 - it is REQUIRED if
-# $StartPsxVibrate is $true (checked at startup: must point at a directory
-# containing PSX.NET.Vibrate.exe). Both lines below are commented out since
-# the default is not to start PSXVibrate. To enable it: uncomment BOTH
-# lines below AND edit $PsxVibrateDir to the actual path of your
-# PSX.NET.Vibrate installation.
+# PSX.NET.Vibrate settings
+# $PsxNetVibrateDir has no default in common.ps1 - it is REQUIRED if
+# $StartPsxNetVibrate is $true (checked at startup: must point at a
+# directory containing PSX.NET.Vibrate.exe). Both lines below are
+# commented out since the default is not to start PSX.NET.Vibrate. To
+# enable it: uncomment BOTH lines below AND edit $PsxNetVibrateDir to the
+# actual path of your PSX.NET.Vibrate installation.
 # ---------------------------------------------------------------------------
-#$StartPsxVibrate = $true   # PSXVibrate
-#$PsxVibrateDir    = "$SimBase\psx_net_vibrate\2026-07-08"
+#$StartPsxNetVibrate = $true   # PSX.NET.Vibrate
+#$PsxNetVibrateDir    = "$SimBase\psx_net_vibrate\2026-07-08"
 
 
 # ---------------------------------------------------------------------------

@@ -49,10 +49,10 @@ if ($StartPsxSounds ) {
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psxsounds.ps1"
 }
 
-if ($StartPsxVibrate ) {
+if ($StartPsxNetVibrate ) {
     AddonDelay
-    Write-Output "Starting PSXVibrate..."
-    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psxvibrate.ps1"
+    Write-Output "Starting PSX.NET.Vibrate..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_vibrate.ps1"
 }
 
 if ($StartFrankenusb ) {
