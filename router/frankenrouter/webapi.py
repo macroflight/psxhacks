@@ -1652,6 +1652,28 @@ def _efb_errors_html(errors):
     )
 
 
+def _efb_claim_sources_html(info):
+    """Render a one-tap "claim elevation/traffic master" banner, or '' if not needed.
+
+    Only meaningful in a multi-router network (standalone has no network-wide
+    elevation/traffic master concept, see _efb_status_dict()). Shown whenever
+    either source is unclaimed (SHAREDINFO reports NOSIM for it).
+    """
+    if info['standalone']:
+        return ''
+    if info['elevation_ok'] and info['traffic_ok']:
+        return ''
+    return (
+        '<div class="efb-banner">'
+        'No sim is currently sending elevation and/or traffic data. '
+        '<form class="efb-inline" method="post" action="/api/efb/claim-sources" '
+        'style="margin-left:0.4rem">'
+        '<button type="submit" class="efb-chip efb-chip-sm">'
+        'Make this sim elevation and traffic master</button></form>'
+        '</div>\n'
+    )
+
+
 def _build_efb_page(router, ctx, page_url):
     """Build the compact /efb status+control page for the PSX.NET EFB app."""
     status = _efb_status_dict(router, ctx)
@@ -1675,6 +1697,7 @@ def _build_efb_page(router, ctx, page_url):
         _EFB_CSS +
         '</head>\n<body>\n'
         f'<div id="efb-errors">{_efb_errors_html(r["errors"])}</div>\n'
+        f'<div id="efb-claim-sources">{_efb_claim_sources_html(r)}</div>\n'
         '<div class="efb-grid wide">' +
         _efb_router_card(r) + _efb_datasources_card(w) +
         _efb_controls_card(w) + _efb_location_wx_card(loc, w['sigmet_hazards']) +
@@ -1687,11 +1710,13 @@ def _build_efb_page(router, ctx, page_url):
         '  fetch("/api/efb/status").then(function(r) { return r.json(); })'
         '.then(function(s) {\n'
         '    var ec = document.getElementById("efb-errors");\n'
+        '    var cs = document.getElementById("efb-claim-sources");\n'
         '    var rc = document.getElementById("efb-router-card");\n'
         '    var cc = document.getElementById("efb-controls-card");\n'
         '    var dc = document.getElementById("efb-datasources-card");\n'
         '    var lc = document.getElementById("efb-location-card");\n'
         '    if (ec) ec.innerHTML = s.errors_html;\n'
+        '    if (cs) cs.innerHTML = s.claim_sources_html;\n'
         '    if (rc) rc.outerHTML = s.router_html;\n'
         '    if (cc) cc.outerHTML = s.controls_html;\n'
         '    if (dc) dc.outerHTML = s.datasources_html;\n'
@@ -2594,6 +2619,7 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     'router': r,
                     'weather': w,
                     'errors_html': _efb_errors_html(r['errors']),
+                    'claim_sources_html': _efb_claim_sources_html(r),
                     'router_html': _efb_router_card(r),
                     'controls_html': _efb_controls_card(w),
                     'datasources_html': _efb_datasources_card(w),
@@ -2633,6 +2659,20 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 data = await request.post()
                 if data.get('field') == 'enabled':
                     await _efb_ctx.send_turb_cmd({'enabled': data.get('value') == '1'})
+                raise web.HTTPFound('/efb')
+
+            @routes.post('/api/efb/claim-sources')
+            async def handle_efb_claim_sources_post(_):
+                sim = router.config.identity.simulator
+                if router.sharedinfo.get('elevation_source_simulator', 'NOSIM') == 'NOSIM':
+                    router.logger.info("API: EFB claiming elevation source for %s", sim)
+                    await router.send_to_upstream(
+                        f"addon=FRANKENROUTER:{router.frdp_version}:ELEVATION_SOURCE:{sim}")
+                if router.sharedinfo.get('traffic_source_simulator', 'NOSIM') == 'NOSIM':
+                    router.logger.info("API: EFB claiming traffic source for %s", sim)
+                    await router.send_to_upstream(
+                        f"addon=FRANKENROUTER:{router.frdp_version}:TRAFFIC_SOURCE:{sim}")
+                await asyncio.sleep(1)
                 raise web.HTTPFound('/efb')
 
             @routes.get('/utils')
