@@ -35,6 +35,13 @@ function Test-IsAdministrator {
 if (Test-IsAdministrator) {
     # Already elevated (e.g. the whole sim was started as Administrator) --
     # just do the resync directly, no UAC prompt needed.
+    #
+    # The Windows Time service is Manual (Trigger Start) on a lot of
+    # non-domain-joined installs, i.e. usually not actually running --
+    # w32tm /resync /force assumes it already is and fails with "The
+    # service has not been started" if not. Start-Service is a no-op if
+    # it's already running.
+    Start-Service w32time -ErrorAction SilentlyContinue
     w32tm /resync /force
     exit $LASTEXITCODE
 }
@@ -42,7 +49,8 @@ if (Test-IsAdministrator) {
 Write-Host "Requesting elevation to resync the Windows clock (w32tm /resync /force)..."
 $job = Start-Job -ScriptBlock {
     $proc = Start-Process powershell -Verb RunAs -PassThru -WindowStyle Hidden -ArgumentList @(
-        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', 'w32tm /resync /force'
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
+        'Start-Service w32time -ErrorAction SilentlyContinue; w32tm /resync /force'
     )
     $proc.WaitForExit()
     $proc.ExitCode
