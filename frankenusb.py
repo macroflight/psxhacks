@@ -2024,6 +2024,15 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 if elapsed > (1.0 / self.args.max_rate):
                     # Read data from PSX, modify and write back
                     psx_value = self.psx.get(variable)
+                    if psx_value is None:
+                        # No value from PSX yet for this variable (e.g. we
+                        # just (re)connected, or PSX dropped mid-flight --
+                        # see the "Disconnected from PSX" log line and
+                        # autothrottle_active()'s own None check above for
+                        # the same race). Leave 'last sent'/'new data'
+                        # alone so this is retried on the very next loop
+                        # iteration instead of crashing.
+                        continue
                     elems = psx_value.split(';')
                     new_data = data['new data']
                     for index, value in new_data.items():
