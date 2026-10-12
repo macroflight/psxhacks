@@ -114,6 +114,10 @@ FRDP_SHAREDINFO_INTERVAL = 10.0
 # Keep 300 seconds of RTT data for the statistics in the status display
 FRDP_KEEP_RTT_SAMPLES = 300
 
+# Keep 300 seconds (monitor_task() samples once per second) of CPU
+# starvation data for the statistics in the status display
+MONITOR_KEEP_SAMPLES = 300
+
 # A PSX main server instance in cruise will generate ~12 messages per
 # second (measured during 1.5h flight). Keeping data on the last 10000
 # messages will give us 1-15 minutes of data, should be enough.
@@ -453,6 +457,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.qs121_keepalive_last_warning = 0.0
         self.qs121_keepalive_flip = False
 
+        # monitor_task()'s per-second delay/starvation samples, for the
+        # status display (see print_status()). Not reset at upstream
+        # reconnect -- this is about this process/PC's own health, not
+        # about any one connection.
+        self.monitor_delay_samples = []
+        self.monitor_starvation_samples = []
+
         # Set to True the first time the upstream sends load3 (welcome complete).
         # Never reset after that; used by listener_task to gate client connections.
         self.upstream_ever_welcomed = False
@@ -760,6 +771,19 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             trimstring(self.uuid),
             shutdown_hint,
         )
+        if self.monitor_delay_samples:
+            delay_median = statistics.median(self.monitor_delay_samples)
+            delay_max = max(self.monitor_delay_samples)
+            starvation_median = statistics.median(self.monitor_starvation_samples)
+            starvation_max = max(self.monitor_starvation_samples)
+            self.logger.info(
+                "Monitor delay median/max: %.1f/%.1f ms "
+                "(of which, likely CPU starvation median/max: %.1f/%.1f ms) "
+                "over the last %d sample(s)",
+                delay_median * 1000, delay_max * 1000,
+                starvation_median * 1000, starvation_max * 1000,
+                len(self.monitor_delay_samples),
+            )
         pilot_flying = self.sharedinfo.get('pilot_flying_simulator', 'unknown')
         own_sim = self.config.identity.simulator
         fc_filter_on = (self.config.identity.type != 'master' and
@@ -4331,17 +4355,43 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         """REST API Task."""
         await RouterWebAPI(self).run(name)
 
-    async def monitor_task(self, name):  # pylint: disable=too-many-branches,too-many-statements
+    async def monitor_task(self, name):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         """Monitor the other coroutines and restart as needed."""
         try:  # pylint: disable=too-many-nested-blocks
             while True:
                 # Measure the time it takes to sleep 1.0s. If it takes
-                # a lot longer, the router is overloaded.
+                # a lot longer, the router is overloaded. time.process_time()
+                # only ticks while this process is actually scheduled to
+                # run, so it lets us split the overrun into "this PC
+                # wasn't giving us any CPU at all" (process_time barely
+                # moved while wall-clock time kept going -- another
+                # process, or thermal throttling, starving the whole
+                # machine) versus "we were running the whole time" (a
+                # busy second of real traffic, or something blocking
+                # inside our own event loop). process_time() covers the
+                # whole 1s+overrun interval, not just the overrun itself,
+                # so a busy-but-not-starved second (lots of real work,
+                # zero starvation) can still show substantial CPU time
+                # here -- starvation is a lower bound, not an exact
+                # figure. Samples are kept (not just threshold-exceeding
+                # ones) so the status display can show a running
+                # median/max, not just whatever last tripped the warning.
                 startsleep = time.perf_counter()
+                startcpu = time.process_time()
                 await asyncio.sleep(1.0)
                 delay = time.perf_counter() - startsleep - 1.0
+                cpu_used = time.process_time() - startcpu
+                starvation = max(0.0, delay - cpu_used)
+                self.monitor_delay_samples.append(delay)
+                self.monitor_delay_samples = self.monitor_delay_samples[-MONITOR_KEEP_SAMPLES:]
+                self.monitor_starvation_samples.append(starvation)
+                self.monitor_starvation_samples = (
+                    self.monitor_starvation_samples[-MONITOR_KEEP_SAMPLES:])
                 if delay > self.config.performance.monitor_delay_warning:
-                    self.logger.info("Monitor delay is %.1f ms", delay * 1000)
+                    self.logger.info(
+                        "Monitor delay is %.1f ms (%.1f ms likely CPU starvation,"
+                        " %.1f ms this process was itself running)",
+                        delay * 1000, starvation * 1000, cpu_used * 1000)
 
                 self.logger.debug("%s checking for running and ended tasks", name)
                 running = []
