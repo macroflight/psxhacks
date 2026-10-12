@@ -1,5 +1,37 @@
 # frankenusb changelog
 
+## 1.2.2 (2026-10-12)
+
+- **Bug fix: a backtrace in `psx_axis_sender()` could prevent startup.**
+  `self.psx.get(variable)` can return `None` (e.g. right after
+  (re)connecting, or if PSX drops mid-flight -- the same race already
+  handled by `autothrottle_active()`'s own `None` check), but the code
+  immediately called `.split(';')` on the result without checking for
+  that first, raising `AttributeError: 'NoneType' object has no
+  attribute 'split'`. Now skips that variable for this loop iteration
+  and retries on the next one instead of crashing.
+- **Bug fix: a flight-phase button/trigger (e.g. "after landing") could
+  freeze every other button press and axis motion for several
+  seconds.** `handle_pygame_events()` is the sole, serial consumer of
+  the joystick event queue, awaiting each handler to completion before
+  pulling the next; `flight_phase_setup()`'s `EXITED_RUNWAY` phase
+  contains two `await asyncio.sleep(2.0)` calls for its APU-start
+  sequence, and was being awaited directly from that same loop, so
+  every other input queued up untouched for 4+ seconds. The two call
+  sites (`ACTION_FLIGHT_PHASE_TRIGGER`/`ACTION_FLIGHT_PHASE_BUTTON`) now
+  launch it via `asyncio.create_task()` instead, matching the pattern
+  already used elsewhere (e.g. the groundspeed-triggered tiller
+  auto-disable).
+- **Change: removed the "TILLER ACTIVE" EICAS message** -- it doesn't
+  work well in a shared cockpit (traced to a case where a frankenusb
+  instance hung with tiller mode on, leaving the message stuck,
+  surviving even a full situ save/reload since it got baked into the
+  saved situ file itself).
+- **New: explicit `TILLER_TOGGLE` `set: on`/`set: off` button-config
+  options**, alongside the existing toggle-only behavior, for a config
+  that wants a dedicated "tiller on" and a dedicated "tiller off"
+  button instead of one that flips state.
+
 ## 1.2.1 (2026-10-01)
 
 - **Bug fix: the PSX "Human Pilot" seat (`PnfMode`/`Qi217` bit 0) was being
