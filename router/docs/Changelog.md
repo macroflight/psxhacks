@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-10-13: version 1.18.1
+
+- **Removed: the "force wheels onto ground" `/utils` button.** It wasn't
+  working correctly.
+- **Removed: the "toggle towing direction" button from `/utils`.** This
+  is now available from the EFB instead.
+- **Change: the `/efb` elevation+traffic claim-sources button is now
+  restricted to slave routers.** A master router is already the
+  network's elevation/traffic authority, so claiming "itself" is
+  meaningless there. Enforced both in the HTML rendering and the POST
+  handler itself, not just by hiding the button.
+- **Change: the HAFAP(CPDLC) reset button on `/utils` now asks for
+  confirmation** before resetting, matching the existing Global BANG
+  button's confirm prompt -- a reset can interrupt a CPDLC message
+  already in progress.
+- **Bug fix: the connected-sims table on `/utils/sims` could misalign**
+  -- a global `td:first-child` CSS rule meant for other, 2-column
+  pages was squeezing this 4-column table, and the "Disconnect sim" /
+  service action buttons lacked an explicit `margin:0`, picking up
+  `button.btn`'s base top margin and sitting visibly offset from their
+  row. Both this page and `/services` are fixed.
+
 ## 2026-10-12: version 1.18.0
 
 - **New: `[filtering] notify_filtered_non_q_keywords`** (default
