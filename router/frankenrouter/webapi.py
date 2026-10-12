@@ -169,8 +169,6 @@ _UTILS_PAGE = (
     '<a href="/utils/events" class="btn btn-gray">Event log</a>\n'
     '<a href="/services" class="btn btn-gray">Master sim services</a>\n'
     '{sims_link}'
-    '<form method="post" action="/api/utils/towing/direction" style="display:inline">'
-    '<button class="btn btn-gray">Toggle towing direction{towing_direction}</button></form>\n'
     '<form method="post" action="/api/utils/printer/reset" style="display:inline">'
     '<button class="btn btn-gray">Reset printer</button></form>\n'
     '<form method="post" action="/api/utils/hafap/reset" style="display:inline" '
@@ -2687,16 +2685,6 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
             @routes.get('/utils')
             async def handle_utils_get(_):
                 cs = router.config.listen.rest_api_color_scheme
-                tow_key = router.variables.get_keyword_for_name('Towing') or 'Towing'
-                try:
-                    from frankenrouter import routercache as _rc  # pylint: disable=import-outside-toplevel,no-name-in-module
-                    tow_val = str(router.cache.get_value(tow_key))
-                    tow_dir = (
-                        ' (currently: pushback)' if tow_val[:1] == '1'
-                        else ' (currently: pull forward)'
-                    )
-                except Exception:  # pylint: disable=broad-exception-caught
-                    tow_dir = ''
                 sims_link = (
                     '' if router.config.identity.type == 'standalone' else
                     '<a href="/utils/sims" class="btn btn-gray">Connected slave sims</a>\n'
@@ -2719,7 +2707,6 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 return web.Response(
                     text=_UTILS_PAGE.format(
                         rest_api_color_scheme=cs,
-                        towing_direction=tow_dir,
                         sims_link=sims_link,
                         reset_clients_link=reset_clients_link,
                         global_bang_button=global_bang_button,
@@ -2843,26 +2830,6 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                         result_section=_WINDIMPORT_SENT_SECTION,
                     ),
                     content_type='text/html')
-
-            @routes.post('/api/utils/towing/direction')
-            async def handle_towing_direction(_):
-                from frankenrouter import routercache as _rc  # pylint: disable=import-outside-toplevel,no-name-in-module
-                key = router.variables.get_keyword_for_name('Towing') or 'Towing'
-                try:
-                    current = router.cache.get_value(key)
-                except _rc.RouterCacheException:
-                    current = None
-                current = str(current) if current is not None else None
-                if current and len(current) >= 1:
-                    new_dir = '1' if current[0] != '1' else '2'
-                    new_towing = new_dir + current[1:]
-                    router.logger.info("API: towing direction %s -> %s", current, new_towing)
-                    await router.send_to_upstream(f"{key}={new_towing}")
-                    router.cache.update(key, new_towing)
-                    await router.client_broadcast(f"{key}={new_towing}")
-                else:
-                    router.logger.warning("API: Towing variable not available")
-                raise web.HTTPFound('/utils')
 
             @routes.post('/api/utils/printer/reset')
             async def handle_printer_reset(_):
