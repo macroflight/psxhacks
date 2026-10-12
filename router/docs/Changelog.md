@@ -1,5 +1,73 @@
 # Changelog
 
+## 2026-10-12: version 1.18.0
+
+- **New: `[filtering] notify_filtered_non_q_keywords`** (default
+  `["addon"]`) -- non-Q-code keywords withheld from a client's *ongoing*
+  traffic once it has sent `notify=`, on top of the Q-code restriction
+  `notify=` already applies on its own. Real-world testing of two
+  CS-Technologies-style lighting boards, each restricted to 2 Q-code
+  variables via `notify=`, found they were still receiving 160+ `addon=`
+  messages each -- traffic such a board has no use for. Does not cover
+  the initial welcome a client gets before it has had a chance to send
+  `notify=` in the first place; that remains a separate, larger piece of
+  work. See `docs/Configuration.md`.
+- **New: `monitor_task()` now tracks CPU starvation, not just raw
+  delay.** Alongside the existing measurement of how much longer than
+  1.0s its own sleep actually took, it now also reads `time.process_time()`
+  to see how much of that time this process was actually scheduled to
+  run. A large gap between the two means the OS simply wasn't giving the
+  router any CPU at all during the overrun (another process, or thermal
+  throttling, starving the whole machine) rather than something inside
+  the router's own event loop running slow. Every sample is now kept
+  (not just ones crossing the existing warning threshold), and the
+  periodic status display shows a running median/max of both delay and
+  estimated starvation over the last 5 minutes -- previously only
+  threshold-exceeding samples were ever visible, with no way to see the
+  overall picture after the fact. Prompted by this session's forensic
+  log analysis of a PC apparently struggling under load during a
+  takeoff-roll anomaly investigation.
+- **New: the router now learns Q-code names/modes from the Lexicon a
+  real upstream (or another frankenrouter relaying its own upstream's)
+  sends on connect, instead of trusting only the locally-bundled
+  `Variables.txt`.** That Lexicon is authoritative for the exact PSX
+  version on the other end of the connection; an unknown Q-code is now
+  added on the fly, and a mismatch against `Variables.txt` (name or
+  mode) is logged as a warning and the upstream's own definition wins.
+- **New, experimental, opt-in: `[psx] known_good_situ_enabled`
+  (default off).** A safety net that resets the router's own cached
+  variable state to a known-good baseline (the bundled
+  `router/known-good.situ`) before any client is ever welcomed with it.
+  On a `master` router this happens once at startup, and the same situ
+  is also replayed onto the real upstream PSX Main Server itself as a
+  genuine `load1`/`load2`/&lt;burst&gt;/`load3` sequence (matching what a
+  real Instructor-triggered situ load looks like on the wire), so the
+  live simulation resets too, not just the router's own cache -- before
+  listener_task() starts accepting any client connections. On a `slave`
+  router it happens before each (re)connect attempt to its own upstream,
+  resetting its own already-connected clients first; nothing is sent
+  upstream in this case, since there's no real PSX Main Server on the
+  other end of a slave's upstream link yet. No effect on `standalone`.
+  See `docs/Configuration.md`.
+- **New: a "make this sim elevation+traffic master" button on the
+  `/efb` page**, shown whenever `SHAREDINFO` reports no sim currently
+  sending elevation and/or traffic data. Reuses the same FRDP addon-
+  message mechanism as the existing `/api/filter/elevation|traffic/
+  start_sending` endpoints.
+- **New: a connection that never authenticates/identifies itself is
+  now closed and purged after 30s** (`AUTH_PENDING_TIMEOUT`), instead
+  of lingering as "auth pending" indefinitely -- closes out stale or
+  abandoned (e.g. port-scanner) connections.
+- **Change: the flight-control-lock master-caution message is now
+  wrapped in parentheses**, making it easier to recognize as a
+  router-generated message rather than a real 747 EICAS message.
+- **Bug fix: a hang on shutdown.** `Server.wait_closed()` could hang
+  forever if a client's own graceful close was still in flight when
+  Ctrl-C arrived (Python 3.12+'s `wait_closed()` waits for every
+  connection task the server spawned, none of which are part of our own
+  `TaskGroup`) -- now explicitly aborts them via `Server.abort_clients()`
+  first.
+
 ## 2026-10-10: version 1.17.0
 
 - **New: `notify=` client keyword.** A protocol extension some
