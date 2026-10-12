@@ -316,7 +316,7 @@ def _service_action_buttons(key, display_name, running):
         f'<form method="post" action="/api/services/{key}/{action}" '
         f'style="display:inline" '
         f'onsubmit="return confirm(\'{action.capitalize()} {display_name}?\')">'
-        f'<button class="btn btn-gray btn-sm" style="width:auto">'
+        f'<button class="btn btn-gray btn-sm" style="width:auto;margin:0">'
         f'{action.capitalize()}</button></form> '
         for action in actions
     )
@@ -398,11 +398,12 @@ def _sim_row_html(uuid, info, elevation_source, traffic_source):
     if sim_name_raw == traffic_source:
         badges += ' <span title="Traffic master">✈️</span>'
     return (
-        f'<tr><td>{sim_name}{badges}</td><td>{router_name}</td><td>{age}s ago</td>'
-        '<td style="text-align:right">'
+        f'<tr><td>{sim_name}{badges}</td><td>{router_name}</td>'
+        f'<td style="white-space:nowrap">{age}s ago</td>'
+        '<td style="text-align:right;white-space:nowrap">'
         f'<form method="post" action="/api/sims/{uuid}/disconnect" style="display:inline">'
         '<input type="hidden" name="reason">'
-        '<button type="button" class="btn btn-red btn-sm" onclick="'
+        '<button type="button" class="btn btn-red btn-sm" style="width:auto;margin:0" onclick="'
         f'var r = prompt(\'Reason for disconnecting {sim_name}:\'); '
         'if (r !== null && r.trim() !== \'\') '
         '{ this.form.reason.value = r.trim(); this.form.submit(); }">'
@@ -452,8 +453,10 @@ def _build_sims_page(router, color_scheme):
             key=lambda kv: kv[1].get('simulator_name', ''))
     )
     body = (
-        '<table style="width:100%">'
-        '<tr><th>Sim</th><th>Router</th><th>Last seen</th><th></th></tr>\n' +
+        '<table>'
+        '<tr><th style="text-align:left">Sim</th>'
+        '<th style="text-align:left">Router</th>'
+        '<th style="text-align:left">Last seen</th><th></th></tr>\n' +
         rows + '</table>\n'
         if rows else '<p>No other connected sims.</p>\n'
     )
@@ -462,7 +465,17 @@ def _build_sims_page(router, color_scheme):
         f'<meta name="color-scheme" content="{color_scheme}" />\n'
         '<meta http-equiv="refresh" content="30">\n' +
         _COMMON_CSS.format() +
-        '\n</head>\n<body>\n'
+        # _COMMON_CSS's td:first-child rule (45% width, dimmed/smaller text)
+        # is meant for a 2-column label/value table (used all over the rest
+        # of this file) -- here it's a genuine 4-column data table, where
+        # it squeezes "Router"/"Last seen"/the button column so badly that
+        # "Last seen" wraps and collides with "Router". Reset it the same
+        # way the /events page's table does.
+        '\n<style>'
+        'td:first-child { width: auto; color: inherit; font-size: inherit; padding-right: 0; }'
+        'th, td { padding: 0.4em 0.6em 0.4em 0; }'
+        '</style>\n'
+        '</head>\n<body>\n'
         '<div class="page-title">'
         '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
         '<h1>Connected slave sims</h1>'
