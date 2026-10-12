@@ -1274,6 +1274,7 @@ def _efb_status_dict(router, ctx):  # pylint: disable=too-many-locals
         'upstream_label': upstream_label,
         'client_count': len(router.clients),
         'standalone': standalone,
+        'is_slave': router.config.identity.type == 'slave',
         'errors': list(router.sharedinfo.get('errors', [])),
     }
     if not standalone:
@@ -1655,11 +1656,13 @@ def _efb_errors_html(errors):
 def _efb_claim_sources_html(info):
     """Render a one-tap "claim elevation/traffic master" banner, or '' if not needed.
 
-    Only meaningful in a multi-router network (standalone has no network-wide
-    elevation/traffic master concept, see _efb_status_dict()). Shown whenever
-    either source is unclaimed (SHAREDINFO reports NOSIM for it).
+    Slave-router-only: a master router is already the network's authority
+    for elevation/traffic (claiming "itself" is meaningless there), and
+    standalone has no network-wide elevation/traffic master concept at
+    all (see _efb_status_dict()). Shown whenever either source is
+    unclaimed (SHAREDINFO reports NOSIM for it).
     """
-    if info['standalone']:
+    if not info['is_slave']:
         return ''
     if info['elevation_ok'] and info['traffic_ok']:
         return ''
@@ -2663,6 +2666,12 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
 
             @routes.post('/api/efb/claim-sources')
             async def handle_efb_claim_sources_post(_):
+                # Slave-router-only (enforced here too, not just by hiding
+                # the button on /efb): a master is already the network's
+                # elevation/traffic authority, so claiming "itself" is
+                # meaningless there -- see _efb_claim_sources_html().
+                if router.config.identity.type != 'slave':
+                    raise web.HTTPFound('/efb')
                 sim = router.config.identity.simulator
                 if router.sharedinfo.get('elevation_source_simulator', 'NOSIM') == 'NOSIM':
                     router.logger.info("API: EFB claiming elevation source for %s", sim)
