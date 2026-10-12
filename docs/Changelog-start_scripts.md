@@ -1,5 +1,51 @@
 # start_scripts changelog
 
+## 1.8.0 (2026-10-12)
+
+- **New: checkout-integrity preflight check.** On startup (not on
+  stop/restart -- blocking a shutdown over unrelated local file drift
+  would be the wrong failure mode), `common.ps1` now re-hashes the live
+  psxhacks tree against the manifest the separate `psxhacks-updater.exe`
+  tool wrote after its last successful sync (new `Test-PsxhacksManifest`
+  in `functions.ps1`), and refuses to start with a clear error listing
+  every drifted file (missing/modified/added) if it doesn't match.
+  Skipped entirely for a checkout never managed by that tool (a plain
+  git clone remains fully supported). Cached via an environment variable
+  for the lifetime of one sim-startup process tree, so the SHA256
+  tree-walk only runs once even though `common.ps1` is dot-sourced fresh
+  by every `start_<addon>.ps1` spawned as its own process.
+  `setup_python_venv.ps1` also now prints a machine-parsable
+  `VENV_PYTHON=...` marker line, for the same external tool to drive
+  venv setup itself.
+- **Bug fix: `stop_psxvibrate.ps1` (and the second `KillProcess` call in
+  `stopsim_norouter.ps1`) could not actually stop PSX.NET.Vibrate** --
+  they killed a process named `PSXVibrate`, which has never been this
+  addon's real process name (`PSX.NET.Vibrate`). Renamed throughout to
+  match the other `PSX.NET.*` addons' naming convention:
+  `start_psxvibrate.ps1`/`restart_psxvibrate.ps1`/`stop_psxvibrate.ps1`
+  are now `start_psx_net_vibrate.ps1`/`restart_psx_net_vibrate.ps1`/
+  `stop_psx_net_vibrate.ps1`, and the `$StartPsxVibrate`/`$PsxVibrateDir`
+  override-file variables and the `Invoke-WindowPosition`/
+  `$SimAddonNames` key are now `$StartPsxNetVibrate`/`$PsxNetVibrateDir`/
+  `"PSX.NET.Vibrate"`. Breaking change for any override file or saved
+  window position still using the old names.
+- **Bug fix: `sync_clock.ps1`'s elevated resync could still fail with
+  "the service has not been started."** `w32tm /resync /force` assumes
+  the Windows Time service is already running, which it often isn't on
+  a non-domain-joined machine (`w32time`'s startup type is commonly
+  Manual/Trigger Start) -- now runs `Start-Service w32time` first, inside
+  the same elevated context, before calling `w32tm`.
+- **Removed: FrankenIdent support** (`start_frankenident.ps1`/
+  `restart_frankenident.ps1`/`stop_frankenident.ps1` and their wiring in
+  `common.ps1`/`startsim_slave.ps1`/`startsim_norouter.ps1`/
+  `stopsim_slave.ps1`/`stopsim_norouter.ps1`). Almost every addon now
+  sends its own name to the router directly, so the separate
+  `frankenrouter_ident.py` identification addon is no longer needed.
+- **New: start/stop/restart scripts for CPFlight's FS_COM MCP/EFIS
+  driver** (`start_cpflight_fscom.ps1`/`restart_cpflight_fscom.ps1`/
+  `stop_cpflight_fscom.ps1`), wired into `startsim_slave.ps1` and the
+  override-file example the same way as other optional addons.
+
 ## 1.7.0 (2026-10-09)
 
 - **New: `sync_clock.ps1`, a self-elevating Windows clock resync
