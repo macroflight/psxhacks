@@ -630,11 +630,25 @@ frdp_rtt_warning = 0.5
   `loadX` -- see `router/docs/NOTES.md`), so list their display names
   here if you connect them to a slave router.
 
+- `notify_filtered_non_q_keywords`: non-Q-code keywords (exact match,
+  case-sensitive, e.g. `"addon"` not `"Addon"`) withheld from any client
+  that has sent `notify=` (the Simstack-Switch-style "only send me these
+  Q-code variables" request), in addition to the Q-code restriction
+  `notify=` already applies on its own. A client that asked to be
+  restricted to a couple of Q-code variables (typically low-powered
+  hardware, e.g. a lighting board) has no use for the `addon=` stream
+  either (`FRANKENWEATHER`/`GROUND.HANDLING`/FRDP traffic etc.), which
+  can otherwise still be a substantial share of what it receives. Default:
+  `notify_filtered_non_q_keywords = ["addon"]`. Only applies to a client's
+  ongoing live traffic, not the initial welcome it gets before it has had
+  a chance to send `notify=` in the first place.
+
 Example:
 
 ```text
 [filtering]
 client_reset_blacklist = ["PSX Sound"]
+notify_filtered_non_q_keywords = ["addon", "cduC"]
 ```
 
 <!---

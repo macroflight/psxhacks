@@ -1029,6 +1029,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.logger.debug(
                     "Not sending %s to %s: not in its notify list", key, client.peername)
                 return
+            # No check for notify_filtered_non_q_keywords here: send_if_unsent()
+            # is only ever called with 'version'/'layout', Lexicon keys, and
+            # Q-code keywords (see the call sites below and in
+            # client_add_to_network()'s welcome sequence) -- 'addon'/'cduC'-
+            # style keywords are live-only broadcasts, never part of the
+            # cache-replayed welcome, so there is nothing to filter here.
             egress_entry = self._egress_blocking_entry(
                 self._egress_filter_entries_for_key(key), client)
             if egress_entry is not None:
@@ -1619,6 +1625,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     message_key not in client.notify_keywords):
                 self.logger.debug(
                     "Not sending %s to %s: not in its notify list",
+                    message_key, client.peername)
+                continue
+            if (client.notify_keywords is not None and
+                    message_key in self.config.filtering.notify_filtered_non_q_keywords):
+                self.logger.debug(
+                    "Not sending %s to %s: notify-filtered non-Q keyword",
                     message_key, client.peername)
                 continue
             if isonlystart:

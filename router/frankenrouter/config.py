@@ -255,6 +255,27 @@ class _RouterConfigFiltering:  # pylint: disable=missing-class-docstring,too-few
             raise RouterConfigError(
                 "filtering ptt_ground_handling_translation must be true or false")
 
+        # Non-Q-code keywords (exact match, case-sensitive -- e.g. 'addon',
+        # not 'Addon') to withhold from a client that has sent notify=
+        # (see rules.py's handle_notify()/NOTIFY_FILTERED_NON_Q_KEYWORDS),
+        # on top of the Q-code restriction notify= already applies on its
+        # own. notify= exists for low-powered hardware (e.g. lighting
+        # boards) that asked for a specific, small set of Q-code
+        # variables; by default such a client almost certainly has no use
+        # for the addon= stream either (FRANKENWEATHER/GROUND.HANDLING/
+        # FRDP traffic etc.), which can otherwise still be a substantial
+        # share of what it receives. Real-world testing (two CS
+        # Technologies-style boards, each requesting 2 Q-code variables)
+        # found 160+ addon= messages still reaching them after notify=.
+        self.notify_filtered_non_q_keywords = data.get(
+            'notify_filtered_non_q_keywords', ['addon'])
+        if not isinstance(self.notify_filtered_non_q_keywords, list):
+            raise RouterConfigError(
+                "filtering notify_filtered_non_q_keywords must be a list")
+        if not all(isinstance(k, str) for k in self.notify_filtered_non_q_keywords):
+            raise RouterConfigError(
+                "filtering notify_filtered_non_q_keywords entries must be strings")
+
 
 class _RouterConfigPerformance:  # pylint: disable=missing-class-docstring,too-few-public-methods,too-many-instance-attributes
     def __init__(self, data):  # pylint: disable=too-many-branches
@@ -840,6 +861,20 @@ keywords = ["Qs123"]
             RouterConfig(config_data="[filtering]\nground_handling_forward_names = 'nope'\n")
         with self.assertRaises(RouterConfigError):
             RouterConfig(config_data="[filtering]\nground_handling_forward_names = [1, 2]\n")
+
+    def test_notify_filtered_non_q_keywords(self):
+        """notify_filtered_non_q_keywords defaults to ['addon'] and can be overridden."""
+        conf = RouterConfig(config_data="")
+        self.assertEqual(conf.filtering.notify_filtered_non_q_keywords, ['addon'])
+        conf = RouterConfig(config_data=(
+            "[filtering]\nnotify_filtered_non_q_keywords = ['addon', 'cduC']\n"))
+        self.assertEqual(conf.filtering.notify_filtered_non_q_keywords, ['addon', 'cduC'])
+        conf = RouterConfig(config_data="[filtering]\nnotify_filtered_non_q_keywords = []\n")
+        self.assertEqual(conf.filtering.notify_filtered_non_q_keywords, [])
+        with self.assertRaises(RouterConfigError):
+            RouterConfig(config_data="[filtering]\nnotify_filtered_non_q_keywords = 'nope'\n")
+        with self.assertRaises(RouterConfigError):
+            RouterConfig(config_data="[filtering]\nnotify_filtered_non_q_keywords = [1, 2]\n")
 
     def test_file_input(self):
         """Test reading from one of the example files."""
