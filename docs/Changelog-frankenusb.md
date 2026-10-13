@@ -1,5 +1,16 @@
 # frankenusb changelog
 
+## 1.3.0 (2026-10-13)
+
+- **New: a `NORMAL` axis mapped to `Brakes` now enforces a safe 0-1000
+  range.** Prompted by a real-world "turbo takeoff" incident where a
+  miscalibrated brake-pedal axis sent PSX a negative `Brakes` (`Qs357`)
+  value; PSX's own physics model turns that into unbounded extra forward
+  thrust instead of rejecting or clamping it (see PAIB/2026/016).
+  `psx min`/`psx max` now default to 0/1000 when left unset on such an
+  axis, and frankenusb refuses to start if a config explicitly sets
+  either to anything else, naming the offending joystick and axis.
+
 ## 1.2.2 (2026-10-12)
 
 - **Bug fix: a backtrace in `psx_axis_sender()` could prevent startup.**
