@@ -176,6 +176,35 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         # listed in LEFT_RIGHT_CONTROLS to their right-seat equivalents.
         self.right_seat = False
 
+    def _validate_brakes_axis_range(self):
+        """Force safe psx min/max for any NORMAL axis mapped to Brakes.
+
+        PSX accepts an out-of-range (negative) Brakes value and turns it
+        into unbounded forward acceleration instead of rejecting or
+        clamping it (see PAIB/2026/016), so a miscalibrated axis can
+        cause a runaway takeoff. Default 'psx min'/'psx max' to 0/1000
+        when unset, and refuse to start if a config explicitly sets
+        something else.
+        """
+        for joystick_name, joystick_config in self.config.items():
+            for axis_index, axis_config in joystick_config.get('axis motion', {}).items():
+                if axis_config.get('axis type') != 'NORMAL':
+                    continue
+                if axis_config.get('psx variable') != 'Brakes':
+                    continue
+                if 'psx min' not in axis_config:
+                    axis_config['psx min'] = 0
+                elif axis_config['psx min'] != 0:
+                    raise FrankenUsbException(
+                        f"{joystick_name} axis {axis_index}: a NORMAL axis mapped to "
+                        f"\"Brakes\" must use \"psx min\" = 0, found {axis_config['psx min']!r}")
+                if 'psx max' not in axis_config:
+                    axis_config['psx max'] = 1000
+                elif axis_config['psx max'] != 1000:
+                    raise FrankenUsbException(
+                        f"{joystick_name} axis {axis_index}: a NORMAL axis mapped to "
+                        f"\"Brakes\" must use \"psx max\" = 1000, found {axis_config['psx max']!r}")
+
     def _handle_args(self):
         """Handle command line arguments."""
         parser = argparse.ArgumentParser(
@@ -2099,6 +2128,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         except IOError as inst:
             raise FrankenUsbException(
                 f"Failed to open config file {self.args.config_file}: {inst}") from inst
+        self._validate_brakes_axis_range()
 
         pygame.init()
         self.logger.debug("Waiting a little after pygame.init()")
