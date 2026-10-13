@@ -223,7 +223,13 @@ function Test-PsxhacksManifest([string]$PsxhacksDir) {
     Get-ChildItem -Path $PsxhacksDir -Recurse -File |
         Where-Object { $_.FullName -notlike "*\__pycache__\*" -and $_.Name -ne ".psxhacks-manifest.json" } |
         ForEach-Object {
-            $rel = $_.FullName.Substring($PsxhacksDir.Length + 1)
+            # psxhacks-updater (pu_manifest.py) writes manifest keys as
+            # POSIX paths (path.as_posix()) so the manifest is portable
+            # across OSes; FullName here is native Windows backslashes,
+            # so without normalizing, every file in a subdirectory would
+            # never match $seen and get misreported as "(added)" even on
+            # a byte-for-byte clean sync.
+            $rel = ($_.FullName.Substring($PsxhacksDir.Length + 1)) -replace '\\', '/'
             if (-not $seen.ContainsKey($rel)) { $drifted += "$rel (added)" }
         }
     return $drifted

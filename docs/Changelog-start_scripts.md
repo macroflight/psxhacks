@@ -1,5 +1,16 @@
 # start_scripts changelog
 
+## 1.8.1 (2026-10-13)
+
+- **Bug fix: the 1.8.0 checkout-integrity preflight check (`Test-PsxhacksManifest`)
+  misreported every file in a subdirectory as `(added)`, even right after a
+  clean `psxhacks-updater` sync.** `psxhacks-updater`'s manifest stores file
+  paths as POSIX-style (forward-slash) relative paths so it stays portable
+  across OSes, but the live-tree scan here was comparing against
+  `$_.FullName`-derived paths, which use backslashes on Windows -- so no
+  file below the top level could ever match, even when nothing had
+  changed. Now normalizes to forward slashes before comparing.
+
 ## 1.8.0 (2026-10-12)
 
 - **New: checkout-integrity preflight check.** On startup (not on
