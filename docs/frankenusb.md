@@ -521,6 +521,71 @@ axis input is ignored while the autothrottle is active (on
 `AXIS_PSX_THROTTLE`/`REVERSE`, override with `'allow movement with at on':
 True`).
 
+### Flying the latch
+
+Your USB throttle levers are not motorized. PSX's own throttles move on
+their own -- driven by the autothrottle, or by another pilot in a shared
+cockpit -- but your physical levers can't follow them; there's no way to
+make a USB throttle quadrant physically track PSX's commanded position.
+The latch/unlatch mechanism above exists entirely to work around that one
+fact, and flying it well is mostly about building the right mental model
+and habits, not about the mechanism itself.
+
+**The real-aircraft analogy**: in the real jet, when you move your hand
+from the yoke to the throttles, you're reaching for wherever they
+*already are* -- your hand finds them, and you grab on. With FrankenUSB,
+there's no "finding them where they are," because your lever doesn't
+move itself. Instead, *you* move your hand and the lever together to
+wherever PSX's throttle position currently is, and the latch sound is
+what tells you "this is that position" -- it stands in for the real
+aircraft's sense of touch. Only after you hear it are you actually
+holding the throttle in a meaningful sense; before that, you're just
+holding a disconnected lever.
+
+A good technique follows directly from that analogy: treat the final
+approach to the latch point as two separate motions. First, *gently* ease
+the lever toward where you expect PSX's throttle to be -- this is the
+"moving my hand to the throttle" step, and it should be a light, searching
+movement, not a firm grip, precisely because you don't yet know you're in
+the right place. Only once you hear the latch sound should you grab the
+lever firmly and start actually flying it. Treating the whole motion as
+one firm grab risks slamming the lever through the latch point and well
+past it, exactly where a real lever would have stopped you by physically
+being there.
+
+Some situations worth knowing in advance:
+
+- **Preflight**: before you need the throttles for anything, get latched
+  deliberately rather than by accident -- ease your USB levers slightly
+  until you hear the latch sound, so you know your levers are tracking
+  reality before you need to rely on them.
+- **After `TOGA`**: the autothrottle takes the levers and drives them
+  forward itself. Push your USB throttles fully forward and leave them
+  there -- you'll be latched (PSX's throttles are headed roughly the same
+  way), and you're ready for whatever comes next without having to re-find
+  the position later.
+- **While the autothrottle is active** in any mode other than `HOLD`,
+  FrankenUSB will not let your USB lever move PSX's throttle at all,
+  latched or not -- this is a separate check, independent of latch state
+  (see `autothrottle_active()` above). The autothrottle owns the levers in
+  every active mode except `HOLD`.
+- **In `HOLD` mode**, the autothrottle is technically still armed but
+  isn't actively flying the levers, so FrankenUSB does allow you to move
+  the throttles yourself -- but the latch rule still applies first. If you
+  haven't been following the lever, you'll need to find the latch point
+  again before your movement does anything.
+- **Rejected takeoff**: if the throttles happen to already be in `HOLD`,
+  you can just yank your USB levers closed -- `HOLD` allows lever control,
+  so as long as you were latched (which you should be, having left them
+  forward since `TOGA`), closing them closes PSX's throttles immediately.
+  If they're *not* in `HOLD`, yanking the levers does nothing, regardless
+  of latch state. Since you don't want to be checking which mode you're in
+  during an RTO, the simplest, always-correct habit is to press the
+  autothrottle disconnect first, then yank the levers closed -- that
+  removes the autothrottle's claim on the levers unconditionally, so your
+  lever movement is guaranteed to take effect no matter what mode you were
+  in a moment ago.
+
 ## Flight phase procedures
 
 `flight_phase_setup()` phases, triggered via
