@@ -35,6 +35,7 @@ import pathlib
 import sys
 import time
 import traceback
+import unicodedata
 
 import aiohttp
 
@@ -128,6 +129,22 @@ _FULL_SEND_INTERVAL = 300.0
 _WORLDFLIGHT_SALES_URL = "https://flightofthepenguins.se/api/sales"
 _WORLDFLIGHT_TYPE_LABELS = {"merch": "MERCH", "ticket": "TICKET"}
 
+# WorldFlight passenger manifest printing (same --worldflight-shop-alerts opt-in).
+# Queried once per distinct FMC route load, keyed by departure/arrival ICAO -
+# the site itself decides whether that pair is a WorldFlight leg (a pair
+# that isn't one just gets a 404, treated the same as "no passengers").
+_WORLDFLIGHT_PASSENGERS_URL = "https://flightofthepenguins.se/api/passengers"
+_WORLDFLIGHT_CALLSIGN = "BAN32N"
+_WORLDFLIGHT_MANIFEST_CHECK_INTERVAL_S = 5.0
+_PRINTER_LINE_WIDTH = 40
+
+# PSX DoorOpenBits (Qi180) bit positions for the two left passenger doors -
+# Aerowinx's own constants (DR_ENTRY_1L/DR_ENTRY_2L), a bit set = open.
+# "L1"/"L2" are the standard airline names for these two doors.
+_DOOR_BIT_L1 = 1 << 3
+_DOOR_BIT_L2 = 1 << 5
+_FINAL_DOORS_MASK = _DOOR_BIT_L1 | _DOOR_BIT_L2
+
 # PSX FMC route parsing — mirrors psccfc/connector/frdp.py (kept in sync by hand).
 _WAYPOINT_PREFIX_LEN = 10
 _WAYPOINT_SENTINEL_LATLON = "9.0/9.0"
@@ -163,6 +180,34 @@ def _parse_route_airports(route):
     dep = dep_raw if len(dep_raw) == 4 and dep_raw.isalnum() else None
     arr = arr_raw if len(arr_raw) == 4 and arr_raw.isalnum() else None
     return dep, arr
+
+
+def _to_printer_ascii(text):
+    """Normalise to uppercase, printable 7-bit US-ASCII (diacritics stripped, not dropped)."""
+    decomposed = unicodedata.normalize('NFKD', text)
+    ascii_only = decomposed.encode('ascii', 'ignore').decode('ascii')
+    return ascii_only.upper()
+
+
+def _format_worldflight_manifest_lines(flight_code, dep_icao, arr_icao, passengers):
+    """Build the printer lines (header + one per sold seat) for a passenger manifest.
+
+    Each line is normalised to upper-case US-ASCII and truncated to
+    _PRINTER_LINE_WIDTH chars; the caller joins them with "^" and sends
+    the result as one PrinterText value.
+    """
+    lines = [
+        "PSCC / CONAIR / FALP",
+        "WORLDFLIGHT 2026",
+        f"{flight_code} {dep_icao}-{arr_icao}",
+        "PASSENGER MANIFEST",
+    ]
+    seats = [str(passenger.get("seat", "?")) for passenger in passengers]
+    seat_width = max((len(seat) for seat in seats), default=0)
+    for seat, passenger in zip(seats, passengers):
+        name = str(passenger.get("name", ""))
+        lines.append(f"{seat:<{seat_width}}: {name}")
+    return [_to_printer_ascii(line)[:_PRINTER_LINE_WIDTH] for line in lines]
 
 
 def _parse_route_waypoints(route):
@@ -395,6 +440,13 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self._worldflight_prev_mastwarn_cp = 0
         self._worldflight_prev_mastwarn_fo = 0
 
+        # WorldFlight passenger manifest printing (--worldflight-shop-alerts).
+        self._door_open_bits = None   # DoorOpenBits raw int, None until PSX sends one
+        # (dep_icao, arr_icao) the manifest was already printed for - printing is
+        # blocked for that same pair until the FMC route is cleared (both go
+        # None), per _maybe_print_worldflight_manifest().
+        self._worldflight_manifest_printed_for = None
+
     # --- PSX callbacks ---
 
     @staticmethod
@@ -515,6 +567,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
 
     def _on_route2(self, _key, value):
         self._route2 = value or None
+
+    def _on_door_open_bits(self, _key, value):
+        try:
+            self._door_open_bits = int(value)
+        except ValueError:
+            pass
 
     def _on_eta(self, _key, value):
         self._eta = value or None
@@ -736,7 +794,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
 
     # --- coroutines ---
 
-    async def get_psx_connection_coro(self):
+    async def get_psx_connection_coro(self):  # pylint: disable=too-many-statements
         """Maintain a connection to the PSX main server."""
         def connected():
             self.logger.info("PSX CONNECTED")
@@ -782,6 +840,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.psx.subscribe("FmcRteViAcMo", self._on_route_mode)
             self.psx.subscribe("FmcRte1", self._on_route1)
             self.psx.subscribe("FmcRte2", self._on_route2)
+            self.psx.subscribe("DoorOpenBits", self._on_door_open_bits)
             self.psx.subscribe("ActDestEta", self._on_eta)
             self.psx.subscribe("McpWdoSpd", self._on_mcp_spd)
             self.psx.subscribe("McpWdoHdg", self._on_mcp_hdg)
@@ -794,9 +853,10 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.psx.subscribe("GearLever", self._on_gear_lever)
             self.psx.subscribe("SpdBrkLever", self._on_spd_brk_lever)
             self.psx.subscribe("addon", self._handle_addon_message)
-            # Qh114/Qh115 - watched for --worldflight-shop-alerts regardless
-            # of whether it's enabled, per the "subscribe once, for the
-            # process lifetime" rule (see CLAUDE.md).
+            # Qh114/Qh115, and DoorOpenBits above - watched for
+            # --worldflight-shop-alerts regardless of whether it's enabled,
+            # per the "subscribe once, for the process lifetime" rule (see
+            # CLAUDE.md).
             self.psx.subscribe("MastWarnCp", self._on_mastwarn)
             self.psx.subscribe("MastWarnFo", self._on_mastwarn)
 
@@ -1258,6 +1318,132 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 exc, inspect.currentframe().f_code.co_name)
             self.logger.critical(traceback.format_exc())
 
+    @staticmethod
+    async def _fetch_worldflight_passengers(session, dep_icao, arr_icao):
+        """Return the {"flight", "passengers"} dict for this leg, or None if it isn't one.
+
+        None specifically means the site returned 404 for this dep/arr
+        pair (confirmed not a WorldFlight leg); any other failure raises,
+        so the caller can tell "not a leg" apart from a transient error.
+        """
+        async with session.get(
+                _WORLDFLIGHT_PASSENGERS_URL, params={"dep": dep_icao, "arr": arr_icao},
+                timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            if resp.status == 404:
+                return None
+            resp.raise_for_status()
+            return await resp.json()
+
+    def _is_ready_for_worldflight_manifest(self):
+        """Check the non-network conditions: callsign, stationary, and L1/L2 both closed.
+
+        Logs the specific reason at DEBUG level whenever a condition
+        isn't met, so --debug shows exactly what's still blocking the
+        manifest from printing.
+        """
+        callsign = (self._flight_number or "").strip().upper()
+        if callsign != _WORLDFLIGHT_CALLSIGN:
+            self.logger.debug(
+                "WorldFlight passenger manifest: callsign is %r, need %r",
+                callsign, _WORLDFLIGHT_CALLSIGN)
+            return False
+        stationary = self._lat is not None and (self._tas_kt or 0) < _STATIONARY_SPEED_THRESHOLD_KT
+        if not stationary:
+            self.logger.debug(
+                "WorldFlight passenger manifest: not stationary (tas_kt=%s)", self._tas_kt)
+            return False
+        if self._door_open_bits is None:
+            self.logger.debug("WorldFlight passenger manifest: DoorOpenBits not seen yet")
+            return False
+        if (self._door_open_bits & _FINAL_DOORS_MASK) != 0:
+            self.logger.debug(
+                "WorldFlight passenger manifest: L1 and/or L2 still open (DoorOpenBits=%d)",
+                self._door_open_bits)
+            return False
+        return True
+
+    def _print_worldflight_manifest(self, flight_code, dep_icao, arr_icao, passengers):
+        lines = _format_worldflight_manifest_lines(flight_code, dep_icao, arr_icao, passengers)
+        self.psx.send("PrinterText", "^".join(lines))
+
+    async def _maybe_print_worldflight_manifest(self, session):
+        """Print the WorldFlight passenger manifest once, per FMC route load.
+
+        Gated on: the FMC route's departure/arrival ICAO being a
+        WorldFlight leg (checked via the passengers API itself, which
+        also hands back the WF leg code - see _fetch_worldflight_passengers()),
+        the FMC callsign being _WORLDFLIGHT_CALLSIGN, the aircraft being
+        stationary, and the final boarding door (L1 or L2) being closed
+        (see _is_ready_for_worldflight_manifest()). Once printed for a
+        given (dep, arr) pair - or once confirmed via a 404 that the pair
+        isn't a WorldFlight leg at all, so there's no point asking again -
+        printing is blocked for that same pair until the FMC route is
+        cleared (both go None), per the module docstring's wording.
+        """
+        active_route = _pick_active_route(self._route_mode, self._route1, self._route2)
+        dep_icao, arr_icao = _parse_route_airports(active_route)
+
+        if dep_icao is None or arr_icao is None:
+            if self._worldflight_manifest_printed_for is not None:
+                self.logger.debug(
+                    "WorldFlight passenger manifest: FMC route cleared, re-arming")
+            else:
+                self.logger.debug("WorldFlight passenger manifest: no FMC route loaded")
+            self._worldflight_manifest_printed_for = None
+            return
+
+        route_key = (dep_icao, arr_icao)
+        if route_key == self._worldflight_manifest_printed_for:
+            self.logger.debug(
+                "WorldFlight passenger manifest: already printed (or confirmed not a "
+                "WorldFlight leg) for %s-%s, skipping", dep_icao, arr_icao)
+            return
+        self.logger.debug(
+            "WorldFlight passenger manifest: FMC route is %s-%s, checking readiness",
+            dep_icao, arr_icao)
+        if not self._is_ready_for_worldflight_manifest():
+            return
+
+        try:
+            data = await self._fetch_worldflight_passengers(session, dep_icao, arr_icao)
+        except (aiohttp.ClientError, OSError, ValueError) as exc:
+            self.logger.debug(
+                "WorldFlight passenger manifest: fetch failed for %s-%s: %s",
+                dep_icao, arr_icao, exc)
+            return  # transient - leave printed_for alone, retry on the next check
+
+        if data is None:
+            self.logger.debug(
+                "WorldFlight passenger manifest: %s-%s is not a WorldFlight leg",
+                dep_icao, arr_icao)
+            self._worldflight_manifest_printed_for = route_key
+            return
+
+        flight_code = data.get("flight", "?")
+        passengers = data.get("passengers", [])
+        self._print_worldflight_manifest(flight_code, dep_icao, arr_icao, passengers)
+        self._worldflight_manifest_printed_for = route_key
+        self.logger.info(
+            "Printed WorldFlight passenger manifest for %s (%s-%s), %d passenger(s)",
+            flight_code, dep_icao, arr_icao, len(passengers))
+
+    async def worldflight_passenger_manifest_coro(self):
+        """Periodically check whether to print the WorldFlight passenger manifest.
+
+        See _maybe_print_worldflight_manifest() for the conditions.
+        """
+        try:
+            self.logger.debug("Starting %s", inspect.currentframe().f_code.co_name)
+            async with aiohttp.ClientSession() as session:
+                while True:
+                    await asyncio.sleep(_WORLDFLIGHT_MANIFEST_CHECK_INTERVAL_S)
+                    await self._maybe_print_worldflight_manifest(session)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical(
+                "Unhandled exception %s in %s, shutting down",
+                exc, inspect.currentframe().f_code.co_name)
+            self.logger.critical(traceback.format_exc())
+
     async def monitor_coro(self):
         """Monitor the coroutines and start/restart as needed."""
         try:
@@ -1289,6 +1475,8 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 if self.args.worldflight_shop_alerts:
                     all_coros.append(
                         ("WorldFlightShop", self.worldflight_shop_coro))
+                    all_coros.append(
+                        ("WorldFlightManifest", self.worldflight_passenger_manifest_coro))
                 for name, coro_fn in all_coros:
                     if name not in running:
                         self.logger.info("Starting %s ...", name)
@@ -1360,7 +1548,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
             '--worldflight-shop-alerts',
             action='store_true',
             help="Show an EICAS master caution alert when a purchase is made in the "
-                 "WorldFlight musical web shop.",
+                 "WorldFlight musical web shop, and print the WorldFlight passenger "
+                 "manifest on the AIDS printer once ready for departure (FMC route "
+                 "matches a WorldFlight leg, callsign BAN32N, stationary, L1/L2 closed).",
         )
         parser.add_argument(
             '--worldflight-shop-check-interval',
