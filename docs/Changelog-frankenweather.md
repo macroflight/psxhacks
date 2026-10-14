@@ -1,5 +1,26 @@
 # frankenweather changelog
 
+## 1.5.0 (2026-10-14)
+
+- **Fix: never re-send a weather variable PSX already has** — found via
+  forensic log analysis of a real KLAX-EGLL flight where the PFD altitude
+  instantly dropped ~500ft at FL150 during an entirely ordinary,
+  unremarkable 5-minute zone refresh. The write that preceded the jump
+  turned out to be byte-for-byte identical to what had been sent 5 minutes
+  earlier for the same (currently-focused) zone — strong evidence that
+  re-sending data PSX already has can itself trigger PSX to apply the
+  injection as an instant snap instead of a smooth transit. `WxMode{N}`,
+  `Wx{N}`/`WxBasic`, `Metar{N}`, and `WxAutoSet` are now only actually sent
+  to PSX when the value differs from what PSX's own subscribed-variable
+  state already shows — previously every one of these was resent
+  unconditionally on every zone-update cycle regardless of whether
+  anything changed. Self-heals after a PSX reconnect or after FrankenWeather
+  spends time in "disabled" mode with PSX's own GUI/manual weather controls
+  in use, since both naturally refresh the underlying cache without any
+  extra logic. `Qi243` (the slow-transit arm) and `WxBurst` (turbulence
+  injections) are unaffected — both are one-shot commands, not persistent
+  state, and always still transmit.
+
 ## 1.4.0 (2026-10-06)
 
 - **New: the SIGMET parser now extracts every hazard type** (TS, TURB,
