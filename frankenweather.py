@@ -1763,8 +1763,29 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self.psx.send(key, value)
         return True
 
-    def psx_send_and_set(self, key: str, value: str) -> None:
-        """Send a PSX key=value and update the local variable cache."""
+    def psx_send_and_set(self, key: str, value: str, force: bool = False) -> None:
+        """Send a PSX key=value and update the local variable cache.
+
+        Skips the actual send if PSX's own subscribed-variable cache
+        (`self.psx.get(key)`, populated from every incoming update, not just
+        our own writes) already holds this exact value -- re-sending data
+        PSX already has is believed to be able to make PSX treat the
+        injection as an instant snap instead of a smooth transit (see
+        project_frankenweather_altitude_jump memory, 2026-10-14 case: a
+        byte-identical resend of the focused zone's weather was immediately
+        followed by an instant altitude jump). Because the cache comes from
+        subscriptions, not a separate tracked dict, it self-heals whenever
+        PSX's own state diverges from what we last sent for any reason --
+        a reconnect (PSX resends current values on connect), or PSX's own
+        GUI/manual weather controls being used while FrankenWeather was in
+        "disabled" mode -- without needing any explicit cache-clear logic.
+        Pass force=True for values that must always be transmitted
+        regardless of the cache, such as Qi243 (a one-shot mode-gate pulse,
+        not a persistent state value PSX "already has").
+        """
+        if not force and self.psx.get(key) == value:
+            self.logger.debug("→ PSX %s = %s SKIPPED (unchanged)", key, value)
+            return
         if not self._psx_send(key, value):
             return
         self.psx._set(key, value)  # pylint: disable=protected-access
@@ -1779,7 +1800,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         safe here: nothing FrankenWeather writes ever needs PSX's fast/instant
         transit mode.
         """
-        self.psx_send_and_set("Qi243", str(_WX_SLOW_TRANSIT_MS))
+        self.psx_send_and_set("Qi243", str(_WX_SLOW_TRANSIT_MS), force=True)
 
     def _sync_psx_clock(self) -> None:
         """Sync PSX clocks (TimeEarth, TimeClockL, TimeClockR) to current real-world time.
@@ -2998,7 +3019,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         if random.random() < inject_prob:
                             base, direction, _ = _pick_burst(manual_state, eff)
                             magnitude = min(99, random.randint(1, max(1, int(eff * 99))))
-                            self.psx_send_and_set("WxBurst", str(direction * (base + magnitude)))
+                            self.psx_send_and_set(
+                                "WxBurst", str(direction * (base + magnitude)), force=True)
                     state_changed = (
                         self._turb_state is None or
                         self._turb_state.kind != manual_state.kind or
@@ -3069,7 +3091,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         magnitude = min(99, random.randint(1, max(1,
                                         int(effective_intensity * 99))))
                         psx_value = direction * (base + magnitude)
-                        self.psx_send_and_set("WxBurst", str(psx_value))
+                        self.psx_send_and_set("WxBurst", str(psx_value), force=True)
                         self.logger.debug("Injected WxBurst=%d (%s%s%02d)",
                                           psx_value, label,
                                           '+' if direction > 0 else '-', magnitude)
@@ -5555,10 +5577,16 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.psx.subscribe("WxCorridorTxt", self._handle_corridor)
             self.psx.subscribe("MetarsUp", self._handle_metars_up)
             self.psx.subscribe("PrinterText", self._handle_printer_text)
+            # No callback needed on these two -- subscribing is enough to
+            # make psx.get() a reliable local cache of PSX's actual current
+            # value, which psx_send_and_set() relies on to avoid re-sending
+            # weather data PSX already has (see psx_send_and_set()).
+            self.psx.subscribe("WxAutoSet")
 
             for i in range(1, 8):
                 self.psx.subscribe(f"Wx{i}", self.handle_wx_change)
                 self.psx.subscribe(f"WxMode{i}")
+                self.psx.subscribe(f"Metar{i}")
 
             # Turbulence subsystem subscriptions
             self.psx.subscribe("TimeEarth")
