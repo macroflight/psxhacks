@@ -1768,6 +1768,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             # Called on every load3 (full initial dump complete, including
             # reconnects), so layout/PnfMode are guaranteed fresh here.
             self._sync_seat_state_from_psx()
+            self._sync_reverse_state_from_psx()
 
         def teardown():
             self.logger.info("Disconnected from PSX, tearing down")
@@ -1966,6 +1967,95 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             self._set_psxnetvatsim_acp_seat(seat)
         if button_config.get('select psx human pilot seat', True):
             self._set_psx_human_pilot_seat(seat)
+
+    def _find_reverse_button_flavor(self, joystick_name, axis):
+        """Return 'stepped', 'lever', or None for the reverse button(s) wired to axis.
+
+        Scans every button container ('button down'/'button up'/'button
+        long'/'button short') for a button config whose 'axis' matches.
+        STEPPED_REVERSE_TOGGLE uses a distinct four-state model
+        (normal/reverse_idle/reverse_full/reverse_idle_back) from
+        REVERSE_LEVER_UP/DOWN/REVERSE_TOGGLE's two-state one
+        (normal/reverse), and handle_throttle_reverse_button() /
+        handle_stepped_reverse_toggle() each only recognize their own
+        flavor's state strings -- so the right one must be known before
+        writing a synced value into self.axis_reverse_mode.
+        """
+        joystick_config = self.config.get(joystick_name, {})
+        for container in ('button down', 'button up', 'button long', 'button short'):
+            for button_config in joystick_config.get(container, {}).values():
+                if button_config.get('axis') != axis:
+                    continue
+                button_type = button_config.get('button type')
+                if button_type == 'STEPPED_REVERSE_TOGGLE':
+                    return 'stepped'
+                if button_type in ('REVERSE_LEVER_UP', 'REVERSE_LEVER_DOWN', 'REVERSE_TOGGLE'):
+                    return 'lever'
+        return None
+
+    def _sync_reverse_state_from_psx(self):
+        """Infer each reverse-capable throttle axis's real mode from PSX.
+
+        frankenusb tracks each THROTTLE_WITH_REVERSE_BUTTON axis's
+        reverse state itself (self.axis_reverse_mode), defaulting every
+        axis to 'normal'. If we (re)connect while the aircraft's actual
+        reversers are already deployed -- frankenusb restarted mid-
+        flight, or we're now looking at a different sim/aircraft, or a
+        new situ was loaded (which looks exactly like a disconnect then
+        reconnect to frankenusb's own PSX client) -- that tracked state
+        would otherwise silently stay stuck at whatever it was before,
+        so the next button press would be interpreted relative to the
+        wrong starting point (e.g. "leave idle" when PSX is actually
+        already in reverse). Reads back the real commanded Tla for each
+        axis that actually has a reverse button wired to it (see
+        _find_reverse_button_flavor) and classifies it against that
+        axis's own configured idle/reverse-idle/reverse-full values.
+
+        Note: STEPPED_REVERSE_TOGGLE's 'reverse_idle' and
+        'reverse_idle_back' send the exact same Tla value, so they
+        cannot be told apart by reading Tla alone -- this defaults to
+        'reverse_idle' in that case, the more conservative read (the
+        next press continues deeper into reverse rather than returning
+        to normal).
+        """
+        raw_tla = self.psx.get('Tla')
+        if raw_tla is None:
+            return
+        tla_fields = raw_tla.split(';')
+        for joystick_name, joystick_config in self.config.items():
+            for axis, axis_config in joystick_config.get('axis motion', {}).items():
+                if axis_config.get('axis type') != 'THROTTLE_WITH_REVERSE_BUTTON':
+                    continue
+                flavor = self._find_reverse_button_flavor(joystick_name, axis)
+                if flavor is None:
+                    continue
+
+                engine_index = axis_config['engine indexes'][0]
+                try:
+                    tla = int(tla_fields[engine_index])
+                except (IndexError, ValueError):
+                    self.logger.error(
+                        "Reverse-state sync: could not read Tla[%s] for %s axis %s",
+                        engine_index, joystick_name, axis)
+                    continue
+
+                if tla >= axis_config['psx idle']:
+                    new_mode = 'normal'
+                elif flavor == 'lever':
+                    new_mode = 'reverse'
+                else:
+                    dist_idle = abs(tla - axis_config['psx reverse idle'])
+                    dist_full = abs(tla - axis_config['psx reverse full'])
+                    new_mode = 'reverse_idle' if dist_idle <= dist_full else 'reverse_full'
+
+                if joystick_name not in self.axis_reverse_mode:
+                    self.axis_reverse_mode[joystick_name] = {}
+                old_mode = self.axis_reverse_mode[joystick_name].get(axis, 'normal')
+                self.axis_reverse_mode[joystick_name][axis] = new_mode
+                if new_mode != old_mode:
+                    self.logger.info(
+                        "Reverse-state sync: %s axis %s, Tla=%s -> %s (was %s)",
+                        joystick_name, axis, tla, new_mode, old_mode)
 
     async def psx_axis_sender(self):  # pylint: disable=too-many-branches
         """Send axis data to PSX.
