@@ -467,7 +467,22 @@ def _spoofing_page_check(value):
 
 
 def _gps_drift_check(value):
-    """Qs573 GpsDrift: 2 ';'-terminated numeric fields (distance nm, alt deviation ft)."""
+    """Qs573 GpsDrift: 2 or 3 ';'-terminated numeric fields.
+
+    The forum post only documents the steady-state 2-field form
+    (distance nm, alt deviation ft, e.g. '0.0;0.0;'). Real traffic
+    (core-simevents, 2026-09-28) also shows a 3rd, all-zero field
+    appearing briefly and repeatedly throughout a session -- e.g.
+    '0;0;0;', toggling back to the 2-field form within ~1.5s each time,
+    uncorrelated with any nearby change to SpoofStatus/SpoofRadius/
+    SpoofingPage. Likely a transient reset state of PSX's own drift
+    calculation; accepted here as a second valid shape rather than
+    rejected, since it's confirmed real PSX output, not a malformed
+    sender.
+    """
+    ok3, _, reliable3 = _semicolon_terminated_floats(value, 3)
+    if ok3:
+        return ok3, "ok", reliable3
     return _semicolon_terminated_floats(value, 2)
 
 
