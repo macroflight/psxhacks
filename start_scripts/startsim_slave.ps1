@@ -61,6 +61,12 @@ if ($StartFrankenusb ) {
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenusb.ps1"
 }
 
+if ($StartFrankenboostproxy ) {
+    AddonDelay
+    Write-Output "Starting FrankenBoostProxy..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenboostproxy.ps1"
+}
+
 if ($StartSrslPsxSlave ) {
     AddonDelay
     Write-Output "Starting SRSL-PSX..."

@@ -142,6 +142,7 @@ There are also programs that you would want to run in every instance/location in
 * PSX.NET.MSFS.Router
 * AcarsPrint
 * FrankenUSB
+* FrankenBoostProxy
 * vPilot
 
 ## The scripts

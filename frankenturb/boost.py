@@ -23,6 +23,26 @@ Angular rate output (body frame, deg/s):
   pitch_rate_dps : q — rotation about y_b (nose up = positive)
   yaw_rate_dps   : r — rotation about z_b (nose right = positive)
 
+Other derived output:
+  ground_speed_kt     : horizontal speed over the ground (not airspeed)
+  vertical_speed_fpm  : rate of climb (+) / descent (−) over the ground
+  aoa_deg             : approximate angle of attack — angle of the
+                         ground-track velocity vector, rotated into the
+                         body frame, above the x_b axis in the xz-plane
+                         (+ = relative wind from below the nose). Exact
+                         only in still air: real wind (especially
+                         vertical wind) biases it, since it uses ground
+                         speed/track rather than true airspeed through
+                         the air mass. A sideslip angle (the same
+                         rotated vector's angle off the x_b axis in the
+                         xy-plane) was tried and removed: ordinary
+                         cruise crosswind alone was enough to show
+                         several degrees of apparent sideslip during a
+                         genuinely coordinated (zero true sideslip)
+                         turn, making it unusable without a real 3D wind
+                         vector to correct for - which this module does
+                         not have.
+
 Computation
 -----------
 A rolling buffer of BoostSamples is kept.  Once the buffer spans at least
@@ -81,7 +101,7 @@ class BoostSample:  # pylint: disable=too-many-instance-attributes
 
 
 @dataclass
-class AccelerationState:
+class AccelerationState:  # pylint: disable=too-many-instance-attributes
     """Body-frame accelerations and angular rates derived from boost data.
 
     See module docstring for full coordinate-system description.
@@ -94,6 +114,8 @@ class AccelerationState:
     pitch_rate_dps: float = 0.0    # body pitch rate (deg/s)
     yaw_rate_dps: float = 0.0      # body yaw   rate (deg/s)
     ground_speed_kt: float = 0.0   # horizontal speed over ground (knots)
+    vertical_speed_fpm: float = 0.0  # rate of climb/descent over ground (ft/min, + = climbing)
+    aoa_deg: float = 0.0           # approximate angle of attack (deg) - see module docstring
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +243,26 @@ class AccelerationComputer:  # pylint: disable=too-few-public-methods
         # Ground speed: central-difference horizontal velocity at s1
         gs_n = (n2 - n0) / dt_ang    # m/s north
         gs_e = (e2 - e0) / dt_ang    # m/s east
-        ground_speed_kt = math.hypot(gs_n, gs_e) / KT_TO_MS
+        horizontal_speed_mps = math.hypot(gs_n, gs_e)
+        ground_speed_kt = horizontal_speed_mps / KT_TO_MS
+
+        # Vertical speed: same central difference, applied to the down-positive
+        # position deltas already needed below for vertical acceleration.
+        vel_d = (d2 - d0) / dt_ang  # m/s, down positive (NED convention)
+        climb_rate_mps = -vel_d     # + = climbing
+        vertical_speed_fpm = climb_rate_mps / FT_TO_M * 60.0
+
+        # Approximate AoA: rotate the ground-track velocity vector into the
+        # body frame (same rotation used for specific force below) and
+        # take its angle in the xz-plane - the standard aerodynamic
+        # definition, generalised to account for bank (a flight-path-
+        # angle-only formula is only exact at zero bank). Still only
+        # approximate: it's ground speed/track, not true airspeed through
+        # the air mass, so real wind (especially vertical wind, i.e.
+        # updrafts/downdrafts) biases it. The same rotation's xy-plane
+        # angle (sideslip) was tried and dropped - see module docstring.
+        v_x, _, v_z = _ned_to_body(gs_n, gs_e, vel_d, psi, theta, phi)
+        aoa_deg = math.degrees(math.atan2(v_z, v_x))
 
         # Non-uniform 3-point second-derivative stencil at s1:
         #   a = 2 × [(x2−x1)/dt12 − (x1−x0)/dt01] / (dt01+dt12)
@@ -258,4 +299,6 @@ class AccelerationComputer:  # pylint: disable=too-few-public-methods
             pitch_rate_dps=math.degrees(q_rad),
             yaw_rate_dps=math.degrees(r_rad),
             ground_speed_kt=ground_speed_kt,
+            vertical_speed_fpm=vertical_speed_fpm,
+            aoa_deg=aoa_deg,
         )

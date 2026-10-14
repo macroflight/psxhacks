@@ -1,5 +1,17 @@
 # start_scripts changelog
 
+## 1.9.0 (2026-10-14)
+
+- **New addon: FrankenBoostProxy** (resurrected from the old `frankenboostproxy.py`
+  with its elevation-offset feature dropped and 5 Hz acceleration/position
+  telemetry added instead), added to the `start_<x>.ps1`/`stop_<x>.ps1`/
+  `restart_<x>.ps1` framework and started from `startsim_slave.ps1` and
+  `startsim_norouter.ps1` (opt-in, `$StartFrankenboostproxy`/
+  `$FrankenboostproxyOptions`/`$FrankenboostproxyRepo`, all unset/`$false`
+  by default - see `psxhacks-start-override-EXAMPLE.ps1`).
+  `restart_frankenboostproxy.ps1` points it at the slave sim's router via
+  `--psx-port-override`, same as every other `franken*.py` addon.
+
 ## 1.8.1 (2026-10-13)
 
 - **Bug fix: the 1.8.0 checkout-integrity preflight check (`Test-PsxhacksManifest`)

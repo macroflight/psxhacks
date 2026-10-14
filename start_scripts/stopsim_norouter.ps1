@@ -28,6 +28,7 @@ KillPythonScript "psx-acars.py"
 KillPythonScript "frankentanker.py"
 KillPythonScript "frankenweather.py"
 KillPythonScript "frankenpush.py"
+KillPythonScript "frankenboostproxy.py"
 
 KillProcess "PSX.Bacars.UI"
 KillJavaJar "$SrslPsxMasterDir\SRSL-PSX.jar"

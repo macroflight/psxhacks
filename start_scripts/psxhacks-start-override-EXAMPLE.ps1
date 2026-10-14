@@ -484,6 +484,25 @@
 
 
 # ---------------------------------------------------------------------------
+# FrankenBoostProxy settings (slave sim)
+# Relays the local boost server's (e.g. MSFS) raw feed to multiple
+# downstream clients and derives 5 Hz acceleration/position telemetry from
+# it. --send-addon is opt-in (off by default) and broadcasts that telemetry
+# on the PSX network, throttled to --addon-interval; it is also always
+# available at the full 5 Hz rate to clients connecting on --accel-port.
+#
+# NOTE: FrankenBoostProxy is started from startsim_slave.ps1 and
+# startsim_norouter.ps1. restart_frankenboostproxy.ps1 already takes care
+# of pointing it at this sim's PSX port for you via --psx-port-override
+# (this applies to every franken*.py addon started from start_scripts - no
+# need to set --psx-port yourself).
+# ---------------------------------------------------------------------------
+#$StartFrankenboostproxy  = $true   # FrankenBoostProxy
+#$FrankenboostproxyOptions = @("--send-addon","--addon-interval=1","--accel-port=10751")
+#$FrankenboostproxyRepo    = $null
+
+
+# ---------------------------------------------------------------------------
 # FrankenTanker settings (master sim)
 # Fire retardant loading/dropping simulation (e.g. CL-415/AT-802 water bombers).
 #

@@ -94,6 +94,12 @@ if ($StartFrankenusb ) {
     Invoke-WindowPosition "frankenusb"
 }
 
+if ($StartFrankenboostproxy ) {
+    Write-Output "Starting FrankenBoostProxy..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenboostproxy.ps1"
+    Invoke-WindowPosition "frankenboostproxy"
+}
+
 if ($StartSrslPsxMaster ) {
     Write-Output "Starting SRSL-PSX..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_srsl_psx_master.ps1"
