@@ -1324,8 +1324,19 @@ def _efb_status_dict(router, ctx):  # pylint: disable=too-many-locals
         om_color, om_label = '#22c55e', 'OK'
     else:
         om_color, om_label = '#64748b', 'unknown'
+    # frankenweather's --primary-metar-source (experimental, default
+    # 'vatsim') decides which bulk METAR cache is actually kept warm in
+    # normal operation (see frankenweather.py's _refresh_primary_metar_cache())
+    # -- show freshness for whichever one that is, not always VATSIM,
+    # or NOAA-primary installs permanently show "VATSIM METAR -- not
+    # getting data, never" even though that's expected and fine.
+    primary_metar_source = (state or {}).get('primary_metar_source', 'vatsim')
+    if primary_metar_source == 'noaa':
+        metar_src_name, metar_src_epoch = 'NOAA METAR', (state or {}).get('noaa_metar_cache_time')
+    else:
+        metar_src_name, metar_src_epoch = 'VATSIM METAR', (state or {}).get('vatsim_cache_time')
     vatsim_color, vatsim_label, vatsim_age = _efb_data_status(
-        now, (state or {}).get('vatsim_cache_time'), _EFB_VATSIM_STALE_TIMEOUT_S)
+        now, metar_src_epoch, _EFB_VATSIM_STALE_TIMEOUT_S)
 
     turbstate = ctx.fw_turbstate
     turb_fresh_color, _, turb_age = _efb_data_status(now, ctx.fw_turbstate_received_at)
@@ -1350,7 +1361,7 @@ def _efb_status_dict(router, ctx):  # pylint: disable=too-many-locals
         'src_msfs_age': msfs_age,
         'src_om_color': om_color, 'src_om_label': om_label,
         'src_vatsim_color': vatsim_color, 'src_vatsim_label': vatsim_label,
-        'src_vatsim_age': vatsim_age,
+        'src_vatsim_age': vatsim_age, 'src_vatsim_source_name': metar_src_name,
         'turb_available': turb_available,
         'turb_enabled': bool((turbstate or {}).get('enabled', True)),
         'turb_kind': (turbstate or {}).get('active_kind', 'none'),
@@ -1548,7 +1559,7 @@ def _efb_datasources_card(w):
         _efb_src_row('FrankenWeather ← MSFS', w['src_msfs_color'],
                      f"{w['src_msfs_label']}, {w['src_msfs_age']}") +
         _efb_src_row('FrankenWeather ← Open-Meteo', w['src_om_color'], w['src_om_label']) +
-        _efb_src_row('FrankenWeather ← VATSIM METAR', w['src_vatsim_color'],
+        _efb_src_row(f"FrankenWeather ← {w['src_vatsim_source_name']}", w['src_vatsim_color'],
                      f"{w['src_vatsim_label']}, {w['src_vatsim_age']}")
     )
     return (

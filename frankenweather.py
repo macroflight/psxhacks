@@ -228,6 +228,15 @@ _STATIONS_CACHE = os.path.join(os.path.expanduser("~"), ".cache", "frankenweathe
 _DEFAULT_CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".frankenweather.toml")
 _VATSIM_ALL_URL = "https://metar.vatsim.net/all"
 _VATSIM_CACHE_MAX_S = 1800             # re-fetch VATSIM METARs every 30 minutes
+# EXPERIMENTAL (--metar-live-refresh): metar.vatsim.net also serves a
+# comma-separated subset of stations at the same path (confirmed live:
+# https://metar.vatsim.net/EGLL,KLAX returns both in one response, same
+# one-line-per-station format as /all; an unknown ICAO is silently omitted,
+# never an error). Used for a short-timeout, per-cycle refresh of just the
+# airports actually in use as zones, so they can be fresher than the 30-
+# minute bulk cache without polling /all more often for everyone else.
+_VATSIM_LIVE_URL = "https://metar.vatsim.net/{icaos}"
+_VATSIM_LIVE_TIMEOUT_S = 30.0
 # Secondary METAR source used only for the METAR-fallback path, when VATSIM's
 # own (ATC/pilot-reported) network doesn't cover a station near enough to be
 # useful -- NOAA's hourly cycle files have much broader, non-VATSIM-dependent
@@ -572,6 +581,21 @@ def _metar_sky_str(cloud_pct: float, wmo_code: int) -> str:
     if oktas <= 6:
         return f"BKN{base_str}"
     return f"OVC{base_str}"
+
+
+def _parse_vatsim_metar_lines(text: str) -> dict:
+    """Parse a VATSIM METAR dump (bulk /all or a live ICAO-list fetch) into icao -> raw line."""
+    metars: dict = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split()
+        if parts:
+            icao = parts[0]
+            if len(icao) == 4 and icao.upper() == icao and icao.isalnum():
+                metars[icao] = line
+    return metars
 
 
 def _gen_metar(icao: str, om: dict, now: datetime) -> str:
@@ -1516,6 +1540,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self.zone_wx: dict = {}
         self.zone_mode: dict = {}
         self.zone_is_metar: dict = {}
+        # zone_num -> "VATSIM" or "NOAA", only meaningful when zone_is_metar
+        # is True. See --primary-metar-source / _metar_source_label().
+        self.zone_metar_source: dict = {}
         self.last_write_time = 0.0
 
         # Fixed zone positions: zone_num (1-7) → (lat, lon, icao)
@@ -4099,50 +4126,76 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
     # VATSIM METAR cache
     # ------------------------------------------------------------------
 
-    async def _refresh_vatsim_cache(self, session: aiohttp.ClientSession) -> None:
-        """Fetch all VATSIM METARs and update the local cache."""
+    async def _refresh_vatsim_cache(self, session: aiohttp.ClientSession) -> bool:
+        """Fetch all VATSIM METARs and update the local cache. Returns success."""
         try:
             async with session.get(_VATSIM_ALL_URL,
                                    timeout=aiohttp.ClientTimeout(total=30)) as r:
                 if r.status != 200:
                     self.logger.warning("VATSIM METAR /all: HTTP %d", r.status)
-                    return
+                    return False
                 text = await r.text()
-                metars: dict = {}
-                for line in text.splitlines():
-                    line = line.strip()
-                    if not line:
-                        continue
-                    parts = line.split()
-                    if parts:
-                        icao = parts[0]
-                        if len(icao) == 4 and icao.upper() == icao and icao.isalnum():
-                            metars[icao] = line
+                metars = _parse_vatsim_metar_lines(text)
                 self.vatsim_cache = metars
                 self.vatsim_cache_time = time.time()
                 self.logger.info("VATSIM METAR cache refreshed: %d airports", len(metars))
+                return True
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.warning("VATSIM METAR cache refresh failed: %s", exc)
+            return False
 
-    async def _refresh_noaa_metar_cache(self, session: aiohttp.ClientSession) -> None:
+    async def _fetch_vatsim_live(
+            self, session: aiohttp.ClientSession, icaos: set) -> dict:
+        """EXPERIMENTAL (--metar-live-refresh): fetch just these ICAOs, fresh.
+
+        One batch request (metar.vatsim.net accepts a comma-separated list
+        at the same path as a single station) with a short
+        _VATSIM_LIVE_TIMEOUT_S timeout, so a slow/unresponsive VATSIM
+        doesn't hold up a zone update cycle. Returns {} on any failure or
+        timeout -- callers fall back to whatever cached METAR they already
+        had, which is the whole point: this only ever refines an
+        already-selected zone/airport, never decides placement.
+        """
+        if not icaos:
+            return {}
+        url = _VATSIM_LIVE_URL.format(icaos=",".join(sorted(icaos)))
+        try:
+            async with session.get(
+                    url, timeout=aiohttp.ClientTimeout(total=_VATSIM_LIVE_TIMEOUT_S)) as r:
+                if r.status != 200:
+                    self.logger.warning("VATSIM METAR live fetch: HTTP %d", r.status)
+                    return {}
+                text = await r.text()
+                metars = _parse_vatsim_metar_lines(text)
+                self.logger.debug(
+                    "VATSIM METAR live fetch: %d/%d requested stations returned",
+                    len(metars), len(icaos))
+                return metars
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.warning("VATSIM METAR live fetch failed: %s", exc)
+            return {}
+
+    async def _refresh_noaa_metar_cache(self, session: aiohttp.ClientSession) -> bool:
         """Fetch NOAA's current-hour METAR cycle file and update the local cache.
 
-        Secondary source, used only by _apply_metar_fallback() when VATSIM's
-        own cache doesn't cover enough nearby stations -- NOAA's network is
-        far broader (every station reporting anywhere, not just VATSIM
+        Used both as the secondary source's periodic refresh (see
+        --primary-metar-source) and by _apply_metar_fallback() when the
+        primary cache doesn't cover enough nearby stations -- NOAA's network
+        is far broader (every station reporting anywhere, not just VATSIM
         ATC/pilot-fed ones). Each file is two lines per station: an
-        observation timestamp, then the raw METAR text itself.
+        observation timestamp, then the raw METAR text itself. Returns
+        success.
         """
         url = _NOAA_METAR_CYCLE_URL.format(hour=datetime.now(timezone.utc).hour)
         try:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as r:
                 if r.status != 200:
                     self.logger.warning("NOAA METAR cycle fetch: HTTP %d", r.status)
-                    return
+                    return False
                 text = await r.text()
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.warning("NOAA METAR cycle fetch failed: %s", exc)
-            return
+            return False
         metars: dict = {}
         for line in text.splitlines():
             line = line.strip()
@@ -4156,20 +4209,83 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self.noaa_metar_cache = metars
         self.noaa_metar_cache_time = time.time()
         self.logger.info("NOAA METAR cache refreshed: %d stations", len(metars))
+        return True
+
+    def _metar_lookup_cache(self, *, apply_vatsim_failure_diag: bool = False) -> dict:
+        """Return the VATSIM+NOAA METAR caches merged, icao -> raw METAR line.
+
+        Precedence on overlap follows --primary-metar-source (experimental,
+        default 'vatsim'). Outside the full Open-Meteo-outage fallback path
+        (_apply_metar_fallback(), which always refreshes and consults both
+        caches directly), only the primary source is refreshed on the normal
+        30-minute schedule -- see _refresh_primary_metar_cache() for how the
+        secondary source gets fetched as a stand-in only when the primary's
+        own refresh fails, and stops being needed again as soon as the
+        primary succeeds (its fresher data then simply wins the precedence
+        merge below). At the default setting with a healthy VATSIM, this is
+        exactly equivalent to self.vatsim_cache alone.
+
+        apply_vatsim_failure_diag: honor _diag_simulate_vatsim_failure. Only
+        _nearest_metar_stations() (the METAR-fallback path) passes True --
+        the normal per-zone METAR matching and the D-ATIS override
+        deliberately keep using the real cache regardless of that diagnostic.
+        """
+        vatsim = ({} if apply_vatsim_failure_diag and self._diag_simulate_vatsim_failure
+                  else self.vatsim_cache)
+        if self.args.primary_metar_source == 'noaa':
+            combined = dict(vatsim)
+            combined.update(self.noaa_metar_cache)
+        else:
+            combined = dict(self.noaa_metar_cache)
+            combined.update(vatsim)
+        return combined
+
+    def _metar_source_label(self, icao: str, raw: str) -> str:
+        """Return "VATSIM" or "NOAA", whichever cache actually holds raw for icao."""
+        if self.noaa_metar_cache.get(icao) == raw and self.vatsim_cache.get(icao) != raw:
+            return "NOAA"
+        return "VATSIM"
+
+    async def _refresh_primary_metar_cache(self, session: aiohttp.ClientSession) -> None:
+        """Refresh --primary-metar-source's cache every 30 min; fail over symmetrically.
+
+        Only the configured primary source is fetched on the normal
+        schedule -- not both unconditionally. If that fetch fails (HTTP
+        error or exception, not just "cache still fresh enough to skip"),
+        immediately fetch the secondary source too, as a stand-in until the
+        primary recovers. No extra state needs to be tracked for the
+        recovery side: once the primary's own refresh succeeds again, its
+        (now fresher) data simply wins the precedence merge in
+        _metar_lookup_cache() over whatever the secondary was last asked to
+        hold, so things fall back to the primary automatically.
+        """
+        if self.args.primary_metar_source == 'noaa':
+            primary, secondary = self._refresh_noaa_metar_cache, self._refresh_vatsim_cache
+            primary_cache_time, primary_max_age_s = (
+                self.noaa_metar_cache_time, _NOAA_METAR_CACHE_MAX_S)
+        else:
+            primary, secondary = self._refresh_vatsim_cache, self._refresh_noaa_metar_cache
+            primary_cache_time, primary_max_age_s = (
+                self.vatsim_cache_time, _VATSIM_CACHE_MAX_S)
+        if (time.time() - primary_cache_time > primary_max_age_s and
+                not await primary(session)):
+            self.logger.warning(
+                "Primary METAR source (%s) refresh failed -- falling back to "
+                "secondary source as a stand-in", self.args.primary_metar_source)
+            await secondary(session)
 
     def _nearest_metar_stations(self, lat: float, lon: float, n: int) -> list:
         """Return up to n (icao, lat, lon, dist_nm, raw_metar), nearest first.
 
-        Draws from the VATSIM (preferred on overlap) and NOAA caches
-        combined, cross-referenced against the known airport-position
-        database. Used only by the METAR-fallback path, so distance is
-        unbounded -- the whole point is to find the best available data,
-        however far away. See _diag_simulate_vatsim_failure for how to
-        exercise the NOAA-only / no-data-at-all branches on demand.
+        Draws from the VATSIM and NOAA caches combined (see
+        _metar_lookup_cache() for precedence), cross-referenced against the
+        known airport-position database. Used only by the METAR-fallback
+        path, so distance is unbounded -- the whole point is to find the
+        best available data, however far away. See
+        _diag_simulate_vatsim_failure for how to exercise the NOAA-only /
+        no-data-at-all branches on demand.
         """
-        combined = dict(self.noaa_metar_cache)
-        if not self._diag_simulate_vatsim_failure:
-            combined.update(self.vatsim_cache)
+        combined = self._metar_lookup_cache(apply_vatsim_failure_diag=True)
         candidates = []
         for icao, raw in combined.items():
             pos = self.airports.get(icao)
@@ -4246,6 +4362,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.psx_send_and_set(f"WxMode{zone_num}", wxmode)
             self.psx_send_and_set(f"Metar{zone_num}", raw)
             self.zone_is_metar[zone_num] = True
+            self.zone_metar_source[zone_num] = self._metar_source_label(icao, raw)
             self.zone_reason[zone_num] = f"VATSIM/NOAA {icao} (METAR fallback, {dist_nm:.0f}nm)"
         nearest_icao, _, _, nearest_dist, nearest_raw = stations[0]
         self._apply_metar_to_wxbasic(nearest_icao, nearest_raw, nearest_dist)
@@ -4668,9 +4785,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                          self.ac_lat, self.ac_lon, self.ac_hdg,
                          "MANEUVERING" if self._maneuvering else "CRUISE")
 
-        # Refresh VATSIM METAR cache if stale
-        if time.time() - self.vatsim_cache_time > _VATSIM_CACHE_MAX_S:
-            await self._refresh_vatsim_cache(session)
+        # Refresh --primary-metar-source's cache if stale; fails over to the
+        # other source as a stand-in on failure (see _refresh_primary_metar_cache()).
+        await self._refresh_primary_metar_cache(session)
+        metar_cache = self._metar_lookup_cache()
 
         # Find all airports within snapping range for each zone
         zone_candidates = [self._airports_within_nm(lat, lon, _AIRPORT_SNAP_NM)
@@ -4680,6 +4798,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         snap_positions: list = []
         snap_icaos: list = []
         raw_metars: list = []   # real METAR string, or None if Open-Meteo needed
+        metar_sources: list = []  # "VATSIM"/"NOAA" alongside raw_metars, or None
         om_zone_idx: list = []  # indices of zones that need Open-Meteo
         used_icaos: set = set()
         # zone index -> (icao, age_hours) for zones where a real METAR was
@@ -4702,7 +4821,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 # anything not covered by the METAR text itself (CAPE/radar/
                 # lightning CB inputs), so the CB decision stays consistent
                 # with the zone's actual (offset) broadcast position.
-                raw = self.vatsim_cache.get(stored_icao)
+                raw = metar_cache.get(stored_icao)
                 stale_age = None
                 if raw is not None and not _metar_is_fresh(raw):
                     stale_age = _metar_age_hours(raw)
@@ -4713,6 +4832,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 raw_metars.append(raw)
                 used_icaos.add(stored_icao)
                 if raw is None:
+                    metar_sources.append(None)
                     om_zone_idx.append(i)
                     if stale_age is not None:
                         self.logger.warning(
@@ -4724,15 +4844,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                             "Zone %d: no METAR for %s (CB-avoidance offset zone) — "
                             "using Open-Meteo", i + 1, stored_icao)
                 else:
+                    src_label = self._metar_source_label(stored_icao, raw)
+                    metar_sources.append(src_label)
                     self.logger.debug(
-                        "Zone %d → %s (VATSIM METAR, CB-avoidance offset zone)",
-                        i + 1, stored_icao)
+                        "Zone %d → %s (%s METAR, CB-avoidance offset zone)",
+                        i + 1, stored_icao, src_label)
                 continue
             skipped_stale: list = []
             for icao, alat, alon, dist_nm in zone_candidates[i]:
-                if icao not in self.vatsim_cache or icao in used_icaos:
+                if icao not in metar_cache or icao in used_icaos:
                     continue
-                candidate_raw = self.vatsim_cache[icao]
+                candidate_raw = metar_cache[icao]
                 if not _metar_is_fresh(candidate_raw):
                     skipped_stale.append((icao, _metar_age_hours(candidate_raw), dist_nm))
                     continue
@@ -4740,7 +4862,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 snap_icaos.append(icao)
                 raw_metars.append(candidate_raw)
                 used_icaos.add(icao)
-                self.logger.debug("Zone %d → %s (VATSIM METAR, %.1fnm)", i + 1, icao, dist_nm)
+                src_label = self._metar_source_label(icao, candidate_raw)
+                metar_sources.append(src_label)
+                self.logger.debug("Zone %d → %s (%s METAR, %.1fnm)",
+                                  i + 1, icao, src_label, dist_nm)
                 break
             else:
                 if skipped_stale:
@@ -4749,13 +4874,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     self.logger.warning(
                         "Zone %d: discarding stale METAR for %s (%.0fh old, %.0fnm) — "
                         "using Open-Meteo instead", i + 1, stale_icao, stale_age, stale_dist_nm)
-                # No (fresh) VATSIM METAR — snap to nearest available airport anyway, use OM
+                # No (fresh) METAR anywhere nearby — snap to nearest available airport
+                # anyway, use OM
                 best_ap = next(
                     (ap for ap in zone_candidates[i] if ap[0] not in used_icaos), None)
                 if best_ap is not None:
                     snap_positions.append((best_ap[1], best_ap[2]))
                     snap_icaos.append(best_ap[0])
                     raw_metars.append(None)
+                    metar_sources.append(None)
                     om_zone_idx.append(i)
                     used_icaos.add(best_ap[0])
                     ac_dist = self._dist_nm(self.ac_lat, self.ac_lon, best_ap[1], best_ap[2])
@@ -4766,11 +4893,35 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     snap_positions.append((lat, lon))
                     snap_icaos.append(stored_icao)
                     raw_metars.append(None)
+                    metar_sources.append(None)
                     om_zone_idx.append(i)
                     used_icaos.add(stored_icao)
                     self.logger.debug(
                         "Zone %d → %s (Open-Meteo; no airports within %.0fnm)",
                         i + 1, stored_icao, _AIRPORT_SNAP_NM)
+
+        # EXPERIMENTAL (--metar-live-refresh): try a fresher live VATSIM reading
+        # for every zone that already got a real METAR from VATSIM above. Never
+        # touches zone/airport selection -- that's already final by this point --
+        # and silently keeps the existing cached text for any ICAO the live fetch
+        # doesn't return (not in VATSIM's live data, or the fetch failed/timed out).
+        if self.args.metar_live_refresh:
+            live_icaos = {
+                snap_icaos[i] for i in range(7)
+                if raw_metars[i] is not None and metar_sources[i] == "VATSIM"
+            }
+            if live_icaos:
+                live_metars = await self._fetch_vatsim_live(session, live_icaos)
+                if live_metars:
+                    self.vatsim_cache.update(live_metars)
+                for i in range(7):
+                    if metar_sources[i] != "VATSIM":
+                        continue
+                    fresh = live_metars.get(snap_icaos[i])
+                    if fresh is not None and fresh != raw_metars[i]:
+                        self.logger.debug(
+                            "Zone %d → %s: live VATSIM METAR refresh", i + 1, snap_icaos[i])
+                        raw_metars[i] = fresh
 
         # Fetch Open-Meteo for all 7 zones — CB always comes from OM even for METAR zones
         om_batch = await self._fetch_om_batch(snap_positions)
@@ -4903,7 +5054,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             cb_suffixes.append(f"  CAPE={cape:.0f} J/kg{cb_part}")
 
             # Build zone reason (short) and weather_detail (long) for API broadcast
-            src = "VATSIM" if raw_metars[i] else "OM"
+            src = metar_sources[i] if raw_metars[i] else "OM"
             stored_icao = self.zone_positions.get(i + 1, (None, None, ""))[2]
             reason = f"{src} {snap_icaos[i]}"
             if i in stale_metar_discarded:
@@ -4926,9 +5077,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 _role = ("departure" if stored_icao == self.fmc_dep_icao
                          else "destination")
                 base = f"{_role} airport {snap_icao}"
-                base += "; VATSIM METAR" if is_metar else "; OpenMeteo"
+                base += f"; {metar_sources[i]} METAR" if is_metar else "; OpenMeteo"
             elif is_metar:
-                base = f"VATSIM METAR {snap_icao}"
+                base = f"{metar_sources[i]} METAR {snap_icao}"
                 if snap_icao != stored_icao and stored_icao:
                     base += f" (nearest METAR to {stored_icao})"
             else:
@@ -4984,7 +5135,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             zone_num = i + 1
             self.zone_mode[zone_num] = wxmode
             self.zone_is_metar[zone_num] = raw_metars[i] is not None
-            src = "VATSIM" if raw_metars[i] else "OM"
+            self.zone_metar_source[zone_num] = metar_sources[i]
+            src = metar_sources[i] if raw_metars[i] else "OM"
             stale_note = ""
             if i in stale_metar_discarded:
                 stale_icao, stale_age = stale_metar_discarded[i]
@@ -5078,7 +5230,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 source = "MANUAL"
                 reason = "Manual weather"
             else:
-                source = "VATSIM" if self.zone_is_metar.get(zone_num) else "OM"
+                source = (self.zone_metar_source.get(zone_num, "VATSIM")
+                          if self.zone_is_metar.get(zone_num) else "OM")
                 reason = self.zone_reason.get(zone_num, "")
             zones.append({
                 "zone": zone_num,
@@ -5114,6 +5267,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "metar_fallback_active": self._metar_fallback_active,
             "last_om_fetch_failed": self._last_om_fetch_failed,
             "vatsim_cache_time": self.vatsim_cache_time or None,
+            "noaa_metar_cache_time": self.noaa_metar_cache_time or None,
+            "primary_metar_source": self.args.primary_metar_source,
             "mode": "MANEUVERING" if self._maneuvering else "CRUISE",
             "sigmet_hazards": self._aircraft_sigmet_hazards(),
             "ac_lat": round(self.ac_lat, 4) if self.ac_lat is not None else None,
@@ -5685,6 +5840,24 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "VATSIM/NOAA METAR stations only once every zone is more than this "
                  "many nm away (matches PSX's own zone-of-influence radius; "
                  "deliberately independent of --cruise-behind-dist/--low-alt-dist).")
+        parser.add_argument(
+            '--primary-metar-source', choices=('vatsim', 'noaa'), default='vatsim',
+            help="EXPERIMENTAL: which METAR source to prefer when both VATSIM and "
+                 "NOAA have data for the same station. Only the primary source's "
+                 "cache is refreshed outside the full Open-Meteo-outage fallback "
+                 "path (where both are always consulted regardless of this "
+                 "setting), so leaving this at the default 'vatsim' is identical "
+                 "to behavior before this option existed.")
+        parser.add_argument(
+            '--metar-live-refresh', action='store_true',
+            help="EXPERIMENTAL: once a zone has been assigned a real (fresh, "
+                 "cached) METAR by the normal selection rule, additionally try a "
+                 "short-timeout live fetch of just that airport's current METAR "
+                 "straight from VATSIM, to get something fresher than the bulk "
+                 "cache (which only refreshes every 30 minutes). Falls back "
+                 "silently to the already-selected cached METAR on failure or "
+                 "timeout; never changes which airport a zone snaps to, and never "
+                 "turns a cache miss/stale METAR into a hit. Off by default.")
         parser.add_argument(
             '--new-zone-infront-range', type=_parse_nm_range, default=(150.0, 250.0),
             metavar='MIN,MAX',

@@ -1,5 +1,27 @@
 # frankenweather changelog
 
+## 1.6.0 (2026-10-15)
+
+- **New (experimental, command-line only): `--primary-metar-source
+  {vatsim,noaa}`** (default `vatsim`) and **`--metar-live-refresh`**.
+  `--primary-metar-source` picks which bulk METAR source (VATSIM's `/all`
+  feed, or NOAA's hourly cycle file) is refreshed on the normal 30-minute
+  schedule and wins precedence when both have data for the same station;
+  only one is fetched regularly — if that fetch fails, the other is
+  fetched immediately as a stand-in, and falls back to the primary
+  automatically as soon as it succeeds again, with no extra state to
+  track. `--metar-live-refresh` additionally tries a short-timeout
+  (30s), single-batch live fetch straight from VATSIM
+  (`metar.vatsim.net` accepts a comma-separated ICAO list) for just the
+  airports already selected as zones each cycle, falling back silently
+  to the already-cached METAR on failure or timeout — it never changes
+  which airport a zone snaps to, only how fresh that airport's text is.
+  Both default to today's exact behavior (VATSIM bulk feed only, 30-minute
+  cache, no live per-station fetch) unless explicitly enabled. Zone source
+  reporting (web UI, console log) now also distinguishes "VATSIM" from
+  "NOAA" per zone instead of always saying "VATSIM" whenever any real
+  METAR was used.
+
 ## 1.5.0 (2026-10-14)
 
 - **Fix: never re-send a weather variable PSX already has** — found via
