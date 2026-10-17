@@ -1,5 +1,21 @@
 # frankenusb changelog
 
+## 1.4.0 (2026-10-16)
+
+- **New: a `THROTTLE_WITH_REVERSE_BUTTON` axis's tracked reverse state
+  now re-syncs from PSX's real `Tla` on every (re)connect** -- including
+  a situ load, which looks identical to a disconnect/reconnect from
+  frankenusb's own PSX client. Previously, frankenusb's own
+  `axis_reverse_mode` tracking always restarted at `'normal'`, so if the
+  real reversers were already deployed (frankenusb restarted mid-flight,
+  a different aircraft/sim, or a freshly loaded situation), the next
+  button press was interpreted relative to the wrong starting point.
+  Classifies the real commanded `Tla` against each axis's own configured
+  idle/reverse-idle/reverse-full values, correctly distinguishing
+  `STEPPED_REVERSE_TOGGLE`'s four-state model from
+  `REVERSE_LEVER_UP`/`REVERSE_LEVER_DOWN`/`REVERSE_TOGGLE`'s two-state
+  one.
+
 ## 1.3.0 (2026-10-13)
 
 - **New: a `NORMAL` axis mapped to `Brakes` now enforces a safe 0-1000
