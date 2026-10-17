@@ -16,8 +16,9 @@ A patch release needs no changelog reminder. A minor release gets a
 suggestion to add a changelog entry. A major release requires typing "YES"
 to confirm the changelog has actually been updated.
 
-<addon> is one of: frankencduproxy, frankenprint, frankenpush, frankenrouter,
-frankentanker, frankenusb, frankenweather, psxutils, start_scripts.
+<addon> is one of: frankenboostproxy, frankencduproxy, frankenprint, frankenpush,
+frankenrouter, frankentanker, frankenusb, frankenweather, psxutils,
+start_scripts.
 
 psxutils is a shared version number for a group of small diagnostic
 utilities (show_hid, show_psx, show_usb, temporary_weather_logger) that are
@@ -48,6 +49,9 @@ _ROOT = pathlib.Path(__file__).resolve().parent
 
 # addon name -> (version file, changelog file)
 _ADDONS = {
+    'frankenboostproxy': (
+        _ROOT / 'frankenboostproxy.version',
+        _ROOT / 'docs' / 'Changelog-frankenboostproxy.md'),
     'frankencduproxy': (
         _ROOT / 'frankencduproxy.version',
         _ROOT / 'docs' / 'Changelog-frankencduproxy.md'),
@@ -99,6 +103,9 @@ _ALL_ADDONS = {**_ADDONS, **_NONBUILD_ADDONS}
 # psx.py, Makefile, .github/, requirements.txt, ...) are shared
 # infrastructure, deliberately unattributed to any single addon.
 _ADDON_PATHS = {
+    'frankenboostproxy': (
+        ['frankenboostproxy.py', 'frankenboostproxy.spec',
+         'show_boost_gauges.py', 'show_boost_gauges.spec'], []),
     'frankencduproxy': (['frankencduproxy.py', 'frankencduproxy.spec'], []),
     'frankenprint': (['frankenprint.py', 'frankenprint.spec'], []),
     'frankenpush': (['frankenpush.py', 'frankenpush.spec'], []),

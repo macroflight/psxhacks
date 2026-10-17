@@ -50,6 +50,15 @@ four EXEs. This grouping lives in the `build.yml` workflow's
 `psxutils.version` to exist there so `./release.py psxutils` can bump it
 like any other addon).
 
+Same idea for `frankenboostproxy`: `show_boost_gauges` (its companion
+Tkinter telemetry GUI) shares `frankenboostproxy.version` rather than
+having its own, and the two are built and released together as
+`frankenboostproxy-v<version>`/`frankenboostproxy.zip` containing both
+EXEs. `show_boost_gauges.py` reads the shared version the same way
+(`get_version("frankenboostproxy", __file__)`), and its own `.spec`
+bundles `frankenboostproxy.version` as data for the same reason every
+other addon bundles its own.
+
 The addon/version-file mapping lives in exactly one place,
 `release.py`'s `_ADDONS` dict, so it can never drift out of sync between
 `release.py` itself and the CI workflow: the detect job pipes the list of
@@ -92,7 +101,9 @@ Releases page and find the tag for the addon you want
 release has exactly one asset: that addon's `.exe` — except `psxutils`
 releases (`psxutils-v1.0.0`, etc.), whose one asset is a `.zip` containing
 all four utility EXEs (`show_hid.exe`, `show_psx.exe`, `show_usb.exe`,
-`temporary_weather_logger.exe`).
+`temporary_weather_logger.exe`), and `frankenboostproxy` releases, whose
+one asset is a `.zip` containing both `frankenboostproxy.exe` and
+`show_boost_gauges.exe`.
 
 ## Retention
 

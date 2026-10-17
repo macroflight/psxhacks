@@ -78,8 +78,12 @@ from dataclasses import dataclass
 from typing import Optional
 
 from psx import Client
+from psxhacks_version import get_version
 
-__version__ = "2.0.0"
+# Shares frankenboostproxy's version number/changelog - the two are built
+# and released together (see makepackages.ps1/build.yml's $GroupMembers),
+# not independently versioned.
+__version__ = get_version("frankenboostproxy", __file__)
 
 _RECONNECT_DELAY_S = 3.0
 _REFRESH_INTERVAL_MS = 100

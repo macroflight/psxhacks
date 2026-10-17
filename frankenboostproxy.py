@@ -101,11 +101,12 @@ import time
 from typing import IO, Optional
 
 from psx import Client
+from psxhacks_version import get_version
 from frankenturb import parse_pibahealtas
 from frankenturb.boost import AccelerationComputer, AccelerationState, BoostSample, \
     KT_TO_MS, parse_boost_line
 
-__version__ = "2.0.0"
+__version__ = get_version("frankenboostproxy", __file__)
 
 _ADDON_PREFIX = "FRANKENBOOSTPROXY:TELEMETRY:"
 _FRDP_VERSION = '1'
@@ -249,7 +250,7 @@ class BoostProxy:  # pylint: disable=too-many-instance-attributes,too-few-public
     async def _psx_task(self) -> None:
         def connected(*_args) -> None:
             self.logger.info("Connected to PSX as client #%s", self.psx.get("id"))
-            self.psx.send("name", f"{_MY_CLIENT_ID}:FrankenBoostProxy")
+            self.psx.send("name", f"{_MY_CLIENT_ID}:FrankenBoostProxy {__version__}")
             # Opt into FRDP broadcasts (ROUTERINFO) if connected to a
             # frankenrouter - see router/docs/NOTES.md's "FRDP SUBSCRIBE"
             # section. Silently ignored if connected directly to a PSX

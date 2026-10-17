@@ -2,6 +2,15 @@
 
 ## 2.0.0 (2026-10-14)
 
+- **`frankenboostproxy` and `show_boost_gauges` now have real version
+  numbers and are built/released as standalone EXEs** (previously source
+  only). They share one version number and one release
+  (`frankenboostproxy-v<version>`, a `.zip` with both EXEs - the same
+  pattern `psxutils` uses for its four utilities), since
+  `show_boost_gauges` only exists to display `frankenboostproxy`'s
+  telemetry and has never had independent version history. See
+  `docs/BuildSystem.md`.
+
 - **Rewritten: elevation-offset feature dropped, acceleration/position
   telemetry added instead.** `frankenboostproxy.py` no longer applies a
   runtime elevation offset to the relayed boost feed (the old

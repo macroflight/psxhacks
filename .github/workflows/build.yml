@@ -110,6 +110,7 @@ jobs:
           # is purely about how the *release* is packaged.
           $GroupMembers = @{
               'psxutils' = @('show_hid', 'show_psx', 'show_usb', 'temporary_weather_logger')
+              'frankenboostproxy' = @('frankenboostproxy', 'show_boost_gauges')
           }
 
           function Publish-Release([string]$Tag, [string]$Title, [string[]]$Assets) {
