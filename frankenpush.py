@@ -125,6 +125,34 @@ _STATIONARY_SPEED_THRESHOLD_KT = 5.0
 # Between full sends only changed fields are sent to reduce bandwidth.
 _FULL_SEND_INTERVAL = 300.0
 
+# Delay between the crew clearing a flight_deck_doorbell call (CallFrCabin
+# reset to 0) and telling Flight Centre, so its status display doesn't
+# reset the "ring the doorbell" button the instant the crew's mic selector
+# moves off CAB. See _resolve_doorbell_after_delay()/~/to-psxhacks.md.
+_DOORBELL_RESOLVED_DELAY_S = 10.0
+
+# flight_deck_door_locked wire values (frankenpush -> Flight Centre, both
+# in the immediate flight_deck_door event and the regular telemetry
+# field) -- our own tri-state encoding, not a passthrough of Qh419's raw
+# wire values (only _DOOR_STATUS_LOCKED happens to coincide with one).
+_DOOR_STATUS_UNKNOWN = 0   # no FltDkDoorTurn movement seen since startup
+_DOOR_STATUS_UNLOCKED = 1  # last movement seen was Qh419=0
+_DOOR_STATUS_LOCKED = 2    # last movement seen was Qh419=2
+
+# CfgVariant (Qi0) values that have no flight deck door lock and a
+# limited intercom -- "Freighter" and "Freighter ER" -- confirmed live
+# against a real PSX session across all 5 variants (0=Combi, 1=Freighter,
+# 2=Passenger, 3=Freighter ER, 4=Passenger ER; only 1/3 lack a door).
+# These show a simulated "flight deck curtain" on Flight Centre's status
+# display instead of a door lock.
+_FREIGHTER_CFG_VARIANTS = (1, 3)
+
+# Freighter-only: how long after a "U/D" button press (CallPanel/Qh413==0
+# -- live-confirmed: a momentary pulse, not a held state, and never seen
+# fire during the normal flight_deck_doorbell call-clearing sequence)
+# the simulated curtain closes again. See _close_curtain_after_delay().
+_CURTAIN_AUTO_CLOSE_DELAY_S = 60.0
+
 # WorldFlight musical web shop purchase alerts (opt-in, see --worldflight-shop-alerts).
 _WORLDFLIGHT_SALES_URL = "https://flightofthepenguins.se/api/sales"
 _WORLDFLIGHT_TYPE_LABELS = {"merch": "MERCH", "ticket": "TICKET"}
@@ -365,7 +393,7 @@ def _print_version_mismatch_warning():
 class Script():  # pylint: disable=too-many-instance-attributes
     """FrankenPush script."""
 
-    def __init__(self):
+    def __init__(self):  # pylint: disable=too-many-statements
         """Initialize script state."""
         self.args = None
         self.taskgroup = None
@@ -389,6 +417,30 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self._route1 = None
         self._route2 = None
         self._eta = None
+        # _DOOR_STATUS_UNLOCKED/_DOOR_STATUS_LOCKED once a switch movement
+        # has been seen, else _DOOR_STATUS_UNKNOWN (the switch always
+        # springs back to neutral, so there's no persistent PSX readback
+        # of this). See _on_fltdk_door_turn() and ~/to-psxhacks.md.
+        self._flight_deck_door_locked = _DOOR_STATUS_UNKNOWN
+        # True from the moment a flight_deck_doorbell request places a
+        # call (Qi102=07) until CallFrCabin is seen reset back to 0 --
+        # i.e. "we have an outstanding doorbell call, waiting for the
+        # crew to clear it". Flight Centre itself infers a rejection from
+        # a LOCK/DENY flight_deck_door event arriving while a request is
+        # pending, so this flag only tracks the normal clear-the-call
+        # path. See _handle_portal_message()/_on_call_fr_cabin().
+        self._doorbell_call_active = False
+
+        # True/False once CfgVariant (Qi0) has been seen, else None
+        # ("unknown"). True for the Freighter/Freighter ER variants,
+        # which have no flight deck door lock -- Flight Centre shows a
+        # simulated "curtain" for those instead. See _on_cfg_variant().
+        self._is_freighter = None
+        # Freighter-only simulated curtain state and the handle of its
+        # pending auto-close task, if any. See _on_call_panel()/
+        # _close_curtain_after_delay().
+        self._curtain_open = False
+        self._curtain_close_task = None
 
         # FRDP broadcast state, received (and, for FLIGHTINFO, also sent)
         # over the single PSX connection - see get_psx_connection_coro()
@@ -427,6 +479,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self._flap_lever = None     # Qh389 FlapLever 0-6
         self._gear_lever = None     # Qh170 GearLever 1=up 2=off 3=down
         self._spd_brk_lever = None  # Qh388 SpdBrkLever 0-800
+        self._seatbelts_on = None  # Qh421 Seatbelts: True when ==2, else False
 
         # Autosave situ monitoring — set when a file changes, consumed by _build_update
         self._pending_autosave_situ = None
@@ -567,6 +620,107 @@ class Script():  # pylint: disable=too-many-instance-attributes
         except ValueError:
             pass
 
+    def _on_seatbelts(self, _key, value):
+        """Detect the seat belt signs' on/off state (Qh421, ECON).
+
+        On when Qh421==2, off for any other value. Unlike the door
+        switch, Qh421 is a real switch position with a readable state,
+        so an immediate event is only queued when the derived on/off
+        actually changes -- unknown (None) -> known counts as a change,
+        per ~/to-psxhacks.md.
+        """
+        try:
+            now_on = int(value) == 2
+        except ValueError:
+            return
+        if now_on == self._seatbelts_on:
+            return
+        self._seatbelts_on = now_on
+        self.logger.info("Seatbelt signs: %s", "ON" if now_on else "OFF")
+        self._reverse_sync_queue.put_nowait({
+            "type": "seatbelt_signs",
+            "protocol_version": PUSH_PROTOCOL_VERSION,
+            "on": now_on,
+        })
+
+    def _on_cfg_variant(self, _key, value):
+        """Detect whether the loaded aircraft variant has a door lock (Qi0, ECON).
+
+        The Freighter/Freighter ER variants (_FREIGHTER_CFG_VARIANTS)
+        have no flight deck door and a limited intercom; Flight Centre
+        shows a simulated curtain for those instead of the door lock
+        status -- see ~/to-psxhacks.md. Only queues an event when this
+        actually changes (unknown -> known counts as a change, same
+        convention as _on_seatbelts()); it shouldn't change again within
+        a session, but handling it the same way costs nothing.
+        """
+        try:
+            is_freighter = int(value) in _FREIGHTER_CFG_VARIANTS
+        except ValueError:
+            return
+        if is_freighter == self._is_freighter:
+            return
+        self._is_freighter = is_freighter
+        self.logger.info(
+            "Aircraft variant: %s", "freighter (no door lock)" if is_freighter
+            else "has a door lock")
+        self._reverse_sync_queue.put_nowait({
+            "type": "is_freighter",
+            "protocol_version": PUSH_PROTOCOL_VERSION,
+            "is_freighter": is_freighter,
+        })
+
+    def _on_call_panel(self, _key, value):
+        """Detect a freighter's "U/D" intercom button press (CallPanel/Qh413==0).
+
+        Live-confirmed: a momentary pulse (fires once per physical
+        press, even if the value doesn't change) rather than a held
+        state, and never seen to fire during the normal
+        flight_deck_doorbell call-clearing sequence -- see
+        ~/to-psxhacks.md. Only acts while self._is_freighter, since
+        Qh413's other values are ordinary call-panel button selections
+        on the full intercom, not meaningful here. Opens the simulated
+        curtain (if not already open) and (re)starts the 60s auto-close
+        countdown on every press, so holding the door "open" is just
+        repeated presses rather than a separate explicit close action --
+        matching the lack of any described way to close it manually.
+        """
+        if not self._is_freighter:
+            return
+        try:
+            pressed = int(value) == 0
+        except (ValueError, TypeError):
+            return
+        if not pressed:
+            return
+        if self._curtain_close_task is not None:
+            self._curtain_close_task.cancel()
+        if not self._curtain_open:
+            self._curtain_open = True
+            self.logger.info("Flight deck curtain: OPEN")
+            self._reverse_sync_queue.put_nowait({
+                "type": "flight_deck_curtain",
+                "protocol_version": PUSH_PROTOCOL_VERSION,
+                "open": True,
+            })
+        self._curtain_close_task = asyncio.ensure_future(self._close_curtain_after_delay())
+
+    async def _close_curtain_after_delay(self):
+        """Close the simulated flight deck curtain after the fixed delay.
+
+        Can be preempted (cancelled) by _on_call_panel() if another U/D
+        press restarts the countdown before this delay elapses.
+        """
+        await asyncio.sleep(_CURTAIN_AUTO_CLOSE_DELAY_S)
+        self._curtain_open = False
+        self._curtain_close_task = None
+        self.logger.info("Flight deck curtain: CLOSED (auto)")
+        self._reverse_sync_queue.put_nowait({
+            "type": "flight_deck_curtain",
+            "protocol_version": PUSH_PROTOCOL_VERSION,
+            "open": False,
+        })
+
     def _on_tail_number(self, _key, value):
         self._tail_number = value.strip().upper() or None
 
@@ -613,8 +767,15 @@ class Script():  # pylint: disable=too-many-instance-attributes
         except (ValueError, IndexError):
             return None, None
 
-    @property
-    def _connected_sim_names(self):
+    def _connected_sim_names_and_master(self):
+        """Return (connected client sim names, master router's sim name).
+
+        The master sim name is returned alongside (rather than as a
+        separate property re-scanning self._routerinfos) since Flight
+        Centre's status-display name matching needs it too -- see
+        ~/to-psxhacks.md -- even though connected_sim_names deliberately
+        excludes it from the client list below.
+        """
         now = time.time()
 
         # Expire entries not seen within 2× the ROUTERINFO broadcast interval.
@@ -644,7 +805,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
             if 'simulator_name' in ri and ri['simulator_name'] != master_sim_name
         })
         self.logger.debug("ROUTERINFO: master=%r  clients=%r", master_sim_name, names)
-        return names
+        return names, master_sim_name
 
     def _build_update(self, full):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
         """Build the JSON payload to send to Flight Centre.
@@ -690,9 +851,28 @@ class Script():  # pylint: disable=too-many-instance-attributes
         if full or self._sent_state.get("flightinfo") != fi:
             update["flightinfo"] = fi
 
-        names = self._connected_sim_names
+        names, master_sim_name = self._connected_sim_names_and_master()
         if full or self._sent_state.get("names") != names:
             update["connected_sim_names"] = names
+        if full or self._sent_state.get("master_sim_name") != master_sim_name:
+            update["master_sim_name"] = master_sim_name
+            # INFO rather than DEBUG for now, while this feature is new.
+            self.logger.info(
+                "Sending master_sim_name=%r to FC (%s)",
+                master_sim_name, "full" if full else "delta")
+
+        # Flight deck door lock state (see _on_fltdk_door_turn() and
+        # ~/to-psxhacks.md) -- the switch always springs back to neutral,
+        # so this is the only persistent record of it; sent here (for
+        # resync on reconnect) in addition to the immediate
+        # flight_deck_door event queued by _on_fltdk_door_turn().
+        door_locked = self._flight_deck_door_locked
+        if full or self._sent_state.get("door_locked") != door_locked:
+            update["flight_deck_door_locked"] = door_locked
+            # INFO rather than DEBUG for now, while this feature is new.
+            self.logger.info(
+                "Sending flight_deck_door_locked=%r to FC (%s)",
+                door_locked, "full" if full else "delta")
 
         # SHAREDINFO fields — delta-tracked.
         pilot_flying = self._sharedinfo.get("pilot_flying_simulator")
@@ -738,6 +918,19 @@ class Script():  # pylint: disable=too-many-instance-attributes
             update["gear_lever"] = gear_str
             update["spd_brk_out"] = spd_brk_out
 
+        # Seatbelt signs (Qh421==2) -- delta-tracked, for Flight Centre's
+        # status display. See ~/to-psxhacks.md.
+        if full or self._sent_state.get("seatbelts_on") != self._seatbelts_on:
+            update["seatbelts_on"] = self._seatbelts_on
+
+        # Aircraft variant (door lock vs. simulated curtain) and the
+        # freighter-only curtain state -- see _on_cfg_variant()/
+        # _on_call_panel()/~/to-psxhacks.md.
+        if full or self._sent_state.get("is_freighter") != self._is_freighter:
+            update["is_freighter"] = self._is_freighter
+        if full or self._sent_state.get("curtain_open") != self._curtain_open:
+            update["flight_deck_curtain_open"] = self._curtain_open
+
         # Captain's barometric setting — delta-tracked.
         capt_baro_mode, capt_baro_hpa = self._parse_capt_baro()
         capt_baro_now = (capt_baro_mode, capt_baro_hpa)
@@ -757,7 +950,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
 
         return update
 
-    def _record_sent_state(self, update):
+    def _record_sent_state(self, update):  # pylint: disable=too-many-branches
         """Record what was just sent so the next delta can skip unchanged fields."""
         for key in ("tail_number", "flight_number", "eta"):
             if key in update:
@@ -770,6 +963,10 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self._sent_state["flightinfo"] = update["flightinfo"]
         if "connected_sim_names" in update:
             self._sent_state["names"] = update["connected_sim_names"]
+        if "master_sim_name" in update:
+            self._sent_state["master_sim_name"] = update["master_sim_name"]
+        if "flight_deck_door_locked" in update:
+            self._sent_state["door_locked"] = update["flight_deck_door_locked"]
         if "pilot_flying_sim" in update:
             self._sent_state["sharedinfo"] = (
                 update["pilot_flying_sim"],
@@ -786,6 +983,123 @@ class Script():  # pylint: disable=too-many-instance-attributes
         if "flap_lever" in update:
             self._sent_state["controls"] = (
                 self._flap_lever, self._gear_lever, self._spd_brk_lever)
+        if "seatbelts_on" in update:
+            self._sent_state["seatbelts_on"] = update["seatbelts_on"]
+        if "is_freighter" in update:
+            self._sent_state["is_freighter"] = update["is_freighter"]
+        if "flight_deck_curtain_open" in update:
+            self._sent_state["curtain_open"] = update["flight_deck_curtain_open"]
+
+    def _queue_initial_status(self):
+        """Queue the currently-known door lock, seatbelt, variant and curtain state.
+
+        Called right after (re)connecting to the portal, so these reach
+        Flight Centre immediately rather than waiting for the first
+        regular telemetry send -- which additionally only happens once
+        PSX has reported a position fix (self._lat is not None), an
+        unrelated gate that would otherwise delay this further. Sends
+        whatever is currently known, including "unknown"
+        (_DOOR_STATUS_UNKNOWN / None) if no PSX data has arrived yet.
+        self._curtain_open is never actually unknown (it starts False
+        and is only ever derived locally), so that one's always a real
+        boolean.
+        """
+        self._reverse_sync_queue.put_nowait({
+            "type": "flight_deck_door",
+            "protocol_version": PUSH_PROTOCOL_VERSION,
+            "locked": self._flight_deck_door_locked,
+        })
+        self._reverse_sync_queue.put_nowait({
+            "type": "seatbelt_signs",
+            "protocol_version": PUSH_PROTOCOL_VERSION,
+            "on": self._seatbelts_on,
+        })
+        self._reverse_sync_queue.put_nowait({
+            "type": "is_freighter",
+            "protocol_version": PUSH_PROTOCOL_VERSION,
+            "is_freighter": self._is_freighter,
+        })
+        self._reverse_sync_queue.put_nowait({
+            "type": "flight_deck_curtain",
+            "protocol_version": PUSH_PROTOCOL_VERSION,
+            "open": self._curtain_open,
+        })
+
+    def _on_fltdk_door_turn(self, _key, value):
+        """Detect a flight-deck-door-lock switch movement (Qh419, DELTA).
+
+        PSX sends Qh419=0 when the switch is turned to UNLOCK and
+        Qh419=2 when turned to LOCK; either way it then springs back to
+        neutral (Qh419=1), which is not itself a state change and is
+        ignored. Sent to Flight Centre on every occurrence (not only on
+        a change) -- see ~/to-psxhacks.md: Flight Centre itself treats a
+        LOCK event arriving while a doorbell request is pending as a
+        rejection of that request, even if the door was already locked,
+        so this must fire every time, independent of
+        self._flight_deck_door_locked's previous value. Queued for
+        immediate delivery (like checklist_toggle/scratchpad_update)
+        since the status display needs to react right away, not wait
+        for the next regular telemetry tick.
+        """
+        try:
+            turn = int(value)
+        except (ValueError, TypeError):
+            return
+        if turn not in (0, 2):
+            return
+        status = _DOOR_STATUS_LOCKED if turn == 2 else _DOOR_STATUS_UNLOCKED
+        self._flight_deck_door_locked = status
+        self.logger.info(
+            "Flight deck door: %s", "LOCKED" if status == _DOOR_STATUS_LOCKED else "UNLOCKED")
+        self._reverse_sync_queue.put_nowait({
+            "type": "flight_deck_door",
+            "protocol_version": PUSH_PROTOCOL_VERSION,
+            "locked": status,
+        })
+
+    def _on_call_fr_cabin(self, _key, value):
+        """Detect our own flight_deck_doorbell call being cleared (Qi102, DELTA).
+
+        We set Qi102 ("CallFrCabin") to 07 to place the call (see
+        _handle_portal_message()); PSX resets it back to 0 once the crew
+        switches their mic selector away from CAB, which also clears the
+        "PARTY LINE" cabin-call display (Qs457/CallPanelDisp) -- live-
+        confirmed sequence, see ~/to-psxhacks.md. Only acts while
+        self._doorbell_call_active (i.e. a call we ourselves placed is
+        still outstanding), so an unrelated cabin call doesn't trigger
+        this. A rejection (the crew denying via the lock switch instead
+        of the interphone) is handled entirely on Flight Centre's side
+        from _on_fltdk_door_turn()'s flight_deck_door event, so this
+        method has nothing special to do for that case -- if the call
+        later also happens to clear normally, the resulting
+        flight_deck_doorbell_resolved is harmless; Flight Centre only
+        logs it since it already resolved the request.
+        """
+        if not self._doorbell_call_active:
+            return
+        try:
+            cleared = int(value) == 0
+        except (ValueError, TypeError):
+            return
+        if not cleared:
+            return
+        self._doorbell_call_active = False
+        self.logger.info("Flight deck doorbell: crew cleared the call")
+        asyncio.ensure_future(self._resolve_doorbell_after_delay())
+
+    async def _resolve_doorbell_after_delay(self):
+        """Tell Flight Centre the doorbell call was cleared, after a delay.
+
+        The 10s delay (per ~/to-psxhacks.md) is deliberate -- it gives
+        Flight Centre's status display a moment before it resets the
+        "ring the doorbell" button, rather than flipping the instant the
+        crew's mic selector moves off CAB.
+        """
+        await asyncio.sleep(_DOORBELL_RESOLVED_DELAY_S)
+        self._reverse_sync_queue.put_nowait({
+            "type": "flight_deck_doorbell_resolved",
+            "protocol_version": PUSH_PROTOCOL_VERSION,
+        })
 
     def _on_mastwarn(self, key, value):
         """Detect a 0->1 edge on bit 0 of MastWarnCp/MastWarnFo (Qh114/Qh115).
@@ -846,7 +1160,10 @@ class Script():  # pylint: disable=too-many-instance-attributes
             #   PiBaHeAlTas = Qs121, FmcFltNo = Qs401,
             #   FmcRteViAcMo = Qs373, FmcRte1 = Qs376, FmcRte2 = Qs377,
             #   ActDestEta = Qi247, LeftPfdAlt = Qs562 (DEMAND),
-            #   Afds = Qs434 (ECON), McpWdo* = Qi32-35 (ECON)
+            #   Afds = Qs434 (ECON), McpWdo* = Qi32-35 (ECON),
+            #   FltDkDoorTurn = Qh419 (DELTA), CallFrCabin = Qi102 (DELTA),
+            #   Seatbelts = Qh421 (ECON), CfgVariant = Qi0 (ECON),
+            #   CallPanel = Qh413 (DELTA)
             self.psx.subscribe("AcTailNo", self._on_tail_number)
             self.psx.subscribe("CfgRego", self._on_tail_number)
             self.psx.subscribe("PiBaHeAlTas", self._on_position)
@@ -862,10 +1179,15 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.psx.subscribe("McpWdoAlt", self._on_mcp_alt)
             self.psx.subscribe("McpPshVs", self._on_mcp_psh_vs)
             self.psx.subscribe("Afds", self._on_afds)
+            self.psx.subscribe("FltDkDoorTurn", self._on_fltdk_door_turn)
+            self.psx.subscribe("CallFrCabin", self._on_call_fr_cabin)
+            self.psx.subscribe("CfgVariant", self._on_cfg_variant)
+            self.psx.subscribe("CallPanel", self._on_call_panel)
             self.psx.subscribe("LeftPfdAlt", self._on_left_pfd_alt)
             self.psx.subscribe("FlapLever", self._on_flap_lever)
             self.psx.subscribe("GearLever", self._on_gear_lever)
             self.psx.subscribe("SpdBrkLever", self._on_spd_brk_lever)
+            self.psx.subscribe("Seatbelts", self._on_seatbelts)
             self.psx.subscribe("addon", self._handle_addon_message)
             # Qh114/Qh115, and DoorOpenBits above - watched for
             # --worldflight-shop-alerts regardless of whether it's enabled,
@@ -1081,7 +1403,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
             if stationary and (self._tas_kt or 0) >= _STATIONARY_SPEED_THRESHOLD_KT:
                 return
 
-    async def push_loop_coro(self):
+    async def push_loop_coro(self):  # pylint: disable=too-many-statements
         """Maintain a WebSocket connection to the portal and send position updates."""
         ws_url = self.args.portal_url.rstrip('/') + '/ws/push'
         headers = {"Authorization": f"Bearer {self.args.logon_code}"}
@@ -1101,8 +1423,16 @@ class Script():  # pylint: disable=too-many-instance-attributes
                             # previous portal session isn't assumed linked.
                             self._active_flight_plan_id = None
                             self._active_checklist_items = []
+                            # Forget any doorbell request from a previous
+                            # connection too -- Flight Centre resets its own
+                            # button state on every (re)connect (see
+                            # ~/to-psxhacks.md), so a stale "outstanding
+                            # call" here could fire a resolved event for a
+                            # request nobody is tracking anymore.
+                            self._doorbell_call_active = False
                             while not self._reverse_sync_queue.empty():
                                 self._reverse_sync_queue.get_nowait()
+                            self._queue_initial_status()
 
                             send_task = asyncio.ensure_future(
                                 self._portal_send_loop(ws))
@@ -1156,9 +1486,10 @@ class Script():  # pylint: disable=too-many-instance-attributes
     async def _drain_ws(self, ws):
         """Handle messages the portal sends back down the push WebSocket.
 
-        Currently just the "flight_plan"/"link_status" pushes from Flight
-        Centre (see CLAUDE.md's Flight Centre / frankenrouter integration
-        section). Exits when the server closes the connection.
+        "flight_plan"/"link_status" pushes from Flight Centre (see
+        CLAUDE.md's Flight Centre / frankenrouter integration section)
+        plus "flight_deck_doorbell"/"crew_message" (see
+        ~/to-psxhacks.md). Exits when the server closes the connection.
         """
         async for msg in ws:
             if msg.type != aiohttp.WSMsgType.TEXT:
@@ -1173,10 +1504,14 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 self.logger.warning("Error handling portal message: %s", exc)
 
     async def _handle_portal_message(self, data):
-        """Apply one "flight_plan"/"link_status" message from Flight Centre.
+        """Apply one message from Flight Centre (flight_plan/link_status/.../crew_message).
 
-        Pushes the resulting FLIGHTINFO to the router mesh over the
-        existing FRDP peer connection.
+        flight_plan/link_status push the resulting FLIGHTINFO to the
+        router mesh over the existing FRDP peer connection.
+        flight_deck_doorbell places a fake cabin call in PSX -- see
+        ~/to-psxhacks.md and _on_fltdk_door_turn(). crew_message
+        broadcasts a message for frankenprint to print -- see
+        ~/to-psxhacks.md.
         """
         msg_type = data.get("type")
         if msg_type == "flight_plan":
@@ -1195,20 +1530,72 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self._active_flight_plan_id = None
             self._active_checklist_items = []
             await self._send_frdp_flightinfo(_unlinked_flightinfo())
+        elif msg_type == "flight_deck_doorbell":
+            if self.psx_connected:
+                self.logger.info(
+                    "Flight Centre: doorbell rung, placing PARTY LINE cabin call")
+                self._doorbell_call_active = True
+                self.psx.send("Qi102", "07")
+            else:
+                # INFO rather than WARNING for now, while this feature is new
+                # and we want it visible without raising log noise elsewhere.
+                self.logger.info(
+                    "Flight Centre: doorbell rung but no PSX connection to place the call")
+        elif msg_type == "crew_message":
+            sim_name = (data.get("sim_name") or "").strip()
+            text = data.get("text") or ""
+            if not sim_name or not text:
+                return
+            if self.psx_connected:
+                self.logger.info(
+                    "Flight Centre: broadcasting crew message for %s: %r", sim_name, text)
+                line = text.replace("\n", "^")
+                self.psx.send("addon", f"FRANKENPRINT:{sim_name}:{line}")
+            else:
+                # INFO rather than WARNING for now, while this feature is new
+                # and we want it visible without raising log noise elsewhere.
+                self.logger.info(
+                    "Flight Centre: crew message received but no PSX "
+                    "connection to broadcast it on")
 
     async def _reverse_sync_loop(self, ws):
-        """Send reverse-sync deltas to Flight Centre as soon as they arrive.
+        """Send queued immediate messages to Flight Centre as soon as they arrive.
 
         Sends checklist_toggle/scratchpad_update deltas (queued by
         _queue_reverse_sync_deltas as they're received over FRDP),
-        independent of the regular telemetry send interval — the
-        user-facing requirement is that a checklist toggle goes out
-        immediately, not on the next periodic tick.
+        flight_deck_door events (queued by _on_fltdk_door_turn()) and
+        flight_deck_doorbell_resolved events (queued by
+        _resolve_doorbell_after_delay()), independent of the regular
+        telemetry send interval — the user-facing requirement in all
+        cases is that the change goes out immediately, not on the next
+        periodic tick (which, while the sim is stationary, can be up to
+        _STATIONARY_SEND_INTERVAL away).
         """
         while True:
             message = await self._reverse_sync_queue.get()
             await ws.send_json(message)
-            self.logger.debug("Sent reverse-sync message to FC: %s", message.get("type"))
+            msg_type = message.get("type")
+            if msg_type == "flight_deck_door":
+                # INFO rather than DEBUG for now, while this feature is new.
+                self.logger.info(
+                    "Sent flight_deck_door to FC: locked=%s", message.get("locked"))
+            elif msg_type == "flight_deck_doorbell_resolved":
+                # INFO rather than DEBUG for now, while this feature is new.
+                self.logger.info("Sent flight_deck_doorbell_resolved to FC")
+            elif msg_type == "seatbelt_signs":
+                # INFO rather than DEBUG for now, while this feature is new.
+                self.logger.info(
+                    "Sent seatbelt_signs to FC: on=%s", message.get("on"))
+            elif msg_type == "is_freighter":
+                # INFO rather than DEBUG for now, while this feature is new.
+                self.logger.info(
+                    "Sent is_freighter to FC: is_freighter=%s", message.get("is_freighter"))
+            elif msg_type == "flight_deck_curtain":
+                # INFO rather than DEBUG for now, while this feature is new.
+                self.logger.info(
+                    "Sent flight_deck_curtain to FC: open=%s", message.get("open"))
+            else:
+                self.logger.debug("Sent reverse-sync message to FC: %s", message.get("type"))
 
     async def _monitor_autosave_coro(self):
         """Poll PSX autosave situ files and queue changed ones for upload.
