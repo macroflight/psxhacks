@@ -42,6 +42,27 @@ def _from_uv(u: float, v: float) -> tuple[float, float]:
     return speed_ms * MS_TO_KT, direction
 
 
+def _is_tropopause_level(alts: np.ndarray, temps: np.ndarray, i: int) -> bool:
+    """Return True if level i qualifies as the tropopause (WMO lapse-rate test).
+
+    The lapse rate from level i to i+1 must be <=2 degC/km, AND the
+    average lapse rate from level i to every level within the next 2 km
+    above it must also stay <=2 degC/km. alts/temps must already be
+    sorted ascending by altitude.
+    """
+    dz_km = (alts[i + 1] - alts[i]) / 1000.0
+    if dz_km <= 0 or (temps[i] - temps[i + 1]) / dz_km > 2.0:
+        return False
+    for j in range(i + 1, len(alts)):
+        dz_total_km = (alts[j] - alts[i]) / 1000.0
+        if dz_total_km > 2.0:
+            break
+        avg_lapse = (temps[i] - temps[j]) / dz_total_km if dz_total_km > 0 else 0.0
+        if avg_lapse > 2.0:
+            return False
+    return True
+
+
 # ---------------------------------------------------------------------------
 # WindProfile
 # ---------------------------------------------------------------------------
@@ -74,6 +95,10 @@ class WindProfile:  # pylint: disable=too-many-instance-attributes
     altitudes_m: np.ndarray     # shape (N,)  — ascending
     speeds_kt: np.ndarray       # shape (N,)
     directions_deg: np.ndarray  # shape (N,)
+    # Temperature at each level (degC), or None/all-NaN if not fetched —
+    # optional because older callers (make_fixed_wind_profile(), disk-cache
+    # entries written before this field existed) don't supply it.
+    temperatures_c: Optional[np.ndarray] = None
 
     # u/v in m/s — computed once in __post_init__ for fast interpolation
     _u_ms: np.ndarray = field(init=False, repr=False)
@@ -83,6 +108,8 @@ class WindProfile:  # pylint: disable=too-many-instance-attributes
 
     def __post_init__(self):
         """Initialize derived UV components and validity mask."""
+        if self.temperatures_c is None:
+            self.temperatures_c = np.full_like(self.altitudes_m, np.nan, dtype=np.float32)
         self._valid = (
             np.isfinite(self.altitudes_m) &
             np.isfinite(self.speeds_kt) &
@@ -232,6 +259,37 @@ class WindProfile:  # pylint: disable=too-many-instance-attributes
             return None
 
         return jet_alt, jet_spd, jet_dir
+
+    def tropopause(self) -> Optional[tuple[float, float, float, float]]:
+        """Return (alt_m, temp_c, wind_speed_kt, wind_dir_deg) at the tropopause.
+
+        Uses the WMO definition: the lowest level at which the lapse rate
+        decreases to 2 degC/km or less, provided the average lapse rate
+        between that level and every level within the next 2 km does not
+        exceed 2 degC/km either. The search starts above 5000 m (~500 hPa)
+        to skip low-level inversions, which are common and not the
+        tropopause. Wind at the found altitude is read via wind_at(), so
+        it benefits from the same u/v interpolation as everything else.
+
+        Returns None if there are too few valid temperature levels, or no
+        qualifying level is found in the available profile (e.g. a very
+        high tropical tropopause can exceed Open-Meteo's ~100 hPa/16 km
+        ceiling).
+        """
+        valid = self._valid & np.isfinite(self.temperatures_c)
+        if np.sum(valid) < 3:
+            return None
+        order = np.argsort(self.altitudes_m[valid])
+        alts = self.altitudes_m[valid][order]
+        temps = self.temperatures_c[valid][order]
+
+        for i in range(len(alts) - 1):
+            if alts[i] < 5000.0 or not _is_tropopause_level(alts, temps, i):
+                continue
+            alt_m = float(alts[i])
+            speed_kt, dir_deg = self.wind_at(alt_m)
+            return alt_m, float(temps[i]), speed_kt, dir_deg
+        return None
 
     # ------------------------------------------------------------------
     # Convenience

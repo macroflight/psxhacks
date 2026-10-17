@@ -1635,6 +1635,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # 1 ("Altitude indicators with OAT error") staying set, without
         # ever touching bits 2/4 (aircraft-type configuration).
         self._aero_ckbxs_bits: int = 0
+        # Last-seen raw WxAloft (Qs327) string from PSX, tracked via
+        # subscription -- see --sync-tropopause/_write_tropopause(), which
+        # needs it to read-modify-write: the trailing ";cv<lat> <lon>"
+        # position reference is PSX's own and is never ours to construct,
+        # only to preserve verbatim.
+        self._wxaloft_raw: Optional[str] = None
         # Whether to offset the departure/destination zone's centre away
         # from the real airport (see _arpt_coverage_needed()) so any CB
         # PSX generates there can never land within _CB_AIRPORT_CLEARANCE_NM
@@ -2186,6 +2192,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.psx_send_and_set(
                 "AeroCkBxs", str(self._aero_ckbxs_bits | _AERO_OAT_ERROR_BIT))
 
+    def handle_wxaloft(self, _key: str, value: str) -> None:
+        """Track PSX's raw WxAloft (Qs327) string, for _write_tropopause()'s read-modify-write."""
+        self._wxaloft_raw = value
+
     def _write_sigmet_on(self, embed: bool, trigger_download: bool) -> None:
         """Write SigmetOn (Qi262), touching only the embed/download bits.
 
@@ -2210,6 +2220,62 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if trigger_download:
             new_value |= _SIGMET_DOWNLOAD_BIT
         self.psx_send_and_set("SigmetOn", str(new_value))
+
+    def _write_tropopause(self) -> None:
+        """EXPERIMENTAL (--sync-tropopause): set WxAloft's tropopause fields from Open-Meteo.
+
+        Computes tropopause altitude/temperature/wind at the aircraft's
+        current position from the same Open-Meteo pressure-level profile
+        (and the same cache) the turbulence engine already fetches for
+        itself (see WindProfile.tropopause(), a WMO lapse-rate detection),
+        then writes PSX's "Constantly" form for all three Planet Weather
+        page tropopause fields in one go. Wind variability is always
+        written as 0 (no ensemble-spread data available from Open-Meteo)
+        and gust is always set equal to speed, to avoid PSX's own
+        gust-must-be->=-speed auto-bump producing a transient mismatch
+        (confirmed live, 2026-10-15, decoding this exact format).
+
+        WxAloft (Qs327) format, decoded live against a real PSX instance:
+        [aA]<alt ft>[tT]<abs temp C>[wW]<variability><dir><speed>;<gust>;cv<lat> <lon>
+        Lowercase letter = that field is in its "auto" PSX mode (variable
+        by latitude/season for alt+temp, by jet-stream-constellation for
+        wind); uppercase = "Constantly", with the following number(s) as
+        the fixed override. variability/direction are fixed 3-digit
+        zero-padded fields; speed/gust are variable-width, no padding.
+        The trailing ";cv<lat> <lon>" is PSX's own position reference --
+        never ours to construct, only to preserve verbatim via
+        self._wxaloft_raw (see handle_wxaloft()).
+
+        Arms Qi243 first: this is literally Aerowinx's own example of
+        "weather data" to arm before injecting (Qi243's own documentation
+        uses "tropopause data" as its example), unlike SigmetOn above.
+        """
+        if self._wxaloft_raw is None or self.ac_lat is None or self.ac_lon is None:
+            return
+        if self._turb_engine is None:
+            return
+        idx = self._wxaloft_raw.find(";cv")
+        if idx == -1:
+            self.logger.warning(
+                "WxAloft in unexpected format, not updating tropopause: %s", self._wxaloft_raw)
+            return
+        suffix = self._wxaloft_raw[idx:]
+        profile = self._turb_engine.wind_fetcher.get(
+            self.ac_lat, self.ac_lon, datetime.now(timezone.utc))
+        if profile is None:
+            return
+        result = profile.tropopause()
+        if result is None:
+            self.logger.debug("Tropopause not found in current wind profile — skipping")
+            return
+        alt_m, temp_c, speed_kt, dir_deg = result
+        alt_ft = round(alt_m / 0.3048)
+        temp_abs = round(abs(temp_c))
+        speed = round(speed_kt)
+        direction = round(dir_deg) % 360
+        self._inject_wx_slow_transit()
+        new_value = f"A{alt_ft}T{temp_abs}W{0:03d}{direction:03d}{speed};{speed}{suffix}"
+        self.psx_send_and_set("WxAloft", new_value)
 
     def _aircraft_sigmet_hazards(self) -> list:
         """Return the sorted, deduplicated hazard types of every SIGMET the aircraft is in.
@@ -5223,6 +5289,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
         self._state_changed_event.set()
         self._apply_msfs_sync()
+        if self.args.sync_tropopause:
+            self._write_tropopause()
         self.logger.info("Zone update complete")
 
     # ------------------------------------------------------------------
@@ -5774,6 +5842,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.psx.subscribe("WxSigmet", self.handle_sigmet_change)
             self.psx.subscribe("SigmetOn", self.handle_sigmet_on)
             self.psx.subscribe("AeroCkBxs", self.handle_aero_ckbxs)
+            self.psx.subscribe("WxAloft", self.handle_wxaloft)
             self.psx.subscribe("addon", self._handle_addon)
             self.psx.subscribe("WxCorridorTxt", self._handle_corridor)
             self.psx.subscribe("MetarsUp", self._handle_metars_up)
@@ -5904,6 +5973,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "silently to the already-selected cached METAR on failure or "
                  "timeout; never changes which airport a zone snaps to, and never "
                  "turns a cache miss/stale METAR into a hit. Off by default.")
+        parser.add_argument(
+            '--sync-tropopause', action='store_true',
+            help="EXPERIMENTAL: keep PSX's Planet Weather page tropopause "
+                 "altitude/temperature/wind set to \"Constantly\" with real "
+                 "values computed from Open-Meteo's pressure-level data at the "
+                 "aircraft's current position (WMO lapse-rate definition), "
+                 "refreshed on the same cadence as the weather zones. Wind "
+                 "variability is always written as 0 (no ensemble-spread data "
+                 "available) and gust is always set equal to speed. Off by "
+                 "default -- leaves PSX on its own \"variable by latitude and "
+                 "season\"/\"variable by jet stream constellation\" settings.")
         parser.add_argument(
             '--new-zone-infront-range', type=_parse_nm_range, default=(150.0, 250.0),
             metavar='MIN,MAX',

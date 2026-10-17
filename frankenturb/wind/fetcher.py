@@ -81,6 +81,7 @@ def _build_hourly_params() -> str:
             f"windspeed_{lvl}hPa",
             f"winddirection_{lvl}hPa",
             f"geopotential_height_{lvl}hPa",
+            f"temperature_{lvl}hPa",
         ]
     return ",".join(names)
 
@@ -144,11 +145,19 @@ class WindFetcher:  # pylint: disable=too-few-public-methods
             "altitudes_m": profile.altitudes_m.tolist(),
             "speeds_kt": profile.speeds_kt.tolist(),
             "directions_deg": profile.directions_deg.tolist(),
+            "temperatures_c": profile.temperatures_c.tolist(),
         }
 
     @staticmethod
     def _decode(data: dict) -> WindProfile:
-        """Decode a WindProfile from its JSON-serializable dict form."""
+        """Decode a WindProfile from its JSON-serializable dict form.
+
+        "temperatures_c" is missing from any disk-cache entry written
+        before that field existed -- WindProfile.__post_init__() fills in
+        an all-NaN array when None is passed, so this just needs to not
+        KeyError on an old entry.
+        """
+        temps = data.get("temperatures_c")
         return WindProfile(
             lat=data["lat"],
             lon=data["lon"],
@@ -158,6 +167,7 @@ class WindFetcher:  # pylint: disable=too-few-public-methods
             altitudes_m=np.array(data["altitudes_m"], dtype=np.float32),
             speeds_kt=np.array(data["speeds_kt"], dtype=np.float32),
             directions_deg=np.array(data["directions_deg"], dtype=np.float32),
+            temperatures_c=np.array(temps, dtype=np.float32) if temps is not None else None,
         )
 
     def get(
@@ -290,21 +300,25 @@ class WindFetcher:  # pylint: disable=too-few-public-methods
         altitudes = []
         speeds = []
         directions = []
+        temperatures = []
 
         for lvl in LEVELS_HPA:
             spd = _scalar(hourly, f"windspeed_{lvl}hPa", hour_idx)
             dir_ = _scalar(hourly, f"winddirection_{lvl}hPa", hour_idx)
             alt = _scalar(hourly, f"geopotential_height_{lvl}hPa", hour_idx)
+            temp = _scalar(hourly, f"temperature_{lvl}hPa", hour_idx)
 
             pressures.append(float(lvl))
             altitudes.append(alt)       # may be NaN
             speeds.append(spd)          # may be NaN
             directions.append(dir_)     # may be NaN
+            temperatures.append(temp)   # may be NaN
 
         pressures_arr = np.array(pressures, dtype=np.float32)
         altitudes_arr = np.array(altitudes, dtype=np.float32)
         speeds_arr = np.array(speeds, dtype=np.float32)
         directions_arr = np.array(directions, dtype=np.float32)
+        temperatures_arr = np.array(temperatures, dtype=np.float32)
 
         # Sort by altitude ascending (low pressure = high altitude is last).
         order = np.argsort(altitudes_arr)
@@ -312,6 +326,7 @@ class WindFetcher:  # pylint: disable=too-few-public-methods
         altitudes_arr = altitudes_arr[order]
         speeds_arr = speeds_arr[order]
         directions_arr = directions_arr[order]
+        temperatures_arr = temperatures_arr[order]
 
         return WindProfile(
             lat=float(data.get("latitude", lat)),
@@ -322,6 +337,7 @@ class WindFetcher:  # pylint: disable=too-few-public-methods
             altitudes_m=altitudes_arr,
             speeds_kt=speeds_arr,
             directions_deg=directions_arr,
+            temperatures_c=temperatures_arr,
         )
 
 
