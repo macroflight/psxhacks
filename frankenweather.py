@@ -2193,7 +2193,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         (self._sigmet_on_bits), not a bare literal -- SigmetOn is a 0-15
         bitmask and bits 2/8 are undocumented; whatever they mean, this
         must never change them.
+
+        Arms Qi243 (WxSlowTransit) first, same as every other PSX weather
+        write -- found via forensic log analysis of a real flight where an
+        instant PFD altitude snap landed ~17s after the last Qi243 arm had
+        expired, right as a SigmetOn write landed. Later confirmed by
+        Aerowinx (Hardy) that PSX already auto-smooths SIGMET-driven
+        changes regardless of Qi243's state, so this call is not actually
+        necessary -- kept anyway per the user's own call: cheap, harmless
+        insurance, not worth reverting.
         """
+        self._inject_wx_slow_transit()
         new_value = self._sigmet_on_bits & ~_SIGMET_KNOWN_BITS
         if embed:
             new_value |= _SIGMET_EMBED_BIT
