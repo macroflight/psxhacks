@@ -238,13 +238,34 @@ class FrankenPrint:
     # PSX variable callback
     # ------------------------------------------------------------------
 
+    def _print_or_pushover(self, text: str) -> None:
+        """Print text (or send it via Pushover), whichever mode is active."""
+        if self.args.pushover:
+            self._send_pushover(text)
+        else:
+            self._print_job(text)
+
     def _on_printer_text(self, _key: str, value: str) -> None:
         """Print the text received in Qs119; ignore the empty-string reset from PSX."""
         if value:
-            if self.args.pushover:
-                self._send_pushover(value)
-            else:
-                self._print_job(value)
+            self._print_or_pushover(value)
+
+    def _on_addon_message(self, _key: str, value: str) -> None:
+        """Print a message sent as addon=FRANKENPRINT:<sim name>:<text>.
+
+        Opt-in via --sim-name: without it, addon= messages are ignored
+        entirely, since there would be nothing to match the sim name
+        against. The sim name comparison is case-insensitive. <text>
+        uses the same '^'-delimited line format as PrinterText (Qs119),
+        and goes through the same _print_job()/_send_pushover() path.
+        """
+        if not self.args.sim_name or not value.startswith('FRANKENPRINT:'):
+            return
+        sim_name, _, text = value[len('FRANKENPRINT:'):].partition(':')
+        if sim_name.strip().upper() != self.args.sim_name.strip().upper():
+            return
+        if text:
+            self._print_or_pushover(text)
 
     # ------------------------------------------------------------------
     # PSX connection
@@ -264,6 +285,7 @@ class FrankenPrint:
         client.onConnect = lambda: None
         client.subscribe("version", connected)
         client.subscribe("PrinterText", self._on_printer_text)
+        client.subscribe("addon", self._on_addon_message)
         await client.connect(self.args.psx_host, self.args.psx_port)
         self.logger.warning("PSX connection ended")
 
@@ -301,6 +323,13 @@ class FrankenPrint:
         parser.add_argument(
             '--test-print', action='store_true',
             help="Print a short test message on each PSX connection.")
+        parser.add_argument(
+            '--sim-name', default=None, metavar='NAME',
+            help="If set, also print messages sent as "
+                 "addon=FRANKENPRINT:<sim name>:<text> (text uses the same "
+                 "'^'-delimited line format as PrinterText), but only when "
+                 "<sim name> matches this (case-insensitive). Off by "
+                 "default -- addon= messages are otherwise ignored.")
 
         pushover = parser.add_argument_group(
             'Pushover', 'Send print jobs as Pushover push notifications '
