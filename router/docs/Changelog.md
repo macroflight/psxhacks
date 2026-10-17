@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-10-16: version 1.19.0
+
+- **New: a master router now enforces a small set of PSX settings that
+  should never drift** -- `Qi201`/`TfcMode` must stay `1` (external
+  control, since vPilot always injects traffic) and `Qs445`/`Atis` must
+  always start with `_` (ATIS off), with only that first character
+  corrected and the rest of the per-pilot record string left untouched.
+  A situ load (or someone poking at PSX's own config UI) can silently
+  revert either one; a shared-cockpit setup never wants them set
+  differently sim to sim. Checked every housekeeping tick (10s, already
+  well under a 30s requirement) on master routers only; any correction is
+  logged at INFO and pushed upstream. See `ENFORCED_SETTINGS` in
+  `frankenrouter.py` -- only meant for settings with exactly one sane
+  value, not a general config-sync mechanism.
+- **Bug fix: the `/efb` page's "FrankenWeather ← VATSIM METAR" status row
+  always judged freshness against VATSIM's cache**, even on an
+  installation using frankenweather's experimental
+  `--primary-metar-source noaa`. Since VATSIM's cache is then legitimately
+  never populated, this showed a permanent false "not getting data,
+  never" warning. The row now checks whichever source frankenweather
+  reports as primary and shows that source's own freshness and label
+  (`"FrankenWeather ← NOAA METAR"` when NOAA is primary) -- defaults to
+  VATSIM for older frankenweather builds that don't send this field yet.
+
 ## 2026-10-13: version 1.18.1
 
 - **Removed: the "force wheels onto ground" `/utils` button.** It wasn't
