@@ -132,6 +132,33 @@ PSX_RESUME_ELEVATION_AFTER = 60
 # How often to sent master caution if filter status is bad
 FILTER_WARNING_INTERVAL = 60
 
+
+def _enforce_qi201_tfcmode(current):
+    """Qi201 (TfcMode) must be 1 (external control) -- vPilot always injects traffic."""
+    return None if current == 1 else 1
+
+
+def _enforce_qs445_atis(current):
+    """Qs445 (Atis) must start with "_" (ATIS off); the rest is per-pilot records, untouched."""
+    if isinstance(current, str) and current.startswith("_"):
+        return None
+    rest = current[1:] if isinstance(current, str) and current else ""
+    return "_" + rest
+
+
+# PSX settings a master-sim router must keep at a known-good value,
+# regardless of how they got changed (a situ load reverting them is the
+# main concern, but this also covers e.g. someone poking at PSX's own
+# config UI) -- see _housekeeping_enforce_settings(). Only ever add a
+# setting here if it's one we never want to see at anything but this one
+# value; this is not a general-purpose config-sync mechanism. Each
+# function takes the cache's current value and returns None if it's
+# already fine, or the corrected value to write if not.
+ENFORCED_SETTINGS = {
+    "Qi201": _enforce_qi201_tfcmode,
+    "Qs445": _enforce_qs445_atis,
+}
+
 # How long a connection may sit as "auth pending" (no access and no
 # self-announced name) before housekeeping closes and purges it.
 AUTH_PENDING_TIMEOUT = 30.0
@@ -3259,6 +3286,31 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 f"'{self.config.identity.type}' — expected 'slave' or 'unknown'. "
                 f"Check your config file.")
 
+    async def _housekeeping_enforce_settings(self):
+        """Correct any ENFORCED_SETTINGS entry that has drifted from its expected value.
+
+        Master-sim-router only: a situ load (or someone poking at PSX's
+        own config UI) can silently revert one of these; a slave or
+        standalone router has no authority to override what the real PSX
+        session actually has. Runs every housekeeping tick
+        (HOUSEKEEPING_INTERVAL, currently 10s), well under the "check at
+        least every 30s" requirement -- no separate subscription/change
+        hook is needed since this cadence already satisfies it.
+        """
+        if self.get_router_type() != 'master':
+            return
+        for key, check in ENFORCED_SETTINGS.items():
+            try:
+                current = self.cache.get_value(key)
+            except routercache.RouterCacheException:
+                continue  # not seen yet -- nothing to correct
+            corrected = check(current)
+            if corrected is not None:
+                self.logger.info(
+                    "%s drifted (%r), resetting to %r", key, current, corrected)
+                self.cache.update(key, corrected)
+                await self.send_to_upstream(f"{key}={corrected}")
+
     async def _housekeeping_enable_psx_elevation_database(self):
         """Switch back to PSX's internal elevation database.
 
@@ -3581,6 +3633,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self._housekeeping_disable_filters_if_standalone()
                     await self._housekeeping_purge_stale_auth_pending()
                     await self._housekeeping_enable_psx_elevation_database()
+                    await self._housekeeping_enforce_settings()
                     await self._housekeeping_enable_master_caution()
                     self._housekeeping_remove_stale_masters()
                     self._housekeeping_log_unnamed_clients()
