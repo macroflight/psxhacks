@@ -1,5 +1,24 @@
 # start_scripts changelog
 
+## 1.10.0 (2026-10-16)
+
+- **New addon: PSX-WINCTRL-PFPx** (a third-party bridge between a
+  WINCTRL/Winwing PFP CDU and PSX via HID+TCP -
+  <https://github.com/JamieJanssen/PSX-WINCTRL-PFPx>,
+  <https://aerowinx.com/board/index.php/topic,8002.0.html>), added to the
+  `start_<x>.ps1`/`stop_<x>.ps1`/`restart_<x>.ps1` framework and started
+  from `startsim_slave.ps1` and `startsim_norouter.ps1` (opt-in,
+  `$StartPsxWinctrlPfp`/`$PsxWinctrlPfpOptions`/`$PsxWinctrlPfpDir`/
+  `$PsxWinctrlPfpPython`, all unset/`$false` by default - see
+  `psxhacks-start-override-EXAMPLE.ps1`). Unlike every other `franken*.py`
+  addon, `restart_psx_winctrl_pfp.ps1` does **not** force a
+  `--psx-port-override` onto the slave sim's router - this addon needs the
+  user to choose which port it connects to, so `$PsxWinctrlPfpOptions` is
+  passed through untouched. It also runs from its own dedicated Python
+  venv (`$PsxWinctrlPfpPython`), not the shared `$PsxhacksPython` every
+  other addon uses, since it's a third-party script with its own
+  dependencies and no version requirement to validate against.
+
 ## 1.9.0 (2026-10-14)
 
 - **New addon: FrankenBoostProxy** (resurrected from the old `frankenboostproxy.py`
