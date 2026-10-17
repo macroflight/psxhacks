@@ -135,6 +135,9 @@ _WORLDFLIGHT_TYPE_LABELS = {"merch": "MERCH", "ticket": "TICKET"}
 # that isn't one just gets a 404, treated the same as "no passengers").
 _WORLDFLIGHT_PASSENGERS_URL = "https://flightofthepenguins.se/api/passengers"
 _WORLDFLIGHT_CALLSIGN = "BAN32N"
+# Total charity seats sold per leg - fixed for the whole event, not something
+# the /api/passengers response itself reports.
+_WORLDFLIGHT_TOTAL_SEATS = 76
 _WORLDFLIGHT_MANIFEST_CHECK_INTERVAL_S = 5.0
 _PRINTER_LINE_WIDTH = 40
 
@@ -201,12 +204,16 @@ def _format_worldflight_manifest_lines(flight_code, dep_icao, arr_icao, passenge
         "WORLDFLIGHT 2026",
         f"{flight_code} {dep_icao}-{arr_icao}",
         "PASSENGER MANIFEST",
+        f"{len(passengers)} OF {_WORLDFLIGHT_TOTAL_SEATS} SEATS SOLD",
     ]
-    seats = [str(passenger.get("seat", "?")) for passenger in passengers]
-    seat_width = max((len(seat) for seat in seats), default=0)
-    for seat, passenger in zip(seats, passengers):
-        name = str(passenger.get("name", ""))
-        lines.append(f"{seat:<{seat_width}}: {name}")
+    if not passengers:
+        lines.append("NO PASSENGERS")
+    else:
+        seats = [str(passenger.get("seat", "?")) for passenger in passengers]
+        seat_width = max(len(seat) for seat in seats)
+        for seat, passenger in zip(seats, passengers):
+            name = str(passenger.get("name", ""))
+            lines.append(f"{seat:<{seat_width}}: {name}")
     return [_to_printer_ascii(line)[:_PRINTER_LINE_WIDTH] for line in lines]
 
 
@@ -446,6 +453,13 @@ class Script():  # pylint: disable=too-many-instance-attributes
         # blocked for that same pair until the FMC route is cleared (both go
         # None), per _maybe_print_worldflight_manifest().
         self._worldflight_manifest_printed_for = None
+        # (dep_icao, arr_icao) for which L1 and/or L2 have been observed open
+        # at least once - "currently closed" only means boarding is *done* if
+        # the doors were actually open at some point for this same route; a
+        # freshly loaded route whose doors just happen to already be closed
+        # (boarding hasn't started yet) must not look identical. See
+        # _is_ready_for_worldflight_manifest().
+        self._worldflight_doors_seen_open_for = None
 
     # --- PSX callbacks ---
 
@@ -1334,8 +1348,16 @@ class Script():  # pylint: disable=too-many-instance-attributes
             resp.raise_for_status()
             return await resp.json()
 
-    def _is_ready_for_worldflight_manifest(self):
-        """Check the non-network conditions: callsign, stationary, and L1/L2 both closed.
+    def _is_ready_for_worldflight_manifest(self, route_key):
+        """Check the non-network conditions: callsign, stationary, and doors closed-after-open.
+
+        "Doors closed" alone isn't enough: a freshly loaded route whose
+        doors just happen to already be closed (boarding hasn't started
+        yet) looks identical to "boarding just finished and doors were
+        re-closed" unless we also require having actually observed L1
+        and/or L2 open at some point for this same route_key first (see
+        _maybe_print_worldflight_manifest(), which maintains
+        self._worldflight_doors_seen_open_for).
 
         Logs the specific reason at DEBUG level whenever a condition
         isn't met, so --debug shows exactly what's still blocking the
@@ -1360,6 +1382,11 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 "WorldFlight passenger manifest: L1 and/or L2 still open (DoorOpenBits=%d)",
                 self._door_open_bits)
             return False
+        if self._worldflight_doors_seen_open_for != route_key:
+            self.logger.debug(
+                "WorldFlight passenger manifest: doors closed, but never seen open yet "
+                "for this route - boarding hasn't started")
+            return False
         return True
 
     def _print_worldflight_manifest(self, flight_code, dep_icao, arr_icao, passengers):
@@ -1373,12 +1400,16 @@ class Script():  # pylint: disable=too-many-instance-attributes
         WorldFlight leg (checked via the passengers API itself, which
         also hands back the WF leg code - see _fetch_worldflight_passengers()),
         the FMC callsign being _WORLDFLIGHT_CALLSIGN, the aircraft being
-        stationary, and the final boarding door (L1 or L2) being closed
-        (see _is_ready_for_worldflight_manifest()). Once printed for a
-        given (dep, arr) pair - or once confirmed via a 404 that the pair
-        isn't a WorldFlight leg at all, so there's no point asking again -
-        printing is blocked for that same pair until the FMC route is
-        cleared (both go None), per the module docstring's wording.
+        stationary, and the final boarding door (L1 or L2) having been
+        open at some point and then closed again for this same route
+        (see _is_ready_for_worldflight_manifest()) - a route loaded while
+        the doors already happen to be closed (boarding hasn't started
+        yet) must not be mistaken for "boarding just finished". Once
+        printed for a given (dep, arr) pair - or once confirmed via a 404
+        that the pair isn't a WorldFlight leg at all, so there's no point
+        asking again - printing is blocked for that same pair until the
+        FMC route is cleared (both go None), per the module docstring's
+        wording.
         """
         active_route = _pick_active_route(self._route_mode, self._route1, self._route2)
         dep_icao, arr_icao = _parse_route_airports(active_route)
@@ -1390,9 +1421,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
             else:
                 self.logger.debug("WorldFlight passenger manifest: no FMC route loaded")
             self._worldflight_manifest_printed_for = None
+            self._worldflight_doors_seen_open_for = None
             return
 
         route_key = (dep_icao, arr_icao)
+        if self._door_open_bits is not None and (self._door_open_bits & _FINAL_DOORS_MASK) != 0:
+            self._worldflight_doors_seen_open_for = route_key
         if route_key == self._worldflight_manifest_printed_for:
             self.logger.debug(
                 "WorldFlight passenger manifest: already printed (or confirmed not a "
@@ -1401,7 +1435,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self.logger.debug(
             "WorldFlight passenger manifest: FMC route is %s-%s, checking readiness",
             dep_icao, arr_icao)
-        if not self._is_ready_for_worldflight_manifest():
+        if not self._is_ready_for_worldflight_manifest(route_key):
             return
 
         try:
