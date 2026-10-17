@@ -251,6 +251,12 @@ _SIGMET_REFRESH_MAX_S = 1800           # re-request PSX's own SIGMET download ev
 _SIGMET_EMBED_BIT = 1                 # SIGMETs embedded in the planet weather model
 _SIGMET_DOWNLOAD_BIT = 4              # trigger an immediate download (self-clearing)
 _SIGMET_KNOWN_BITS = _SIGMET_EMBED_BIT | _SIGMET_DOWNLOAD_BIT
+# AeroCkBxs (Qi184) is a 3-bit Aerodynamics-page-checkboxes mask (Max=7):
+# bit 1 "Altitude indicators with OAT error", bit 2 "CG varies with fuel
+# distribution", bit 4 "5th engine installed" -- confirmed against the
+# real PSX UI. Only bit 1 is ours to enforce; bits 2/4 are aircraft-type
+# configuration and must never be touched. See handle_aero_ckbxs().
+_AERO_OAT_ERROR_BIT = 1
 _DATIS_LINE_MAX_CHARS = 24            # PSX MetarsUp (Qs464): max chars per '^'-delimited line
 # Split a MetarsUp (Qs464) value into per-airport blocks. PSX terminates every
 # airport's block -- found or not -- with a blank line, i.e. two consecutive
@@ -1624,6 +1630,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # purely so _write_sigmet_on() can read-modify-write without ever
         # touching the unknown bits (2, 8).
         self._sigmet_on_bits: int = 0
+        # Last-seen AeroCkBxs (Qi184) value from PSX, tracked via
+        # subscription -- see handle_aero_ckbxs(), which also enforces bit
+        # 1 ("Altitude indicators with OAT error") staying set, without
+        # ever touching bits 2/4 (aircraft-type configuration).
+        self._aero_ckbxs_bits: int = 0
         # Whether to offset the departure/destination zone's centre away
         # from the real airport (see _arpt_coverage_needed()) so any CB
         # PSX generates there can never land within _CB_AIRPORT_CLEARANCE_NM
@@ -2150,6 +2161,30 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self._sigmet_on_bits = int(value)
         except ValueError:
             pass
+
+    def handle_aero_ckbxs(self, _key: str, value: str) -> None:
+        """Track PSX's AeroCkBxs bitmask; enforce the OAT-error altimetry bit stays set.
+
+        frankenweather should always want bit 1 ("Altitude indicators
+        with OAT error") on, so PSX's altimetry correctly reacts to OAT
+        (including SIGMET-driven freezing-temperature overrides) the way
+        real aircraft do (per Aerowinx/Hardy). Runs every time PSX reports
+        this value -- at connect/reconnect (PSX resends every subscribed
+        variable's current value, so this needs no separate "on connect"
+        hook) and whenever it changes for any other reason, e.g. someone
+        unchecked it via PSX's own GUI -- so it gets caught and
+        re-enforced regardless of when or how it happened, not just at
+        startup/reconnect/re-enable. Read-modify-write: bits 2 ("CG varies
+        with fuel distribution") and 4 ("5th engine installed") are
+        aircraft-type configuration and are never touched.
+        """
+        try:
+            self._aero_ckbxs_bits = int(value)
+        except ValueError:
+            return
+        if not self._aero_ckbxs_bits & _AERO_OAT_ERROR_BIT:
+            self.psx_send_and_set(
+                "AeroCkBxs", str(self._aero_ckbxs_bits | _AERO_OAT_ERROR_BIT))
 
     def _write_sigmet_on(self, embed: bool, trigger_download: bool) -> None:
         """Write SigmetOn (Qi262), touching only the embed/download bits.
@@ -5728,6 +5763,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.psx.subscribe("FmcRte2", self.handle_fmc_change)
             self.psx.subscribe("WxSigmet", self.handle_sigmet_change)
             self.psx.subscribe("SigmetOn", self.handle_sigmet_on)
+            self.psx.subscribe("AeroCkBxs", self.handle_aero_ckbxs)
             self.psx.subscribe("addon", self._handle_addon)
             self.psx.subscribe("WxCorridorTxt", self._handle_corridor)
             self.psx.subscribe("MetarsUp", self._handle_metars_up)
