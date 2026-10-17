@@ -147,6 +147,12 @@ if ($StartCsCdu ) {
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_cs_cdu.ps1"
 }
 
+if ($StartPsxWinctrlPfp ) {
+    Write-Output "Starting PSX-WINCTRL-PFPx..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_winctrl_pfp.ps1"
+    Invoke-WindowPosition "PSX-WINCTRL-PFPx"
+}
+
 if ($StartPsxSimlinkBridge ) {
     Write-Output "Starting psx_simlink_bridge..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_simlink_bridge.ps1"

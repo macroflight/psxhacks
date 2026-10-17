@@ -103,6 +103,12 @@ if ($StartCsCdu ) {
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_cs_cdu.ps1"
 }
 
+if ($StartPsxWinctrlPfp ) {
+    AddonDelay
+    Write-Output "Starting PSX-WINCTRL-PFPx..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_winctrl_pfp.ps1"
+}
+
 if ($StartCpflightFsCom ) {
     AddonDelay
     Write-Output "Starting CPFlight FS_COM..."

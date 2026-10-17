@@ -484,6 +484,26 @@
 
 
 # ---------------------------------------------------------------------------
+# PSX-WINCTRL-PFPx settings (slave sim)
+# A lightweight bridge between Aerowinx PSX and a WINCTRL / Winwing PFP
+# CDU -- connects directly to the CDU via HID and to PSX via TCP. This is
+# a separate, third-party tool (not a psxhacks addon) with its own
+# dedicated Python virtual environment -- $PsxWinctrlPfpPython does NOT
+# share $PsxhacksPython. $PsxWinctrlPfpDir/$PsxWinctrlPfpPython have no
+# default in common.ps1 - both are REQUIRED if $StartPsxWinctrlPfp is
+# $true (checked at startup). Unlike FrankenBoostProxy, no port override
+# is forced on it -- decide which port to connect to PSX or
+# FrankenCDUProxy on yourself, via $PsxWinctrlPfpOptions.
+# https://github.com/JamieJanssen/PSX-WINCTRL-PFPx
+# https://aerowinx.com/board/index.php/topic,8002.0.html
+# ---------------------------------------------------------------------------
+#$StartPsxWinctrlPfp   = $true   # PSX-WINCTRL-PFPx (WINCTRL/Winwing PFP CDU hardware)
+#$PsxWinctrlPfpDir      = "$SimBase\hardware_psx_winctrl_pfp"
+#$PsxWinctrlPfpPython   = "$SimBase\python\venv-psx-winctrl-pfp\Scripts\python.exe"
+#$PsxWinctrlPfpOptions  = @()   # e.g. @("--psx-port=10746")
+
+
+# ---------------------------------------------------------------------------
 # FrankenBoostProxy settings (slave sim)
 # Relays the local boost server's (e.g. MSFS) raw feed to multiple
 # downstream clients and derives 5 Hz acceleration/position telemetry from

@@ -213,6 +213,7 @@ $FrankenprintOptions = @()
 $FrankenpushOptions  = @()
 $FrankencontrolOptions = @()
 $FrankenboostproxyOptions = @()
+$PsxWinctrlPfpOptions = @()
 
 # Per-addon alternative psxhacks repo directory name.
 # Set to the name of a sibling directory to run that addon from a different
@@ -262,6 +263,7 @@ $StartCsCdu           = $false
 $StartCpflightFsCom   = $false
 $StartPsxSimlinkBridge = $false
 $StartFrankenboostproxy = $false
+$StartPsxWinctrlPfp = $false
 
 # Unlike every other addon above, FrankenControl defaults to enabled: it
 # just monitors/controls the other master-sim services and is meant to be
@@ -654,6 +656,33 @@ if ($StartCsCdu) {
         Show-ErrorAndExit "`$CsCduExe not found: $CsCduExe`nEdit $OverrideFile and set `$CsCduExe to the path of your CS CDU Bridge (CockpitSimulator) .exe."
     } elseif ([System.IO.Path]::GetExtension($CsCduExe) -ne ".exe") {
         Show-ErrorAndExit "`$CsCduExe is not an .exe file: $CsCduExe`nEdit $OverrideFile and set `$CsCduExe to the path of your CS CDU Bridge (CockpitSimulator) .exe."
+    }
+}
+
+# $PsxWinctrlPfpDir/$PsxWinctrlPfpPython have no default - they must be
+# set in the override file (see psxhacks-start-override-EXAMPLE.ps1), but
+# only if the PSX-WINCTRL-PFPx bridge is actually enabled. Unlike the
+# psxhacks-native addons, this is a separate, third-party tool
+# (https://github.com/JamieJanssen/PSX-WINCTRL-PFPx) with its own
+# dedicated Python virtual environment - it does not share $PsxhacksPython,
+# so no Python-version check is made here (that's between you and that
+# project's own requirements).
+if ($StartPsxWinctrlPfp) {
+    if ([string]::IsNullOrWhiteSpace($PsxWinctrlPfpDir)) {
+        Show-ErrorAndExit "`$StartPsxWinctrlPfp is `$true but `$PsxWinctrlPfpDir is not set.`nEdit $OverrideFile and set `$PsxWinctrlPfpDir to your PSX-WINCTRL-PFPx checkout directory."
+    } elseif (-not (Test-Path $PsxWinctrlPfpDir -PathType Container)) {
+        Show-ErrorAndExit "`$PsxWinctrlPfpDir not found: $PsxWinctrlPfpDir`nEdit $OverrideFile and set `$PsxWinctrlPfpDir to your PSX-WINCTRL-PFPx checkout directory."
+    } elseif (-not (Test-Path (Join-Path $PsxWinctrlPfpDir "psx_winctrl_pfp.py"))) {
+        Show-ErrorAndExit "`$PsxWinctrlPfpDir does not look like a PSX-WINCTRL-PFPx checkout (no psx_winctrl_pfp.py found): $PsxWinctrlPfpDir`nEdit $OverrideFile and set `$PsxWinctrlPfpDir to your PSX-WINCTRL-PFPx checkout directory."
+    }
+    if ([string]::IsNullOrWhiteSpace($PsxWinctrlPfpPython)) {
+        Show-ErrorAndExit "`$StartPsxWinctrlPfp is `$true but `$PsxWinctrlPfpPython is not set.`nEdit $OverrideFile and set `$PsxWinctrlPfpPython to the path of python.exe in PSX-WINCTRL-PFPx's own virtual environment."
+    } elseif (-not (Test-Path $PsxWinctrlPfpPython -PathType Leaf)) {
+        Show-ErrorAndExit "`$PsxWinctrlPfpPython not found: $PsxWinctrlPfpPython`nEdit $OverrideFile and set `$PsxWinctrlPfpPython to the path of python.exe in PSX-WINCTRL-PFPx's own virtual environment."
+    } elseif ([System.IO.Path]::GetExtension($PsxWinctrlPfpPython) -ne ".exe") {
+        Show-ErrorAndExit "`$PsxWinctrlPfpPython is not an .exe file: $PsxWinctrlPfpPython`nEdit $OverrideFile and set `$PsxWinctrlPfpPython to the path of python.exe in PSX-WINCTRL-PFPx's own virtual environment."
+    } elseif (-not (Test-Path (Join-Path (Split-Path $PsxWinctrlPfpPython -Parent) "activate"))) {
+        Show-ErrorAndExit "`$PsxWinctrlPfpPython does not look like it is inside a Python virtual environment (no 'activate' next to it): $PsxWinctrlPfpPython`nEdit $OverrideFile and set `$PsxWinctrlPfpPython to the path of python.exe in PSX-WINCTRL-PFPx's own virtual environment."
     }
 }
 
