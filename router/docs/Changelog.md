@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-17: version 1.19.1
+
+- **The periodic aircraft-status log line now shows a rough local time
+  of day** next to its `ttwf=...` (time to WorldFlight) field, e.g.
+  `ttwf=14dh14 LT: afternoon`. Estimated from longitude as solar time
+  (`UTC + lon/15` hours) -- deliberately no timezone database, just a
+  coarse "early morning/morning/mid-morning/lunchtime/afternoon/evening/
+  late evening/night" bucket, good enough for "what's it roughly like
+  down there right now" at a glance. See
+  `Frankenrouter._local_time_phase_str()`/`_TIME_PHASES`.
+
 ## 2026-10-16: version 1.19.0
 
 - **New: a master router now enforces a small set of PSX settings that

@@ -271,6 +271,26 @@ MASTER_ADDON_PATTERNS = [
 ]
 
 
+# Rough local-time-of-day phase at a given longitude, keyed by the local
+# solar hour (longitude/15 -- 15 degrees per hour -- offset from UTC) at
+# which that phase starts. No timezone database involved, deliberately:
+# this is solar time, not civil time, so it ignores DST/zone boundaries
+# entirely -- close enough for "what's it like down there right now" at
+# a glance. Sorted ascending; "night" appears at both ends to wrap around
+# midnight. See Frankenrouter._local_time_phase_str().
+_TIME_PHASES = (
+    (0.0, "night"),
+    (5.0, "early morning"),
+    (7.0, "morning"),
+    (10.0, "mid-morning"),
+    (11.0, "lunchtime"),
+    (13.5, "afternoon"),
+    (18.0, "evening"),
+    (20.0, "late evening"),
+    (22.0, "night"),
+)
+
+
 def trimstring(longname, maxlen=11, sep=".."):
     """Shorten string."""
     if not isinstance(longname, str):
@@ -2217,6 +2237,18 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         total_hours = int((wf_start - now_utc).total_seconds() // 3600)
         return f"ttwf={total_hours // 24}dh{total_hours % 24}"
 
+    @staticmethod
+    def _local_time_phase_str(lon_deg: float) -> str:
+        """Return a rough local-time-of-day phase (e.g. "afternoon") at this longitude."""
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        local_hour = (now_utc.hour + now_utc.minute / 60.0 + lon_deg / 15.0) % 24.0
+        phase = _TIME_PHASES[0][1]
+        for start_hour, label in _TIME_PHASES:
+            if local_hour < start_hour:
+                break
+            phase = label
+        return phase
+
     def print_aircraft_status(self):
         """Display a basic aircraft status line to verify sane data."""
         try:
@@ -2235,9 +2267,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             lon = math.degrees(float(PiBaHeAlTas[6]))
             self.logger.info(
                 "pitch=%.1f bank=%.1f heading=%.0f altitude_true=%.0f"
-                " TAS=%.0f lat=%.6f lon=%.6f %s",
+                " TAS=%.0f lat=%.6f lon=%.6f %s LT: %s",
                 pitch, bank, heading_true, alt_true_ft, tas, lat, lon,
-                self._worldflight_countdown_str()
+                self._worldflight_countdown_str(),
+                self._local_time_phase_str(lon)
             )
 
     async def logging_task(self, name):  # pylint: disable=too-many-branches
