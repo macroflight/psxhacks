@@ -6093,6 +6093,21 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 # loading", so it doubles as our situ-load detector here.
                 if self._timesync_on_situ_load:
                     self._sync_psx_clock()
+                # TEMPORARY (PFD-altitude-jump investigation, see the
+                # project_frankenweather_altitude_jump memory): LeftPfdAlt
+                # (Qs562) is PSX Mode=DEMAND, so it's never sent unprompted.
+                # onResume (load3) fires only after the Lexicon has been
+                # fully delivered (see router/docs/NOTES.md's welcome-
+                # message sequence), unlike onConnect/the "version"
+                # callback, which fire before the Lexicon arrives -- too
+                # early for psx.py's name->Qcode mapping to resolve
+                # "LeftPfdAlt" (see frankenpush.py's identical pattern).
+                # A single demand here makes PSX start sending it on every
+                # change for the rest of this connection, which the router
+                # logs along with Qs121 -- no periodic re-demand or local
+                # tracking/analysis needed, that happens from the logs.
+                # Remove once that investigation is closed.
+                self.psx.send("demand", "LeftPfdAlt")
 
             self.psx = psx.Client()
             self.psx.onPause = lambda: setattr(self, 'psx_paused', True)

@@ -49,6 +49,16 @@
   tops=...`) gains a `[CB ramp: ...]` suffix with the signed oktas/min
   and ft/min rate and the target, whenever that zone's CB is actively
   growing or decaying.
+- **TEMPORARY: now sends `demand=LeftPfdAlt` (Qs562) once whenever PSX
+  resumes (including the initial connect).** PSX never sends this field
+  unprompted (`Mode=DEMAND`); a single demand makes PSX stream it on
+  every change for the rest of that connection, which the router logs
+  alongside `Qs121`/`PiBaHeAlTas` -- giving direct evidence of the PFD's
+  own indicated altitude for the ongoing altitude-jump investigation
+  (see `project_frankenweather_altitude_jump` memory) via log analysis,
+  instead of only inferring a jump from QNH/weather writes.
+  frankenweather doesn't otherwise track or analyze this value itself.
+  Remove the `demand=LeftPfdAlt` send once that investigation is closed.
 
 ## 1.7.0 (2026-10-15)
 
