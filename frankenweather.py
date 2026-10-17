@@ -326,6 +326,61 @@ _CONFLICT_LOG_INTERVAL_S = 60.0
 # transit either, so the window can just be generous.
 _WX_SLOW_TRANSIT_MS = 2000
 
+# CB growth/decay ramping (--cb-growth, cruise mode only): see
+# Script._ramp_cb_wx()/docs/frankenweather.md. Instead of a CB's oktas/top
+# snapping instantly to its forecast target, they ramp gradually -- growth
+# is sized at creation so a CB doesn't look like it "popped into view" at a
+# distance where it'd be noticeable, and (subject to the rate cap below)
+# finishes growing before the aircraft reaches it; shrinking/removal always
+# uses the fixed decay rate below, since a departing zone doesn't need to
+# hurry. Base (field 11) is never ramped -- it's applied straight from the
+# forecast every cycle.
+_CB_GROWTH_START_PCT_RANGES = (
+    # (dist_nm threshold, low_pct, high_pct) -- highest threshold first; the
+    # first range whose threshold the distance exceeds applies, picking a
+    # uniformly random percentage within it (never a single fixed value) --
+    # see _cb_growth_start_pct(). A CB this far out is too far away to
+    # assess precisely even at the high end of its range, so starting
+    # closer to fully-formed doesn't read as a "pop".
+    (200.0, 0.70, 1.00),
+    (150.0, 0.50, 0.80),
+    (100.0, 0.30, 0.60),
+    (50.0, 0.10, 0.40),
+)
+_CB_GROWTH_START_PCT_RANGE_BELOW = (0.05, 0.20)  # dist_nm <= 50
+_CB_GROWTH_MIN_TOP_ABOVE_BASE_FT = 3000.0   # "a few thousand feet above the base"
+_CB_GROWTH_MIN_OKTAS = 1                    # never less than 1/8 once a CB exists
+_CB_GROWTH_ASSUMED_GS_KT = 420.0            # ETA fallback if ac_tas_kt isn't known yet
+# Hard cap on the ETA-sized growth rate, regardless of distance -- avoiding
+# the "pops up right next to the aircraft" effect matters more than a
+# close-in CB finishing growth before arrival, so a CB created with little
+# runway left (e.g. one appearing in an already-nearby zone) simply arrives
+# still under-grown rather than rushing to finish in a minute or two. This
+# is the floor of the CAPE-scaled cap below (i.e. the cap for weak/no-CAPE
+# CBs, e.g. one forced by a TS SIGMET/METAR override with little CAPE
+# behind it) -- higher CAPE only ever raises it.
+_CB_GROWTH_MAX_TOP_FT_PER_MIN = 1000.0
+_CB_GROWTH_MAX_OKTAS_PER_MIN = 0.15
+# Real updrafts scale roughly with sqrt(2*CAPE) (parcel theory's unmixed
+# max vertical velocity); real-world updrafts run well under that unmixed
+# max (entrainment), and the visible cloud *top* rises slower still than
+# the internal updraft. _CB_GROWTH_CAPE_UPDRAFT_FRACTION folds both of
+# those discounts into one empirical factor, picked so the resulting top
+# growth rate lands in the ~1500-4000 ft/min range meteorology references
+# give for an actively-growing CB at moderate-to-severe CAPE (1500-3000
+# J/kg) -- see the growth-rate/CAPE discussion in
+# docs/Changelog-frankenweather.md. sqrt(CAPE) has no ceiling of its own,
+# so _CB_GROWTH_MAX_TOP_FT_PER_MIN_CEILING caps the result at the fast end
+# of that same real-world range -- without it, extreme CAPE (rare, but
+# Open-Meteo can report it) would keep accelerating the rate even after
+# cb_tops_ft()'s own 55000ft forecast ceiling (reached by CAPE ~1750 J/kg)
+# stops giving it any more height left to climb towards.
+_CB_GROWTH_CAPE_UPDRAFT_FRACTION = 0.25
+_CB_GROWTH_MAX_TOP_FT_PER_MIN_CEILING = 4000.0
+_MPS_TO_FT_PER_MIN = 196.85
+_CB_DECAY_TOP_FT_PER_MIN = 150.0            # fixed, real-CB-collapse-plausible rate
+_CB_DECAY_OKTAS_PER_MIN = 0.1               # ~1 okta every 10 minutes
+
 _HDG_WINDOW_S = 300.0                 # heading-change detection window (5 min)
 _MANEUVER_ENTER_DEG = 180.0           # total hdg change to enter maneuvering mode
 _MANEUVER_EXIT_DEG = 60.0             # total hdg change to exit maneuvering mode
@@ -1551,6 +1606,22 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self.zone_metar_source: dict = {}
         self.last_write_time = 0.0
 
+        # --cb-growth ramp state (see _ramp_cb_wx()): zone_num → dict of
+        # current_oktas/current_top_ft/growth_rate_*_per_min/last_update_ts,
+        # present only while that zone's CB is actively growing/decaying.
+        self.zone_cb_ramp: dict = {}
+        # zone_num → distance (nm) to the aircraft captured at the moment the
+        # zone was last (re)placed; consumed (popped) by _ramp_cb_wx() the
+        # first time it sees a CB there, so it only ever reflects placement,
+        # never a later update.
+        self.zone_cb_create_dist_nm: dict = {}
+        # zone_num → {'oktas','base','top'} forecast target (pre-ramp), or
+        # None if no CB is forecast there -- set every _update_zones() cycle
+        # regardless of --cb-growth, so the web UI/console can always show
+        # the target even when ramping itself is inactive (in which case
+        # current == target, since nothing is ramped).
+        self.zone_cb_target: dict = {}
+
         # Fixed zone positions: zone_num (1-7) → (lat, lon, icao)
         self.zone_positions: dict = {}
         self.zone_relocated_time: dict = {}  # zone_num → last relocation timestamp
@@ -1872,7 +1943,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 return
             self.ac_hdg = math.degrees(float(parts[2])) % 360
             self.ac_alt_ft = float(parts[3]) / 1000.0
-            self.ac_tas_kt = float(parts[4])
+            self.ac_tas_kt = float(parts[4]) / 1000.0
             self.ac_lat = math.degrees(float(parts[5]))
             self.ac_lon = math.degrees(float(parts[6]))
         except (ValueError, IndexError):
@@ -3489,6 +3560,153 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return ';'.join(fields)
         return wx_str
 
+    @staticmethod
+    def _cb_growth_start_pct(dist_nm: float) -> float:
+        """Return a random starting fraction of forecast CB size for a CB this far out.
+
+        Picks uniformly within whichever _CB_GROWTH_START_PCT_RANGES bracket
+        dist_nm falls into (see --cb-growth / _ramp_cb_wx()) -- the same
+        CB created at the same distance won't always start at the same
+        size, only within the same range.
+        """
+        for threshold, low, high in _CB_GROWTH_START_PCT_RANGES:
+            if dist_nm > threshold:
+                return random.uniform(low, high)
+        return random.uniform(*_CB_GROWTH_START_PCT_RANGE_BELOW)
+
+    @staticmethod
+    def _cb_growth_max_top_ft_per_min(cape_jkg: float) -> float:
+        """Return the top-growth-rate cap for this CAPE, bounded at both ends.
+
+        Real-world updrafts (and so convective growth) are stronger at
+        higher CAPE -- scaled from parcel theory's sqrt(2*CAPE) max vertical
+        velocity via _CB_GROWTH_CAPE_UPDRAFT_FRACTION (see that constant's
+        comment). _CB_GROWTH_MAX_TOP_FT_PER_MIN is the floor for weak/zero
+        CAPE (e.g. a CB forced by a TS SIGMET/METAR override);
+        _CB_GROWTH_MAX_TOP_FT_PER_MIN_CEILING caps the other end, since
+        sqrt(CAPE) alone has no ceiling of its own.
+        """
+        cape = max(cape_jkg, 0.0)
+        updraft_mps = math.sqrt(2.0 * cape)
+        scaled = updraft_mps * _CB_GROWTH_CAPE_UPDRAFT_FRACTION * _MPS_TO_FT_PER_MIN
+        return min(_CB_GROWTH_MAX_TOP_FT_PER_MIN_CEILING,
+                   max(_CB_GROWTH_MAX_TOP_FT_PER_MIN, scaled))
+
+    def _ramp_cb_wx(  # pylint: disable=too-many-locals,too-many-statements
+            self, zone_num: int, target_wx: str, cape_jkg: float = 0.0) -> str:
+        """Ramp zone_num's CB oktas/top toward target_wx's values (--cb-growth).
+
+        Growth is sized at CB creation (new zone placement, or a CB first
+        appearing in an already-settled zone) from the distance to the
+        aircraft at that moment, so it both avoids an abrupt "pop" at a
+        distance where it'd be noticeable and still finishes growing before
+        the aircraft arrives (see _cb_growth_start_pct()/docs). The top
+        growth rate's cap also scales with cape_jkg (this zone's forecast
+        CAPE, if known) via _cb_growth_max_top_ft_per_min() -- stronger
+        storms are allowed to grow faster, same as in reality. Once sized,
+        the growth rate stays fixed; shrinking/removal always uses the
+        fixed _CB_DECAY_*_PER_MIN rates instead, regardless of distance.
+        Base (field 11) is never touched -- it's always the fresh forecast.
+        """
+        parts = target_wx.split(';')
+        target_oktas = int(parts[9])
+        target_top = float(parts[10])
+        target_base = float(parts[11])
+        now = time.time()
+        ramp = self.zone_cb_ramp.get(zone_num)
+
+        if target_oktas <= 0:
+            if ramp is None or ramp['current_oktas'] <= 0:
+                self.zone_cb_ramp.pop(zone_num, None)
+                return target_wx
+            elapsed_min = max(0.0, (now - ramp['last_update_ts']) / 60.0)
+            new_oktas = max(0.0, ramp['current_oktas'] - _CB_DECAY_OKTAS_PER_MIN * elapsed_min)
+            new_top = max(target_base,
+                          ramp['current_top_ft'] - _CB_DECAY_TOP_FT_PER_MIN * elapsed_min)
+            if new_oktas <= 0:
+                self.zone_cb_ramp.pop(zone_num, None)
+                return target_wx
+            ramp.update(current_oktas=new_oktas, current_top_ft=new_top, last_update_ts=now,
+                        last_oktas_rate_per_min=-_CB_DECAY_OKTAS_PER_MIN,
+                        last_top_rate_per_min=-_CB_DECAY_TOP_FT_PER_MIN)
+            parts[9] = str(max(1, round(new_oktas)))
+            parts[10] = str(round(new_top))
+            return ';'.join(parts)
+
+        if ramp is None or ramp.get('current_oktas', 0) <= 0:
+            dist_nm = self.zone_cb_create_dist_nm.pop(zone_num, None)
+            if dist_nm is None:
+                lat, lon, _ = self.zone_positions[zone_num]
+                dist_nm = self._dist_nm(self.ac_lat, self.ac_lon, lat, lon)
+            start_pct = self._cb_growth_start_pct(dist_nm)
+            current_oktas = min(
+                float(target_oktas),
+                max(float(_CB_GROWTH_MIN_OKTAS), round(target_oktas * start_pct)))
+            current_top = min(
+                target_top,
+                target_base + max(_CB_GROWTH_MIN_TOP_ABOVE_BASE_FT,
+                                  start_pct * (target_top - target_base)))
+            gs_kt = self.ac_tas_kt or _CB_GROWTH_ASSUMED_GS_KT
+            time_to_arrival_min = max(1.0, dist_nm / gs_kt * 60.0)
+            # Capped, not just sized to finish by arrival: avoiding a "pop"
+            # right next to the aircraft matters more than a close-in CB
+            # reaching full size in time -- see _CB_GROWTH_MAX_*_PER_MIN /
+            # _cb_growth_max_top_ft_per_min() (CAPE raises the top cap).
+            rate_oktas = min((target_oktas - current_oktas) / time_to_arrival_min,
+                             _CB_GROWTH_MAX_OKTAS_PER_MIN)
+            max_top_rate = self._cb_growth_max_top_ft_per_min(cape_jkg)
+            rate_top = min((target_top - current_top) / time_to_arrival_min, max_top_rate)
+            ramp = {
+                'current_oktas': current_oktas,
+                'current_top_ft': current_top,
+                'growth_rate_oktas_per_min': rate_oktas,
+                'growth_rate_top_per_min': rate_top,
+                'last_oktas_rate_per_min': rate_oktas,
+                'last_top_rate_per_min': rate_top,
+                'last_update_ts': now,
+            }
+            self.zone_cb_ramp[zone_num] = ramp
+            top_fill_min = (target_top - current_top) / rate_top if rate_top else 0.0
+            self.logger.info(
+                "Zone %d: CB growth starting at %.0fnm (%.0f%%, CAPE=%.0fJ/kg):"
+                " %.1f/%d oktas, %.0f/%.0fft top (rate %.2fokt/min, %.0fft/min"
+                " [cap %.0f], ac ETA %.0fmin, full growth in %.0fmin%s)",
+                zone_num, dist_nm, start_pct * 100, cape_jkg, current_oktas,
+                target_oktas, current_top, target_top, rate_oktas, rate_top,
+                max_top_rate, time_to_arrival_min, top_fill_min,
+                " -- capped, won't finish in time" if
+                top_fill_min > time_to_arrival_min else "")
+        else:
+            old_oktas, old_top = ramp['current_oktas'], ramp['current_top_ft']
+            elapsed_min = max(0.0, (now - ramp['last_update_ts']) / 60.0)
+            if target_oktas >= old_oktas:
+                new_oktas = min(
+                    float(target_oktas),
+                    old_oktas + ramp['growth_rate_oktas_per_min'] * elapsed_min)
+            else:
+                new_oktas = max(
+                    float(target_oktas), old_oktas - _CB_DECAY_OKTAS_PER_MIN * elapsed_min)
+            if target_top >= old_top:
+                new_top = min(
+                    target_top, old_top + ramp['growth_rate_top_per_min'] * elapsed_min)
+            else:
+                new_top = max(target_top, old_top - _CB_DECAY_TOP_FT_PER_MIN * elapsed_min)
+            new_top = max(new_top, target_base)
+            if elapsed_min > 0:
+                oktas_rate = (new_oktas - old_oktas) / elapsed_min
+                top_rate = (new_top - old_top) / elapsed_min
+            else:
+                oktas_rate = (ramp['growth_rate_oktas_per_min'] if target_oktas >= old_oktas
+                              else -_CB_DECAY_OKTAS_PER_MIN)
+                top_rate = (ramp['growth_rate_top_per_min'] if target_top >= old_top
+                            else -_CB_DECAY_TOP_FT_PER_MIN)
+            ramp.update(current_oktas=new_oktas, current_top_ft=new_top, last_update_ts=now,
+                        last_oktas_rate_per_min=oktas_rate, last_top_rate_per_min=top_rate)
+
+        parts[9] = str(max(_CB_GROWTH_MIN_OKTAS, round(ramp['current_oktas'])))
+        parts[10] = str(round(ramp['current_top_ft']))
+        return ';'.join(parts)
+
     # ------------------------------------------------------------------
     # MSFS sync (in-cloud and QNH)
     # ------------------------------------------------------------------
@@ -3873,6 +4091,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         """Place all 7 zones randomly around the aircraft on startup."""
         self.zone_positions.clear()
         self.zone_relocated_time.clear()
+        self.zone_cb_ramp.clear()
+        self.zone_cb_create_dist_nm.clear()
         next_zone = 1
         for icao, lat, lon in self._arpt_coverage_needed():
             if next_zone > 7:
@@ -3881,6 +4101,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.zone_positions[next_zone] = (lat, lon, icao)
             self.zone_placement_reason[next_zone] = self._placement_desc(
                 lat, lon, icao, is_arpt=True)
+            self.zone_cb_create_dist_nm[next_zone] = dist_m / _NM_TO_M
             self.logger.info(
                 "Zone %d: initial placement at %s @ %.3f/%.3f  %.0f°/%.0fnm (dep/dst arpt)",
                 next_zone, icao, lat, lon, az % 360, dist_m / _NM_TO_M)
@@ -3890,6 +4111,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.zone_positions[zone_num] = (lat, lon, icao)
             self.zone_placement_reason[zone_num] = self._placement_desc(lat, lon, icao)
             az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
+            self.zone_cb_create_dist_nm[zone_num] = dist_m / _NM_TO_M
             self.logger.info(
                 "Zone %d: initial placement at %s @ %.3f/%.3f  %.0f°/%.0fnm",
                 zone_num, icao, lat, lon, az % 360, dist_m / _NM_TO_M)
@@ -4021,8 +4243,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.zone_placement_reason[zone_num] = self._placement_desc(
                 new_lat, new_lon, new_icao)
             self.zone_relocated_time[zone_num] = now
+            self.zone_cb_ramp.pop(zone_num, None)
             new_az, _, new_dist_m = self.geod.inv(
                 self.ac_lon, self.ac_lat, new_lon, new_lat)
+            self.zone_cb_create_dist_nm[zone_num] = new_dist_m / _NM_TO_M
             self.logger.info(
                 "Zone %d: relocated from %s @ %.3f/%.3f [%.0f°/%.0fnm] (%s)"
                 " → %s @ %.3f/%.3f [%.0f°/%.0fnm]",
@@ -4100,6 +4324,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.zone_placement_reason[zone_num] = self._placement_desc(
                 new_lat, new_lon, icao, is_arpt=True)
             self.zone_relocated_time[zone_num] = time.time()
+            self.zone_cb_ramp.pop(zone_num, None)
+            _, _, new_dist_m = self.geod.inv(self.ac_lon, self.ac_lat, new_lon, new_lat)
+            self.zone_cb_create_dist_nm[zone_num] = new_dist_m / _NM_TO_M
             self.logger.info(
                 "Zone %d: repositioned %s for avoid_cb_near_airport toggle "
                 "(%.3f/%.3f → %.3f/%.3f)",
@@ -4132,9 +4359,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.zone_placement_reason[best_zn] = self._placement_desc(
                 lat, lon, icao, is_arpt=True)
             self.zone_relocated_time[best_zn] = time.time()
+            self.zone_cb_ramp.pop(best_zn, None)
             old_az, _, old_dm = self.geod.inv(
                 self.ac_lon, self.ac_lat, old_pos[1], old_pos[0])
             new_az, _, new_dm = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
+            self.zone_cb_create_dist_nm[best_zn] = new_dm / _NM_TO_M
             self.logger.info(
                 "Zone %d: relocated from %s @ %.3f/%.3f [%.0f°/%.0fnm]"
                 " → %s @ %.3f/%.3f [%.0f°/%.0fnm] (dep/dst arpt)",
@@ -4895,6 +5124,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self.logger.info("Updating zone weather — ac=%.2f/%.2f hdg=%.0f° [%s]",
                          self.ac_lat, self.ac_lon, self.ac_hdg,
                          "MANEUVERING" if self._maneuvering else "CRUISE")
+        # --cb-growth is active in cruise and inactive in maneuvering mode,
+        # using frankenweather's own mode flag (see _update_maneuvering_mode()
+        # and the log line above) -- deliberately independent of altitude,
+        # unlike _check_and_relocate()'s own separate in_cruise concept.
+        in_cruise = not self._maneuvering
 
         # Refresh --primary-metar-source's cache if stale; fails over to the
         # other source as a stand-in on failure (see _refresh_primary_metar_cache()).
@@ -5125,6 +5359,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 new_metars.append(_gen_metar(icao, om, now) if om else None)
             wx_before_sigmet = wx
             final_wx = self._sigmet_cb_override(wx, (lat, lon), om, f"Zone {i + 1} {icao}")
+            zone_num = i + 1
+            target_parts = final_wx.split(';')
+            target_oktas_val = int(target_parts[9]) if len(target_parts) > 11 else 0
+            self.zone_cb_target[zone_num] = (
+                {'oktas': target_oktas_val, 'base': int(target_parts[11]),
+                 'top': int(target_parts[10])} if target_oktas_val > 0 else None)
+            if self.args.cb_growth and in_cruise:
+                cape_here = _om_hval(om.get("hourly", {}), "cape", now.hour, 0) if om else 0.0
+                final_wx = self._ramp_cb_wx(zone_num, final_wx, cape_here)
+            else:
+                self.zone_cb_ramp.pop(zone_num, None)
             new_wxs.append(final_wx)
             _per_zone.append({
                 'radar_echo': radar_echo,
@@ -5154,9 +5399,23 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             showers_mm = _om_hval(hourly, "showers", now.hour, 0)
             wmo_code = int((om.get("current") or {}).get("weather_code", 0))
             if cb_oktas > 0:
+                growth_note = ""
+                ramp = self.zone_cb_ramp.get(i + 1)
+                target = self.zone_cb_target.get(i + 1)
+                if ramp and target:
+                    okt_rate = ramp.get('last_oktas_rate_per_min', 0.0)
+                    top_rate = ramp.get('last_top_rate_per_min', 0.0)
+                    bits = []
+                    if abs(okt_rate) >= 0.01:
+                        bits.append(f"{okt_rate:+.2f}okt/min")
+                    if abs(top_rate) >= 1.0:
+                        bits.append(f"{top_rate:+.0f}ft/min")
+                    if bits:
+                        growth_note = (f" [CB ramp: {' '.join(bits)}"
+                                       f" -> target {target['oktas']}ok/{target['top']}ft]")
                 cb_part = (f"  CB {cb_oktas} oktas"
                            f" base={parts[11]}ft tops={parts[10]}ft"
-                           f" (WMO={wmo_code} showers={showers_mm:.2f}mm/h)")
+                           f" (WMO={wmo_code} showers={showers_mm:.2f}mm/h){growth_note}")
             elif _cape_to_cb_oktas(cape, cin) > 0 and showers_mm < 0.5:
                 cb_part = (f"  (CAPE suppressed: WMO={wmo_code}"
                            f" showers={showers_mm:.2f}mm/h)")
@@ -5356,6 +5615,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 "placement": self._placement_desc(lat, lon, icao,
                                                   is_arpt=icao in arpt_icaos),
                 "weather_detail": self.zone_weather_detail.get(zone_num, ""),
+                # --cb-growth: the CB's forecast target (None if none forecast)
+                # and its current ramp rate (None if not actively ramping) --
+                # the zone's *current* oktas/base/top is already available
+                # from Wx<N> itself (see fw_webui.py's _parse_wx_brief()).
+                "cb_target": self.zone_cb_target.get(zone_num),
+                "cb_rate": ({
+                    "oktas_per_min": round(
+                        self.zone_cb_ramp[zone_num].get('last_oktas_rate_per_min', 0.0), 3),
+                    "top_ft_per_min": round(
+                        self.zone_cb_ramp[zone_num].get('last_top_rate_per_min', 0.0), 1),
+                } if zone_num in self.zone_cb_ramp else None),
             })
         zone_positions = [(z["lat"], z["lon"]) for z in zones]
         _SIGMET_MAX_NM = 100.0
@@ -6004,6 +6274,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             '--fake-cb', type=_parse_cb_arg, default=None, metavar='O:B:T',
             help="Override CB in all zones: O=oktas (0-8), B=base ft, T=top ft "
                  "(e.g. --fake-cb=6:3000:45000).")
+        parser.add_argument(
+            '--cb-growth', action='store_true',
+            help="EXPERIMENTAL: in cruise only, ramp a CB's coverage (oktas) "
+                 "and top height gradually toward its forecast target instead "
+                 "of snapping instantly, so new CBs don't appear to pop into "
+                 "view and don't finish growing before the aircraft reaches "
+                 "them. Shrinking/removal always decays at a fixed rate "
+                 "regardless of distance. Off by default -- CBs snap to "
+                 "forecast instantly, as before.")
         parser.add_argument(
             '--om-proxy', type=str, default=None, metavar='URL',
             help="Proxy URL for all Open-Meteo requests, e.g. socks5h://localhost:1080."

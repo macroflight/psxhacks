@@ -100,7 +100,10 @@ Features:
   generated (minimum 4 oktas) even when CAPE is zero, since TS SIGMETs
   report observed thunderstorms. METAR convective indicators (TS, TSRA,
   SHRA, GR, LTG, FC, CB sky groups) are also used and can override or
-  refine the Open-Meteo prediction.
+  refine the Open-Meteo prediction. See [CB growth and
+  decay](#cb-growth-and-decay) below for `--cb-growth`, an opt-in,
+  cruise-only ramp of a CB's coverage/top instead of an instant snap to
+  its forecast value.
 
 - METAR TEMPO/BECMG/PROBnn trend groups are parsed out and excluded from
   the current-observation weather (they describe conditions that *may*
@@ -256,6 +259,75 @@ maneuvering mode (a hold or vectoring pattern), and dropping back below
 60° of change exits it back to normal cruise placement. The 180°/60° gap
 is deliberate hysteresis so the mode doesn't flap back and forth near the
 boundary.
+
+### CB growth and decay
+
+`--cb-growth` (experimental, off by default) is a cruise-only option that
+ramps a CB's coverage (oktas) and top height gradually toward its forecast
+target instead of snapping to it the instant a zone is placed ahead of the
+aircraft or a new CB appears in an existing zone. Base height is never
+ramped — it always reflects the live forecast, since it moves slowly and
+smoothly on its own (it's derived from temperature/dewpoint, not CAPE).
+
+The starting size and growth rate are both picked from the CB's distance
+to the aircraft at the moment it first appears:
+
+- **Starting percentage**: a random value within a range picked by
+  distance (never less than 1 okta/a few thousand feet above base) —
+  70-100% beyond 200 nm, 50-80% beyond 150 nm, 30-60% beyond 100 nm,
+  10-40% beyond 50 nm, 5-20% at or inside 50 nm. Randomized (not a single
+  fixed value per distance) so CBs don't all look identically "grown" at
+  a given range. Counterintuitive at first, but the point is
+  *noticeability*, not realism: a CB 200+ nm out is too far away to
+  assess precisely, so starting it already mostly grown doesn't look
+  like a "pop"; the same jump at 50 nm or less, where the pilot can
+  actually judge its size, would.
+- **Growth rate**: fixed at that moment so the CB reaches its forecast
+  size at roughly the same time the aircraft reaches the zone (using true
+  airspeed as the speed estimate), so a CB doesn't finish forming only
+  after it's long gone, nor is there too little visible development by
+  the time the aircraft arrives — **but capped**, regardless of distance:
+  avoiding the "CB just popped up right next to the aircraft" effect
+  matters more than a close-in CB finishing growth in time, so one
+  created with little runway left (e.g. appearing in an already-nearby
+  zone) simply arrives still under-grown rather than rushing to finish in
+  a minute or two. The cap itself scales with the zone's forecast CAPE —
+  real storm updrafts (and so convective growth) are stronger at higher
+  CAPE, so a high-CAPE CB is allowed to grow faster than the 1000 ft/min
+  floor used for weak/no-CAPE CBs (e.g. one forced by a TS SIGMET/METAR
+  override) — but only up to a 4000 ft/min ceiling, matching real-world
+  references for an actively-growing CB; CAPE's own scaling has no
+  ceiling of its own, and would otherwise keep accelerating the rate even
+  past the point (~1750 J/kg) where the forecast top height itself has
+  already saturated at its own 55000ft ceiling. Coverage (oktas) growth
+  is capped at a flat rate regardless of CAPE.
+
+Once a CB is fully grown, if its forecast later shrinks or disappears
+entirely, it decays at a fixed rate rather than reusing the (now
+irrelevant) growth rate — removal isn't time-critical, since the zone
+will be left behind soon regardless, and a real CB doesn't collapse
+instantly either. This also means a CB that forms, then forecasts away,
+then comes back doesn't flicker in and out at the boundary.
+
+Ramping state is per-zone and resets whenever a zone is (re)placed
+(relocation, a new dep/dst airport zone, or the CB-near-airport-avoidance
+offset) — any CB in the newly-assigned zone starts fresh from its own
+distance at that moment. The feature is active whenever frankenweather is
+*not* in maneuvering mode (see "Entering/exiting maneuvering mode" above)
+— this is independent of altitude, unlike [Zone placement and
+relocation](#zone-placement-and-relocation)'s own separate cruise/
+maneuvering distinction, so a climb or descent still ramps CBs as long as
+it isn't also a hold/vectoring pattern. In maneuvering mode, or with the
+flag off, CBs snap to forecast instantly, as before.
+
+Both the forecast target and the live ramp rate are visible, not just the
+current (ramped) value: the web UI's weather map popup and the
+`/weather/settings` zone cards show the CB's current oktas/top next to
+its target (only when they differ) and its current growth/decay rate —
+this applies to the frankenrouter web UI too, since it serves the same
+pages. The console's per-zone log line gains a `[CB ramp: ...]` suffix
+with the signed oktas/min and ft/min rate and the target whenever that
+zone's CB is actively changing.
 
 ### Time sync
 

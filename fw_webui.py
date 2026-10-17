@@ -449,6 +449,8 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
             'wx': wx,
             'metar': metar,
             'wx_raw': wx_str,
+            'cb_target': zone.get('cb_target'),
+            'cb_rate': zone.get('cb_rate'),
         })
 
     zones_js = json.dumps(zone_data)
@@ -582,10 +584,18 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         "{radius:9,color:'#fff',weight:2,fillColor:c,fillOpacity:0.9,opacity:0.95})"
         ".addTo(map);\n"
         "  var wx=z.wx;\n"
+        "  var cbTargetDiffers=wx.cb_raw&&z.cb_target&&"
+        "(z.cb_target.oktas!==wx.cb_raw.oktas||z.cb_target.top!==wx.cb_raw.top);\n"
+        "  var cbTargetSuffix=cbTargetDiffers?"
+        "' → '+z.cb_target.oktas+\"/8 \"+z.cb_target.top+\"'\":'';\n"
+        "  var cbRateSuffix=(z.cb_rate&&(Math.abs(z.cb_rate.top_ft_per_min)>=1||"
+        "Math.abs(z.cb_rate.oktas_per_min)>=0.01))?"
+        "' ('+(z.cb_rate.top_ft_per_min>=0?'+':'')+z.cb_rate.top_ft_per_min+\"'/min)\":'';\n"
         "  var cbLabel='';\n"
         "  if(wx.cb_raw){\n"
         "    var cr=wx.cb_raw;\n"
-        "    cbLabel='<br>⛈ '+cr.oktas+\"/8 \"+cr.base+\"'-\"+cr.top+\"'\";\n"
+        "    cbLabel='<br>⛈ '+cr.oktas+\"/8 \"+cr.base+\"'-\"+cr.top+\"'\""
+        "+cbTargetSuffix+cbRateSuffix;\n"
         "  }\n"
         "  var tip='<b>WX'+z.zone+'</b> '+z.icao+cbLabel;\n"
         "  var tipCls=z.is_focused?'zone-label zone-label-focused':'zone-label';\n"
@@ -593,7 +603,11 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         "{radius:14,color:'#3b82f6',weight:2.5,fill:false,opacity:0.9}).addTo(map);\n"
         "  var cbRow=wx.cb_raw"
         "?'<tr><td style=\"color:#f87171\">⛈ CB</td><td style=\"color:#f87171\">'"
-        "+wx.cb_raw.oktas+'/8 '+wx.cb_raw.base+\"'-\"+wx.cb_raw.top+\"'</td></tr>\":'';\n"
+        "+wx.cb_raw.oktas+'/8 '+wx.cb_raw.base+\"'-\"+wx.cb_raw.top+\"'\""
+        "+(cbTargetDiffers?'<span style=\"color:#94a3b8\">'+cbTargetSuffix+'</span>':'')"
+        "+(cbRateSuffix?'<span style=\"color:#fbbf24;font-size:10px\">'+cbRateSuffix"
+        "+'</span>':'')"
+        "+'</td></tr>':'';\n"
         "  var metarLbl=z.source==='VATSIM'?'METAR':'METAR (gen)';\n"
         "  var metarRow=z.metar"
         "?'<tr><td style=\"vertical-align:top;color:#94a3b8;font-size:10px;"
@@ -1145,7 +1159,25 @@ def _build_weather_settings_page(ctx):  # pylint: disable=too-many-locals,too-ma
                 f'<tr><td>Hi cloud</td><td class="val">{wx["hi_cloud"]}</td></tr>\n'
             )
             if wx['cb'] != 'None':
-                body += f'<tr><td>CB</td><td class="warn">{wx["cb"]}</td></tr>\n'
+                cb_target = zone.get('cb_target')
+                cb_rate = zone.get('cb_rate')
+                cb_raw = wx.get('cb_raw') or {}
+                target_suffix = ''
+                if cb_target and (cb_target.get('oktas') != cb_raw.get('oktas') or
+                                  cb_target.get('top') != cb_raw.get('top')):
+                    target_suffix = (f' <span style="color:#94a3b8">&rarr; '
+                                     f'{cb_target["oktas"]}/8 {cb_target["top"]} ft</span>')
+                rate_suffix = ''
+                top_rate = (cb_rate or {}).get('top_ft_per_min', 0)
+                okt_rate = (cb_rate or {}).get('oktas_per_min', 0)
+                if cb_rate and (abs(top_rate) >= 1 or abs(okt_rate) >= 0.01):
+                    sign = '+' if top_rate >= 0 else ''
+                    rate_suffix = (
+                        f' <span style="color:#fbbf24;font-size:0.82em">'
+                        f'({sign}{top_rate:.0f} ft/min)</span>')
+                body += (
+                    f'<tr><td>CB</td><td class="warn">{wx["cb"]}'
+                    f'{target_suffix}{rate_suffix}</td></tr>\n')
             body += (
                 f'<tr><td>Temp / QNH</td><td class="val">{wx["temp"]} / {wx["qnh"]}</td></tr>\n'
                 '</table>\n'

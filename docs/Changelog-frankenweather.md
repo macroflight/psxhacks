@@ -1,5 +1,55 @@
 # frankenweather changelog
 
+## 1.8.0 (2026-10-17)
+
+- **Fix: `self.ac_tas_kt` (true airspeed, from `PiBaHeAlTas`) was missing
+  the same `/1000.0` unscaling already correctly applied to altitude on
+  the line above it** — PSX sends this field as `tas_kt*1e3` (confirmed
+  against `frankenpush.py`/`frankenturb/__init__.py`'s independent
+  parsers of the same field), so `ac_tas_kt` has always held TAS×1000.
+  This silently broke `_update_maneuvering_mode()`'s "true airspeed below
+  200 kt forces maneuvering mode" check (it could never fire), and was
+  caught via `--cb-growth`'s new reliance on this field's actual magnitude
+  for its ETA estimate (see below).
+- **New (experimental, command-line only): `--cb-growth`** — active in
+  cruise, inactive in maneuvering mode (independent of altitude; see
+  "Entering/exiting maneuvering mode" above), ramps a CB's coverage
+  (oktas) and top height gradually toward its forecast target instead of
+  snapping instantly, so a CB doesn't appear to pop into view the moment
+  a zone is placed ahead of the aircraft or a new CB appears in an
+  existing zone. Starting size is a random percentage of forecast size,
+  picked within a range chosen by the CB's distance to the aircraft when
+  it first appears (farther out allows a higher percentage without
+  looking like a pop, since it's too far away to assess precisely):
+  70-100% beyond 200nm, 50-80% beyond 150nm, 30-60% beyond 100nm, 10-40%
+  beyond 50nm, 5-20% at or inside 50nm. The growth rate is sized to finish by
+  roughly the time the aircraft gets there, but hard-capped regardless of
+  distance — avoiding a pop right next to the aircraft matters more than
+  a close-in CB finishing growth in time, so one with little runway left
+  simply arrives still under-grown. The top-growth cap scales with the
+  zone's forecast CAPE (real storm updrafts are stronger at higher CAPE),
+  bounded between a 1000 ft/min floor (weak/no-CAPE CBs) and a 4000 ft/min
+  ceiling, matching the ~1500-4000 ft/min range meteorology references
+  give for an actively-growing CB -- without the ceiling, CAPE's
+  unbounded sqrt(CAPE) scaling would keep accelerating the rate even past
+  the point (~1750 J/kg) where `cb_tops_ft()`'s own 55000ft forecast
+  ceiling stops giving it any more height left to climb towards. Oktas
+  growth stays at a flat cap. Shrinking/removal always uses a fixed,
+  distance- and CAPE-independent decay rate instead, since a departing
+  zone doesn't need to hurry. Base height is never ramped. Off by
+  default. See
+  [CB growth and decay](frankenweather.md#cb-growth-and-decay).
+- **`--cb-growth`: the forecast target and ramp rate are now visible,
+  not just the live (ramped) value.** The web UI's weather map popup and
+  the `/weather/settings` zone cards both show the CB's current oktas/top
+  alongside its forecast target (only when they actually differ) and its
+  current growth/decay rate — this applies to the frankenrouter web UI
+  too, since it serves the same `fw_webui.py` pages. The per-zone console
+  log line (`Zone N [SRC]: ICAO @ lat/lon  CAPE=... CB n oktas base=...
+  tops=...`) gains a `[CB ramp: ...]` suffix with the signed oktas/min
+  and ft/min rate and the target, whenever that zone's CB is actively
+  growing or decaying.
+
 ## 1.7.0 (2026-10-15)
 
 - **Fix: arm `Qi243` (`WxSlowTransit`) before `SigmetOn` writes** — found
