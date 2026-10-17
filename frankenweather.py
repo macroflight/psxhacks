@@ -6325,40 +6325,32 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "controlling the weather zones). For testing/troubleshooting.")
 
         # Removed options, kept as accepted-but-ignored so old startup scripts still run;
-        # handle_args() logs a deprecation warning for each one actually passed.
+        # handle_args() logs a deprecation warning for each one actually passed. Hidden
+        # from --help (argparse.SUPPRESS) rather than deleted, so that backward-compat
+        # acceptance keeps working -- only the --help listing is decluttered.
         parser.add_argument(
-            '--turb-config-file', type=str, default=None, metavar='PATH',
-            help="[REMOVED] Turbulence settings are now part of --config-file.")
+            '--turb-config-file', type=str, default=None, help=argparse.SUPPRESS)
         parser.add_argument(
-            '--cruise-alt', type=float, default=None, metavar='FT',
-            help="[REMOVED] No longer used.")
+            '--cruise-alt', type=float, default=None, help=argparse.SUPPRESS)
         parser.add_argument(
-            '--arpt-zone-dist', type=float, default=None, metavar='NM',
-            help="[REMOVED] No longer used.")
+            '--arpt-zone-dist', type=float, default=None, help=argparse.SUPPRESS)
         parser.add_argument(
-            '--msfs-in-cloud-sync', action='store_true',
-            help="[REMOVED] Now a runtime toggle on the /weather/settings web page.")
+            '--msfs-in-cloud-sync', action='store_true', help=argparse.SUPPRESS)
         parser.add_argument(
             '--msfs-qnh-check', choices=('CHECK', 'USE'), default=None,
-            help="[REMOVED] Now a runtime toggle on the /weather/settings web page.")
+            help=argparse.SUPPRESS)
         parser.add_argument(
-            '--msfs-qnh-check-maxdiff', type=float, default=None, metavar='HPA',
-            help="[REMOVED] No longer used.")
+            '--msfs-qnh-check-maxdiff', type=float, default=None, help=argparse.SUPPRESS)
         parser.add_argument(
-            '--msfs-wind-sync', action='store_true',
-            help="[REMOVED] Now a runtime toggle on the /weather/settings web page.")
+            '--msfs-wind-sync', action='store_true', help=argparse.SUPPRESS)
         parser.add_argument(
-            '--disable-psx-weather-updates', action='store_true',
-            help="[REMOVED] No longer supported.")
+            '--disable-psx-weather-updates', action='store_true', help=argparse.SUPPRESS)
         parser.add_argument(
-            '--no-turbulence', action='store_true',
-            help="[REMOVED] The turbulence subsystem can no longer be disabled entirely.")
+            '--no-turbulence', action='store_true', help=argparse.SUPPRESS)
         parser.add_argument(
-            '--turb-rate', type=int, default=None, metavar='0-100',
-            help="[REMOVED] No longer used.")
+            '--turb-rate', type=int, default=None, help=argparse.SUPPRESS)
         parser.add_argument(
-            '--turb-intensity-bias', type=int, default=None, metavar='0-999',
-            help="[REMOVED] No longer used.")
+            '--turb-intensity-bias', type=int, default=None, help=argparse.SUPPRESS)
         self.args = parser.parse_args()
         if self.args.psx_port_override is not None:
             if self.args.psx_port_override != self.args.psx_port:
