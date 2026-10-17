@@ -1,5 +1,24 @@
 # frankenweather changelog
 
+## 1.7.0 (2026-10-15)
+
+- **Fix: arm `Qi243` (`WxSlowTransit`) before `SigmetOn` writes** — found
+  via forensic log analysis of a real flight where an instant PFD
+  altitude snap landed ~17 seconds after the last `Qi243` arm had
+  expired, right as a `SigmetOn` write landed. Aerowinx (Hardy) later
+  confirmed PSX already auto-smooths SIGMET-driven changes regardless of
+  `Qi243`'s state, so this isn't strictly necessary, but it's cheap,
+  harmless insurance either way.
+- **New (experimental, command-line only): `--sync-tropopause`** — keeps
+  PSX's Planet Weather page tropopause altitude/temperature/wind set to
+  "Constantly" with real values, computed from Open-Meteo's
+  pressure-level data at the aircraft's current position (WMO
+  lapse-rate definition), refreshed on the same cadence as the weather
+  zones. `WxAloft`'s on-the-wire format was reverse-engineered live
+  against a real PSX instance. Wind variability is always written as 0
+  (no ensemble-spread data available from Open-Meteo) and gust is always
+  set equal to speed. Off by default.
+
 ## 1.6.0 (2026-10-15)
 
 - **New (experimental, command-line only): `--primary-metar-source
