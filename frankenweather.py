@@ -1997,11 +1997,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         """Provide PSX variable lookups for the standalone web UI."""
         if name == 'FocussedWxZone':
             return str(self.focused_zone)
-        m = __import__('re').match(r'^Wx(\d+)$', name)
+        m = re.match(r'^Wx(\d+)$', name)
         if m:
             zone_num = int(m.group(1))
             return self.zone_wx.get(zone_num)
-        if self.psx and __import__('re').match(r'^Metar\d+$', name):
+        if self.psx and re.match(r'^Metar\d+$', name):
             return self.psx.get(name)
         if self.psx:
             return self.psx.get(name)

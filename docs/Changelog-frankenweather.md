@@ -1,5 +1,11 @@
 # frankenweather changelog
 
+## 1.8.1 (2026-10-18)
+
+- Cleanup: `_web_cache_get()` used `__import__('re').match(...)` twice
+  instead of the `re` module already imported at the top of the file -
+  no behavior change, just dropped the redundant inline import.
+
 ## 1.8.0 (2026-10-17)
 
 - **Fix: `self.ac_tas_kt` (true airspeed, from `PiBaHeAlTas`) was missing

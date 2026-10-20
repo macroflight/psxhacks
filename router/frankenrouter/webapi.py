@@ -13,6 +13,7 @@ import string
 import sys
 import textwrap
 import time
+import traceback
 import urllib.parse
 
 # Add psxhacks root to sys.path so fw_webui (first-party, at the root) can be imported.
@@ -3096,4 +3097,4 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
         except Exception as exc:  # pylint: disable=broad-exception-caught
             router.logger.critical(
                 "Unhandled exception %s in %s, shutting down", exc, name)
-            router.logger.critical(__import__('traceback').format_exc())
+            router.logger.critical(traceback.format_exc())

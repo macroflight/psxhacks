@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-18: version 1.19.6
+
+- Cleanup: `webapi.py`'s top-level exception handler used
+  `__import__('traceback').format_exc()` instead of a normal
+  `import traceback` at the top of the file - no behavior change, just
+  dropped the redundant inline import.
+
 ## 2026-10-18: version 1.19.5
 
 - **Fix: password comparisons in `update_access_level()` used plain
