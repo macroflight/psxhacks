@@ -1,5 +1,22 @@
 # frankenpush changelog
 
+## 1.4.0 (2026-10-20)
+
+- **New feature: "join Discord voice chat?" doorbell from Flight
+  Centre.** `flight_deck_doorbell` now takes an optional `call` field:
+  `"crew_rest"` places a PA CREW REST cabin call (`Qi102=44`), while no
+  `call` field keeps the original PARTY LINE call (`Qi102=07`). Unknown
+  `call` values are logged and dropped. Both call types are reported as
+  resolved to Flight Centre the same way, once the crew clears the call.
+- **New feature: print on PSX's own printer from Flight Centre.** A
+  `{"type": "psx_print", "text": ...}` message prints `text` directly
+  on PSX's printer (`PrinterText`), without frankenprint.
+- **Removed: Flight Centre flight info and checklists.** frankenpush no
+  longer relays `flight_plan`/`link_status` into the router as FRDP
+  FLIGHTINFO, and no longer syncs checklist ticks or scratchpad edits
+  back to Flight Centre (`checklist_toggle`/`scratchpad_update`). The
+  matching router `/flightinfo` page was removed in the same change.
+
 ## 1.3.1 (2026-10-18)
 
 - **Fix: the doorbell-cleared handler
