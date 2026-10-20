@@ -1,5 +1,34 @@
 # frankenweather changelog
 
+## 1.8.2 (2026-10-20)
+
+- **Fix: cruise PFD altitude jumps caused by writing WxBasic (planet
+  weather).** Flight logs showed every cruise PFD altitude jump of 9 ft
+  or more coincided with a WxBasic write, and none without one: PSX
+  appears to turn pending smooth weather transits into instant ones when
+  WxBasic is written. WxBasic is now only written on the ground (below
+  50 kt TAS) or while the aircraft is actually in it. Verified on a 6.5 h
+  cruise with no jumps (about 22 expected before the fix). Tropopause
+  sync (`--sync-tropopause`, WxAloft) is unaffected.
+- **Fix: PSX silently corrected some cloud values frankenweather sent**,
+  rewriting them about 10-40 ms later. A second write on the same
+  variable that soon was linked to PFD altitude jumps, and it also
+  defeated the "don't resend values PSX already has" check. Values are
+  now kept within what PSX accepts:
+  - "No cloud" layers use 44950 ft (high layer) and 44900 ft (low layer)
+    instead of 45000 ft for both.
+  - CB tops are capped at 44999 ft instead of 55000 ft, so the
+    tallest CB is now reached at about 1250 J/kg CAPE instead of
+    about 2000 J/kg.
+  - MSFS cloud sync no longer sends a negative cloud base near the
+    ground (e.g. fog during taxi or initial climb); the base is floored
+    at 100 ft, PSX's own minimum.
+- **Fix: crash and restart loop on a stale METAR without an observation
+  time.** If a METAR was too old to use and its observation time couldn't
+  be read, building the zone status text crashed the weather update and
+  frankenweather restarted it every ~15 s until the zone moved on. The
+  age is now shown as "undated".
+
 ## 1.8.1 (2026-10-18)
 
 - Cleanup: `_web_cache_get()` used `__import__('re').match(...)` twice
