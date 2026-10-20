@@ -1,5 +1,17 @@
 # frankenusb changelog
 
+## 1.4.1 (2026-10-18)
+
+- **Fix: shutting down on a PSX `exit`/`pleaseBeSoKindAndQuit` blocked
+  the event loop for a full second.** The shutdown handler used
+  `time.sleep(1.0)` to give the outgoing `exit` message time to reach
+  the socket before the process terminates, which stalled everything
+  else running on the loop for that second too. Now scheduled via
+  `loop.call_later(1.0, ...)` instead - asyncio deliberately re-raises
+  `SystemExit`/`KeyboardInterrupt` out of a scheduled callback rather
+  than swallowing them, so the process still terminates the same way,
+  just without blocking in the meantime.
+
 ## 1.4.0 (2026-10-16)
 
 - **New: a `THROTTLE_WITH_REVERSE_BUTTON` axis's tracked reverse state

@@ -1785,8 +1785,19 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                 return
             self.logger.info("Received PSX %s, shutting down", key)
             self.psx.send("exit")
-            time.sleep(1.0)
-            raise SystemExit(0)
+
+            def _raise_system_exit():
+                raise SystemExit(0)
+
+            # Give the "exit" message a second to actually reach the
+            # socket before tearing down the process, without blocking
+            # the event loop (and everything else on it) for that whole
+            # second the way time.sleep(1.0) would. call_later()'s
+            # callback runs directly on the loop, and asyncio deliberately
+            # re-raises SystemExit/KeyboardInterrupt out of a callback
+            # instead of just logging them, so this still terminates the
+            # process exactly as before.
+            asyncio.get_running_loop().call_later(1.0, _raise_system_exit)
 
         self.psx = psx.Client()
         self.psx.logger = self.logger.debug  # .info to see traffic
