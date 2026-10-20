@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-18: version 1.19.4
+
+- **Removed the cleartext FRDP AUTH fallback.** A router/downstream
+  client authenticating with a plain `AUTH:<password>` (rather than the
+  HMAC-SHA256-over-nonce `AUTH:hmac-sha256:<hmac>` format introduced
+  alongside `AUTH_CHALLENGE`) is now simply rejected instead of being
+  checked against the password in cleartext. No routers still send the
+  old format, and dropping it removes a password-sniffing opportunity
+  for anyone who can observe this (Internet/shared-network-facing,
+  unencrypted) connection.
+
 ## 2026-10-18: version 1.19.3
 
 - **Fix: a peer sending data with no line separator on the PSX listen

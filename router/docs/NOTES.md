@@ -256,32 +256,38 @@ the PING message.
 FRDP PONG messages should never be forwarded to upstream or connected
 clients.
 
-### FRDP AUTH
+### FRDP AUTH / AUTH_CHALLENGE
 
-`addon=FRANKENROUTER:<protocol version>:AUTH:<PASSWORD>` is sent by a router to another if
-password authentication is being used.
+When a connecting client (or downstream router) does not yet have
+access based on IP alone, the upstream router sends
+`addon=FRANKENROUTER:<protocol version>:AUTH_CHALLENGE:<nonce>`, a
+random hex nonce it generates and remembers per-connection. The client
+responds with `addon=FRANKENROUTER:<protocol version>:AUTH:hmac-sha256:<hmac_hex>`,
+where `hmac_hex = HMAC-SHA256(key=password, msg=nonce).hexdigest()` -
+the password itself is never sent over the wire. The upstream router
+tries this HMAC against every password it knows of (configured
+`match_password` access rules, the session password, the observer
+session password) and grants the corresponding access level on the
+first match; if none match, access is refused. A bare cleartext
+`AUTH:<password>` (the pre-HMAC format) is no longer accepted.
 
-If the password is accepted by the upstream router, the connection is
-established and a normal PSX welcome message is sent by the upstream
-router.
-
-If the password is not accepted a short error message "unauthorized"
-is sent and the connection closed by the upstream router.
+If the password is not accepted no PSX data is sent and the connection
+stays unauthenticated (`has_access()` false) - it is not actively
+closed by the upstream router at the protocol level.
 
 ```text
 upstream router                client router
 <-------------- TCP connection -------------
-[...]
-<-------------- AUTH:<invalid password -----
---------------- unauthorized -------------->
-[connection closed]
+--------------- AUTH_CHALLENGE:<nonce> ----->
+<-------------- AUTH:hmac-sha256:<bad hmac> -
+[no password matched; still unauthenticated]
 ```
 
 ```text
 upstream router                client router
 <-------------- TCP connection -------------
-[...]
-<-------------- AUTH:<password -------------
+--------------- AUTH_CHALLENGE:<nonce> ----->
+<-------------- AUTH:hmac-sha256:<hmac> -----
 --------------- id=... -------------------->
 --------------- version=... --------------->
 --------------- Qs123=456  ---------------->

@@ -2641,28 +2641,20 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 # We only want to send this upstream if connected to
                 # another frankenrouter.
                 if self.get_router_type() == 'slave':
-                    if self.config.upstream.password and not self.upstream.frdp_auth_sent:
-                        if self.upstream.auth_nonce is not None:
-                            # New upstream: authenticate with HMAC-SHA256
-                            auth_hmac = hmac.new(
-                                self.config.upstream.password.encode(),
-                                self.upstream.auth_nonce.encode(),
-                                hashlib.sha256
-                            ).hexdigest()
-                            ver = self.frdp_version
-                            await self.send_to_upstream(
-                                f"addon=FRANKENROUTER:{ver}:AUTH:hmac-sha256:{auth_hmac}")
-                            self.upstream.frdp_auth_sent = True
-                        elif self.upstream.frdp_ident_sent and self.upstream.auth_wait_cycles >= 1:
-                            # Old upstream (never sent AUTH_CHALLENGE): fall back to cleartext
-                            ver = self.frdp_version
-                            pwd = self.config.upstream.password
-                            await self.send_to_upstream(
-                                f"addon=FRANKENROUTER:{ver}:AUTH:{pwd}")
-                            self.upstream.frdp_auth_sent = True
-                        elif self.upstream.frdp_ident_sent:
-                            # Give upstream one more cycle to send AUTH_CHALLENGE
-                            self.upstream.auth_wait_cycles += 1
+                    if (
+                            self.config.upstream.password and
+                            not self.upstream.frdp_auth_sent and
+                            self.upstream.auth_nonce is not None
+                    ):
+                        auth_hmac = hmac.new(
+                            self.config.upstream.password.encode(),
+                            self.upstream.auth_nonce.encode(),
+                            hashlib.sha256
+                        ).hexdigest()
+                        ver = self.frdp_version
+                        await self.send_to_upstream(
+                            f"addon=FRANKENROUTER:{ver}:AUTH:hmac-sha256:{auth_hmac}")
+                        self.upstream.frdp_auth_sent = True
                 #
                 # FRDP ROUTERINFO
                 #

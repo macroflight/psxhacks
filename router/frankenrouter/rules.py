@@ -772,14 +772,13 @@ class Rules():  # pylint: disable=too-many-public-methods
             RulesAction.DROP, RulesCode.FRDP_AUTH_CHALLENGE,
             extra_data={'nonce': nonce})
 
-    def handle_addon_frankenrouter_auth(self, payload):
+    def handle_addon_frankenrouter_auth(self, payload):  # pylint: disable=too-many-return-statements
         """Handle FRDP AUTH message.
 
-        Supports two formats:
-        - Cleartext (old): addon=FRANKENROUTER:<ver>:AUTH:<password>
-        - HMAC (new):      addon=FRANKENROUTER:<ver>:AUTH:hmac-sha256:<hmac_hex>
-          where hmac_hex = HMAC-SHA256(key=password, msg=nonce).hexdigest()
-          and nonce was sent by this router in an AUTH_CHALLENGE message.
+        Format: addon=FRANKENROUTER:<ver>:AUTH:hmac-sha256:<hmac_hex>
+        where hmac_hex = HMAC-SHA256(key=password, msg=nonce).hexdigest()
+        and nonce was sent by this router in an AUTH_CHALLENGE message.
+        Cleartext AUTH (the pre-HMAC format) is no longer accepted.
         """
         if self.sender.upstream:
             return self.myreturn(
@@ -791,35 +790,35 @@ class Rules():  # pylint: disable=too-many-public-methods
         if payload == "":
             return self.myreturn(RulesAction.DROP, RulesCode.FRDP_AUTH_FAIL,
                                  message="empty password")
-        if payload.startswith("hmac-sha256:"):
-            received_hmac = payload[len("hmac-sha256:"):]
-            nonce = self.sender.auth_nonce
-            matched_password = None
-            if nonce:
-                candidates = [
-                    a.match_password
-                    for a in self.router.config.access
-                    if a.match_password is not None
-                ]
-                for session_pwd in (self.router.session_password,
-                                    self.router.observer_session_password):
-                    if session_pwd:
-                        candidates.append(session_pwd)
-                for pwd in candidates:
-                    expected = hmac.new(
-                        pwd.encode(), nonce.encode(), hashlib.sha256
-                    ).hexdigest()
-                    if hmac.compare_digest(received_hmac, expected):
-                        matched_password = pwd
-                        break
-            if matched_password is None:
-                fail_reason = "no challenge was issued" if not nonce else "invalid password"
-                return self.myreturn(RulesAction.DROP, RulesCode.FRDP_AUTH_FAIL,
-                                     message=fail_reason)
-            self.sender.update_access_level(matched_password)
-        else:
-            # Cleartext (backward compat for old downstream routers)
-            self.sender.update_access_level(payload)
+        if not payload.startswith("hmac-sha256:"):
+            return self.myreturn(
+                RulesAction.DROP, RulesCode.FRDP_AUTH_FAIL,
+                message="cleartext AUTH is no longer accepted, use hmac-sha256")
+        received_hmac = payload[len("hmac-sha256:"):]
+        nonce = self.sender.auth_nonce
+        matched_password = None
+        if nonce:
+            candidates = [
+                a.match_password
+                for a in self.router.config.access
+                if a.match_password is not None
+            ]
+            for session_pwd in (self.router.session_password,
+                                self.router.observer_session_password):
+                if session_pwd:
+                    candidates.append(session_pwd)
+            for pwd in candidates:
+                expected = hmac.new(
+                    pwd.encode(), nonce.encode(), hashlib.sha256
+                ).hexdigest()
+                if hmac.compare_digest(received_hmac, expected):
+                    matched_password = pwd
+                    break
+        if matched_password is None:
+            fail_reason = "no challenge was issued" if not nonce else "invalid password"
+            return self.myreturn(RulesAction.DROP, RulesCode.FRDP_AUTH_FAIL,
+                                 message=fail_reason)
+        self.sender.update_access_level(matched_password)
         if not self.sender.has_access():
             return self.myreturn(RulesAction.DROP, RulesCode.FRDP_AUTH_FAIL,
                                  message="invalid password")
@@ -1784,6 +1783,7 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             self.psx = TestRules.DummyConfigPsx()
             self.identity = TestRules.DummyConfigIdentity()
             self.filtering = TestRules.DummyConfigFiltering()
+            self.access = []
 
     class DummyFrankenrouter():  # pylint: disable=too-few-public-methods,too-many-instance-attributes
         """Implement small parts of the router for unit testing."""
@@ -1800,6 +1800,8 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             self.jettison_resync_sent_at = 0.0
             self.frdp_version = 1
             self.config = TestRules.DummyConfig()
+            self.session_password = None
+            self.observer_session_password = None
             self.observer_mode = False
             self.sharedinfo = {"pilot_flying_simulator": "NO_CONTROL_LOCKS"}
             self.load_marker_pause_enabled = False
@@ -1840,6 +1842,7 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             self.client_provided_display_name = None
             self.is_frankenrouter = False
             self.frdp_subscribed = False
+            self.auth_nonce = None
             self.upstream = False
             self.peername = None
             # Default to "long connected" so existing tests are unaffected by
@@ -2207,18 +2210,33 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         testpeer.access_level = 'full'
         testpeer.display_name = "Foobar"
 
+        router.session_password = "mypassword"
+        testpeer.auth_nonce = "testnonce"
+        good_hmac = hmac.new(
+            b"mypassword", b"testnonce", hashlib.sha256).hexdigest()
+        bad_hmac = hmac.new(
+            b"badpassword", b"testnonce", hashlib.sha256).hexdigest()
+
         # AUTH success from client
         testpeer.access_level = NOACCESS_ACCESS_LEVEL
         (action, code, *_) = rules.route(
-            "addon=FRANKENROUTER:1:AUTH:mypassword", testpeer)
+            f"addon=FRANKENROUTER:1:AUTH:hmac-sha256:{good_hmac}", testpeer)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.FRDP_AUTH_OK)
         self.assertEqual(testpeer.access_level, 'full')
 
-        # AUTH failure from client
+        # AUTH failure from client (wrong password)
         testpeer.access_level = NOACCESS_ACCESS_LEVEL
         (action, code, *_) = rules.route(
-            "addon=FRANKENROUTER:1:AUTH:badpassword", testpeer)
+            f"addon=FRANKENROUTER:1:AUTH:hmac-sha256:{bad_hmac}", testpeer)
+        self.assertEqual(action, RulesAction.DROP)
+        self.assertEqual(code, RulesCode.FRDP_AUTH_FAIL)
+        self.assertEqual(testpeer.access_level, NOACCESS_ACCESS_LEVEL)
+
+        # AUTH failure from client (cleartext no longer accepted)
+        testpeer.access_level = NOACCESS_ACCESS_LEVEL
+        (action, code, *_) = rules.route(
+            "addon=FRANKENROUTER:1:AUTH:mypassword", testpeer)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.FRDP_AUTH_FAIL)
         self.assertEqual(testpeer.access_level, NOACCESS_ACCESS_LEVEL)
@@ -2226,7 +2244,7 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         # AUTH already authenticated
         testpeer.access_level = 'full'
         (action, code, *_) = rules.route(
-            "addon=FRANKENROUTER:1:AUTH:mypassword", testpeer)
+            f"addon=FRANKENROUTER:1:AUTH:hmac-sha256:{good_hmac}", testpeer)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.FRDP_AUTH_ALREADY_HAS_ACCESS)
         self.assertEqual(testpeer.access_level, 'full')

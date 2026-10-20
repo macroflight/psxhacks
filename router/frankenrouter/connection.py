@@ -531,7 +531,3 @@ class UpstreamConnection(Connection):  # pylint: disable=too-few-public-methods
 
         # Nonce received from upstream in AUTH_CHALLENGE; None until received
         self.auth_nonce = None
-
-        # Number of frdp_send_task cycles we have waited for a nonce before
-        # falling back to cleartext (for old upstreams that never challenge)
-        self.auth_wait_cycles = 0
