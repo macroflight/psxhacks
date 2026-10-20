@@ -49,6 +49,7 @@ from frankenturb.cb import (
 from frankenturb.disk_cache import DiskCache
 from fw_cb import (
     WX_DEFAULTS as _WX_DEFAULTS,
+    CB_TOP_MAX_FT as _CB_TOP_MAX_FT,
     cape_to_cb_oktas as _cape_to_cb_oktas,
     cb_base_ft as _cb_base_ft,
     cb_tops_ft as _cb_tops_ft,
@@ -373,8 +374,8 @@ _CB_GROWTH_MAX_OKTAS_PER_MIN = 0.15
 # so _CB_GROWTH_MAX_TOP_FT_PER_MIN_CEILING caps the result at the fast end
 # of that same real-world range -- without it, extreme CAPE (rare, but
 # Open-Meteo can report it) would keep accelerating the rate even after
-# cb_tops_ft()'s own 55000ft forecast ceiling (reached by CAPE ~1750 J/kg)
-# stops giving it any more height left to climb towards.
+# cb_tops_ft()'s own CB_TOP_MAX_FT forecast ceiling (reached by CAPE ~1250
+# J/kg) stops giving it any more height left to climb towards.
 _CB_GROWTH_CAPE_UPDRAFT_FRACTION = 0.25
 _CB_GROWTH_MAX_TOP_FT_PER_MIN_CEILING = 4000.0
 _MPS_TO_FT_PER_MIN = 196.85
@@ -1150,7 +1151,7 @@ def metar_to_wx_string(parsed: dict) -> str:
     if ts_oktas > 0:
         cb_base = _cb_base_ft(parsed['temp_c'], parsed['dp_c'])
         if ts_oktas >= 8:
-            cb_tops = 55000
+            cb_tops = _CB_TOP_MAX_FT
         elif ts_oktas >= 4:
             cb_tops = 40000
         else:
@@ -1809,8 +1810,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # Manual weather parameters (used when _fw_mode == "manual")
         self._manual_wx_force_update: bool = False
         self._manual_wx_params: dict = {
-            "hi_oktas": 0, "hi_top": 45000, "hi_base": 45000,
-            "lo_oktas": 0, "lo_top": 45000, "lo_base": 45000,
+            # Not 45000/45000 -- see fw_cb.py's _NO_HI_CLOUD_CEILING_FT /
+            # _NO_LO_CLOUD_CEILING_FT (PSX corrects both 45000 itself, and
+            # a hi/lo pair sharing one value, within ~40ms of accepting
+            # either).
+            "hi_oktas": 0, "hi_top": 44950, "hi_base": 44950,
+            "lo_oktas": 0, "lo_top": 44900, "lo_base": 44900,
             "cb_oktas": 0, "cb_top": 35000, "cb_base": 3000,
             "turb_severity": 0, "turb_top": 5000, "turb_base": 0,
             "mb_mode": 0, "mb_chance": 0, "mb_outflow": 400,
@@ -2707,11 +2712,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         inv_tmp = int(round(float(p.get("inv_tmp", 5)) * 10))
         return ";".join([
             str(int(p.get("hi_oktas", 0))),      # [0]  hiCloudCov
-            str(int(p.get("hi_top", 45000))),     # [1]  hiCloudTop
-            str(int(p.get("hi_base", 45000))),    # [2]  hiCloudBase
+            str(int(p.get("hi_top", 44950))),     # [1]  hiCloudTop
+            str(int(p.get("hi_base", 44950))),    # [2]  hiCloudBase
             str(int(p.get("lo_oktas", 0))),       # [3]  loCloudCov
-            str(int(p.get("lo_top", 45000))),     # [4]  loCloudTop
-            str(int(p.get("lo_base", 45000))),    # [5]  loCloudBase
+            str(int(p.get("lo_top", 44900))),     # [4]  loCloudTop
+            str(int(p.get("lo_base", 44900))),    # [5]  loCloudBase
             str(int(p.get("turb_severity", 0))),  # [6]  turbIntensity
             str(int(p.get("turb_top", 5000))),    # [7]  turbTop
             str(int(p.get("turb_base", 0))),      # [8]  turbBase
@@ -3551,7 +3556,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             h_temp = _om_hval(hourly, "temperature_2m", hi, 15.0)
             h_dp = _om_hval(hourly, "dewpoint_2m", hi, 10.0)
             cb_oktas = max(_cape_to_cb_oktas(cape, cin), 4)
-            cb_tops = max(_cb_tops_ft(cape), sig['top_ft'])
+            cb_tops = min(max(_cb_tops_ft(cape), sig['top_ft']), _CB_TOP_MAX_FT)
             fields[9] = str(cb_oktas)
             fields[10] = str(cb_tops)
             fields[11] = str(_cb_base_ft(h_temp, h_dp))

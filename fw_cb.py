@@ -7,14 +7,42 @@ external dependencies beyond the standard library.
 from datetime import datetime, timezone
 
 
+# "No cloud" ceiling sentinels for hi/loCloudTop/Base. NOT 45000: live
+# traffic analysis (2026-10-19) showed PSX rebroadcasting a corrected value
+# roughly 40ms after accepting a write with either field at exactly 45000,
+# every single time -- that unsolicited second write landing on the same
+# key within such a tight window correlates with PSX's WxSlowTransit
+# occasionally snapping the PFD instead of smooth-transiting (see
+# project_frankenweather_altitude_jump memory). It also permanently defeats
+# the psx_send_and_set() dedup, since PSX's own correction overwrites the
+# cache before the next cycle tries to resend 45000 again. PSX also
+# corrects hi/lo sentinels sharing the SAME value down to a value 50ft
+# apart (enforcing loCloud below hiCloud, confirmed live) -- so the two
+# sentinels must differ by at least that much, not just avoid 45000.
+_NO_HI_CLOUD_CEILING_FT = "44950"
+_NO_LO_CLOUD_CEILING_FT = "44900"
+
+# cbCloudTop (field 10) ceiling: live traffic analysis (2026-10-19, SIGMET/
+# high-CAPE area) showed PSX correcting ANY cbCloudTop above 45000 down to
+# exactly 45000, ~37ms after accepting the original write -- same
+# tight-window secondary-write signature as the hi/lo sentinels above, and
+# triggered on EVERY zone, EVERY cycle, whenever CAPE/SIGMET-driven CB
+# forecasts reach severe-convection altitudes. Capped 1ft below the
+# observed-safe 45000 rather than at it, consistent with never touching a
+# value PSX treats specially. Applies to every cb_top source: cb_tops_ft()'s
+# own CAPE-based saturation, metar_to_wx_string()'s METAR-thunderstorm
+# tiers, and the TS-SIGMET override's max() against the SIGMET's own
+# reported top (which can exceed even cb_tops_ft()'s 55000 cap).
+CB_TOP_MAX_FT = 44999
+
 # Default PSX Wx semicolon-string field values (24 fields, 0-indexed).
 WX_DEFAULTS = [
     "0",        # [0]  hiCloudCov (oktas 0-8)
-    "45000",    # [1]  hiCloudTop  ft
-    "45000",    # [2]  hiCloudBase ft
+    _NO_HI_CLOUD_CEILING_FT,    # [1]  hiCloudTop  ft
+    _NO_HI_CLOUD_CEILING_FT,    # [2]  hiCloudBase ft
     "0",        # [3]  loCloudCov
-    "45000",    # [4]  loCloudTop  ft
-    "45000",    # [5]  loCloudBase ft
+    _NO_LO_CLOUD_CEILING_FT,    # [4]  loCloudTop  ft
+    _NO_LO_CLOUD_CEILING_FT,    # [5]  loCloudBase ft
     "0",        # [6]  turbIntensity
     "5000",     # [7]  turbTop     ft
     "0",        # [8]  turbBase    ft
@@ -62,9 +90,10 @@ def cb_tops_ft(cape_jkg: float) -> int:
     """Estimate CB tops in feet from CAPE (J/kg).
 
     Targets ~40000 ft at CAPE 1000 J/kg (typical tropical CB), saturates at
-    55000 ft for severe convection above ~2000 J/kg.
+    CB_TOP_MAX_FT for severe convection above ~1250 J/kg -- not higher (see
+    CB_TOP_MAX_FT's own comment: PSX corrects anything above 45000 itself).
     """
-    return max(25000, min(55000, 20000 + int(cape_jkg * 20)))
+    return max(25000, min(CB_TOP_MAX_FT, 20000 + int(cape_jkg * 20)))
 
 
 _RADAR_CAPE_MIN = 300.0   # J/kg — minimum CAPE required for radar/lightning to gate CBs

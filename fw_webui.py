@@ -273,9 +273,9 @@ def _manual_metar(p, icao="ZZZZ", now=None):  # pylint: disable=too-many-locals,
     wind_var = int(p.get("wind_var", 0))
     vis_m = int(p.get("vis_m", 9999))
     lo_oktas = int(p.get("lo_oktas", 0))
-    lo_base = int(p.get("lo_base", 45000))
+    lo_base = int(p.get("lo_base", 44900))
     hi_oktas = int(p.get("hi_oktas", 0))
-    hi_base = int(p.get("hi_base", 45000))
+    hi_base = int(p.get("hi_base", 44950))
     cb_oktas = int(p.get("cb_oktas", 0))
     cb_base = int(p.get("cb_base", 3000))
     temp = int(p.get("surf_temp", 15))
@@ -305,10 +305,10 @@ def _manual_metar(p, icao="ZZZZ", now=None):  # pylint: disable=too-many-locals,
 
     sky_tokens = []
     lo_cover = _OKTAS_COVER.get(lo_oktas)
-    if lo_cover and lo_base < 45000:
+    if lo_cover and lo_base < 44900:
         sky_tokens.append(f"{lo_cover}{lo_base // 100:03d}")
     hi_cover = _OKTAS_COVER.get(hi_oktas)
-    if hi_cover and hi_base < 45000:
+    if hi_cover and hi_base < 44950:
         sky_tokens.append(f"{hi_cover}{hi_base // 100:03d}")
     cb_cover = _OKTAS_COVER.get(cb_oktas)
     if cb_cover and cb_oktas > 0:
