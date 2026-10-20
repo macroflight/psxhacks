@@ -82,6 +82,10 @@ class FrankenPrint:
         self.args: Optional[argparse.Namespace] = None
         self.logger = logging.getLogger(__MYNAME__)
         self._write: Optional[Callable[[bytes], None]] = None
+        # Keeps references to the executor futures _print_or_pushover()
+        # hands off, so they aren't garbage-collected mid-flight and so any
+        # exception they raise gets logged instead of silently dropped.
+        self._background_futures: set = set()
 
     # ------------------------------------------------------------------
     # Printer selection and connection
@@ -238,10 +242,32 @@ class FrankenPrint:
     # PSX variable callback
     # ------------------------------------------------------------------
 
+    def _run_in_background(self, func: Callable[[], None]) -> None:
+        """Run a blocking `func` on a worker thread, logging any exception.
+
+        Keeps a reference to the future (in self._background_futures)
+        until it completes, so it can't be garbage-collected mid-flight
+        and any exception is reported instead of silently dropped.
+        """
+        future = asyncio.get_running_loop().run_in_executor(None, func)
+        self._background_futures.add(future)
+
+        def _done(fut: "asyncio.Future") -> None:
+            self._background_futures.discard(fut)
+            exc = fut.exception()
+            if exc is not None:
+                self.logger.error("Background task failed: %s", exc, exc_info=exc)
+
+        future.add_done_callback(_done)
+
     def _print_or_pushover(self, text: str) -> None:
         """Print text (or send it via Pushover), whichever mode is active."""
         if self.args.pushover:
-            self._send_pushover(text)
+            # _send_pushover() sleeps between multi-page sends and makes
+            # blocking HTTPS calls; run it off the event loop thread so a
+            # multi-page bulletin doesn't stall PSX message processing
+            # for the whole pagination delay.
+            self._run_in_background(lambda: self._send_pushover(text))
         else:
             self._print_job(text)
 
