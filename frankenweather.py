@@ -311,6 +311,15 @@ _MSFS_CLOUD_TIME_WINDOW_S = 120.0
 # layer, delaying the coverage ramp-up right when icing risk starts (immediately on
 # entering a thick layer) -- altitude proximity invalidates that stale history fast.
 _MSFS_CLOUD_ALT_BAND_FT = 1500.0
+# Floor for the synced hi-cloud layer's base (_apply_msfs_sync): near the
+# ground (e.g. fog/low stratus right after takeoff, MSFS reporting
+# in-cloud at low altitude), alt - margin can go negative. Live traffic
+# analysis (2026-10-19, CYVR departure) showed PSX silently correcting any
+# such negative hiCloudBase to exactly 100ft ~10ms after accepting it --
+# same tight-window self-correction signature as the Wx sentinel/CB-top
+# ceiling cases in fw_cb.py's CB_TOP_MAX_FT comment. Clamping to PSX's own
+# observed floor here avoids ever sending it a value it has to correct.
+_MSFS_CLOUD_BASE_FLOOR_FT = 100.0
 _NM_TO_M = 1852.0
 # How long a paused instance waits without hearing from the conflicting
 # (higher-UUID) FRANKENWEATHER instance before resuming — see _note_conflict()
@@ -3831,7 +3840,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     oktas = self._msfs_cloud_oktas()
                     data[0] = str(oktas)
                     data[1] = str(int(alt + margin))
-                    data[2] = str(int(alt - margin))
+                    data[2] = str(int(max(_MSFS_CLOUD_BASE_FLOOR_FT, alt - margin)))
                     self.logger.info("Cloud sync [%s]: created hi layer at %dft (%d oktas)",
                                      zone_key, int(alt), oktas)
                     changed = True
@@ -3845,9 +3854,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 else:
                     oktas = self._msfs_cloud_oktas()
                     data[0] = str(oktas)
-                    data[2] = str(int(alt - margin))
+                    new_base = max(_MSFS_CLOUD_BASE_FLOOR_FT, alt - margin)
+                    data[2] = str(int(new_base))
                     self.logger.info("Cloud sync [%s]: lowered hi layer base to %dft (%d oktas)",
-                                     zone_key, int(alt - margin), oktas)
+                                     zone_key, int(new_base), oktas)
                     changed = True
             else:
                 if in_hi:
