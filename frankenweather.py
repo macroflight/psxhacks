@@ -770,6 +770,11 @@ def _metar_is_fresh(metar: str, now: Optional[datetime] = None) -> bool:
     return age is not None and age <= _METAR_MAX_AGE_HOURS
 
 
+def _metar_age_text(age_h: Optional[float]) -> str:
+    """Return age_h as e.g. "2h old", or "undated" if it is unknown (no DDHHMMZ group)."""
+    return "undated" if age_h is None else f"{age_h:.0f}h old"
+
+
 _WIND_UPDATE_INTERVAL_S = 60.0
 
 _SIGMET_HAZARDS = frozenset({'TS', 'TURB', 'ICE', 'VA', 'TC', 'MTW'})
@@ -5261,8 +5266,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     stale_icao, stale_age, stale_dist_nm = skipped_stale[0]
                     stale_metar_discarded[i] = (stale_icao, stale_age)
                     self.logger.warning(
-                        "Zone %d: discarding stale METAR for %s (%.0fh old, %.0fnm) — "
-                        "using Open-Meteo instead", i + 1, stale_icao, stale_age, stale_dist_nm)
+                        "Zone %d: discarding stale METAR for %s (%s, %.0fnm) — "
+                        "using Open-Meteo instead", i + 1, stale_icao,
+                        _metar_age_text(stale_age), stale_dist_nm)
                 # No (fresh) METAR anywhere nearby — snap to nearest available airport
                 # anyway, use OM
                 best_ap = next(
@@ -5473,7 +5479,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             reason = f"{src} {snap_icaos[i]}"
             if i in stale_metar_discarded:
                 stale_icao, stale_age = stale_metar_discarded[i]
-                reason += f" (stale {stale_icao} METAR {stale_age:.0f}h old discarded)"
+                reason += f" (stale {stale_icao} METAR {_metar_age_text(stale_age)} discarded)"
             if stored_icao in arpt_set:
                 reason += " (dep/dst arpt)"
             if cb_oktas > 0:
@@ -5554,7 +5560,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             stale_note = ""
             if i in stale_metar_discarded:
                 stale_icao, stale_age = stale_metar_discarded[i]
-                stale_note = f"  (stale {stale_icao} METAR {stale_age:.0f}h old discarded)"
+                stale_note = f"  (stale {stale_icao} METAR {_metar_age_text(stale_age)} discarded)"
             self.psx_send_and_set(f"WxMode{zone_num}", wxmode)
             self.logger.info("Zone %d [%s]: %s @ %.3f/%.3f%s%s",
                              zone_num, src, snap_icaos[i],
