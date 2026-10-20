@@ -258,6 +258,21 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         except (ConnectionError, OSError) as exc:
             self.logger.info("readuntil returned %s, probably disconnect", exc)
             raise ConnectionClosed from exc
+        except asyncio.LimitOverrunError as exc:
+            # The offending bytes are left in the stream's internal
+            # buffer (readuntil() doesn't consume them on this error), so
+            # unlike the generic case below, simply logging and
+            # continuing would have the very next call hit this exact
+            # same error again -- letting a peer that sends data with no
+            # line separator spin this connection's read loop at ~100%
+            # CPU forever, one critical log line per iteration. Close the
+            # connection instead; it's not a valid PSX client either way.
+            self.logger.warning(
+                "readuntil() got %d bytes without finding a line separator "
+                "from %s -- closing the connection", exc.consumed, self.peername)
+            self.writer.close()
+            self.closed = True
+            raise ConnectionClosed from exc
         except Exception as exc:  # pylint: disable=broad-exception-caught
             msg = f"Unhandled exception: {traceback.format_exc()}"
             if self.router.config.identity.stop_minded:

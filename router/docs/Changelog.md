@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-18: version 1.19.3
+
+- **Fix: a peer sending data with no line separator on the PSX listen
+  port could spin that connection's read loop at ~100% CPU forever,
+  flooding the log with one critical message per iteration.**
+  `read_line_from_stream()`'s `readuntil()` call raises
+  `asyncio.LimitOverrunError` once more than the 1MiB line-length limit
+  accumulates without a separator, but left the offending bytes in the
+  stream's internal buffer and fell through to the generic
+  "log and keep going" exception handler -- so the very next read
+  attempt hit the exact same error immediately, with no backoff. Now
+  caught specifically: the connection is closed outright instead
+  (not a valid PSX client either way).
+
 ## 2026-10-18: version 1.19.2
 
 - **Security hardening of the PSX listen port** (`port`, the actual
