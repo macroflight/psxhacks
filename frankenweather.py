@@ -320,6 +320,12 @@ _MSFS_CLOUD_ALT_BAND_FT = 1500.0
 # ceiling cases in fw_cb.py's CB_TOP_MAX_FT comment. Clamping to PSX's own
 # observed floor here avoids ever sending it a value it has to correct.
 _MSFS_CLOUD_BASE_FLOOR_FT = 100.0
+# WxBasic (planet weather) is only written while on the ground (below this
+# TAS) or while the aircraft is actually in it (FocussedWxZone 0) -- see
+# _write_wxbasic(). Live traffic analysis (2026-10-20, CYVR-DNMM): every
+# cruise PFD altitude snap >=9ft coincided with a WxBasic write in the same
+# zone batch, against 0 of 260 batches without one.
+_WXBASIC_MAX_WRITE_TAS_KT = 50.0
 _NM_TO_M = 1852.0
 # How long a paused instance waits without hearing from the conflicting
 # (higher-UUID) FRANKENWEATHER instance before resuming — see _note_conflict()
@@ -1919,6 +1925,26 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return
         self.psx._set(key, value)  # pylint: disable=protected-access
 
+    def _wxbasic_writable(self) -> bool:
+        """Return True if WxBasic may be written now: on the ground, or the aircraft is in it.
+
+        In flight the aircraft is virtually always inside one of our 7 zones,
+        so WxBasic's content doesn't affect it -- but writing WxBasic does:
+        it correlates with PSX applying in-progress zone transits instantly
+        (PFD altitude snaps), see _WXBASIC_MAX_WRITE_TAS_KT.
+        """
+        if self.focused_zone == 0:
+            return True
+        return self.ac_tas_kt is not None and self.ac_tas_kt < _WXBASIC_MAX_WRITE_TAS_KT
+
+    def _write_wxbasic(self, wx_str: str) -> None:
+        """Write WxBasic if _wxbasic_writable(), otherwise skip it entirely."""
+        if not self._wxbasic_writable():
+            self.logger.debug("WxBasic write skipped (airborne, aircraft not in WxBasic)")
+            return
+        self.zone_wx[0] = wx_str
+        self.psx_send_and_set("WxBasic", wx_str)
+
     def _inject_wx_slow_transit(self) -> None:
         """Ask PSX to smooth-transit the weather write(s) about to follow.
 
@@ -1986,6 +2012,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.logger.debug("  within cooldown — ignoring echo")
             return
         if key == "WxBasic":
+            if not self._wxbasic_writable():
+                return
             zone_num = 0
         elif key.startswith("Wx") and key[2:].isdigit():
             zone_num = int(key[2:])
@@ -2760,7 +2788,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.psx_send_and_set(f"WxMode{zone_num}", wxmode)
         await asyncio.sleep(1.0)
         self.last_write_time = time.time()
-        self.psx_send_and_set("WxBasic", wx_str)
+        self._write_wxbasic(wx_str)
         for zone_num in range(1, 8):
             self.zone_wx[zone_num] = wx_str
             self.psx_send_and_set(f"Wx{zone_num}", wx_str)
@@ -4669,8 +4697,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         base[22] = str(int(round(parsed['temp_c'])))
         base[23] = str(_hpa_to_psx_qnh(parsed['qnh_hpa']))
         wx_str = ";".join(base)
-        self.zone_wx[0] = wx_str
-        self.psx_send_and_set("WxBasic", wx_str)
+        if not self._wxbasic_writable():
+            return
+        self._write_wxbasic(wx_str)
         self.logger.info(
             "METAR fallback: WxBasic QNH/temp set from %s (%.0fnm away)", icao, dist_nm)
 
@@ -5535,9 +5564,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         await asyncio.sleep(1.0)
 
         self.last_write_time = time.time()
-        # WxBasic (planet fallback) mirrors zone 1's weather data
-        self.zone_wx[0] = new_wxs[0]
-        self.psx_send_and_set("WxBasic", new_wxs[0])
+        # WxBasic (planet fallback) mirrors zone 1's weather data -- on the
+        # ground, or while the aircraft is actually in WxBasic, only.
+        self._write_wxbasic(new_wxs[0])
         for i, wx in enumerate(new_wxs):
             zone_num = i + 1
             old_wx = self.zone_wx.get(zone_num)
