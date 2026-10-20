@@ -58,6 +58,20 @@ class _RouterConfigListen:  # pylint: disable=missing-class-docstring,too-few-pu
         if not isinstance(self.rest_api_efb_music_link_enabled, bool):
             raise RouterConfigError("rest_api_efb_music_link_enabled must be true or false")
 
+        # Caps how many new client connections a single source IP may open
+        # on the PSX listen port within a rolling 60s window; further
+        # attempts are rejected (connection closed immediately, no access
+        # check or Task/cache bookkeeping) until the window clears. This is
+        # the actual Internet/shared-network-facing port (unlike
+        # rest_api_port, which trusts the sim's own internal network), so
+        # it has no other protection against a connection flood. 0 disables
+        # the limit entirely.
+        self.max_new_connections_per_minute_per_ip = data.get(
+            'max_new_connections_per_minute_per_ip', 30)
+        if not isinstance(self.max_new_connections_per_minute_per_ip, int):
+            raise RouterConfigError(
+                "max_new_connections_per_minute_per_ip must be an integer")
+
 
 class _RouterConfigUpstream:  # pylint: disable=missing-class-docstring,too-few-public-methods
     def __init__(self, data):

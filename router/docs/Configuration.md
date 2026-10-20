@@ -74,6 +74,11 @@ type = "slave"
   to shut the router down still works regardless of this setting.
 - `rest_api_efb_music_link_enabled`: set to false to hide the
   "In-flight music" button on the `/efb` page. Defaults to true.
+- `max_new_connections_per_minute_per_ip`: caps how many new connections
+  on `port` (the actual PSX protocol port, not `rest_api_port`) a single
+  source IP may open within a rolling 60-second window; further attempts
+  are refused until the window clears. Defaults to 30. Set to 0 to
+  disable the limit.
 
 Note: the normal port for a PSX router is 10748. If you want to use
 the router as a drop-in replacement for your PSX main server for a

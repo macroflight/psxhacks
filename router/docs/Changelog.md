@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-18: version 1.19.2
+
+- **Security hardening of the PSX listen port** (`port`, the actual
+  Internet/shared-network-facing port — unlike `rest_api_port`, which
+  trusts the sim's own internal network and was left alone): client
+  passwords are no longer written to the log in cleartext
+  (`update_access_level()` now logs only whether one was given/matched),
+  and a new `max_new_connections_per_minute_per_ip` setting (default 30,
+  0 disables) caps how many new connections a single source IP may open
+  within a rolling 60-second window, rejecting (and closing) further
+  attempts until it clears — closes a flood vector where an
+  unauthenticated peer on that port could otherwise open unlimited
+  connections. See `docs/Configuration.md`'s `[listen]` section.
+
 ## 2026-10-17: version 1.19.1
 
 - **The periodic aircraft-status log line now shows a rough local time

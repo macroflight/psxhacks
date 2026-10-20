@@ -429,6 +429,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.longest_destination_string = 0
         self.rules = Rules(self)
         self.blocklist = set()
+        # Recent new-connection timestamps per source IP, for
+        # _check_connection_rate_limit() (see max_new_connections_per_minute_per_ip).
+        self._recent_connection_times = {}
         self.session_password = None
         self.observer_session_password = None
         self.observer_mode = False
@@ -1368,6 +1371,24 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             await self.close_upstream_connection()
         self.connection_state_changed()
 
+    def _check_connection_rate_limit(self, ip):
+        """Return True if `ip` may open another connection right now.
+
+        Tracks each accepted attempt's timestamp per IP in a rolling 60s
+        window; once max_new_connections_per_minute_per_ip attempts have
+        been seen in that window, further ones are refused until it clears.
+        """
+        limit = self.config.listen.max_new_connections_per_minute_per_ip
+        if not limit:
+            return True
+        now = time.time()
+        window = self._recent_connection_times.setdefault(ip, [])
+        window[:] = [t for t in window if now - t < 60.0]
+        if len(window) >= limit:
+            return False
+        window.append(now)
+        return True
+
     async def handle_new_connection_cb(self, reader, writer):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         """Handle a new client connection."""
         # asyncio will intentionally not propagate exceptions from a
@@ -1379,6 +1400,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             this_ip = writer.get_extra_info('peername')[0]
             if this_ip in self.blocklist:
                 self.logger.info("Blocking connection from blocked IP %s", this_ip)
+                return
+
+            if not self._check_connection_rate_limit(this_ip):
+                self.logger.warning(
+                    "Rejecting connection from %s: exceeded %d new connections/minute",
+                    this_ip, self.config.listen.max_new_connections_per_minute_per_ip)
+                writer.close()
                 return
 
             # Create the connection object (which needs our config
@@ -3716,6 +3744,16 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                             bucket_age = now - bucket
                             if bucket_age > 60:
                                 del this_client.sent_stats[bucket]
+
+                    # Drop per-IP connection-rate-limit windows once they're
+                    # empty (the window itself already self-prunes entries
+                    # older than 60s on each check; this just reclaims the
+                    # now-unused IP keys instead of keeping them forever).
+                    for ip in list(self._recent_connection_times):
+                        window = self._recent_connection_times[ip]
+                        window[:] = [t for t in window if now - t < 60.0]
+                        if not window:
+                            del self._recent_connection_times[ip]
 
         # Standard Task cleanup
         except asyncio.exceptions.CancelledError:
