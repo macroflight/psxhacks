@@ -206,10 +206,9 @@ class _RouterConfigPsx:  # pylint: disable=missing-class-docstring,too-few-publi
             raise RouterConfigError("psx known_good_situ_enabled must be true or false")
 
 
-# crew/airframes/portal_account/airline_icao/checklist used to be configured
-# here; Flight Centre now owns all of this data (see CLAUDE.md's Flight
-# Centre / frankenrouter integration section) and nothing in this codebase
-# reads these anymore. Kept as a presence check only (RouterConfig.__init__
+# crew/airframes/portal_account/airline_icao/checklist used to feed the
+# (since removed) flight info page; nothing in this codebase reads these
+# anymore. Kept as a presence check only (RouterConfig.__init__
 # logs a deprecation warning) so old config files that still set them don't
 # hard-fail on startup.
 _DEPRECATED_SHAREDINFO_KEYS = ('crew', 'airframes', 'portal_account', 'airline_icao', 'checklist')
@@ -570,8 +569,8 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
         self.sharedinfo = _RouterConfigSharedinfo(config.get('sharedinfo', {}))
         if self.sharedinfo.deprecated_keys_present:
             self.logger.warning(
-                "Config: [sharedinfo] %s no longer used (Flight Centre now owns "
-                "this data) and can be removed from the config file",
+                "Config: [sharedinfo] %s no longer used and can be removed "
+                "from the config file",
                 ", ".join(self.sharedinfo.deprecated_keys_present))
         if self.sharedinfo.master:
             if self.identity.type == 'master':

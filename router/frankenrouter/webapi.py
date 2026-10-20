@@ -117,7 +117,6 @@ _INDEX_PAGE = (
     '<div class="page-title">'
     '<a href="/"><img src="/static/frankentech.png" alt="Frankentech"></a>'
     '<h1>Frankenrouter &mdash; {this_sim}</h1>'
-    '{checklist_warning}'
     '<div style="margin-left:auto">'
     '<a href="/efb" class="btn btn-gray btn-sm">EFB mode</a>'
     '<a href="/" class="btn btn-gray btn-sm">Refresh</a>'
@@ -139,7 +138,6 @@ _INDEX_PAGE = (
     '</table>\n'
     '</div>\n'
     '{change_upstream_button}'
-    '<a href="/flightinfo" class="btn btn-gray">Flight Info</a>\n'
     '<a href="/weather" class="btn btn-gray">Weather</a>\n'
     '<a href="/utils" class="btn btn-gray">Utils</a>\n'
     '{sessionpwd_button}'
@@ -796,177 +794,6 @@ _OBSERVER_SESSION_PASSWORD_SET_SECTION = (
 _OBSERVER_SESSION_PASSWORD_UNSET_SECTION = (
     '<a href="/api/observerpwd/generate" class="btn btn-green">'
     'Generate observer session password</a>\n'
-)
-
-# Read-only briefing fields shown on /flightinfo once Flight Centre has
-# linked this sim to a planned flight — everything here (plus seat_swap/
-# p1_is_vatpri, handled separately) is now sourced from Flight Centre, not
-# editable locally. See CLAUDE.md's Flight Centre / frankenrouter
-# integration section. captain_code/fo_code are the PSCC crew code
-# (e.g. "MKRO"), not a full name.
-_BRIEFING_FIELD_LABELS = {
-    'portal_account': 'Portal account',
-    'airline_icao': 'Airline ICAO',
-    'airframe': 'Airframe',
-    'captain_code': 'Captain/P1',
-    'fo_code': 'First Officer/P2',
-    'dep_airport': 'Departure (ICAO)',
-    'arr_airport': 'Arrival (ICAO)',
-    'flight_number': 'Portal flight number',
-    'vatsim_callsign': 'VATSIM callsign',
-    'preflight_starts': 'Preflight starts',
-    'eobt': 'EOBT',
-    'observers': 'Observers',
-    'route': 'Planned route',
-    'comments': 'Comments (SOP to use, etc.)',
-}
-
-# Cruise/arrival crew overrides — only shown when Flight Centre reports a
-# value that actually differs from the departure crew above (see
-# frankenpush.py's _flightinfo_from_flight_plan_push, which leaves these
-# blank whenever a phase is unchanged from departure). Kept separate from
-# _BRIEFING_FIELD_LABELS since that dict always renders a row (with "—" as
-# a placeholder for "not set") — these rows must disappear entirely rather
-# than show "—" for the common case of an unchanged crew.
-_BRIEFING_OVERRIDE_FIELD_LABELS = {
-    'captain_code_cruise': 'Captain/P1 — cruise',
-    'fo_code_cruise': 'First Officer/P2 — cruise',
-    'observers_cruise': 'Observers — cruise',
-    'captain_code_arrival': 'Captain/P1 — arrival',
-    'fo_code_arrival': 'First Officer/P2 — arrival',
-    'observers_arrival': 'Observers — arrival',
-}
-
-_FLIGHTINFO_PAGE = (
-    '<!DOCTYPE html>\n<html>\n<head>\n'
-    '<meta name="color-scheme" content="{rest_api_color_scheme}" />\n' +
-    _COMMON_CSS +
-    '\n<style>\n'
-    'body {{ max-width: 72em; }}\n'
-    '.rb-grid {{ display:grid; grid-template-columns:repeat(3,1fr);'
-    ' gap:0.6em 1.2em; margin:0.6em 0 1em; }}\n'
-    '.rb-grid div {{ min-width:0; }}\n'
-    '.rb-label {{ display:block; font-size:0.8em; color:#94a3b8; }}\n'
-    '.rb-value {{ display:block; font-size:1em; word-wrap:break-word; }}\n'
-    '#scratchpad_save.dirty {{ background:#b45309; }}\n'
-    '</style>\n'
-    '<script>\n'
-    'var scratchpadDirty = false;\n'
-    'var lastKnownVersion = "{last_updated_by}|{last_updated_at}";\n'
-    'var READONLY_FIELDS = ["portal_account","airline_icao","airframe","captain_code",'
-    '"fo_code","dep_airport","arr_airport","flight_number","vatsim_callsign",'
-    '"preflight_starts","eobt","observers","route","comments"];\n'
-    'var OVERRIDE_FIELDS = ["captain_code_cruise","fo_code_cruise","observers_cruise",'
-    '"captain_code_arrival","fo_code_arrival","observers_arrival"];\n'
-    'function applyBriefing(data) {{\n'
-    '  READONLY_FIELDS.forEach(function(id) {{\n'
-    '    var el = document.getElementById("rb_" + id);\n'
-    '    if (el) el.textContent = data[id] || "—";\n'
-    '  }});\n'
-    '  OVERRIDE_FIELDS.forEach(function(id) {{\n'
-    '    var row = document.getElementById("rbrow_" + id);\n'
-    '    var el = document.getElementById("rb_" + id);\n'
-    '    if (!row || !el) return;\n'
-    '    if (data[id]) {{ el.textContent = data[id]; row.style.display = ""; }}\n'
-    '    else {{ row.style.display = "none"; }}\n'
-    '  }});\n'
-    '  var seat = document.getElementById("rb_seat_swap");\n'
-    '  if (seat) seat.textContent = data.seat_swap ? "Yes" : "No";\n'
-    '  var vatpri = document.getElementById("rb_p1_is_vatpri");\n'
-    '  if (vatpri) vatpri.textContent = data.p1_is_vatpri ? "Yes" : "No";\n'
-    '  var linked = !!data.flight_plan_id;\n'
-    '  var banner = document.getElementById("unlinked_banner");\n'
-    '  var content = document.getElementById("linked_content");\n'
-    '  if (banner) banner.style.display = linked ? "none" : "";\n'
-    '  if (content) content.style.display = linked ? "" : "none";\n'
-    '  if (data.checklist) {{\n'
-    '    data.checklist.forEach(function(checked, i) {{\n'
-    '      var el = document.getElementById("chk_" + i);\n'
-    '      if (el) el.checked = checked;\n'
-    '    }});\n'
-    '  }}\n'
-    '  if (!scratchpadDirty) {{\n'
-    '    var sp = document.getElementById("scratchpad");\n'
-    '    if (sp) sp.value = data.scratchpad || "";\n'
-    '  }}\n'
-    '  var note = document.getElementById("last_updated_note");\n'
-    '  if (note) note.textContent ='
-    ' "Last updated by: " + (data.last_updated_by || "") + " " + (data.last_updated_at || "");\n'
-    '}}\n'
-    'function pollBriefing() {{\n'
-    '  fetch("/api/briefing")\n'
-    '    .then(function(r) {{ return r.json(); }})\n'
-    '    .then(function(data) {{\n'
-    '      var v = (data.last_updated_by || "") + "|" + (data.last_updated_at || "");\n'
-    '      if (v !== lastKnownVersion) {{\n'
-    '        applyBriefing(data);\n'
-    '        lastKnownVersion = v;\n'
-    '      }}\n'
-    '    }})\n'
-    '    .catch(function() {{}});\n'
-    '}}\n'
-    'function toggleChecklistItem(index, checked) {{\n'
-    '  var data = new FormData();\n'
-    '  data.set("index", index);\n'
-    '  data.set("checked", checked ? "1" : "0");\n'
-    '  fetch("/api/flightinfo/checklist", {{method: "POST", body: data}}).catch(function() {{}});\n'
-    '}}\n'
-    'function saveScratchpad() {{\n'
-    '  var data = new FormData();\n'
-    '  data.set("scratchpad", document.getElementById("scratchpad").value);\n'
-    '  fetch("/api/flightinfo/scratchpad", {{method: "POST", body: data}})\n'
-    '    .then(function() {{\n'
-    '      scratchpadDirty = false;\n'
-    '      document.getElementById("scratchpad_save").classList.remove("dirty");\n'
-    '    }})\n'
-    '    .catch(function() {{}});\n'
-    '}}\n'
-    'document.addEventListener("DOMContentLoaded", function() {{\n'
-    '  document.querySelectorAll(".cl-toggle").forEach(function(el) {{\n'
-    '    el.addEventListener("change", function() {{\n'
-    '      toggleChecklistItem(el.dataset.index, el.checked);\n'
-    '    }});\n'
-    '  }});\n'
-    '  var sp = document.getElementById("scratchpad");\n'
-    '  if (sp) {{\n'
-    '    sp.addEventListener("input", function() {{\n'
-    '      scratchpadDirty = true;\n'
-    '      document.getElementById("scratchpad_save").classList.add("dirty");\n'
-    '    }});\n'
-    '  }}\n'
-    '  var saveBtn = document.getElementById("scratchpad_save");\n'
-    '  if (saveBtn) saveBtn.addEventListener("click", saveScratchpad);\n'
-    '  setInterval(pollBriefing, 5000);\n'
-    '}});\n'
-    '</script>\n'
-    '</head>\n<body>\n'
-    '<div class="page-title">'
-    '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
-    '<h1>Flight information</h1>'
-    '</div>\n'
-    '<div class="btn-row">\n'
-    '<a href="/" class="btn btn-gray">Back</a>\n'
-    '<a href="/flightinfo" class="btn btn-gray">Refresh</a>\n'
-    '</div>\n'
-    '<div id="unlinked_banner" class="card warn" style="display:{unlinked_display}">'
-    '<p style="margin:0">Sim is not linked to a planned flight in Flight Centre.'
-    ' Plan a flight in Flight Centre with the same tail number and callsign'
-    ' and it will show up here.</p>'
-    '</div>\n'
-    '<div id="linked_content" style="display:{linked_display}">\n'
-    '<p id="last_updated_note" class="note" style="margin:0 0 0.4em">'
-    'Last updated by: {last_updated_by} {last_updated_at}</p>\n'
-    '{readonly_notice}'
-    '<div class="rb-grid">\n'
-    '{briefing_html}'
-    '</div>\n'
-    '{checklist_html}'
-    '<label for="scratchpad">Inflight scratchpad</label>\n'
-    '<textarea id="scratchpad" name="scratchpad"{scratchpad_disabled}>{scratchpad}</textarea>\n'
-    '<button type="button" id="scratchpad_save" class="btn btn-blue"{scratchpad_save_disabled}>'
-    'Save</button>\n'
-    '</div>\n'
-    '</body>\n</html>\n'
 )
 
 
@@ -1977,11 +1804,6 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                         f'<tr><td>Connected simulators</td>'
                         f'<td class="val">{connected_sims}</td></tr>\n'
                     )
-                # checklist_items comes from Flight Centre (see CLAUDE.md's
-                # Flight Centre / frankenrouter integration section); an
-                # empty/missing list (including "not linked") just means no
-                # warning below, matching /flightinfo's own display.
-                cl_items = router.flightinfo.get('checklist_items') or []
                 data = {
                     'rest_api_color_scheme': router.config.listen.rest_api_color_scheme,
                     'this_sim': own_sim,
@@ -2039,17 +1861,6 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     'shutdown_button': (
                         '<a href="/shutdown" class="btn btn-red">Shutdown router</a>\n'
                         if router.config.listen.rest_api_shutdown_enabled else ''
-                    ),
-                    'checklist_warning': (
-                        '' if not cl_items else
-                        '' if (
-                            len(router.flightinfo.get('checklist', [])) == len(cl_items) and
-                            all(router.flightinfo['checklist'])
-                        ) else
-                        '<a href="/flightinfo" style="background:#92400e;color:#fbbf24;'
-                        'padding:0.2em 0.7em;border-radius:0.4em;font-size:0.85em;'
-                        'font-weight:600;white-space:nowrap;text-decoration:none">'
-                        'Checklist incomplete</a>'
                     ),
                 }
                 return web.json_response(
@@ -2491,158 +2302,6 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 await router.send_to_upstream(f"Qs119={text}")
                 await router.client_broadcast(f"Qs119={text}")
                 return web.Response(text="OK")
-
-            @routes.get('/flightinfo')
-            async def handle_flightinfo_get(_):
-                upstream = router.upstream
-                is_observer = (
-                    upstream is not None and upstream.access_level == 'observer')
-                readonly_notice = (
-                    '<div class="card warn">'
-                    '<p style="margin:0">Observer mode: flight info is read-only.</p>'
-                    '</div>\n') if is_observer else ''
-
-                flightinfo = router.flightinfo
-                linked = flightinfo.get('flight_plan_id') is not None
-                briefing_html = ''.join(
-                    f'<div><span class="rb-label">{label}</span>'
-                    f'<span class="rb-value" id="rb_{key}">'
-                    f'{flightinfo.get(key) or "—"}</span></div>\n'
-                    for key, label in _BRIEFING_FIELD_LABELS.items()
-                )
-                # Only shown when Flight Centre reports a cruise/arrival
-                # crew value that differs from departure — see
-                # _BRIEFING_OVERRIDE_FIELD_LABELS. Rendered (display:none
-                # when not applicable) rather than omitted outright so the
-                # 5s /api/briefing poll (applyBriefing's OVERRIDE_FIELDS
-                # handling) can toggle them live if a flight plan is edited
-                # while this page is open, not just on next page load.
-                briefing_html += ''.join(
-                    f'<div id="rbrow_{key}" style="display:'
-                    f'{"" if flightinfo.get(key) else "none"}">'
-                    f'<span class="rb-label">{label}</span>'
-                    f'<span class="rb-value" id="rb_{key}">{flightinfo.get(key) or ""}</span>'
-                    f'</div>\n'
-                    for key, label in _BRIEFING_OVERRIDE_FIELD_LABELS.items()
-                )
-                briefing_html += (
-                    f'<div><span class="rb-label">Seat swap (Captain in right seat)</span>'
-                    f'<span class="rb-value" id="rb_seat_swap">'
-                    f'{"Yes" if flightinfo.get("seat_swap") else "No"}</span></div>\n'
-                    f'<div><span class="rb-label">VATPRI swap (P1 is VATPRI)</span>'
-                    f'<span class="rb-value" id="rb_p1_is_vatpri">'
-                    f'{"Yes" if flightinfo.get("p1_is_vatpri") else "No"}</span></div>\n'
-                )
-
-                # checklist_items comes from Flight Centre (see CLAUDE.md's
-                # Flight Centre / frankenrouter integration section); an
-                # empty/missing list means "no checklist configured" and the
-                # section below simply doesn't render. When unlinked this is
-                # moot anyway — linked_content (see _FLIGHTINFO_PAGE) is
-                # hidden entirely in favor of the unlinked_banner message.
-                cl_items = flightinfo.get('checklist_items') or []
-                cl_state = flightinfo.get('checklist', [])
-                cl_disabled = ' disabled' if is_observer else ''
-                checklist_html = (
-                    '<h2>Pre-pre-flight checklist</h2>\n'
-                    '<div class="grid3">\n' +
-                    ''.join(
-                        f'<label class="toggle-row">'
-                        f'<span class="toggle-switch">'
-                        f'<input type="checkbox" id="chk_{i}" class="cl-toggle" data-index="{i}"'
-                        f'{"  checked" if i < len(cl_state) and cl_state[i] else ""}'
-                        f'{cl_disabled}>'
-                        f'<span class="toggle-track"></span>'
-                        f'</span>'
-                        f'<span>{item[:1].upper() + item[1:]}</span>'
-                        f'</label>\n'
-                        for i, item in enumerate(cl_items)
-                    ) +
-                    '</div>\n'
-                ) if cl_items else ''
-
-                data = {
-                    'rest_api_color_scheme': router.config.listen.rest_api_color_scheme,
-                    **flightinfo,
-                    'readonly_notice': readonly_notice,
-                    'briefing_html': briefing_html,
-                    'checklist_html': checklist_html,
-                    'linked_display': '' if linked else 'none',
-                    'unlinked_display': 'none' if linked else '',
-                    'scratchpad': flightinfo.get('scratchpad') or '',
-                    'scratchpad_disabled': ' disabled' if is_observer else '',
-                    'scratchpad_save_disabled': ' disabled' if is_observer else '',
-                }
-                return web.json_response(
-                    text=_FLIGHTINFO_PAGE.format(**data), content_type='text/html')
-
-            @routes.post('/api/flightinfo/checklist')
-            async def handle_flightinfo_checklist_post(request):
-                """Toggle a single checklist item.
-
-                Sent immediately on click by the router UI rather than
-                batched with other edits, since a checklist state matters
-                to the whole crew right away.
-                """
-                upstream = router.upstream
-                if upstream is not None and upstream.access_level == 'observer':
-                    return web.json_response({'error': 'observer'}, status=403)
-                post = await request.post()
-                items = router.flightinfo.get('checklist_items') or []
-                try:
-                    index = int(post.get('index', ''))
-                except (TypeError, ValueError):
-                    return web.json_response({'error': 'bad index'}, status=400)
-                if not 0 <= index < len(items):
-                    return web.json_response({'error': 'bad index'}, status=400)
-                checklist = list(router.flightinfo.get('checklist') or [])
-                while len(checklist) < len(items):
-                    checklist.append(False)
-                checklist[index] = post.get('checked', '') == '1'
-                router.flightinfo = {
-                    **router.flightinfo,
-                    'checklist': checklist,
-                    # Explicitly overridden (not inherited from the prior FC
-                    # push) so frankenpush's echo-suppression check sees this
-                    # as a genuine local edit to relay back — see CLAUDE.md's
-                    # Flight Centre / frankenrouter integration section.
-                    'source': 'router',
-                    'last_updated_by': router.config.identity.simulator,
-                    'last_updated_at': datetime.datetime.now(
-                        datetime.timezone.utc).strftime('%H:%Mz'),
-                }
-                router.logger.info("API: checklist item %d toggled", index)
-                await router.send_frdp_flightinfo()
-                return web.json_response({'ok': True})
-
-            @routes.post('/api/flightinfo/scratchpad')
-            async def handle_flightinfo_scratchpad_post(request):
-                """Save the inflight scratchpad.
-
-                Explicit Save button on the router UI, not autosaved on
-                every keystroke.
-                """
-                upstream = router.upstream
-                if upstream is not None and upstream.access_level == 'observer':
-                    return web.json_response({'error': 'observer'}, status=403)
-                post = await request.post()
-                router.flightinfo = {
-                    **router.flightinfo,
-                    'scratchpad': str(post.get('scratchpad', '')),
-                    # See the checklist handler above for why this is
-                    # explicitly overridden rather than inherited.
-                    'source': 'router',
-                    'last_updated_by': router.config.identity.simulator,
-                    'last_updated_at': datetime.datetime.now(
-                        datetime.timezone.utc).strftime('%H:%Mz'),
-                }
-                router.logger.info("API: scratchpad saved and broadcast")
-                await router.send_frdp_flightinfo()
-                return web.json_response({'ok': True})
-
-            @routes.get('/api/briefing')
-            async def handle_briefing_get(_):
-                return web.json_response(router.flightinfo)
 
             _efb_ctx = RouterFWContext(router, router.config.listen.rest_api_color_scheme)
 

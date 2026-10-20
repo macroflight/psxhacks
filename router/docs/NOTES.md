@@ -365,11 +365,11 @@ FIXME: document the JSON data format
 
 `addon=FRANKENROUTER:<protocol version>:SUBSCRIBE` (no payload) can be
 sent by any client to opt into receiving FRDP broadcasts - ROUTERINFO,
-SHAREDINFO, FLIGHTINFO, and SIMEVENTS - without becoming a full FRDP
+SHAREDINFO, and SIMEVENTS - without becoming a full FRDP
 peer.
 
 Before this existed, a client that only wanted these broadcasts (e.g.
-frankenpush, for ROUTERINFO/SHAREDINFO/FLIGHTINFO) had to fake full
+frankenpush, for ROUTERINFO/SHAREDINFO) had to fake full
 router identification (`name=<id>:FRANKEN.PY frankenrouter ...`
 followed by FRDP IDENT), which also pulls in every other
 router-to-router-only behavior - FRDP PING/PONG RTT tracking,

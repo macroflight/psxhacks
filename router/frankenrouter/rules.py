@@ -376,7 +376,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         addon=FRANKENROUTER:<protocol version>:SUBSCRIBE
 
         Opts a plain (non-router) addon into receiving FRDP broadcasts
-        (ROUTERINFO, SHAREDINFO, FLIGHTINFO, SIMEVENTS) without making it
+        (ROUTERINFO, SHAREDINFO, SIMEVENTS) without making it
         a full FRDP peer: unlike sending name=...FRANKEN.PY frankenrouter...
         to fake router identification, this does not set is_frankenrouter,
         so the client is not FRDP-pinged and none of the router-to-router-
@@ -711,25 +711,6 @@ class Rules():  # pylint: disable=too-many-public-methods
             RulesCode.KEYVALUE_FILTER_EGRESS,
             extra_data={'exclude_non_frankenrouter': True})
 
-    def handle_addon_frankenrouter_flightinfo(self, payload):
-        """Handle a FRDP FLIGHTINFO message.
-
-        Format:
-        addon=FRANKENROUTER:<protocol version>:FLIGHTINFO:<JSON data>
-        """
-        try:
-            flightinfo = json.loads(payload)
-        except json.decoder.JSONDecodeError:
-            return self.myreturn(
-                RulesAction.DROP, RulesCode.MESSAGE_INVALID,
-                message=f"Invalid JSON data in FRDP FLIGHTINFO message: {self.line}"
-            )
-        self.router.flightinfo = flightinfo
-        return self.myreturn(
-            RulesAction.FILTER,
-            RulesCode.FRDP_FLIGHTINFO,
-            extra_data={'exclude_non_frankenrouter': True})
-
     def handle_addon_frankenrouter_simevents(self, payload):
         """Handle a FRDP SIMEVENTS message.
 
@@ -884,7 +865,10 @@ class Rules():  # pylint: disable=too-many-public-methods
         if message_type == 'SHAREDINFO':
             return self.handle_addon_frankenrouter_sharedinfo(payload)
         if message_type == 'FLIGHTINFO':
-            return self.handle_addon_frankenrouter_flightinfo(payload)
+            # Obsolete (Flight Centre flight info support was removed);
+            # silently dropped so older routers on the network don't
+            # trigger an "unsupported FRDP message" warning.
+            return self.myreturn(RulesAction.DROP, RulesCode.FRDP_FLIGHTINFO)
         if message_type == 'SIMEVENTS':
             return self.handle_addon_frankenrouter_simevents(payload)
         if message_type == 'CLIENTINFO':

@@ -7,9 +7,9 @@ WebSocket connection.  No inbound port forwarding is needed — the connection
 is always initiated outward from your machine to the portal.
 
 If connected to a frankenrouter, also sends addon=FRANKENROUTER:SUBSCRIBE
-on that same connection to receive FRDP broadcasts - FLIGHTINFO (crew
-codes, airline, VATSIM callsign, etc.) and ROUTERINFO (connected
-simulator names) - included in each push update to the portal. This
+on that same connection to receive FRDP broadcasts - ROUTERINFO
+(connected simulator names) - included in each push update to the
+portal. This
 requires no extra configuration, and is a no-op (silently ignored) if
 connected directly to a PSX main server with no frankenrouter in front
 of it - see router/docs/NOTES.md's "FRDP SUBSCRIBE" section.
@@ -279,110 +279,6 @@ def _parse_route_waypoints(route):
     return waypoints
 
 
-def _seat_codes(fields, suffix, captain_swap):
-    """(captain_code, fo_code) for one phase ("", "_cruise", or "_arrival").
-
-    Blank pilot_p1{suffix}/pilot_p2{suffix} means "unchanged from
-    departure" (Flight Centre's own leave-blank convention for these
-    per-phase override fields), so falls back to the departure pilot_p1/
-    pilot_p2 when the phase-specific field is empty. captain_swap is a
-    single flag for the whole flight (not per phase), so it's applied the
-    same way to every phase.
-    """
-    p1 = fields.get(f"pilot_p1{suffix}") or fields.get("pilot_p1")
-    p2 = fields.get(f"pilot_p2{suffix}") or fields.get("pilot_p2")
-    return (p2, p1) if captain_swap else (p1, p2)
-
-
-def _flightinfo_from_flight_plan_push(data):
-    """Build a frankenrouter FLIGHTINFO dict from a "flight_plan" message.
-
-    Pushed down by Flight Centre (see CLAUDE.md's Flight Centre /
-    frankenrouter integration section). Checklist state is expressed
-    positionally against checklist_items, matching frankenrouter's existing
-    list[bool] convention (router/frankenrouter/webapi.py) — "checklist_items"
-    is included alongside it (a new key) so the router can show current
-    labels instead of its own now-superseded local TOML list.
-
-    A couple of judgement calls where Flight Centre's shape doesn't map
-    1:1 onto frankenrouter's flightinfo dict:
-      - captain_swap picks which of pilot_p1/pilot_p2 holds captain_code/
-        fo_code (P1 is captain by default, in the left seat; captain_swap
-        means the captain is the one in the right seat, i.e. P2), and also
-        sets seat_swap — both describe the same fact for two consumers.
-      - flight_notes and airline_sop have no separate frankenrouter slot;
-        folded into the single free-text comments field.
-      - captain_code/fo_code/observers are the departure-phase values;
-        *_cruise/*_arrival counterparts are only included when they
-        actually differ from departure (Flight Centre already resolves a
-        blank per-phase field to "same as departure" — see _seat_codes —
-        so this only needs a plain string comparison), so the router page
-        can show/hide the override rows entirely rather than repeat an
-        unchanged value under three headings. pilot_p1/pilot_p2 are the
-        PSCC crew code (users.pscc_id), not a full name.
-    """
-    fields = data.get("fields") or {}
-    items = data.get("checklist_items") or []
-    checked_by_id = {s["id"]: s["checked"] for s in (data.get("checklist_state") or [])}
-    checklist = [bool(checked_by_id.get(item["id"], False)) for item in items]
-
-    captain_swap = bool(fields.get("captain_swap"))
-    captain_code, fo_code = _seat_codes(fields, "", captain_swap)
-    observers = fields.get("observers") or ""
-
-    phase_overrides = {}
-    for phase in ("cruise", "arrival"):
-        p_captain, p_fo = _seat_codes(fields, f"_{phase}", captain_swap)
-        p_observers = fields.get(f"observers_{phase}") or observers
-        phase_overrides[f"captain_code_{phase}"] = p_captain if p_captain != captain_code else ""
-        phase_overrides[f"fo_code_{phase}"] = p_fo if p_fo != fo_code else ""
-        phase_overrides[f"observers_{phase}"] = p_observers if p_observers != observers else ""
-
-    comments = "\n".join(
-        part for part in (fields.get("airline_sop"), fields.get("flight_notes")) if part)
-
-    return {
-        "source": "flightcentre",
-        "flight_plan_id": data.get("flight_plan_id"),
-        "last_updated_by": "Flight Centre",
-        "last_updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "portal_account": fields.get("simfest_portal_account") or "",
-        "airline_icao": fields.get("airline_icao") or "",
-        "airframe": fields.get("airframe") or "",
-        "captain_code": captain_code or "",
-        "fo_code": fo_code or "",
-        **phase_overrides,
-        "seat_swap": captain_swap,
-        "p1_is_vatpri": bool(fields.get("vatpri_swap")),
-        "observers": observers,
-        "flight_number": fields.get("simfest_flight_number") or "",
-        "vatsim_callsign": fields.get("callsign") or "",
-        "dep_airport": fields.get("dep_airport") or "",
-        "arr_airport": fields.get("arr_airport") or "",
-        "route": fields.get("planned_route") or "",
-        "preflight_starts": fields.get("report_time") or "",
-        "eobt": fields.get("eobt") or "",
-        "comments": comments,
-        "scratchpad": fields.get("inflight_scratchpad") or "",
-        "checklist": checklist,
-        "checklist_items": [item.get("label") for item in items],
-    }
-
-
-def _unlinked_flightinfo():
-    """Sentinel FLIGHTINFO for when Flight Centre reports no matching plan.
-
-    ("link_status": linked=false) — the router UI shows a "check Flight
-    Centre" banner whenever flight_plan_id is None but source is set.
-    """
-    return {
-        "source": "flightcentre",
-        "flight_plan_id": None,
-        "last_updated_by": "Flight Centre",
-        "last_updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-    }
-
-
 def _print_version_mismatch_warning():
     """Print a prominent console warning that frankenpush is out of date."""
     print()
@@ -456,20 +352,14 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self._curtain_open = False
         self._curtain_close_task = None
 
-        # FRDP broadcast state, received (and, for FLIGHTINFO, also sent)
-        # over the single PSX connection - see get_psx_connection_coro()
-        # and _handle_addon_message().
-        self._flightinfo = None             # latest FLIGHTINFO dict
+        # FRDP broadcast state, received over the single PSX connection -
+        # see get_psx_connection_coro() and _handle_addon_message().
         self._routerinfos: dict = {}        # {uuid: routerinfo_dict}
         self._sharedinfo: dict = {}         # latest SHAREDINFO from master router
         self._pending_simevents: list = []  # events received since last portal send
 
-        # Flight Centre flight-plan push state (see CLAUDE.md's Flight
-        # Centre / frankenrouter integration section). Set from "flight_plan"/
-        # "link_status" messages received on the portal WebSocket; used to
-        # correlate local checklist/scratchpad edits back to the right plan.
-        self._active_flight_plan_id = None
-        self._active_checklist_items: list = []   # [{"id", "label"}, ...]
+        # Messages to send to Flight Centre immediately rather than on the
+        # next periodic tick - see _reverse_sync_loop().
         self._reverse_sync_queue: asyncio.Queue = asyncio.Queue()
 
         # Live flight state derived or received separately from position
@@ -859,12 +749,8 @@ class Script():  # pylint: disable=too-many-instance-attributes
             update["arr_airport"] = arr_airport
             update["waypoints"] = waypoints
 
-        # flightinfo and connected_sim_names: the server only updates these
-        # when the key is present, so omitting them on delta sends is safe.
-        fi = self._flightinfo
-        if full or self._sent_state.get("flightinfo") != fi:
-            update["flightinfo"] = fi
-
+        # connected_sim_names: the server only updates this when the key
+        # is present, so omitting it on delta sends is safe.
         names, master_sim_name = self._connected_sim_names_and_master()
         if full or self._sent_state.get("names") != names:
             update["connected_sim_names"] = names
@@ -973,8 +859,6 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self._sent_state["route"] = (
                 update["dep_airport"], update["arr_airport"],
                 tuple(tuple(w) for w in update["waypoints"]))
-        if "flightinfo" in update:
-            self._sent_state["flightinfo"] = update["flightinfo"]
         if "connected_sim_names" in update:
             self._sent_state["names"] = update["connected_sim_names"]
         if "master_sim_name" in update:
@@ -1051,7 +935,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         rejection of that request, even if the door was already locked,
         so this must fire every time, independent of
         self._flight_deck_door_locked's previous value. Queued for
-        immediate delivery (like checklist_toggle/scratchpad_update)
+        immediate delivery (see _reverse_sync_loop())
         since the status display needs to react right away, not wait
         for the next regular telemetry tick.
         """
@@ -1164,8 +1048,8 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.psx_connected = True
             self.psx.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__} {__version__}")
             self.psx.send("clientName", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__} {__version__}")
-            # Opt into FRDP broadcasts (ROUTERINFO/SHAREDINFO/FLIGHTINFO/
-            # SIMEVENTS) if connected to a frankenrouter - see
+            # Opt into FRDP broadcasts (ROUTERINFO/SHAREDINFO/SIMEVENTS)
+            # if connected to a frankenrouter - see
             # router/docs/NOTES.md's "FRDP SUBSCRIBE" section. Silently
             # ignored if connected directly to a PSX main server instead.
             self.psx.send("addon", f"FRANKENROUTER:{_FRDP_VERSION}:SUBSCRIBE")
@@ -1178,7 +1062,6 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self._vs_fpm = None
             self._prev_alt_ft_for_vs = None
             self._prev_ts_for_vs = None
-            self._flightinfo = None
             self._routerinfos.clear()
             self._sharedinfo = {}
 
@@ -1246,7 +1129,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         """Process one addon= message received on the PSX connection.
 
         Handles our own addon=FRANKENROUTER:... FRDP broadcasts
-        (ROUTERINFO, SHAREDINFO, FLIGHTINFO, SIMEVENTS) - received
+        (ROUTERINFO, SHAREDINFO, SIMEVENTS) - received
         because we sent addon=FRANKENROUTER:<version>:SUBSCRIBE after
         connecting (see get_psx_connection_coro()). No PING/PONG handling
         is needed here: FRDP PING is only ever sent to full router peers
@@ -1262,30 +1145,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
             return
         msg_type = parts[1]
         payload = parts[2] if len(parts) > 2 else ''
-        if msg_type == 'FLIGHTINFO':
-            self._handle_frdp_flightinfo(payload)
-        elif msg_type == 'ROUTERINFO':
+        if msg_type == 'ROUTERINFO':
             self._handle_frdp_routerinfo(payload)
         elif msg_type == 'SHAREDINFO':
             self._handle_frdp_sharedinfo(payload)
         elif msg_type == 'SIMEVENTS' and self.args.simevents:
             self._handle_frdp_simevents(payload)
-
-    def _handle_frdp_flightinfo(self, payload):
-        """Process a FLIGHTINFO addon message received over FRDP."""
-        try:
-            new_info = json.loads(payload)
-        except json.JSONDecodeError:
-            return
-        old_info = self._flightinfo
-        self._flightinfo = new_info
-        self.logger.debug("FRDP: received FLIGHTINFO")
-        # A FLIGHTINFO we ourselves pushed (source=flightcentre) shouldn't
-        # be echoed back as if a crew member edited it locally — only
-        # diff genuinely router-originated changes (checklist toggle /
-        # scratchpad save) for the reverse-sync path to Flight Centre.
-        if new_info.get('source') != 'flightcentre':
-            self._queue_reverse_sync_deltas(old_info, new_info)
 
     def _handle_frdp_routerinfo(self, payload):
         """Process a ROUTERINFO addon message received over FRDP."""
@@ -1322,64 +1187,6 @@ class Script():  # pylint: disable=too-many-instance-attributes
                                   data.get('router', '?') if isinstance(data, dict) else '?')
         except json.JSONDecodeError:
             pass
-
-    def _queue_reverse_sync_deltas(self, old_info, new_info):
-        """Diff two router-originated FLIGHTINFO dicts and queue deltas.
-
-        Diffs the two fields a crew member can still edit locally
-        (checklist toggles, scratchpad), and queues a delta message per
-        change for _reverse_sync_loop to send to Flight Centre immediately
-        — see CLAUDE.md's Flight Centre / frankenrouter integration
-        section. No-op if Flight Centre hasn't told us which flight plan
-        we're linked to yet.
-        """
-        if self._active_flight_plan_id is None:
-            return
-        old_info = old_info or {}
-        new_info = new_info or {}
-
-        old_checklist = old_info.get('checklist') or []
-        new_checklist = new_info.get('checklist') or []
-        for index, item in enumerate(self._active_checklist_items):
-            old_checked = bool(old_checklist[index]) if index < len(old_checklist) else False
-            new_checked = bool(new_checklist[index]) if index < len(new_checklist) else False
-            if old_checked != new_checked:
-                self._reverse_sync_queue.put_nowait({
-                    "type": "checklist_toggle",
-                    "protocol_version": PUSH_PROTOCOL_VERSION,
-                    "flight_plan_id": self._active_flight_plan_id,
-                    "checklist_item_id": item["id"],
-                    "checked": new_checked,
-                })
-
-        old_scratchpad = old_info.get('scratchpad') or ''
-        new_scratchpad = new_info.get('scratchpad') or ''
-        if old_scratchpad != new_scratchpad:
-            self._reverse_sync_queue.put_nowait({
-                "type": "scratchpad_update",
-                "protocol_version": PUSH_PROTOCOL_VERSION,
-                "flight_plan_id": self._active_flight_plan_id,
-                "text": new_scratchpad,
-            })
-
-    async def _send_frdp_flightinfo(self, flightinfo):
-        """Send a FLIGHTINFO addon message to the router.
-
-        This is the "frankenpush sends it to the routers via addon
-        messages" leg of the Flight Centre -> sim push (see CLAUDE.md).
-        Returns True if actually sent (a live PSX connection is required;
-        there's no queueing/retry — the next Flight Centre sync tick will
-        naturally resend once the connection is back).
-        """
-        if not self.psx_connected:
-            return False
-        self.psx.send(
-            "addon", f"FRANKENROUTER:{_FRDP_VERSION}:FLIGHTINFO:{json.dumps(flightinfo)}")
-        # frankenrouter floods a FLIGHTINFO to other peers but not back to
-        # its origin connection, so update our own cache immediately rather
-        # than waiting for an echo that will never arrive.
-        self._flightinfo = flightinfo
-        return True
 
     async def _portal_send_loop(self, ws):
         """Send updates to the portal at the broadcast interval.
@@ -1454,12 +1261,8 @@ class Script():  # pylint: disable=too-many-instance-attributes
                                 ws_url, headers=headers, heartbeat=30) as ws:
                             self.logger.info("Connected to portal")
                             backoff = 2.0  # reset on successful connection
-                            # Reset per-connection so a stale plan from a
-                            # previous portal session isn't assumed linked.
-                            self._active_flight_plan_id = None
-                            self._active_checklist_items = []
                             # Forget any doorbell request from a previous
-                            # connection too -- Flight Centre resets its own
+                            # connection -- Flight Centre resets its own
                             # button state on every (re)connect (see
                             # ~/to-psxhacks.md), so a stale "outstanding
                             # call" here could fire a resolved event for a
@@ -1521,10 +1324,10 @@ class Script():  # pylint: disable=too-many-instance-attributes
     async def _drain_ws(self, ws):
         """Handle messages the portal sends back down the push WebSocket.
 
-        "flight_plan"/"link_status" pushes from Flight Centre (see
-        CLAUDE.md's Flight Centre / frankenrouter integration section)
-        plus "flight_deck_doorbell"/"crew_message" (see
-        ~/to-psxhacks.md). Exits when the server closes the connection.
+        "flight_deck_doorbell"/"crew_message"/"psx_print" (see
+        ~/to-psxhacks.md); anything else (e.g. the no-longer-used
+        "flight_plan"/"link_status") is ignored. Exits when the server
+        closes the connection.
         """
         async for msg in ws:
             if msg.type != aiohttp.WSMsgType.TEXT:
@@ -1538,11 +1341,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 self.logger.warning("Error handling portal message: %s", exc)
 
-    async def _handle_portal_message(self, data):  # pylint: disable=too-many-branches
-        """Apply one message from Flight Centre (flight_plan/link_status/.../crew_message).
+    async def _handle_portal_message(self, data):
+        """Apply one message from Flight Centre (doorbell/crew_message/psx_print).
 
-        flight_plan/link_status push the resulting FLIGHTINFO to the
-        router mesh over the existing FRDP peer connection.
         flight_deck_doorbell places a fake cabin call in PSX -- see
         ~/to-psxhacks.md and _on_fltdk_door_turn(). crew_message
         broadcasts a message for frankenprint to print -- see
@@ -1551,23 +1352,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         ~/to-psxhacks.md's 2026-10-19 update.
         """
         msg_type = data.get("type")
-        if msg_type == "flight_plan":
-            self._active_flight_plan_id = data.get("flight_plan_id")
-            self._active_checklist_items = data.get("checklist_items") or []
-            sent = await self._send_frdp_flightinfo(_flightinfo_from_flight_plan_push(data))
-            if sent:
-                self.logger.info(
-                    "Flight Centre: pushed flight plan %s to router",
-                    self._active_flight_plan_id)
-            else:
-                self.logger.warning(
-                    "Flight Centre: received flight plan %s but no FRDP peer "
-                    "connection to push it to", self._active_flight_plan_id)
-        elif msg_type == "link_status" and not data.get("linked"):
-            self._active_flight_plan_id = None
-            self._active_checklist_items = []
-            await self._send_frdp_flightinfo(_unlinked_flightinfo())
-        elif msg_type == "flight_deck_doorbell":
+        if msg_type == "flight_deck_doorbell":
             call = data.get("call")
             if call not in _DOORBELL_CALL_CODES:
                 self.logger.warning(
@@ -1616,9 +1401,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
     async def _reverse_sync_loop(self, ws):
         """Send queued immediate messages to Flight Centre as soon as they arrive.
 
-        Sends checklist_toggle/scratchpad_update deltas (queued by
-        _queue_reverse_sync_deltas as they're received over FRDP),
-        flight_deck_door events (queued by _on_fltdk_door_turn()) and
+        Sends flight_deck_door events (queued by _on_fltdk_door_turn()) and
         flight_deck_doorbell_resolved events (queued by
         _resolve_doorbell_after_delay()), independent of the regular
         telemetry send interval — the user-facing requirement in all
