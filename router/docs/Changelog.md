@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-10-20: version 1.20.0
+
+- **Removed: the flight info page and Flight Centre flight info /
+  checklist support.** The `/flightinfo` web page and its APIs are gone,
+  along with the "Checklist incomplete" badge. Incoming FRDP FLIGHTINFO
+  messages are now silently dropped, so older routers and frankenpush
+  versions that still send them cause no errors. The `[sharedinfo]`
+  settings `crew`, `airframes`, `portal_account`, `airline_icao` and
+  `checklist` are no longer used; old config files that still set them
+  load fine, but the router logs a warning suggesting they be removed.
+- **Fix: the "Copy to clipboard" button on the session password page did
+  nothing** when the web interface was opened over plain HTTP on a LAN
+  address (browsers only allow the modern clipboard API over HTTPS or on
+  localhost). It now falls back to the older copy method, and shows
+  "Copy failed" if copying still isn't possible.
+
 ## 2026-10-18: version 1.19.6
 
 - Cleanup: `webapi.py`'s top-level exception handler used
