@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-10-18: version 1.19.5
+
+- **Fix: password comparisons in `update_access_level()` used plain
+  `==`**, a non-constant-time string compare whose timing can in theory
+  leak how many leading characters of a guess were correct, on this
+  unencrypted, Internet/shared-network-facing connection. Switched the
+  `match_password`, session password, and observer session password
+  checks to `secrets.compare_digest()` (the FRDP HMAC path already used
+  the equivalent `hmac.compare_digest()`).
+
 ## 2026-10-18: version 1.19.4
 
 - **Removed the cleartext FRDP AUTH fallback.** A router/downstream

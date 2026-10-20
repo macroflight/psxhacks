@@ -4,6 +4,7 @@ import asyncio
 import collections
 import ipaddress
 import logging
+import secrets
 import time
 import traceback
 import socket
@@ -435,7 +436,11 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
             # 1: check password and IP
             valid_password = False
             if access.match_password is not None:
-                if access.match_password == client_password:
+                if (
+                    client_password is not None and
+                    secrets.compare_digest(
+                        access.match_password.encode(), client_password.encode())
+                ):
                     self.logger.info("Matching password")
                     valid_password = True
 
@@ -491,7 +496,8 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
         if (
             client_password is not None and
             self.router.session_password is not None and
-            self.router.session_password == client_password
+            secrets.compare_digest(
+                self.router.session_password.encode(), client_password.encode())
         ):
             self.logger.info("Access level full granted based on session password")
             self.access_level = 'full'
@@ -502,7 +508,8 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
         if (
             client_password is not None and
             self.router.observer_session_password is not None and
-            self.router.observer_session_password == client_password
+            secrets.compare_digest(
+                self.router.observer_session_password.encode(), client_password.encode())
         ):
             self.logger.info("Access level observer granted based on observer session password")
             self.access_level = 'observer'
