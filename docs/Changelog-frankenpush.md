@@ -1,5 +1,15 @@
 # frankenpush changelog
 
+## 1.3.1 (2026-10-18)
+
+- **Fix: the doorbell-cleared handler
+  (`asyncio.ensure_future(self._resolve_doorbell_after_delay())`) never
+  kept a reference to the resulting Task** - an exception during the
+  10s delay would be silently dropped until (and unless) the Task was
+  garbage-collected. Routed through a new `_track_task()` helper
+  instead, which keeps the Task alive in `self._fire_and_forget_tasks`
+  and logs any exception via a done-callback.
+
 ## 1.3.0 (2026-10-17)
 
 - **New feature: flight deck door status for Flight Centre's status

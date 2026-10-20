@@ -1,5 +1,17 @@
 # frankenusb changelog
 
+## 1.4.2 (2026-10-18)
+
+- **Fix: the 3 call sites that fire a flight-phase setup or
+  centre-ailerons-and-tiller task
+  (`asyncio.create_task(self.flight_phase_setup(...))`/
+  `self.centre_ailerons_and_tiller()`) never kept a reference to the
+  resulting Task** - an exception inside one would be silently dropped
+  until (and unless) the Task was garbage-collected. Routed through a
+  new `_track_task()` helper instead, which keeps the Task alive in
+  `self._fire_and_forget_tasks` and logs any exception via a
+  done-callback.
+
 ## 1.4.1 (2026-10-18)
 
 - **Fix: shutting down on a PSX `exit`/`pleaseBeSoKindAndQuit` blocked

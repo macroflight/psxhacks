@@ -122,6 +122,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self.args = None
         self.taskgroup = None
         self.tasks = set()
+        # One-shot background tasks fired via _track_task() (e.g. a
+        # repaint triggered by some event) rather than self.tasks's
+        # supervised/restarted main coroutines -- tracked only so they
+        # can't be garbage-collected mid-flight and any exception gets
+        # logged instead of silently dropped.
+        self._fire_and_forget_tasks = set()
         self.logger = None
         self.psx = None
         self.psx_connected = False
@@ -183,6 +189,27 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self.turbulence_events_per_minute = 5
         self.turbulence_max_alt = 0
 
+    def _track_task(self, coro):
+        """Fire-and-forget `coro` as a tracked Task.
+
+        Keeping a reference prevents it from being garbage-collected
+        mid-flight, and any exception it raises gets logged instead of
+        silently dropped.
+        """
+        task = asyncio.create_task(coro)
+        self._fire_and_forget_tasks.add(task)
+
+        def _done(finished_task):
+            self._fire_and_forget_tasks.discard(finished_task)
+            if finished_task.cancelled():
+                return
+            exc = finished_task.exception()
+            if exc is not None:
+                self.logger.error("Background task failed: %s", exc, exc_info=exc)
+
+        task.add_done_callback(_done)
+        return task
+
     async def repaint_all_mcdus(self):
         """Trigger a repaint of all MCDUs, cancelling any pending paint tasks first."""
         self.logger.debug("Refreshing all active MCDUs, requested by: %s",
@@ -217,33 +244,33 @@ class Script():  # pylint: disable=too-many-instance-attributes
             if self.system_armed:
                 self.dropping = True
                 self.repaint_req_by.add("drop-message")
-                asyncio.create_task(self.repaint_all_mcdus())
+                self._track_task(self.repaint_all_mcdus())
             else:
                 self.logger.info("System not armed, cannot drop")
         elif command == "STOP":
             self.dropping = False
             self.repaint_req_by.add("stop-message")
-            asyncio.create_task(self.repaint_all_mcdus())
+            self._track_task(self.repaint_all_mcdus())
         elif command == "ARM":
             self.system_armed = True
             self.repaint_req_by.add("arm-message")
-            asyncio.create_task(self.repaint_all_mcdus())
+            self._track_task(self.repaint_all_mcdus())
         elif command == "DISARM":
             self.system_armed = False
             self.dropping = False
             self.repaint_req_by.add("disarm-message")
-            asyncio.create_task(self.repaint_all_mcdus())
+            self._track_task(self.repaint_all_mcdus())
         elif command == "JETTISON":
             self.dropping = True
             self.system_armed = True
             self.droprate = "EMG"
             self.repaint_req_by.add("jettison-message")
-            asyncio.create_task(self.repaint_all_mcdus())
+            self._track_task(self.repaint_all_mcdus())
         elif command == "EXTEND":
             if self.system_armed:
                 self.tailhook_extended = True
                 self.repaint_req_by.add("extend-message")
-                asyncio.create_task(self.repaint_all_mcdus())
+                self._track_task(self.repaint_all_mcdus())
             else:
                 self.logger.info("System not armed")
         elif command == "RETRACT":
@@ -251,7 +278,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 self.tailhook_extended = False
                 self.system_armed = False
                 self.repaint_req_by.add("retract-message")
-                asyncio.create_task(self.repaint_all_mcdus())
+                self._track_task(self.repaint_all_mcdus())
         else:
             self.logger.warning("Got unsupported addon message: %s", value)
 
@@ -259,7 +286,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         """Call when the PSX ZFW changes."""
         self.psx_zfw = lb2kg(float(value))
         self.repaint_req_by.add("zfw-change")
-        asyncio.create_task(self.repaint_all_mcdus())
+        self._track_task(self.repaint_all_mcdus())
         self.logger.debug("PSX ZFW changed to %.1f t", self.psx_zfw / 1000)
 
     def reset_tank_system(self):
@@ -271,7 +298,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self.system_armed = False
         self.tailhook_extended = False
         self.repaint_req_by.add("system-reset")
-        asyncio.create_task(self.repaint_all_mcdus())
+        self._track_task(self.repaint_all_mcdus())
 
     async def tank_control_coro(self):  # pylint: disable=too-many-branches,too-many-statements
         """Check system state and adjust PSX ZFW and other variables as needed.
@@ -449,7 +476,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
 
                 # If we changed anything relevant, repaint MCDU page
                 if len(self.repaint_req_by) > 0:
-                    asyncio.create_task(self.repaint_all_mcdus())
+                    self._track_task(self.repaint_all_mcdus())
 
         except Exception as exc:  # pylint:disable=broad-exception-caught
             self.logger.critical(
@@ -521,7 +548,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self.logger.debug("MCDU event from %s: %s=%s", mcdu.location, event_type, value)
         if event_type in ["logon", "resume"]:
             self.mcdu_page = "tanker"
-            asyncio.create_task(self.repaint_all_mcdus())
+            self._track_task(self.repaint_all_mcdus())
         elif event_type == "keypress":  # pylint: disable=too-many-nested-blocks
             self.repaint_req_by = set()
             if value == "CLR":
@@ -723,7 +750,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
                     self.scratchpad_text += value
                     mcdu.paint(13, 0, "large", "magenta", self.scratchpad_text)
             if len(self.repaint_req_by) > 0:
-                asyncio.create_task(self.repaint_all_mcdus())
+                self._track_task(self.repaint_all_mcdus())
         else:
             self.logger.debug(
                 "Unhandled MCDU event from %s: %s=%s", mcdu.location, event_type, value)

@@ -398,6 +398,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self.args = None
         self.taskgroup = None
         self.tasks = set()
+        # One-shot background tasks fired via _track_task() (e.g. the
+        # doorbell-resolved delay), as opposed to self.tasks's
+        # supervised/restarted main coroutines -- tracked only so they
+        # can't be garbage-collected mid-flight and any exception gets
+        # logged instead of silently dropped.
+        self._fire_and_forget_tasks = set()
         self.logger = None
         self.psx = None
         self.psx_connected = False
@@ -1085,7 +1091,28 @@ class Script():  # pylint: disable=too-many-instance-attributes
             return
         self._doorbell_call_active = False
         self.logger.info("Flight deck doorbell: crew cleared the call")
-        asyncio.ensure_future(self._resolve_doorbell_after_delay())
+        self._track_task(self._resolve_doorbell_after_delay())
+
+    def _track_task(self, coro):
+        """Fire-and-forget `coro` as a tracked Task.
+
+        Keeping a reference prevents it from being garbage-collected
+        mid-flight, and any exception it raises gets logged instead of
+        silently dropped.
+        """
+        task = asyncio.ensure_future(coro)
+        self._fire_and_forget_tasks.add(task)
+
+        def _done(finished_task):
+            self._fire_and_forget_tasks.discard(finished_task)
+            if finished_task.cancelled():
+                return
+            exc = finished_task.exception()
+            if exc is not None:
+                self.logger.error("Background task failed: %s", exc, exc_info=exc)
+
+        task.add_done_callback(_done)
+        return task
 
     async def _resolve_doorbell_after_delay(self):
         """Tell Flight Centre the doorbell call was cleared, after a delay.

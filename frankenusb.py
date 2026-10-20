@@ -120,6 +120,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         print(f"frankenusb version {__version__} starting")
         self.config = None
         self.config_misc = None
+        # One-shot background tasks fired via _track_task(), tracked so
+        # they can't be garbage-collected mid-flight and any exception
+        # they raise gets logged instead of silently dropped.
+        self._fire_and_forget_tasks = set()
         # Pygame events we are intersted in are added to this queue
         self.axis_event_queue = asyncio.Queue(maxsize=0)
         # Variables to be sent to PSX are added to this queue
@@ -175,6 +179,27 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         # True when operating from the right (FO) seat; remaps variables
         # listed in LEFT_RIGHT_CONTROLS to their right-seat equivalents.
         self.right_seat = False
+
+    def _track_task(self, coro):
+        """Fire-and-forget `coro` as a tracked Task.
+
+        Keeping a reference prevents it from being garbage-collected
+        mid-flight, and any exception it raises gets logged instead of
+        silently dropped.
+        """
+        task = asyncio.create_task(coro)
+        self._fire_and_forget_tasks.add(task)
+
+        def _done(finished_task):
+            self._fire_and_forget_tasks.discard(finished_task)
+            if finished_task.cancelled():
+                return
+            exc = finished_task.exception()
+            if exc is not None:
+                self.logger.error("Background task failed: %s", exc, exc_info=exc)
+
+        task.add_done_callback(_done)
+        return task
 
     def _validate_brakes_axis_range(self):
         """Force safe psx min/max for any NORMAL axis mapped to Brakes.
@@ -1325,9 +1350,9 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                         # seconds, and awaiting them here would stall this
                         # coroutine's single event queue consumer, making
                         # frankenusb appear to lock up for that long.
-                        asyncio.create_task(self.flight_phase_setup(phase))
+                        self._track_task(self.flight_phase_setup(phase))
             elif button_config['button type'] == 'ACTION_FLIGHT_PHASE_BUTTON':
-                asyncio.create_task(self.flight_phase_setup(button_config['phase']))
+                self._track_task(self.flight_phase_setup(button_config['phase']))
             elif button_config['button type'] == 'TMBOEING_ROTARY_MODE':
                 self.tmboeing_mode = button_config['position']
                 self.logger.debug("tmboeing_mode = %s", button_config['position'])
@@ -1827,7 +1852,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             if gs > 40.0 and self.aileron_tiller_active:
                 self.logger.info("Ground speed %.1f kt > 40 kt, disabling tiller", gs)
                 self.aileron_tiller_active = False
-                asyncio.create_task(self.centre_ailerons_and_tiller())
+                self._track_task(self.centre_ailerons_and_tiller())
         self.psx.subscribe("GroundSpeed", groundspeed)
 
         # Needed for autothrottle
