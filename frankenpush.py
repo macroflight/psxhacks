@@ -131,6 +131,14 @@ _FULL_SEND_INTERVAL = 300.0
 # moves off CAB. See _resolve_doorbell_after_delay()/~/to-psxhacks.md.
 _DOORBELL_RESOLVED_DELAY_S = 10.0
 
+# flight_deck_doorbell's optional "call" field -> CallFrCabin (Qi102) code
+# to place. No "call" field (the key absent, or None) means the original
+# PARTY LINE behaviour. See ~/to-psxhacks.md's 2026-10-19 update.
+_DOORBELL_CALL_CODES = {
+    None: "07",           # PARTY LINE (status display doorbell, no call field)
+    "crew_rest": "44",    # PA CREW REST (voice chat doorbell)
+}
+
 # flight_deck_door_locked wire values (frankenpush -> Flight Centre, both
 # in the immediate flight_deck_door event and the regular telemetry
 # field) -- our own tri-state encoding, not a passthrough of Qh419's raw
@@ -1530,7 +1538,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 self.logger.warning("Error handling portal message: %s", exc)
 
-    async def _handle_portal_message(self, data):
+    async def _handle_portal_message(self, data):  # pylint: disable=too-many-branches
         """Apply one message from Flight Centre (flight_plan/link_status/.../crew_message).
 
         flight_plan/link_status push the resulting FLIGHTINFO to the
@@ -1538,7 +1546,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
         flight_deck_doorbell places a fake cabin call in PSX -- see
         ~/to-psxhacks.md and _on_fltdk_door_turn(). crew_message
         broadcasts a message for frankenprint to print -- see
-        ~/to-psxhacks.md.
+        ~/to-psxhacks.md. psx_print prints directly on PSX's own
+        printer (PrinterText/Qs119), no frankenprint involved -- see
+        ~/to-psxhacks.md's 2026-10-19 update.
         """
         msg_type = data.get("type")
         if msg_type == "flight_plan":
@@ -1558,11 +1568,16 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self._active_checklist_items = []
             await self._send_frdp_flightinfo(_unlinked_flightinfo())
         elif msg_type == "flight_deck_doorbell":
+            call = data.get("call")
+            if call not in _DOORBELL_CALL_CODES:
+                self.logger.warning(
+                    "Flight Centre: doorbell rung with unknown call %r, dropping", call)
+                return
             if self.psx_connected:
                 self.logger.info(
-                    "Flight Centre: doorbell rung, placing PARTY LINE cabin call")
+                    "Flight Centre: doorbell rung (call=%r), placing cabin call", call)
                 self._doorbell_call_active = True
-                self.psx.send("Qi102", "07")
+                self.psx.send("Qi102", _DOORBELL_CALL_CODES[call])
             else:
                 # INFO rather than WARNING for now, while this feature is new
                 # and we want it visible without raising log noise elsewhere.
@@ -1584,6 +1599,19 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 self.logger.info(
                     "Flight Centre: crew message received but no PSX "
                     "connection to broadcast it on")
+        elif msg_type == "psx_print":
+            text = data.get("text") or ""
+            if not text:
+                return
+            if self.psx_connected:
+                self.logger.info("Flight Centre: printing psx_print message on PSX's printer")
+                self.psx.send("PrinterText", text.replace("\n", "^"))
+            else:
+                # INFO rather than WARNING for now, while this feature is new
+                # and we want it visible without raising log noise elsewhere.
+                self.logger.info(
+                    "Flight Centre: psx_print message received but no PSX "
+                    "connection to print it on")
 
     async def _reverse_sync_loop(self, ws):
         """Send queued immediate messages to Flight Centre as soon as they arrive.
