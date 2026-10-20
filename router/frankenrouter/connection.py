@@ -414,8 +414,8 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
 
         client_ip = ipaddress.ip_address(self.ip)
         self.logger.info(
-            "Checking access level for client %s. ip=%s, password=%s",
-            self.peername, client_ip, client_password)
+            "Checking access level for client %s. ip=%s, password given=%s",
+            self.peername, client_ip, client_password is not None)
         for access in self.router.config.access:
             # 1: check password and IP
             valid_password = False
@@ -459,17 +459,16 @@ class ClientConnection(Connection):  # pylint: disable=too-few-public-methods,to
             if access.match_password is not None and access.match_ip is None:
                 # Only password match required
                 if valid_password:
-                    self.logger.info("Access level %s granted based on password - %s is valid",
-                                     access.level, client_password)
+                    self.logger.info("Access level %s granted based on password match",
+                                     access.level)
                     set_level(access)
                     return
 
             # require both to match
             if valid_password and valid_ip:
                 self.logger.info(
-                    "Access level %s granted based on IP+password - %s in %s, %s is valid",
-                    access.level, client_ip, matching_network,
-                    client_password)
+                    "Access level %s granted based on IP+password - %s in %s, password matched",
+                    access.level, client_ip, matching_network)
                 set_level(access)
                 return
 
