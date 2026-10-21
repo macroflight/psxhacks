@@ -734,6 +734,35 @@ _METAR_OBS_TIME_RE = re.compile(r'\b(\d{2})(\d{2})(\d{2})Z\b')
 _METAR_MAX_AGE_HOURS = 2.0
 
 
+def _noaa_metar_better(new: str, old: Optional[str], now: datetime) -> bool:
+    """Return whether NOAA report new should replace old for the same station.
+
+    NOAA's cycle files repeat each station many times and are not in
+    observation-time order: older reports get re-sent after newer ones
+    (seen live: 13 stations in one file whose last line wasn't their
+    newest report), and an uncorrected original can be re-sent after its
+    COR. So: newest observation time wins; at equal time a COR beats a
+    non-COR; a copy that is just old with its remarks cut off never
+    replaces it; otherwise the later line wins (corrections without a
+    COR marker are seen in the wild too). Same rules as
+    compare_metars.py's _keep_newest().
+    """
+    if old is None:
+        return True
+    old_age = _metar_age_hours(old, now)
+    if old_age is None:
+        return True
+    new_age = _metar_age_hours(new, now)
+    if new_age is None or new_age > old_age:
+        return False
+    if new_age < old_age:
+        return True
+    new_cor, old_cor = " COR " in f" {new} ", " COR " in f" {old} "
+    if old_cor and not new_cor:
+        return False
+    return not (new_cor == old_cor and old.startswith(new))
+
+
 def _metar_age_hours(metar: str, now: Optional[datetime] = None) -> Optional[float]:
     """Return how many hours old metar's own DDHHMMZ observation time is.
 
@@ -4577,27 +4606,45 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         ATC/pilot-fed ones). Each file is two lines per station: an
         observation timestamp, then the raw METAR text itself. Returns
         success.
+
+        Reads the previous hour's file as well as the current one: early in
+        the hour the current file holds only a handful of stations. Each
+        file repeats stations many times and is NOT in observation-time
+        order (see _noaa_metar_better()), so the last line seen for a
+        station is not necessarily its current report.
         """
-        url = _NOAA_METAR_CYCLE_URL.format(hour=datetime.now(timezone.utc).hour)
-        try:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as r:
-                if r.status != 200:
-                    self.logger.warning("NOAA METAR cycle fetch: HTTP %d", r.status)
-                    return False
-                text = await r.text()
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            self.logger.warning("NOAA METAR cycle fetch failed: %s", exc)
-            return False
+        now = datetime.now(timezone.utc)
+        texts = []
+        for hours_ago in (1, 0):
+            hour = (now - timedelta(hours=hours_ago)).hour
+            url = _NOAA_METAR_CYCLE_URL.format(hour=hour)
+            try:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as r:
+                    if r.status != 200:
+                        self.logger.warning(
+                            "NOAA METAR cycle fetch (%02dZ): HTTP %d", hour, r.status)
+                        return False
+                    # NOAA's cycle files are a raw relay of every station's
+                    # report and occasionally contain non-UTF-8 bytes (seen
+                    # live: 0xed mid-file), which made r.text() raise and
+                    # discard the whole file. One garbled report must not cost
+                    # every other station -- replace undecodable bytes instead.
+                    texts.append((await r.read()).decode("utf-8", errors="replace"))
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                self.logger.warning("NOAA METAR cycle fetch (%02dZ) failed: %s", hour, exc)
+                return False
         metars: dict = {}
-        for line in text.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            parts = line.split()
-            if parts:
-                icao = parts[0]
-                if len(icao) == 4 and icao.upper() == icao and icao.isalpha():
-                    metars[icao] = line
+        for text in texts:
+            for line in text.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split()
+                if parts:
+                    icao = parts[0]
+                    if len(icao) == 4 and icao.upper() == icao and icao.isalpha() and (
+                            _noaa_metar_better(line, metars.get(icao), now)):
+                        metars[icao] = line
         self.noaa_metar_cache = metars
         self.noaa_metar_cache_time = time.time()
         self.logger.info("NOAA METAR cache refreshed: %d stations", len(metars))
