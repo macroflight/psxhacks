@@ -1,5 +1,42 @@
 # Changelog
 
+## 2026-10-21: version 1.21.0
+
+- **New: Basic Mode is now a web page.** Basic Mode is meant for
+  first-time shared cockpit flyers who just double-click the router EXE.
+  Instead of asking questions on the console, the router prints its
+  version and tells the user to open <http://localhost:8747/basicmode/>,
+  which has everything needed to get connected:
+  - A very prominent warning if the router can't open its port (10747),
+    which almost always means the PSX main server is still running. The
+    rest of the page stays hidden until the port is free; the router
+    retries every 5 seconds, so it also recovers without a restart.
+  - Fields for the user's crew code (5 characters, used as the simulator
+    name; the router is always named `basicrouter`), the master sim's
+    address, port and password, and a single Connect/Disconnect button.
+  - A connection indicator that turns green once data is flowing from
+    the master sim, and shows why if connecting fails.
+  - Lists of the user's own connected clients and of the other slave
+    sims in the shared cockpit.
+  - A step-by-step checklist, from starting the router to reconfiguring
+    the PSX main server as a main client.
+  - A "Shutdown router" button (with a confirmation), which leaves a
+    page saying the router must be restarted manually.
+- **Changed: Basic Mode is only used when the router is started without
+  any options and there is no `frankenrouter.toml`.** With options but no
+  config file, the router now exits with an error instead of falling
+  back to Basic Mode, so `--no-basic-mode` is no longer needed (it is
+  still accepted).
+- In Basic Mode, the router is always a slave router, assumes its
+  upstream is a frankenrouter, and keeps the console quiet (no periodic
+  status display; everything still goes to the log file).
+- In Basic Mode, a wrong password is shown on the web page instead of
+  shutting down the router, and a new master sim address is tried at
+  once instead of after up to a minute of reconnect backoff.
+- The console now says "Shut down from the web interface" instead of
+  "Shut down due to ^C" when the router was shut down from the web
+  interface.
+
 ## 2026-10-20: version 1.20.0
 
 - **Removed: the flight info page and Flight Centre flight info /
