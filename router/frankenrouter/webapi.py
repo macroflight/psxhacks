@@ -489,6 +489,449 @@ def _build_sims_page(router, color_scheme):
     )
 
 
+# Basic Mode page (/basicmode/): everything a first-time shared cockpit
+# flyer needs, on one page that polls /api/basicmode/status every second.
+# Plain string (not a format template), so CSS/JS braces are not doubled;
+# the only substitutions are the %%...%% markers in _build_basic_mode_page().
+_BASIC_MODE_BODY = '''\
+<style>
+body { max-width: 52em; }
+#portwarning {
+    background: #7f1d1d; border: 3px solid #ef4444; border-radius: 0.6em;
+    padding: 1.2em 1.4em; margin-bottom: 1em; color: #fff;
+}
+#portwarning h1 { font-size: 1.8em; margin-bottom: 0.5em; }
+#portwarning p { font-size: 1.15em; line-height: 1.45; }
+#portwarning .detail { font-size: 0.85em; color: #fecaca; }
+.indicator { display: flex; align-items: center; gap: 0.8em; }
+.dot { width: 1.4em; height: 1.4em; border-radius: 50%; flex-shrink: 0; background: #4b5563; }
+.dot.green { background: #22c55e; box-shadow: 0 0 0.6em #22c55e; }
+.dot.amber { background: #f59e0b; }
+.dot.red { background: #ef4444; }
+.indicator .main { font-size: 1.1em; font-weight: 600; }
+.indicator .sub { font-size: 0.88em; color: #94a3b8; }
+input[type=password] {
+    width: 100%; padding: 0.65em; margin: 0.25em 0 0.75em;
+    font-size: 1em; border-radius: 0.45em;
+    border: 1px solid #374151; background: #111827; color: #f9fafb;
+    font-family: inherit;
+}
+table.list td:first-child { width: auto; color: inherit; font-size: inherit; }
+table.list th { text-align: left; color: #94a3b8; font-weight: 500; font-size: 0.88em; }
+table.list th, table.list td { padding: 0.3em 0.8em 0.3em 0; }
+.empty { color: #64748b; font-size: 0.9em; }
+ol.checklist { padding-left: 0; list-style: none; counter-reset: step; }
+ol.checklist li {
+    counter-increment: step; display: flex; gap: 0.6em; align-items: flex-start;
+    margin: 0.55em 0; line-height: 1.4;
+}
+ol.checklist li::before { content: counter(step) "."; color: #94a3b8; min-width: 1.4em; }
+ol.checklist input { margin-top: 0.3em; flex-shrink: 0; }
+ol.checklist .live { font-size: 0.85em; font-weight: 600; margin-left: 0.3em; }
+.live-ok { color: #4ade80; } .live-no { color: #f87171; }
+#errorbox { color: #fca5a5; font-size: 0.9em; margin: 0.3em 0; }
+@keyframes flash { from { background: #475569; } to { background: #1c2033; } }
+.card.flash { animation: flash 1.5s ease-out; }
+button.btn:disabled { opacity: 0.6; cursor: wait; }
+#connectform input:read-only { opacity: 0.55; }
+@media (max-width: 40em) { .grid2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="page-title">
+<img src="/static/frankentech.png" alt="Frankentech">
+<h1>Frankenrouter &mdash; Basic Mode</h1>
+<span class="note" style="margin-left:auto">Version %%VERSION%%</span>
+</div>
+
+<div id="portwarning" style="display:none">
+<h1>&#9888; The router could not open port %%LISTEN_PORT%%</h1>
+<p>This is almost always because your <b>PSX main server is running</b>
+and is already using that port.</p>
+<p><b>Stop your sim (including the PSX main server), then restart the
+router.</b> This page also retries every few seconds and continues by
+itself once the port is free.</p>
+<p class="detail" id="porterror"></p>
+</div>
+
+<div id="main" style="display:none">
+
+<div class="card" id="upstreamcard">
+<div class="indicator">
+<div class="dot" id="dot"></div>
+<div><div class="main" id="upstreammain">Not connected</div>
+<div class="sub" id="upstreamsub"></div></div>
+</div>
+</div>
+
+<div class="grid2">
+<div>
+<h2>Master sim</h2>
+<form id="connectform" onsubmit="return doToggle()">
+<label for="crew">My crew code, 5 characters (other sims will see this)</label>
+<input type="text" id="crew" maxlength="5" autocomplete="off" spellcheck="false"
+ style="text-transform: uppercase; margin-bottom: 0.2em">
+<p class="note" style="margin-top:0">If you do not have a PSCC crew code assigned, make one up.</p>
+<label for="host">Hostname or IP address of the master sim</label>
+<input type="text" id="host" autocomplete="off" spellcheck="false">
+<label for="port">Port</label>
+<input type="text" id="port" inputmode="numeric" autocomplete="off">
+<label for="password">Password (leave empty if the master sim has none)</label>
+<input type="password" id="password" autocomplete="off">
+<div id="errorbox"></div>
+<button type="submit" class="btn btn-green" id="connbtn">Connect</button>
+</form>
+</div>
+
+<div>
+<h2>What to do</h2>
+<ol class="checklist">
+<li><input type="checkbox"><span>Always start your router first.</span></li>
+<li><input type="checkbox"><span>Enter your crew code, and the IP address (or hostname), port
+and password you got from the master sim, and press <b>Connect</b>.</span></li>
+<li><input type="checkbox"><span>Check that the router is connected to the master sim: look for
+the <b>green</b> indicator above.<span class="live" id="live3"></span></span></li>
+<li><input type="checkbox"><span>Start your sim. Your PSX main clients and addons should
+automatically connect to the router. Verify that you see them in the list of
+connected clients below.</span></li>
+<li><input type="checkbox"><span>Find your PSX main server and reconfigure it. On the
+<b>Network &gt; Main</b> page of Instructor, switch it from &ldquo;The main
+server&rdquo; to &ldquo;A main client&rdquo;, connecting to <b>127.0.0.1</b>
+port <b>%%LISTEN_PORT%%</b> (Preferences &gt; Basics &gt; Main network).</span></li>
+<li><input type="checkbox"><span>Verify that your PSX main client shows up in the
+router's client list below. If a PSX main client does not show up, restart
+it, or go into <b>Instructor &gt; Network &gt; Main</b> and make sure it is
+&ldquo;A main client&rdquo;.</span></li>
+<li><input type="checkbox"><span>You should now be connected. Try moving e.g. the MCP ALT
+knob &ndash; you should see the MCP ALT number change. The other connected
+sims should see the same.</span></li>
+<li><input type="checkbox"><span>Fly!</span></li>
+</ol>
+</div>
+</div>
+
+<h2>Your connected clients</h2>
+<div class="card" id="clients"><span class="empty">No clients connected yet.</span></div>
+
+<h2>Other slave sims connected to the master sim</h2>
+<div class="card" id="sims"><span class="empty">No other sims seen yet.</span></div>
+
+<p class="note"><a href="/" style="color:#64748b">Full router web interface</a></p>
+</div>
+
+<div id="shutdown">
+<hr>
+<button type="button" class="btn btn-red" onclick="doShutdown()">Shutdown router</button>
+</div>
+<div id="stopped" class="card warn" style="display:none">
+<h1 id="stoppedtitle">The router is shutting down...</h1>
+<p style="font-size:1.1em;line-height:1.45">Your sim is being disconnected from the
+shared cockpit. <b>The router will not start again by itself</b>: to use it again,
+you must restart it manually (e.g. double-click the router program again), then
+reload this page.</p>
+<p class="note" id="stoppedstatus">Waiting for the router to stop...</p>
+</div>
+
+<script>
+function esc(s) {
+  return String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, function (c) {
+    return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
+  });
+}
+function dur(s) {
+  s = Math.max(0, Math.floor(s));
+  var h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+  if (h) return h + 'h ' + m + 'm';
+  if (m) return m + 'm ' + sec + 's';
+  return sec + 's';
+}
+function remembered(key) {
+  try { return window.localStorage.getItem('basicmode.' + key); } catch (e) { return null; }
+}
+function remember(key, value) {
+  try { window.localStorage.setItem('basicmode.' + key, value); } catch (e) { /* ignore */ }
+}
+var fieldsFilled = false;
+var stopped = false;
+// Set by the Disconnect button (until the next Connect), so the indicator
+// can say "Disconnected" rather than the same "Not connected" as at startup
+var userDisconnected = false;
+// Flash the indicator card for a moment whenever its status changes
+var lastIndicator = null, flashUntil = 0;
+// The one Connect/Disconnect button: "Disconnect" whenever the router is
+// connected or trying to connect, "Connect" when it's idle
+var active = false, pending = false;
+
+function render(st) {
+  // A status reply already in flight when Shutdown was pressed must not
+  // bring the main page back over the shutdown message
+  if (stopped) return;
+  var bound = st.listen.bound;
+  document.getElementById('portwarning').style.display = bound ? 'none' : 'block';
+  document.getElementById('main').style.display = bound ? 'block' : 'none';
+  document.getElementById('porterror').textContent = st.listen.error ? 'Details: ' + st.listen.error : '';
+  if (!bound) return;
+
+  if (!fieldsFilled) {
+    document.getElementById('crew').value = remembered('crew') || '';
+    document.getElementById('host').value = remembered('host') || st.upstream.host || '';
+    document.getElementById('port').value = remembered('port') || st.upstream.port || '';
+    fieldsFilled = true;
+  }
+
+  var u = st.upstream, dot = document.getElementById('dot');
+  var main = document.getElementById('upstreammain'), sub = document.getElementById('upstreamsub');
+  var card = document.getElementById('upstreamcard');
+  card.className = 'card';
+  if (u.state === 'ok') {
+    dot.className = 'dot green'; card.className = 'card ok';
+    main.textContent = 'Connected to ' + u.name;
+    sub.textContent = u.host + ':' + u.port + ', connected for ' + dur(u.seconds);
+  } else if (u.state === 'connected') {
+    dot.className = 'dot amber';
+    main.textContent = 'Connected to ' + u.name + ', waiting for data...';
+    sub.textContent = u.host + ':' + u.port + ', connected for ' + dur(u.seconds);
+  } else if (u.state === 'connecting') {
+    dot.className = 'dot ' + (u.error ? 'red' : 'amber');
+    if (u.error) card.className = 'card warn';
+    main.textContent = 'Connecting to ' + u.host + ':' + u.port + '...';
+    sub.textContent = u.error || '';
+  } else if (userDisconnected && !u.error) {
+    dot.className = 'dot red'; card.className = 'card warn';
+    main.textContent = 'Disconnected from the master sim';
+    sub.textContent = 'Press Connect to connect again.';
+  } else {
+    dot.className = 'dot' + (u.error ? ' red' : '');
+    if (u.error) card.className = 'card warn';
+    main.textContent = 'Not connected';
+    sub.textContent = u.error || 'Enter the master sim details below and press Connect.';
+  }
+  var indicator = dot.className + '|' + main.textContent;
+  if (lastIndicator !== null && indicator !== lastIndicator) flashUntil = Date.now() + 1500;
+  lastIndicator = indicator;
+  if (Date.now() < flashUntil) card.className += ' flash';
+  if (!pending) {
+    active = u.state !== 'idle';
+    var btn = document.getElementById('connbtn');
+    btn.textContent = active ? 'Disconnect' : 'Connect';
+    btn.className = 'btn ' + (active ? 'btn-red' : 'btn-green');
+    // Disconnect first to change these
+    ['crew', 'host', 'port', 'password'].forEach(function (id) {
+      document.getElementById(id).readOnly = active;
+    });
+  }
+
+  var live3 = document.getElementById('live3');
+  live3.textContent = u.state === 'ok' ? '\\u2714 connected' : '\\u2718 not yet';
+  live3.className = 'live ' + (u.state === 'ok' ? 'live-ok' : 'live-no');
+
+  var rows = st.clients.map(function (c) {
+    return '<tr><td>' + esc(c.ip) + '</td><td>' + esc(c.long || '-') + '</td><td>' +
+      esc(c.short || '-') + '</td><td>' + dur(c.seconds) + '</td></tr>';
+  }).join('');
+  document.getElementById('clients').innerHTML = rows ?
+    '<table class="list"><tr><th>IP</th><th>Name</th><th>Short name</th><th>Connected</th></tr>' +
+    rows + '</table>' : '<span class="empty">No clients connected yet.</span>';
+
+  rows = st.sims.map(function (s) {
+    return '<tr><td>' + esc(s.sim) + '</td><td>' + esc(s.router) + '</td><td>' +
+      dur(s.last_seen) + ' ago</td></tr>';
+  }).join('');
+  document.getElementById('sims').innerHTML = rows ?
+    '<table class="list"><tr><th>Sim</th><th>Router</th><th>Last seen</th></tr>' +
+    rows + '</table>' : '<span class="empty">No other sims seen yet.</span>';
+}
+
+function refresh() {
+  return fetch('/api/basicmode/status', {cache: 'no-store'})
+    .then(function (r) { return r.json(); })
+    .then(render);
+}
+
+function poll() {
+  refresh()
+    .catch(function () { /* router restarting; try again */ })
+    .finally(function () { if (!stopped) setTimeout(poll, 1000); });
+}
+
+function post(url, body) {
+  return fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
+                     body: JSON.stringify(body || {})})
+    .then(function (r) { return r.json(); });
+}
+
+// Show "Connecting..."/"Disconnecting..." on the button until the router
+// answers, then refresh the status straight away so the button flips at once
+function busy(text) {
+  var btn = document.getElementById('connbtn');
+  pending = true; btn.disabled = true; btn.textContent = text;
+  return function () {
+    btn.disabled = false;
+    refresh().catch(function () { /* next poll will retry */ })
+      .finally(function () { pending = false; });
+  };
+}
+
+function doToggle() {
+  if (active) doDisconnect(); else doConnect();
+  return false;
+}
+
+function doConnect() {
+  var crew = document.getElementById('crew').value.trim().toUpperCase();
+  var host = document.getElementById('host').value.trim();
+  var port = document.getElementById('port').value.trim();
+  var password = document.getElementById('password').value;
+  var errorbox = document.getElementById('errorbox');
+  errorbox.textContent = '';
+  var done = busy('Connecting...');
+  post('/api/basicmode/connect', {crew_code: crew, host: host, port: port, password: password})
+    .then(function (res) {
+      if (res.error) { errorbox.textContent = res.error; return; }
+      userDisconnected = false;
+      remember('crew', crew); remember('host', host); remember('port', port);
+    })
+    .catch(function () { errorbox.textContent = 'Could not reach the router.'; })
+    .finally(done);
+}
+
+function doDisconnect() {
+  var errorbox = document.getElementById('errorbox');
+  errorbox.textContent = '';
+  var done = busy('Disconnecting...');
+  post('/api/basicmode/disconnect')
+    .then(function () { userDisconnected = true; })
+    .catch(function () { errorbox.textContent = 'Could not reach the router.'; })
+    .finally(done);
+}
+
+function doShutdown() {
+  if (!window.confirm('Shut down the router? Your sim will be disconnected from the shared cockpit.')) return;
+  stopped = true;
+  // Show the "shutting down, restart manually" page first: replace the
+  // whole page with just that message, nothing else
+  var box = document.getElementById('stopped');
+  box.style.display = 'block';
+  document.body.innerHTML = '';
+  document.body.appendChild(box);
+  window.scrollTo(0, 0);
+  // ...then shut down, and confirm once the router no longer answers
+  setTimeout(function () {
+    fetch('/api/shutdown/yes', {method: 'POST'}).catch(function () { /* already gone */ });
+    setTimeout(waitForShutdown, 1000);
+  }, 300);
+}
+
+function waitForShutdown() {
+  fetch('/api/basicmode/status', {cache: 'no-store'})
+    .then(function () { setTimeout(waitForShutdown, 1000); })
+    .catch(function () {
+      document.getElementById('stoppedtitle').textContent = 'The router has shut down.';
+      document.getElementById('stoppedstatus').textContent =
+        'You can close this page. Restart the router manually to use it again.';
+    });
+}
+
+poll();
+</script>
+</body>
+</html>
+'''
+
+
+def _basic_mode_status(router):
+    """Return the /api/basicmode/status dict (everything the Basic Mode page shows)."""
+    now = time.perf_counter()
+    upstream = {
+        'host': router.config.upstream.host,
+        'port': router.config.upstream.port,
+        'error': router.upstream_last_error,
+    }
+    if router.is_upstream_connected():
+        up = router.upstream
+        # Green only once data is actually flowing: the upstream has
+        # welcomed us (load3) and sent something on this connection.
+        welcomed = router.upstream_ever_welcomed and up.messages_received > 0
+        upstream.update({
+            'state': 'ok' if welcomed else 'connected',
+            # "sim/router" once the upstream router has identified itself
+            'name': (up.display_name if up.simulator_name != 'unknown sim'
+                     else f"{up.ip}:{up.port}"),
+            'seconds': now - up.connected_at,
+        })
+    elif router.upstream_disabled:
+        upstream['state'] = 'idle'
+    else:
+        upstream['state'] = 'connecting'
+    clients = [
+        {
+            'ip': client.ip,
+            'short': client.client_provided_id,
+            'long': client.client_provided_display_name or client.display_name,
+            'seconds': now - client.connected_at,
+        }
+        for client in router.clients.values()
+    ]
+    sims = [
+        {
+            'sim': info.get('simulator_name', 'unknown'),
+            'router': info.get('router_name', 'unknown'),
+            'last_seen': time.time() - info.get('received', time.time()),
+        }
+        for _uuid, info in sorted(
+            _latest_router_per_sim(router.routerinfo, router.config.identity.simulator),
+            key=lambda kv: kv[1].get('simulator_name', ''))
+    ]
+    return {
+        'basic_mode': router.basic_mode,
+        'listen': {
+            'port': router.config.listen.port,
+            'bound': router.proxy_server is not None,
+            'error': router.listen_error,
+        },
+        'upstream': upstream,
+        'clients': clients,
+        'sims': sims,
+    }
+
+
+def _build_basic_mode_page(router):
+    """Build the /basicmode/ page."""
+    return (
+        '<!DOCTYPE html>\n<html>\n<head>\n'
+        f'<meta name="color-scheme" content="{router.config.listen.rest_api_color_scheme}" />\n'
+        '<title>Frankenrouter Basic Mode</title>\n' +
+        _COMMON_CSS.format() + '\n' +
+        _BASIC_MODE_BODY
+        .replace('%%LISTEN_PORT%%', str(router.config.listen.port))
+        .replace('%%VERSION%%', html.escape(router.version))
+    )
+
+
+def _parse_basic_mode_connect(data):
+    """Validate a Basic Mode connect request.
+
+    Returns (request, None) with request = {crew_code, host, port,
+    password}, or (None, error message for the user).
+    """
+    crew_code = str(data.get('crew_code') or '').strip().upper()
+    host = str(data.get('host') or '').strip()
+    port_text = str(data.get('port') or '').strip()
+    password = str(data.get('password') or '')
+    if not re.match(r'^[A-Z0-9]{5}$', crew_code):
+        return None, "Enter your crew code: exactly 5 letters or digits."
+    if not host:
+        return None, "Enter the hostname or IP address of the master sim."
+    if not re.match(r'^[A-Za-z0-9.:\-\[\]]+$', host):
+        return None, "That doesn't look like a hostname or IP address."
+    if not port_text.isdigit() or not 1 <= int(port_text) <= 65535:
+        return None, "The port must be a number between 1 and 65535."
+    if password and not re.match(r'^[\x21-\x7e]+$', password):
+        return None, "The password may only contain printable ASCII characters, no spaces."
+    return {'crew_code': crew_code, 'host': host, 'port': int(port_text),
+            'password': password}, None
+
+
 _WINDIMPORT_PAGE = (
     '<!DOCTYPE html>\n<html>\n<head>\n'
     '<meta name="color-scheme" content="{rest_api_color_scheme}" />\n' +
@@ -2219,6 +2662,42 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 router.connection_state_changed()
                 raise web.HTTPFound('/')
 
+            @routes.get('/basicmode')
+            async def handle_basic_mode_redirect(_):
+                raise web.HTTPFound('/basicmode/')
+
+            @routes.get('/basicmode/')
+            async def handle_basic_mode_page(_):
+                if not router.basic_mode:
+                    raise web.HTTPFound('/')
+                return web.Response(
+                    text=_build_basic_mode_page(router), content_type='text/html')
+
+            @routes.get('/api/basicmode/status')
+            async def handle_basic_mode_status(_):
+                return web.json_response(_basic_mode_status(router))
+
+            @routes.post('/api/basicmode/connect')
+            async def handle_basic_mode_connect(request):
+                if not router.basic_mode:
+                    return web.json_response({'error': "Not in Basic Mode"}, status=403)
+                try:
+                    data = await request.json()
+                except (ValueError, UnicodeDecodeError):
+                    data = {}
+                req, error = _parse_basic_mode_connect(data)
+                if error:
+                    return web.json_response({'error': error})
+                await router.basic_mode_connect(**req)
+                return web.json_response({'ok': True})
+
+            @routes.post('/api/basicmode/disconnect')
+            async def handle_basic_mode_disconnect(_):
+                if not router.basic_mode:
+                    return web.json_response({'error': "Not in Basic Mode"}, status=403)
+                await router.basic_mode_disconnect()
+                return web.json_response({'ok': True})
+
             @routes.get('/api/sharedinfo')
             async def handle_sharedinfo(_):
                 res = router.sharedinfo
@@ -2739,6 +3218,7 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 # always work, matching how most users already shut the
                 # router down "by other means".
                 router.logger.info("API: shutdown requested via web interface")
+                router.shutdown_reason = "from the web interface"
                 loop = asyncio.get_running_loop()
 
                 def _do_shutdown():

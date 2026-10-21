@@ -168,6 +168,18 @@ AUTH_PENDING_TIMEOUT = 30.0
 # Frankenrouter._load_known_good_situ() and its two callers.
 KNOWN_GOOD_SITU_DELAY = 5.0
 
+# Basic Mode (router started with no options and no config file -- the
+# double-clicked EXE of a first-time shared cockpit flyer): all setup
+# happens on this web page instead of the console. See main().
+BASIC_MODE_LISTEN_PORT = 10747
+BASIC_MODE_REST_API_PORT = 8747
+BASIC_MODE_DEFAULT_UPSTREAM_PORT = 10748
+BASIC_MODE_URL = f"http://localhost:{BASIC_MODE_REST_API_PORT}/basicmode/"
+BASIC_MODE_ROUTER_NAME = "basicrouter"
+# How often listener_task() retries binding the listen port in Basic Mode
+# (it's usually busy because the user's PSX main server is still running).
+BASIC_MODE_BIND_RETRY_S = 5.0
+
 # The "Description=...^-^-^-^ End of description ^-^-^-^" block in a .situ
 # file can be several lines; _load_known_good_situ() skips all of it,
 # recognising the end by this exact marker line.
@@ -384,6 +396,23 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.upstream_disabled = False
         self.upstream_disabled_reason = None
         self.upstream_disabled_by = None
+        # Basic Mode state (see main() and the /basicmode/ web page).
+        # In Basic Mode the upstream starts disabled (idle) until the user
+        # presses Connect on the web page.
+        self.basic_mode = False
+        # Why we are shutting down, for the final console message when it
+        # wasn't actually a Ctrl-C (e.g. the web interface's Shutdown
+        # button, which raises SIGINT to get the same graceful shutdown)
+        self.shutdown_reason = None
+        # For the web interface, which can't import it from this script
+        self.version = __VERSION__
+        # Why the listen port could not be bound (None once bound).
+        self.listen_error = None
+        # Last upstream connection problem, for the Basic Mode page.
+        self.upstream_last_error = None
+        # Set to wake upstream_connector_task() from its retry backoff
+        # immediately (e.g. the user just pressed Connect).
+        self.upstream_wakeup = asyncio.Event()
         self.log_traffic_filename = None
         self.start_time = int(time.time())
         self.allowed_clients = {}
@@ -601,8 +630,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             '--no-basic-mode',
             action='store_true',
             help=(
-                "Do not fall back to interactive Basic Mode if --config-file"
-                " is missing; exit with an error instead."
+                "No longer needed (kept for existing scripts): Basic Mode is"
+                " only used when the router is started without any options"
+                " and there is no config file with the default name."
             ),
         )
         parser.add_argument(
@@ -1313,6 +1343,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.warning("Tried to close non-existant upstream connection")
             return
         peername = self.upstream.peername
+        # Lets upstream_connector_task() tell our own close (disconnect,
+        # reconnect elsewhere) from the upstream dropping the connection
+        self.upstream.is_closing = True
         # Send "exit" and close connection
         await self.upstream.close()
         # Destroy upstream connection object
@@ -1906,19 +1939,29 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
                 # Pause clients when we have no upstream connection
                 try:
-                    reader, writer = await asyncio.open_connection(
-                        self.config.upstream.host,
-                        self.config.upstream.port,
-                        limit=READ_BUFFER_SIZE,
+                    reader, writer = await asyncio.wait_for(
+                        asyncio.open_connection(
+                            self.config.upstream.host,
+                            self.config.upstream.port,
+                            limit=READ_BUFFER_SIZE,
+                        ),
+                        # Basic Mode: don't leave a first-timer staring at
+                        # "connecting" for ~30 s after a typo in the host
+                        timeout=10.0 if self.basic_mode else None,
                     )
                 # At least on Windows we get OSError after ~30s if the
-                # upstream is down or unreachable
-                except (ConnectionError, OSError):
+                # upstream is down or unreachable (TimeoutError is an
+                # OSError too)
+                except (ConnectionError, OSError) as exc:
+                    self.upstream_last_error = (
+                        f"Could not connect to {self.config.upstream.host}:"
+                        f"{self.config.upstream.port} ({exc or type(exc).__name__}),"
+                        f" retrying in {reconnect_delay:.0f} s")
                     self.logger.warning(
                         "Upstream connection refused, retrying in %.0f s",
                         reconnect_delay,
                     )
-                    await asyncio.sleep(reconnect_delay)
+                    await self._upstream_backoff(reconnect_delay)
                     reconnect_delay = min(reconnect_delay * 2, 60.0)
                     continue
                 except Exception:  # pylint: disable=broad-exception-caught
@@ -1926,9 +1969,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     if self.config.identity.stop_minded:
                         raise SystemExit(f"{msg}\nRouter is stop-minded so shutting down now")  # pylint: disable=raise-missing-from
                     self.logger.critical("%s\nRouter is go-minded so trying to continue", msg)
-                    await asyncio.sleep(reconnect_delay)
+                    await self._upstream_backoff(reconnect_delay)
                     reconnect_delay = min(reconnect_delay * 2, 60.0)
                     continue
+                # Disconnect pressed (Basic Mode) while we were still connecting
+                if self.upstream_disabled:
+                    writer.close()
+                    continue
+                self.upstream_last_error = None
                 # Create the connection object (which needs our config
                 # and a reference to the log function)
                 self.upstream = connection.UpstreamConnection(
@@ -1962,8 +2010,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.logger.info("Enabling traffic filter")
                     self.filter_traffic = True
 
-                if self.config.upstream.password:
-                    # assume upstream is frankenrouter if we use --password
+                if self.config.upstream.password or self.basic_mode:
+                    # assume upstream is frankenrouter if we use --password,
+                    # and always in Basic Mode (only ever used to join a
+                    # shared cockpit through the master sim's frankenrouter)
                     self.logger.info("Assuming upstream is frankenrouter")
                     self.upstream.is_frankenrouter = True
 
@@ -1999,8 +2049,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                             "Upstream connection broke (%s), reconnecting in %.0f s",
                             exc, reconnect_delay,
                         )
-                        await self.close_upstream_connection()
-                        await asyncio.sleep(reconnect_delay)
+                        if self.is_upstream_connected() and not self.upstream.is_closing:
+                            self.upstream_last_error = (
+                                "Lost the connection to the master sim, reconnecting")
+                            await self.close_upstream_connection()
+                        await self._upstream_backoff(reconnect_delay)
                         reconnect_delay = min(reconnect_delay * 2, 60.0)
                         break
                     except Exception:  # pylint: disable=broad-exception-caught
@@ -2029,6 +2082,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                             reason)
                         self.logger.error(_sep)
                         await self.close_upstream_connection()
+                        if self.basic_mode:
+                            # Show it on the web page and let the user fix
+                            # the password, rather than exit
+                            self.upstream_last_error = (
+                                f"The master sim refused the connection: {reason}"
+                                " (check the password)")
+                            self.upstream_disabled = True
+                            break
                         # Let the logging queue drain before printing the prompt
                         await asyncio.sleep(0.5)
                         print("\nPress any key to exit...")
@@ -2067,6 +2128,47 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             return
         # End of upstream_connector_task()
 
+    async def _upstream_backoff(self, delay):
+        """Sleep before the next upstream connection attempt.
+
+        Returns early if upstream_wakeup is set (e.g. Basic Mode's Connect
+        button), so a new host/port is tried at once rather than after
+        up to a minute of backoff.
+        """
+        try:
+            await asyncio.wait_for(self.upstream_wakeup.wait(), timeout=delay)
+        except asyncio.TimeoutError:
+            pass
+        self.upstream_wakeup.clear()
+
+    async def basic_mode_connect(self, crew_code, host, port, password):  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        """Connect (or reconnect) to a new upstream from the Basic Mode page.
+
+        crew_code becomes our simulator name, which is what the other sims
+        in the shared cockpit see.
+        """
+        self.logger.info(
+            "Basic Mode: connect to %s:%d as %s requested", host, port, crew_code)
+        self.config.identity.simulator = crew_code
+        self.config.upstream.host = host
+        self.config.upstream.port = port
+        self.config.upstream.password = password or None
+        self.upstream_last_error = None
+        self.upstream_disabled = False
+        if self.is_upstream_connected():
+            self.upstream_reconnect_requested = True
+        self.upstream_wakeup.set()
+        self.connection_state_changed()
+
+    async def basic_mode_disconnect(self):
+        """Disconnect from the upstream and stay idle (Basic Mode page)."""
+        self.logger.info("Basic Mode: disconnect requested")
+        self.upstream_disabled = True
+        self.upstream_last_error = None
+        if self.is_upstream_connected():
+            await self.close_upstream_connection()
+        self.connection_state_changed()
+
     def _abort_proxy_server_clients(self):
         """Force-close any client transports asyncio.Server is still tracking.
 
@@ -2094,9 +2196,35 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.debug("Aborting any still-tracked client transports")
             abort_clients()
 
-    async def listener_task(self, name):
+    async def listener_task(self, name):  # pylint: disable=too-many-branches
         """Run the client listener."""
         try:
+            # Basic Mode: bind the listen port right away, so the web page
+            # can tell the user straight after startup if it's busy --
+            # almost always because their PSX main server is still running
+            # as "The main server" on the same port. Keep retrying, so the
+            # page recovers on its own once they stop it. Only binds:
+            # start_serving=False means no client can connect until the
+            # welcome gate below has opened.
+            if self.basic_mode:
+                while self.proxy_server is None:
+                    try:
+                        self.proxy_server = await asyncio.start_server(
+                            self.handle_new_connection_cb,
+                            port=self.config.listen.port,
+                            limit=READ_BUFFER_SIZE,
+                            start_serving=False,
+                        )
+                    except OSError as exc:
+                        if self.listen_error is None:
+                            self.logger.warning(
+                                "Failed to open port %d, retrying every %.0f s: %s",
+                                self.config.listen.port, BASIC_MODE_BIND_RETRY_S, exc)
+                        self.listen_error = str(exc)
+                        await asyncio.sleep(BASIC_MODE_BIND_RETRY_S)
+                self.listen_error = None
+                self.logger.info("Bound listen port %d", self.config.listen.port)
+
             # If configured to do so (default), wait until the upstream has
             # sent its welcome (load3) before accepting client connections.
             # This guarantees every client gets a full, fresh variable set.
@@ -2136,11 +2264,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 await asyncio.sleep(KNOWN_GOOD_SITU_DELAY)
 
             try:
-                self.proxy_server = await asyncio.start_server(
-                    self.handle_new_connection_cb,
-                    port=self.config.listen.port,
-                    limit=READ_BUFFER_SIZE
-                )
+                if self.proxy_server is not None:  # already bound (Basic Mode)
+                    await self.proxy_server.start_serving()
+                else:
+                    self.proxy_server = await asyncio.start_server(
+                        self.handle_new_connection_cb,
+                        port=self.config.listen.port,
+                        limit=READ_BUFFER_SIZE
+                    )
             except OSError as exc:
                 raise SystemExit(
                     f"Failed to open port {self.config.listen.port}," +
@@ -2309,9 +2440,16 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             if self.args.debug:
                 self.logger.setLevel(logging.DEBUG)
 
-            listener = logging.handlers.QueueListener(log_queue, console_handler, file_handler)
+            # Basic Mode keeps the console quiet: everything is on the web
+            # page, and the full log still goes to the log file.
+            if self.basic_mode:
+                console_handler.setLevel(logging.CRITICAL)
 
-            print('Starting logger')
+            listener = logging.handlers.QueueListener(
+                log_queue, console_handler, file_handler, respect_handler_level=True)
+
+            if not self.basic_mode:
+                print('Starting logger')
             # start the listener
             listener.start()
             # report the logger is ready
@@ -2395,7 +2533,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             listener = logging.handlers.QueueListener(log_queue, file_handler)
 
             try:
-                print('Starting traffic logger')
+                if not self.basic_mode:
+                    print('Starting traffic logger')
                 # start the listener
                 listener.start()
                 # report the logger is ready
@@ -2533,7 +2672,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             listener = logging.handlers.QueueListener(log_queue, file_handler)
 
             try:
-                print('Starting simevents logger')
+                if not self.basic_mode:
+                    print('Starting simevents logger')
                 listener.start()
                 self.logger.debug("Task %s has initialized simevents logging to %s",
                                   name, simevents_log_file)
@@ -4553,87 +4693,40 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         """Start the proxy."""
         self.handle_args()
 
-        # If there is no config file, fallback to "dumb client mode"
+        # Basic Mode: the router was started with no options at all (the
+        # first-time shared cockpit flyer double-clicking the EXE) and there
+        # is no config file with the default name. Everything else is done
+        # on the /basicmode/ web page. Any command line option means the
+        # user knows what they are doing, so a missing config file is then
+        # an error rather than a reason to fall back to Basic Mode.
         if not os.path.exists(self.args.config_file):
-            if self.args.no_basic_mode:
+            if len(sys.argv) > 1:
                 raise SystemExit(
-                    f"Configuration file {self.args.config_file} not found and"
-                    " --no-basic-mode was given, refusing to start in Basic Mode."
-                )
-            # Use the default config
+                    f"Configuration file {self.args.config_file} not found. "
+                    "(Start the router without any options to use Basic Mode.)")
+            self.basic_mode = True
             self.config = config.RouterConfig()
-            # Set sane defaults and ask the user to override them
-            print(f"""
-Configuration file {self.args.config_file} not found.
-If you want to use a config file, press Control-C now and create one.
-
-The router will now start in Basic Mode without a config file.
-
-Quick HOWTO for temporarily converting your PSX sim to a shared
-cockpit slave sim:
-
-1: Open the Instructor window for your PSX main server
-2: Under Network > Main, click Stop
-3: Under Preferences > Basic, make sure "This client connects to:" is 127.0.0.1
-4: Under Preferences > Basic, make sure "On Port:" is 10747
-5: Answer the questions below
-6: The router will start and connect to the shared cockpit master sim
-7: Open the Instructor window for your PSX main server
-8: On the Network tab, choose "A main client" and click start (should now connect to router)
-9: Verify that your entire sim is working. You will probably need to restart
-a few addons (the ones that does not automatically reconnect when the
-PSX main server or router is restarted).
-
-Note: choose a simulator name that let other shared cockpit users know
-who you are, e.g your PSX forum nickname
-
-Upstream host should be the IP address or hostname you got from the
-owner of the shared cockpit master sim.
-
-Upstream port should be the port number you got from the owner of the
-shared cockpit master sim.
-
-Password: leave blank if the master sim does not use a
-password. Otherwise use the password given to you by the owner of the
-shared cockpit master sim.
-""")
-
-            # Default to listen on 10747 for "dumb client mode" and connect to 10748
-            self.config.listen.port = 10747
-
-            # Default is to enable the REST API to allow for elevation filter control
-            self.config.listen.rest_api_port = 8747
-
-            self.config.upstream.port = 10748
-
+            self.config.listen.port = BASIC_MODE_LISTEN_PORT
+            # The REST API serves the Basic Mode page, and also allows for
+            # elevation filter control
+            self.config.listen.rest_api_port = BASIC_MODE_REST_API_PORT
+            # No upstream until the user enters one on the web page
+            self.config.upstream.host = ""
+            self.config.upstream.port = BASIC_MODE_DEFAULT_UPSTREAM_PORT
+            self.upstream_disabled = True
+            # The simulator name is the user's crew code, entered on the
+            # web page along with the master sim details (see
+            # basic_mode_connect()); nothing is sent anywhere before that.
+            self.config.identity.simulator = "BASIC"
+            self.config.identity.router = BASIC_MODE_ROUTER_NAME
+            # Basic Mode always joins someone else's shared cockpit as a
+            # slave sim -- set from the start rather than only once the
+            # upstream identifies itself as a frankenrouter, so other sims
+            # list us as a slave sim from our very first ROUTERINFO.
+            self.config.identity.type = 'slave'
             # Enable filtering of MSFS elevation data by default
             self.filter_elevation = True
-
-            while True:
-                self.config.identity.simulator = input(
-                    "The name of your simulator others will see (PSCC: use your crew nick, e.g MACRO)? ")  # pylint: disable=line-too-long
-                if (
-                        len(self.config.identity.simulator) < 24 and
-                        len(self.config.identity.simulator) > 0
-                ):
-                    break
-            self.config.identity.router = self.config.identity.simulator
-
-            host = input(f"Master sim router IP (press Enter for {self.config.upstream.host})? ")
-            port = input(f"master sim router port (press Enter for {self.config.upstream.port})? ")
-            password = input(
-                f"Your password for the master sim (press Enter for {self.config.upstream.password})? ")  # pylint: disable=line-too-long
-            if host != "":
-                self.config.upstream.host = host
-            if port != "":
-                self.config.upstream.port = int(port)
-            if password != "":
-                if not re.match(r'^[\x21-\x7e]+$', password):
-                    raise SystemExit(
-                        "\nPassword contains invalid characters. "
-                        "Only printable ASCII characters (no spaces) are allowed.")
-                self.config.upstream.password = password
-
+            self.subsystems['Status Display']['start'] = False
         else:
             # Read the config file
             try:
@@ -4722,6 +4815,14 @@ shared cockpit master sim.
                 self.tasks.add(task)
                 await asyncio.sleep(0)
                 print(f"frankenrouter version {__VERSION__} starting")
+                if self.basic_mode:
+                    config_path = os.path.abspath(self.args.config_file)
+                    print(
+                        f"\nNo config file found ({config_path}), so the router"
+                        " is running in BASIC MODE.\n"
+                        "This is normal and not an error: Basic Mode is all you"
+                        " need to join a shared cockpit.\n"
+                        f"\nOpen {BASIC_MODE_URL} in your web browser to get started.\n")
 
                 if self.config.log.traffic:
                     # Initialize traffic logging
@@ -4831,10 +4932,11 @@ if __name__ == '__main__':
     if '--devel' not in sys.argv:
         _install_ctrl_c_guard()
     try:
+        the_router = Frankenrouter()
         try:
-            asyncio.run(Frankenrouter().main())
+            asyncio.run(the_router.main())
         except KeyboardInterrupt:
-            print("Shut down due to ^C")
+            print(f"Shut down {the_router.shutdown_reason or 'due to ^C'}")
         except SystemExit as exc:
             if exc.code is not None:
                 print(exc.code)

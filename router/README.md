@@ -51,13 +51,20 @@ done all the time when we use a shared cockpit setup.
   unless you specifically want to try changes ahead of an official
   release.
 - Extract frankenrouter.exe from the zip file.
-- Run frankenrouter.exe.
-- Follow the instructions on screen, which tells you to:
-    - Reconfigure your PSX main server to be a main client.
-    - Enter your simulator name.
-    - Enter the connection details for the shared cockpit master sim (IP, port, password).
-    - Restart addons that don't automatically connect to the router.
+- Run frankenrouter.exe (just double-click it). Started without any
+  options and without a `frankenrouter.toml` config file next to it,
+  the router runs in Basic Mode.
+- Open <http://localhost:8747/basicmode/> in your web browser. That
+  page has everything you need: where to enter the master sim's
+  address, port and password, the connection status, your connected
+  PSX clients and addons, the other sims in the shared cockpit, and a
+  step-by-step checklist (including how to reconfigure your PSX main
+  server to be a main client).
 - Fly shared cockpit :)
+
+If the Basic Mode page shows a big red warning that the router could
+not open its port, your PSX main server is probably still running.
+Stop your sim, then restart the router.
 
 ## Installing
 
