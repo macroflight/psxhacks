@@ -418,6 +418,13 @@ _RV_TIMEOUT = aiohttp.ClientTimeout(total=15)
 _RV_DENSITY_SCAN_NM = 150.0   # radius of local echo scan around aircraft
 _RV_DENSITY_GRID = 5          # NxN sample grid (5×5 = 25 points)
 _RV_DENSITY_THRESHOLD = 0.25  # echo≥2 fraction triggering full CB squeeze
+# The CB squeeze never places a new zone closer than this ahead of the
+# aircraft (unless --new-zone-infront-range's own MIN is already lower): a
+# real crew would be deviating around a CB well before it got this close,
+# so a CB that first appears nearer than this looks like it popped up out
+# of nowhere. Also keeps squeezed zones from being relocated again within
+# minutes (2026-10-21 DNMM-VVDN: squeezed to 50nm, zones lived 3-11min).
+_CB_SQUEEZE_MIN_FWD_NM = 100.0
 
 _BZ_URL = "https://data.blitzortung.org/Data_1/strikes"
 _BZ_LOOKBACK_MIN = 20  # fetch this many recent minute-files of strike data
@@ -1284,6 +1291,35 @@ def build_wxmode_string(lat_deg: float, lon_deg: float,
     return f"{lat_rad:.8f};{lon_rad:.8f};320;{int(round(elevation_m))};{month:02d};{icao}00n"
 
 
+# PSX echoes every WxMode write back slightly rewritten (lat/lon rounded in
+# the last digit, name suffix "00n" -> "01p"), so an exact-string compare
+# against PSX's value never matches and every zone position was being
+# re-sent on every update (2026-10-21 DNMM-VVDN: ~1700 redundant WxMode
+# writes vs 321 real moves). Positions closer than this (radians, ~0.2m)
+# count as unchanged.
+_WXMODE_POS_EPS_RAD = 1e-7
+
+
+def _wxmode_equivalent(a: Optional[str], b: Optional[str]) -> bool:
+    """Return True if WxMode strings a and b describe the same zone placement.
+
+    Ignores PSX's own rewriting of what we sent: last-digit lat/lon rounding
+    and the 3-character suffix after the ICAO in the name field.
+    """
+    if a is None or b is None:
+        return False
+    pa, pb = a.split(';'), b.split(';')
+    if len(pa) != 6 or len(pb) != 6:
+        return a == b
+    try:
+        if (abs(float(pa[0]) - float(pb[0])) > _WXMODE_POS_EPS_RAD or
+                abs(float(pa[1]) - float(pb[1])) > _WXMODE_POS_EPS_RAD):
+            return False
+    except ValueError:
+        return a == b
+    return pa[2:5] == pb[2:5] and pa[5][:-3] == pb[5][:-3]
+
+
 def _parse_cb_arg(s: str) -> tuple:
     """Parse --fake-cb=O:B:T into (oktas, base_ft, top_ft)."""
     parts = s.split(':')
@@ -1654,6 +1690,16 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # Our current desired zone values (zone_num → string)
         self.zone_wx: dict = {}
         self.zone_mode: dict = {}
+        # zone_num -> (lat, lon, elev_m) of the elevation first sent in that
+        # zone's WxMode at that position; see _stable_zone_elev().
+        self._zone_elev: dict[int, tuple] = {}
+        # zone_num -> (zone_positions entry, (lat, lon, icao)): the broadcast
+        # position/airport _update_zones() picked the first time it snapped
+        # that zone at that placement. Reused until the zone is relocated, so
+        # a zone never hops between nearby airports as METARs go stale/fresh
+        # or other zones' choices change (2026-10-21 DNMM-VVDN: OYTZ/OYIB
+        # ping-pong, 18nm apart).
+        self._zone_snap: dict[int, tuple] = {}
         self.zone_is_metar: dict = {}
         # zone_num -> "VATSIM" or "NOAA", only meaningful when zone_is_metar
         # is True. See --primary-metar-source / _metar_source_label().
@@ -1956,12 +2002,31 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         regardless of the cache, such as Qi243 (a one-shot mode-gate pulse,
         not a persistent state value PSX "already has").
         """
-        if not force and self.psx.get(key) == value:
+        current = self.psx.get(key)
+        if not force and (current == value or
+                          (key.startswith("WxMode") and _wxmode_equivalent(current, value))):
             self.logger.debug("→ PSX %s = %s SKIPPED (unchanged)", key, value)
             return
         if not self._psx_send(key, value):
             return
         self.psx._set(key, value)  # pylint: disable=protected-access
+
+    def _stable_zone_elev(self, zone_num: int, lat: float, lon: float, elev_m: float) -> float:
+        """Return the elevation to send in zone_num's WxMode, fixed for as long as it stays put.
+
+        The first elevation used at a position sticks until the zone moves.
+        Open-Meteo's reported elevation for the same point varies between
+        fetches, and METAR zones send 0, so a zone switching between METAR
+        and Open-Meteo data would otherwise get its WxMode rewritten with a
+        new elevation at an unchanged position (2026-10-21 DNMM-VVDN: 61 such
+        rewrites). Any WxMode rewrite is something PSX may treat as a zone
+        reposition, so avoid it unless the zone actually moved.
+        """
+        cached = self._zone_elev.get(zone_num)
+        if cached is not None and cached[0] == lat and cached[1] == lon:
+            return cached[2]
+        self._zone_elev[zone_num] = (lat, lon, elev_m)
+        return elev_m
 
     def _wxbasic_writable(self) -> bool:
         """Return True if WxBasic may be written now: on the ground, or the aircraft is in it.
@@ -4131,12 +4196,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         Both modes retry up to 10 times to maintain new_zone_notnear clearance
         from other zones, and snap to a nearby airport if within _AIRPORT_SNAP_NM.
         """
-        fwd_min, configured_fwd_max = self.args.new_zone_infront_range
+        configured_fwd_min, configured_fwd_max = self.args.new_zone_infront_range
         fwd_max = self._effective_fwd_max()
-        fwd_min = fwd_min * fwd_max / configured_fwd_max if configured_fwd_max > 0 else 0.0
+        fwd_min = (configured_fwd_min * fwd_max / configured_fwd_max
+                   if configured_fwd_max > 0 else 0.0)
+        fwd_min = max(fwd_min, min(configured_fwd_min, _CB_SQUEEZE_MIN_FWD_NM))
+        fwd_max = max(fwd_max, fwd_min)
         if not initial and self.args.cape_squeeze and fwd_max < configured_fwd_max:
-            self.logger.info("CB squeeze active: fwd_max %.0f→%.0fnm",
-                             configured_fwd_max, fwd_max)
+            self.logger.info("CB squeeze active: %.0f-%.0fnm ahead → %.0f-%.0fnm",
+                             configured_fwd_min, configured_fwd_max, fwd_min, fwd_max)
         lat_min, lat_max = self.args.new_zone_leftright_range
         min_sep = self.args.new_zone_notnear
         others = [(lat, lon) for zn, (lat, lon, _) in self.zone_positions.items()
@@ -5260,6 +5328,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         metar_sources: list = []  # "VATSIM"/"NOAA" alongside raw_metars, or None
         om_zone_idx: list = []  # indices of zones that need Open-Meteo
         used_icaos: set = set()
+        locked = {i: snap[1] for i, snap in
+                  ((i, self._zone_snap.get(i + 1)) for i in range(7))
+                  if snap is not None and snap[0] == positions[i]}
+        reserved_icaos = {icao for _, _, icao in locked.values()}
         # zone index -> (icao, age_hours) for zones where a real METAR was
         # available but discarded for being too old (see _metar_is_fresh) --
         # surfaced in zone_reason so it's visible in the web UI, not just logs.
@@ -5309,9 +5381,25 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         "Zone %d → %s (%s METAR, CB-avoidance offset zone)",
                         i + 1, stored_icao, src_label)
                 continue
+            if i in locked:
+                snap_lat, snap_lon, snap_icao = locked[i]
+                raw = metar_cache.get(snap_icao)
+                if raw is not None and not _metar_is_fresh(raw):
+                    stale_metar_discarded[i] = (snap_icao, _metar_age_hours(raw))
+                    raw = None
+                snap_positions.append((snap_lat, snap_lon))
+                snap_icaos.append(snap_icao)
+                raw_metars.append(raw)
+                used_icaos.add(snap_icao)
+                if raw is None:
+                    metar_sources.append(None)
+                    om_zone_idx.append(i)
+                else:
+                    metar_sources.append(self._metar_source_label(snap_icao, raw))
+                continue
             skipped_stale: list = []
             for icao, alat, alon, dist_nm in zone_candidates[i]:
-                if icao not in metar_cache or icao in used_icaos:
+                if icao not in metar_cache or icao in used_icaos or icao in reserved_icaos:
                     continue
                 candidate_raw = metar_cache[icao]
                 if not _metar_is_fresh(candidate_raw):
@@ -5337,7 +5425,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 # No (fresh) METAR anywhere nearby — snap to nearest available airport
                 # anyway, use OM
                 best_ap = next(
-                    (ap for ap in zone_candidates[i] if ap[0] not in used_icaos), None)
+                    (ap for ap in zone_candidates[i]
+                     if ap[0] not in used_icaos and ap[0] not in reserved_icaos), None)
                 if best_ap is not None:
                     snap_positions.append((best_ap[1], best_ap[2]))
                     snap_icaos.append(best_ap[0])
@@ -5359,6 +5448,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     self.logger.debug(
                         "Zone %d → %s (Open-Meteo; no airports within %.0fnm)",
                         i + 1, stored_icao, _AIRPORT_SNAP_NM)
+        for i in range(7):
+            if i not in locked:
+                self._zone_snap[i + 1] = (positions[i], (*snap_positions[i], snap_icaos[i]))
 
         # EXPERIMENTAL (--metar-live-refresh): try a fresher live VATSIM reading
         # for every zone that already got a real METAR from VATSIM above. Never
@@ -5447,7 +5539,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     icao, raw_metars[i], parsed.get('trends', []))
                 parsed['ts_oktas'] = max(parsed['ts_oktas'], trend_ts_oktas)
                 parsed['showers'] = parsed['showers'] or trend_showers
-                new_modes.append(build_wxmode_string(lat, lon, 0.0, month, icao))
+                new_modes.append(build_wxmode_string(
+                    lat, lon, self._stable_zone_elev(i + 1, lat, lon, 0.0), month, icao))
                 wx = metar_to_wx_string(parsed)
                 ts_oktas = parsed.get('ts_oktas', 0)
                 has_showers_metar = parsed.get('showers', False)
@@ -5468,7 +5561,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 new_metars.append(raw_metars[i])
             else:
                 elev = float(om.get("elevation", 0)) if om else 0.0
-                new_modes.append(build_wxmode_string(lat, lon, elev, month, icao))
+                new_modes.append(build_wxmode_string(
+                    lat, lon, self._stable_zone_elev(i + 1, lat, lon, elev), month, icao))
                 wx = (om_to_wx_string(om, radar_echo=radar_echo, lightning=has_lightning)
                       if om else ";".join(_WX_DEFAULTS))
                 new_metars.append(_gen_metar(icao, om, now) if om else None)
@@ -6426,10 +6520,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             '--new-zone-notnear', type=float, default=50.0, metavar='NM',
             help="Minimum separation in nm from existing zones; retry up to 10 times.")
         parser.add_argument(
-            '--cape-squeeze', type=_parse_cape_squeeze, default=(500.0, 50.0),
+            '--cape-squeeze', type=_parse_cape_squeeze, default=(500.0, 150.0),
             metavar='CAPE:MIN_FWD',
             help="Squeeze zone spacing when CAPE is high: at avg CAPE >= CAPE J/kg "
-                 "shrink fwd_max to MIN_FWD nm (default: 500:50).")
+                 "shrink fwd_max to MIN_FWD nm (default: 500:150). New zones are "
+                 "never squeezed closer than 100nm ahead.")
         parser.add_argument(
             '--fake-cb', type=_parse_cb_arg, default=None, metavar='O:B:T',
             help="Override CB in all zones: O=oktas (0-8), B=base ft, T=top ft "

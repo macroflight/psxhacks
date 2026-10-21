@@ -1281,7 +1281,7 @@ def _build_weather_settings_page(ctx):  # pylint: disable=too-many-locals,too-ma
         f'<tr><td>Min zone separation</td>'
         f'<td class="val">{cfg.get("new_zone_notnear", "?")} nm</td></tr>\n' +
         (f'<tr><td>CAPE squeeze</td><td class="val">'
-         f'at {squeeze[0]} J/kg → min {squeeze[1]} nm ahead</td></tr>\n'
+         f'at {squeeze[0]} J/kg → zones placed at most {squeeze[1]} nm ahead</td></tr>\n'
          if squeeze else '') +
         (f'<tr><td>Fake CB override</td><td class="warn">'
          f'{fake_cb[0]} oktas base {fake_cb[1]} ft top {fake_cb[2]} ft</td></tr>\n'
