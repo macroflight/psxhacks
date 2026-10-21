@@ -1,5 +1,31 @@
 # frankenweather changelog
 
+## 1.8.4 (2026-10-21)
+
+- **Change: the CB squeeze no longer places new zones closer than 100 nm
+  ahead.** When CBs are around, `--cape-squeeze` moves new zones closer
+  to the aircraft. With the old default (`500:50`) they landed as close
+  as 30 nm, which real crews would already be deviating around, and
+  zones were relocated again within 3-11 minutes (about one relocation a
+  minute on the DNMM-VVDN flight). The default is now `500:150`: new
+  zones go 150-250 nm ahead normally and 100-150 nm ahead when fully
+  squeezed.
+- **Fix: zones were repositioned in PSX without actually moving.** A
+  zone's position is now only sent to PSX when the zone is really
+  relocated. On the DNMM-VVDN flight there were about 2,200 position
+  writes for 321 real moves:
+  - PSX echoes positions back slightly rewritten (rounded coordinates,
+    a different name ending), so frankenweather never recognised them as
+    unchanged and resent every zone on every update. These are now
+    treated as unchanged.
+  - The elevation sent with a zone's position varied between updates
+    (Open-Meteo's value changes between fetches, and METAR zones send 0).
+    A zone now keeps the elevation it was first sent with until it moves.
+  - Zones hopped between nearby airports (up to about 40 nm) whenever a
+    METAR went stale or fresh, or another zone changed airport. A zone
+    now keeps its airport until it is relocated; if that airport's METAR
+    goes stale, it uses Open-Meteo data at the same spot instead.
+
 ## 1.8.3 (2026-10-21)
 
 - **Fix: `--sync-tropopause` never set a tropopause in the tropics.**
