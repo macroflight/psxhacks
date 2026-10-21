@@ -360,7 +360,9 @@
 # needs a real console to print its UTF-8 box-drawing characters). Both
 # lines below are commented out since the default is not to start it. To
 # enable it: uncomment BOTH lines below AND edit $PsxSimlinkBridgeExe to
-# the actual path of the .exe.
+# the actual path of the .exe. The .exe name must start with "psx_simlink"
+# (e.g. psx_simlink_bridge_windows_v1_0b.exe or psx_simlink.exe) - that's
+# how stop_psx_simlink_bridge.ps1 and FrankenControl find its process.
 # ---------------------------------------------------------------------------
 #$StartPsxSimlinkBridge = $true   # psx_simlink_bridge
 #$PsxSimlinkBridgeExe    = "$SimBase\psx_simlink_bridge\psx_simlink_bridge_windows_v1_0b.exe"
