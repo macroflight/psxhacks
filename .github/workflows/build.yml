@@ -109,7 +109,7 @@ jobs:
           # itself (each member still builds individually via -Addon), this
           # is purely about how the *release* is packaged.
           $GroupMembers = @{
-              'psxutils' = @('show_hid', 'show_psx', 'show_usb', 'temporary_weather_logger')
+              'psxutils' = @('show_hid', 'show_psx', 'show_usb', 'temporary_weather_logger', 'compare_metars')
               'frankenboostproxy' = @('frankenboostproxy', 'show_boost_gauges')
           }
 

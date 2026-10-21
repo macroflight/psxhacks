@@ -61,6 +61,7 @@ $AddonSpecs = [ordered]@{
     'show_psx'             = @('show_psx.spec')
     'show_usb'             = @('show_usb.spec')
     'show_hid'             = @('show_hid.spec')
+    'compare_metars'       = @('compare_metars.spec')
     # frankenrouter lives in a subdirectory; --distpath keeps output alongside the rest
     'frankenrouter'        = @('--distpath', '.\dist', 'router\frankenrouter.spec')
 }

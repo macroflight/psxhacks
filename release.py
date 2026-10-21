@@ -21,9 +21,10 @@ frankenrouter, frankentanker, frankenusb, frankenweather, psxutils,
 start_scripts.
 
 psxutils is a shared version number for a group of small diagnostic
-utilities (show_hid, show_psx, show_usb, temporary_weather_logger) that are
-published together as one release containing a zip of all four EXEs, rather
-than each having its own version/release -- see docs/BuildSystem.md.
+utilities (show_hid, show_psx, show_usb, temporary_weather_logger,
+compare_metars) that are published together as one release containing a zip
+of all their EXEs, rather than each having its own version/release -- see
+docs/BuildSystem.md.
 
 start_scripts is plain PowerShell the user runs directly (see
 start_scripts/functions.ps1's Get-StartScriptsVersion) -- it is never built
@@ -119,7 +120,8 @@ _ADDON_PATHS = {
     'psxutils': (
         ['show_hid.py', 'show_hid.spec', 'show_psx.py', 'show_usb.py',
          'show_usb.spec', 'temporary_weather_logger.py',
-         'temporary_weather_logger.spec'],
+         'temporary_weather_logger.spec', 'compare_metars.py',
+         'compare_metars.spec'],
         []),
     'start_scripts': (['start_scripts/'], []),
 }

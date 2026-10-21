@@ -38,14 +38,14 @@ thing that ever writes (see the repo's main `CLAUDE.md` /
 changed get built; if none did, the (expensive, Windows) `build` job is
 skipped entirely.
 
-Special case: `psxutils` is a shared version number for four small
+Special case: `psxutils` is a shared version number for five small
 diagnostic utilities — `show_hid`, `show_psx`, `show_usb`,
-`temporary_weather_logger` — that don't need independent versioning or
-their own release history. `psxutils.version` changing builds all four
-individually (each still has its own `.spec`/`makepackages.ps1 -Addon`
+`temporary_weather_logger`, `compare_metars` — that don't need
+independent versioning or their own release history. `psxutils.version`
+changing builds all five individually (each still has its own `.spec`/`makepackages.ps1 -Addon`
 entry) and publishes them together as **one** release,
 `psxutils-v<version>`, with a single asset: `psxutils.zip` containing all
-four EXEs. This grouping lives in the `build.yml` workflow's
+five EXEs. This grouping lives in the `build.yml` workflow's
 `$GroupMembers` table, not in `release.py`'s `_ADDONS` (which just needs
 `psxutils.version` to exist there so `./release.py psxutils` can bump it
 like any other addon).
@@ -100,8 +100,8 @@ Releases page and find the tag for the addon you want
 (`frankenweather-v1.2.4`, `frankenrouter-testing-v1.4.5`, etc.). Each
 release has exactly one asset: that addon's `.exe` — except `psxutils`
 releases (`psxutils-v1.0.0`, etc.), whose one asset is a `.zip` containing
-all four utility EXEs (`show_hid.exe`, `show_psx.exe`, `show_usb.exe`,
-`temporary_weather_logger.exe`), and `frankenboostproxy` releases, whose
+all five utility EXEs (`show_hid.exe`, `show_psx.exe`, `show_usb.exe`,
+`temporary_weather_logger.exe`, `compare_metars.exe`), and `frankenboostproxy` releases, whose
 one asset is a `.zip` containing both `frankenboostproxy.exe` and
 `show_boost_gauges.exe`.
 

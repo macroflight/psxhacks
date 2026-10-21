@@ -246,9 +246,10 @@ tag matching the addon you want:
   are OK reporting problems; stick to the plain `-v<version>` tags
   otherwise.
 - `psxutils-v<version>`/`psxutils-testing-v<version>` releases are a
-  special case: one release contains a single zip with four small
+  special case: one release contains a single zip with five small
   diagnostic utilities (`show_hid.exe`, `show_psx.exe`, `show_usb.exe`,
-  `temporary_weather_logger.exe`) rather than one EXE per release.
+  `temporary_weather_logger.exe`, `compare_metars.exe`) rather than one
+  EXE per release.
 
 See [docs/BuildSystem.md](docs/BuildSystem.md) for the full details of
 how and when these are built.

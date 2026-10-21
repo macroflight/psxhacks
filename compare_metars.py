@@ -450,4 +450,12 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    EXIT_STATUS = main()
+    # The EXE is usually double-clicked, and its console window closes as
+    # soon as we exit -- keep the report on screen until the user is done.
+    if getattr(sys, 'frozen', False):
+        try:
+            input("\nPress Enter to exit")
+        except EOFError:
+            pass
+    sys.exit(EXIT_STATUS)
