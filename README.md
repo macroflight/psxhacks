@@ -115,6 +115,15 @@ CDU. Some functions (e.g drop retardant, arm the system, etc.) can
 also be controlled using PSX network `addon=` messages that you can
 send using e.g FrankenUSB.
 
+### compare_metars.py
+
+Downloads the current METARs for all stations from both VATSIM and
+NOAA (the two sources frankenweather uses) and reports how they
+differ: stations only one source has, report age, which source is
+newer, and which fields (QNH, wind, visibility, weather, clouds,
+temperature) disagree. Use `--detail` for a per-station diff, and
+`--icao EGLL,KJFK` or `--prefix K,EG` to limit the comparison.
+
 ### show_psx.py
 
 Will display and monitor for changes one PSX variable. Mostly useful
