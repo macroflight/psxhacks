@@ -1,5 +1,34 @@
 # frankenweather changelog
 
+## 1.8.3 (2026-10-21)
+
+- **Fix: `--sync-tropopause` never set a tropopause in the tropics.**
+  The tropical tropopause sits at about 100 hPa, the highest level
+  frankenweather fetched from Open-Meteo, and the highest level can never
+  be confirmed as the tropopause because there is nothing above it to
+  compare with. 70 hPa is now fetched as well; on the DNMM-VVDN flight
+  this gives about 54,800 ft / -80°C over India, where nothing was set
+  before.
+- **Fix: tropopause sync now hands the tropopause back to PSX when it
+  has no data.** If no tropopause can be determined (or there is no wind
+  profile at all), WxAloft is set back to PSX's own automatic modes
+  instead of leaving an earlier fixed value in place. Tropopause changes
+  are now logged.
+- **Fix: NOAA METARs failed completely if the file contained a single
+  garbled report** ("'utf-8' codec can't decode byte 0xed ..."), and
+  frankenweather fell back to VATSIM. Undecodable bytes are now replaced,
+  so only that one report is affected.
+- **Fix: NOAA METARs were not always the newest report.** NOAA's hourly
+  files repeat each station many times and are not in time order, and
+  frankenweather simply used the last line it saw. It now picks the
+  newest observation, prefers corrected (COR) reports over the
+  originals, and never replaces a full report with a copy whose remarks
+  were cut off. The previous hour's file is read too, since early in each
+  hour the current one has very few stations.
+- **Fix: per-run logs in `.cache/frankenweather/logs` could look out of
+  date when copied during a flight.** The log files are now forced to
+  disk every 60 seconds.
+
 ## 1.8.2 (2026-10-20)
 
 - **Fix: cruise PFD altitude jumps caused by writing WxBasic (planet
