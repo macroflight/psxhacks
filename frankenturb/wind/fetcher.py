@@ -47,11 +47,15 @@ _DISK_CACHE_MAX_AGE_S = 6 * 3600.0
 # ---------------------------------------------------------------------------
 # Pressure levels to request — covers surface to above typical cruise levels.
 # Open-Meteo supports all of these for the GFS/ECMWF ensemble.
+# 70 hPa (~18.5 km) is there for WindProfile.tropopause(): the tropical
+# tropopause sits at or just below 100 hPa, and without a level above it
+# the WMO lapse-rate test has nothing to compare 100 hPa against, so no
+# tropopause is ever found anywhere in the tropics.
 # ---------------------------------------------------------------------------
 LEVELS_HPA: list[int] = [
     1000, 975, 950, 925, 900, 850, 800, 750, 700,
     650, 600, 550, 500, 450, 400, 350, 300,
-    250, 200, 150, 100,
+    250, 200, 150, 100, 70,
 ]
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"

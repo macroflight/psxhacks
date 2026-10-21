@@ -2413,11 +2413,21 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         suffix = self._wxaloft_raw[idx:]
         profile = self._turb_engine.wind_fetcher.get(
             self.ac_lat, self.ac_lon, datetime.now(timezone.utc))
-        if profile is None:
-            return
-        result = profile.tropopause()
+        result = profile.tropopause() if profile is not None else None
         if result is None:
-            self.logger.debug("Tropopause not found in current wind profile — skipping")
+            # No data of our own: hand the tropopause back to PSX's own
+            # "auto" modes rather than leave an earlier fixed value of ours
+            # in place indefinitely -- lowercase letters, numbers kept as-is
+            # (the same toggle the Planet Weather page itself sends).
+            auto_value = re.sub(r"^[aA](\d+)[tT](\d+)[wW]",
+                                lambda m: f"a{m.group(1)}t{m.group(2)}w", self._wxaloft_raw)
+            if auto_value != self._wxaloft_raw:
+                self.logger.info(
+                    "Tropopause: %s — returning WxAloft to PSX auto (%s → %s)",
+                    "no wind profile" if profile is None else "not found in wind profile",
+                    self._wxaloft_raw, auto_value)
+                self._inject_wx_slow_transit()
+                self.psx_send_and_set("WxAloft", auto_value)
             return
         alt_m, temp_c, speed_kt, dir_deg = result
         alt_ft = round(alt_m / 0.3048)
@@ -2426,6 +2436,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         direction = round(dir_deg) % 360
         self._inject_wx_slow_transit()
         new_value = f"A{alt_ft}T{temp_abs}W{0:03d}{direction:03d}{speed};{speed}{suffix}"
+        if new_value != self._wxaloft_raw:
+            self.logger.info(
+                "Tropopause: %dft -%dC %03d°/%dkt (WxAloft %s → %s)",
+                alt_ft, temp_abs, direction, speed, self._wxaloft_raw, new_value)
         self.psx_send_and_set("WxAloft", new_value)
 
     def _aircraft_sigmet_hazards(self) -> list:

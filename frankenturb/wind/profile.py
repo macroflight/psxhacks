@@ -272,9 +272,10 @@ class WindProfile:  # pylint: disable=too-many-instance-attributes
         it benefits from the same u/v interpolation as everything else.
 
         Returns None if there are too few valid temperature levels, or no
-        qualifying level is found in the available profile (e.g. a very
-        high tropical tropopause can exceed Open-Meteo's ~100 hPa/16 km
-        ceiling).
+        qualifying level is found in the available profile. The top level
+        can never qualify itself (nothing above it to test against), which
+        is why the fetcher requests 70 hPa: the tropical tropopause is
+        typically at ~100 hPa/16-17 km.
         """
         valid = self._valid & np.isfinite(self.temperatures_c)
         if np.sum(valid) < 3:
