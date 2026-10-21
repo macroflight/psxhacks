@@ -93,6 +93,10 @@ _OM_ENROUTE_CACHE_PATH = os.path.join(
 _EVENT_LOG_DIR = os.path.join(os.path.expanduser("~"), ".cache", "frankenweather", "logs")
 _EVENT_LOG_GLOB = "frankenweather_*.log"
 _EVENT_LOG_RETAIN = 10  # keep only the most recent N per-run log files
+# How often log_flush_coro() fsyncs the log files, so a log copied off disk
+# mid-flight (e.g. from ~/.cache/frankenweather/logs on Windows) is never
+# more than this far behind -- same cadence as frankenrouter's own logs.
+_LOG_FLUSH_INTERVAL_S = 60.0
 
 
 def _om_pos_key(lat: float, lon: float) -> str:
@@ -5753,6 +5757,35 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
             self.logger.critical(traceback.format_exc())
 
+    async def log_flush_coro(self) -> None:
+        """Every _LOG_FLUSH_INTERVAL_S, flush and fsync every log file.
+
+        logging.FileHandler already flushes Python's buffer after every
+        record, but on Windows a file another process still holds open can
+        look stale to copy/zip tools (size/contents as of an earlier point)
+        until its data is committed to disk -- the fsync forces that commit.
+        """
+        myname = inspect.currentframe().f_code.co_name
+        try:
+            self.logger.debug("Starting %s", myname)
+            while True:
+                await asyncio.sleep(_LOG_FLUSH_INTERVAL_S)
+                for handler in logging.getLogger().handlers:
+                    if not isinstance(handler, logging.FileHandler):
+                        continue
+                    handler.acquire()
+                    try:
+                        if handler.stream:
+                            handler.stream.flush()
+                            os.fsync(handler.stream.fileno())
+                    except OSError as exc:
+                        self.logger.debug("Log fsync failed for %s: %s", handler.baseFilename, exc)
+                    finally:
+                        handler.release()
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
+            self.logger.critical(traceback.format_exc())
+
     async def sigmet_refresh_coro(self) -> None:
         """Every _SIGMET_REFRESH_MAX_S (and once at startup), refresh PSX's own SIGMET data.
 
@@ -6235,6 +6268,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     ("TimeSync", self.time_sync_coro),
                     ("OmFailureBanner", self.om_failure_banner_coro),
                     ("SigmetRefresh", self.sigmet_refresh_coro),
+                    ("LogFlush", self.log_flush_coro),
                 ]
                 coros += [
                     ("TurbulenceTask", self.turbulence_coro),
