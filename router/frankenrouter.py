@@ -400,6 +400,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # In Basic Mode the upstream starts disabled (idle) until the user
         # presses Connect on the web page.
         self.basic_mode = False
+        # Basic Mode keeps the console quiet until the upstream connection
+        # is established (data flowing), then switches to the normal
+        # console log and status display -- see status_display_task().
+        self.basic_mode_console_on = False
+        self.console_handler = None
         # Why we are shutting down, for the final console message when it
         # wasn't actually a Ctrl-C (e.g. the web interface's Shutdown
         # button, which raises SIGINT to get the same graceful shutdown)
@@ -725,6 +730,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         if self.upstream is not None:
             return True
         return False
+
+    def upstream_data_flowing(self):
+        """Return True once the upstream has welcomed us and sent data on this connection."""
+        return (self.is_upstream_connected() and self.upstream_ever_welcomed and
+                self.upstream.messages_received > 0)
 
     def get_router_type(self):
         """Return True if we are a slave sim router."""
@@ -2440,8 +2450,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             if self.args.debug:
                 self.logger.setLevel(logging.DEBUG)
 
-            # Basic Mode keeps the console quiet: everything is on the web
-            # page, and the full log still goes to the log file.
+            # Basic Mode keeps the console quiet until the upstream
+            # connection is established (see status_display_task()):
+            # until then everything is on the web page, and the full log
+            # still goes to the log file.
+            self.console_handler = console_handler
             if self.basic_mode:
                 console_handler.setLevel(logging.CRITICAL)
 
@@ -3345,6 +3358,20 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             last_display = 0.0
             while True:
                 await asyncio.sleep(1.0)
+                if self.basic_mode and not self.basic_mode_console_on:
+                    if not self.upstream_data_flowing():
+                        continue
+                    # Connected: from now on, show the normal console log
+                    # and status display (and keep showing them even if the
+                    # connection drops later).
+                    self.basic_mode_console_on = True
+                    if self.console_handler is not None:
+                        self.console_handler.setLevel(logging.NOTSET)
+                    self.logger.info(
+                        "Connected to the master sim - showing the router's normal"
+                        " console output from now on (the Basic Mode web page at %s"
+                        " keeps working)", BASIC_MODE_URL)
+                    self.status_display_requested = name
                 display = False
                 if self.status_display_requested:
                     display = True
@@ -4726,7 +4753,6 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.config.identity.type = 'slave'
             # Enable filtering of MSFS elevation data by default
             self.filter_elevation = True
-            self.subsystems['Status Display']['start'] = False
         else:
             # Read the config file
             try:

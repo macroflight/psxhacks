@@ -851,9 +851,8 @@ def _basic_mode_status(router):
         up = router.upstream
         # Green only once data is actually flowing: the upstream has
         # welcomed us (load3) and sent something on this connection.
-        welcomed = router.upstream_ever_welcomed and up.messages_received > 0
         upstream.update({
-            'state': 'ok' if welcomed else 'connected',
+            'state': 'ok' if router.upstream_data_flowing() else 'connected',
             # "sim/router" once the upstream router has identified itself
             'name': (up.display_name if up.simulator_name != 'unknown sim'
                      else f"{up.ip}:{up.port}"),
