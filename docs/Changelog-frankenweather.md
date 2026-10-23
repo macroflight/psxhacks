@@ -1,5 +1,42 @@
 # frankenweather changelog
 
+## 1.10.0 (2026-10-23)
+
+- **Fix: CBs in frankenweather's own zones no longer vanish.**
+  frankenweather wrote a METAR it generated from Open-Meteo into each of
+  its zones. PSX rebuilds a zone's weather from its METAR about a second
+  after the METAR's weather changes, which removed SIGMET CBs and changed
+  cloud layers and tops, so the radar, PSX's zones and frankenweather's
+  turbulence disagreed. Zones whose weather comes from Open-Meteo now get
+  a METAR with only the zone's name and the time it was placed (e.g.
+  `X328 231230Z`), written once per placement. PSX's Instructor shows that
+  instead of an old zone's METAR. Zones with a real METAR still get it.
+- **Fix: CB turbulence is centred on the CB itself**, where PSX draws it
+  on the radar, 7 nm from the zone's centre. Its core was centred on the
+  zone's centre, so with a core of under 7 nm, flying straight through
+  the CB on the radar only gave the weaker flank turbulence.
+- **Fix: a zone isn't moved while its CB turbulence can reach the
+  aircraft** (its core plus flank zone, or plus the anvil zone above the
+  cloud top), whatever would otherwise move it: falling behind, becoming
+  the anchor or a SIGMET zone, an airport needing a zone, or entering
+  maneuvering mode. The turbulence used to stop the moment a zone moved.
+- **Fix: leaving maneuvering mode no longer re-places all zones.** It
+  re-placed them at random all around the aircraft, taking away the CB
+  ahead (or the one the aircraft was in). Now only entering maneuvering
+  mode does that, and leaving it lets the ordinary relocation rules move
+  zones as they fall behind.
+- **Fix (`--sigmet`): a new anchor zone is kept away from the other
+  zones.** It went 40-50 nm straight ahead even if another zone was right
+  there, and a zone close to a CB shrinks that CB's radar return and
+  turbulence (one anchor 9 nm from a CB left it a 2 nm core). Now it goes
+  40-50 nm ahead, within 20 nm of track, at least 50 nm
+  (`--new-zone-notnear`) from the other zones when possible, else as far
+  from them as possible, and never gets another zone's name.
+- **New: CB turbulence on the weather map.** Each CB's turbulence area is
+  drawn as rings around where PSX draws the CB: the core (red) and the
+  inner (yellow) and outer (green) half of the flank zone, at cloud
+  levels. (Also in the router's web UI, with a router that has it.)
+
 ## 1.9.0 (2026-10-23)
 
 - **New (experimental): frankenweather's SIGMET system (`--sigmet`).**
