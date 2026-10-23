@@ -434,6 +434,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.frankenweather_turbstate_received_at: float = 0.0
         self.frankenweather_windstate: dict = None
         self.frankenweather_windstate_received_at: float = 0.0
+        self.frankenweather_sigmetstate: dict = None
+        self.frankenweather_sigmetstate_received_at: float = 0.0
         self.frankencontrol_status: dict = None
         self.frankencontrol_status_received_at: float = 0.0
         self.upstream_reconnect_requested = False
@@ -2897,7 +2899,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # End of send_frdp_sharedinfo()
 
     def cache_frankenweather_addon(self, line: str) -> None:
-        """Parse and cache FRANKENWEATHER STATE/TURBSTATE/WINDSTATE addon messages for the UI.
+        """Parse and cache FRANKENWEATHER STATE/TURBSTATE/WINDSTATE/SIGMETSTATE messages for the UI.
 
         Assumes only one FRANKENWEATHER instance is ever active on the
         network — frankenweather itself detects and pauses conflicting
@@ -2907,6 +2909,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # line: "addon=FRANKENWEATHER:STATE:<uuid>:<json>"
         # line: "addon=FRANKENWEATHER:TURBSTATE:<uuid>:<json>"
         # line: "addon=FRANKENWEATHER:WINDSTATE:<uuid>:<payload>" (gzip+base64, see fw_webui)
+        # line: "addon=FRANKENWEATHER:SIGMETSTATE:<uuid>:<payload>" (same encoding)
         rest = line[len("addon=FRANKENWEATHER:"):]
         for prefix, data_attr, received_attr, decode in (
                 ("STATE:", "frankenweather_state",
@@ -2915,6 +2918,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                  "frankenweather_turbstate_received_at", json.loads),
                 ("WINDSTATE:", "frankenweather_windstate",
                  "frankenweather_windstate_received_at", _fw_webui.decode_windstate_payload),
+                ("SIGMETSTATE:", "frankenweather_sigmetstate",
+                 "frankenweather_sigmetstate_received_at", _fw_webui.decode_windstate_payload),
         ):
             if not rest.startswith(prefix):
                 continue

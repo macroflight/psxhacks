@@ -1798,8 +1798,9 @@ def _efb_controls_card(w):
         _efb_bool_chip_row(
             '/api/efb/toggle', 'disable_psx_sigmets', w['disable_psx_sigmets'],
             true_label='PSX SIGMETs Off', false_label='PSX SIGMETs On', small=True) +
-        '<p class="efb-hint">Controls whether PSX\'s own weather engine uses SIGMETs '
-        "(FrankenWeather's own CB logic always does).</p>\n"
+        '<p class="efb-hint">Off: PSX gets no SIGMETs at all (no volcanic ash, '
+        'turbulence, icing or mountain wave either). FrankenWeather still downloads '
+        'them and shows thunderstorms as CBs in its weather zones.</p>\n'
         '</div>\n'
     )
 
@@ -2087,6 +2088,16 @@ class RouterFWContext:
     def fw_windstate_received_at(self):
         """Return epoch of last WINDSTATE receive."""
         return self._router.frankenweather_windstate_received_at
+
+    @property
+    def fw_sigmetstate(self):
+        """Return cached SIGMETSTATE dict."""
+        return self._router.frankenweather_sigmetstate
+
+    @property
+    def fw_sigmetstate_received_at(self):
+        """Return epoch of last SIGMETSTATE receive."""
+        return self._router.frankenweather_sigmetstate_received_at
 
     @property
     def fw_conflict_paused(self):

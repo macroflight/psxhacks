@@ -925,7 +925,7 @@ class Rules():  # pylint: disable=too-many-public-methods
                 RulesCode.KEYVALUE_FILTERED_INGRESS_SILENT,
                 message="filtered FRANKENMSFSBRIDGE addon as filter_elevation is set")
 
-        # FRANKENWEATHER addon traffic (STATE/TURBSTATE/WINDSTATE) can be
+        # FRANKENWEATHER addon traffic (STATE/TURBSTATE/WINDSTATE/SIGMETSTATE) can be
         # large -- WINDSTATE in particular runs several KB per message --
         # and is only useful to other frankenrouters (to relay state
         # across the mesh) and to other FrankenWeather instances
