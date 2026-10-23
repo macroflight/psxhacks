@@ -10,7 +10,7 @@ ctx must provide:
   ctx.fw_state_received_at      : float   — epoch of last STATE
   ctx.fw_turbstate_received_at  : float   — epoch of last TURBSTATE
   ctx.fw_windstate_received_at  : float   — epoch of last WINDSTATE
-  ctx.fw_sigmetstate      : dict | None   — SIGMETSTATE payload (--own-sigmets)
+  ctx.fw_sigmetstate      : dict | None   — SIGMETSTATE payload (--sigmet)
   ctx.fw_sigmetstate_received_at : float  — epoch of last SIGMETSTATE
   ctx.fw_conflict_paused   : bool         — True while this instance is paused
                                             because a second FRANKENWEATHER
@@ -158,16 +158,27 @@ _LEAFLET_HEAD = (
     '</style>\n'
 )
 
-_TURB_TYPES_ORDER = ('wave', 'rotor', 'mechanical', 'shear', 'cb', 'pirep', 'cape', 'gairmet')
+_TURB_TYPES_ORDER = ('wave', 'rotor', 'mechanical', 'shear', 'cb', 'pirep', 'cape', 'gairmet',
+                     'sigmet')
 _TURB_KIND_LABELS = {
     'wave': 'Mountain wave', 'rotor': 'Lee rotor', 'mechanical': 'Mechanical',
     'shear': 'Wind shear CAT', 'cb': 'CB proximity', 'pirep': 'PIREP',
-    'cape': 'CAPE convective', 'gairmet': 'G-AIRMET',
+    'cape': 'CAPE convective', 'gairmet': 'G-AIRMET', 'sigmet': 'SIGMET',
 }
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _sigmets_nav_link(ctx, newline: bool = False) -> str:
+    """Return the nav button to the SIGMETs page, or '' without frankenweather's --sigmet."""
+    sigstate = getattr(ctx, 'fw_sigmetstate', None) or {}
+    if not (sigstate.get('enabled') or
+            ((ctx.fw_state or {}).get('config') or {}).get('sigmet_enabled')):
+        return ''
+    return ('<a href="/weather/sigmets" class="btn btn-gray btn-sm">SIGMETs</a>' +
+            ('\n' if newline else ''))
 
 
 def _page_shell(color_scheme, title, nav_html, body, extra_head=''):
@@ -492,6 +503,8 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
             'wx_raw': wx_str,
             'cb_target': zone.get('cb_target'),
             'cb_rate': zone.get('cb_rate'),
+            'cb_sigmet': zone.get('cb_sigmet'),
+            'anchor': bool(zone.get('anchor')),
             # Where PSX actually draws this zone's CB, if it has one
             'cb_pos': (_zone_cb_position(ctx.cache_get(f'WxMode{zone_num}') or '', time_earth_ms)
                        if (wx.get('cb_raw') or {}).get('oktas') else None),
@@ -680,7 +693,8 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         "    cbLabel='<br>⛈ '+cr.oktas+\"/8 \"+cr.base+\"'-\"+cr.top+\"'\""
         "+cbTargetSuffix+cbRateSuffix;\n"
         "  }\n"
-        "  var tip='<b>WX'+z.zone+'</b> '+z.icao+cbLabel;\n"
+        "  if(cbLabel&&z.cb_sigmet)cbLabel+=' · SIGMET';\n"
+        "  var tip='<b>WX'+z.zone+'</b> '+z.icao+(z.anchor?' ⚓':'')+cbLabel;\n"
         "  var tipCls=z.is_focused?'zone-label zone-label-focused':'zone-label';\n"
         "  if(z.cb_pos)L.marker(z.cb_pos,{icon:L.divIcon({className:'',iconSize:[0,0],"
         "html:'<span style=\"display:inline-block;transform:translate(-50%,-50%);"
@@ -716,6 +730,10 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         "  }\n"
         "  var pop='<div style=\"min-width:220px\">'"
         "    +'<b>WX'+z.zone+' — '+z.icao+'</b>'"
+        "    +(z.anchor?'<br><span style=\"color:#60a5fa;font-size:11px\">⚓ Anchor zone: "
+        "kept free of CBs</span>':'')"
+        "    +(z.cb_sigmet?'<br><span style=\"color:#f87171;font-size:11px\">⛈ CB from '"
+        "+z.cb_sigmet+'</span>':'')"
         "    +'<br><span style=\"color:#94a3b8;font-size:11px\">'+z.source_label+'</span>'"
         "    +'<table style=\"width:100%;border-collapse:collapse;margin-top:4px\">'"
         "    +(wx.wind?'<tr><td>Wind</td><td>'+wx.wind+'</td></tr>':'')"
@@ -1007,8 +1025,8 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         '<div style="display:flex;flex-direction:column;gap:0.5em">\n'
         '<a href="/weather/settings" class="btn btn-gray btn-sm">Weather zones</a>\n'
         '<a href="/weather/turbulence" class="btn btn-gray btn-sm">Extra turbulence</a>\n'
-        '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Enroute wind</a>\n'
-        '<a href="/weather/sigmets" class="btn btn-gray btn-sm">SIGMETs</a>\n'
+        '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Enroute wind</a>\n' +
+        _sigmets_nav_link(ctx, newline=True) +
         '<a href="/weather/config" class="btn btn-gray btn-sm">Config</a>\n' +
         # Only the standalone context has event_log_dir (see fw_webui module
         # docstring) -- the router UI has no need to browse frankenweather's
@@ -1085,8 +1103,8 @@ def _build_weather_settings_page(ctx):  # pylint: disable=too-many-locals,too-ma
         nav_html = (
             '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
             '<a href="/weather/manual" class="btn btn-gray btn-sm">Manual weather</a>'
-            '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Enroute wind</a>'
-            '<a href="/weather/sigmets" class="btn btn-gray btn-sm">SIGMETs</a>'
+            '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Enroute wind</a>' +
+            _sigmets_nav_link(ctx) +
             '<a href="/weather/config" class="btn btn-gray btn-sm">Config</a>'
             '<a href="/weather/settings" class="btn btn-gray btn-sm">Refresh</a>'
         )
@@ -1224,6 +1242,13 @@ def _build_weather_settings_page(ctx):  # pylint: disable=too-many-locals,too-ma
             ' <span style="font-size:0.8em;color:#3b82f6">●</span>'
             if is_focused else ''
         )
+        if zone.get('anchor'):
+            focused_badge += (' <span style="font-size:0.75em;color:#60a5fa" '
+                              'title="Kept free of CBs, near the aircraft">⚓ anchor</span>')
+        if zone.get('cb_sigmet'):
+            focused_badge += (' <span style="font-size:0.75em;color:#fecaca;background:#7f1d1d;'
+                              'border-radius:3px;padding:0 4px" '
+                              f'title="CB from {_esc(zone["cb_sigmet"])}">⛈ SIGMET</span>')
         body += (
             f'<div class="card ok" style="{border_style}">\n'
             f'<div style="display:flex;justify-content:space-between;align-items:baseline;'
@@ -1538,8 +1563,8 @@ def _build_weather_manual_page(ctx):  # pylint: disable=too-many-locals,too-many
             '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
             '<a href="/weather/settings" class="btn btn-gray btn-sm">Zone settings</a>'
             '<a href="/weather/turbulence" class="btn btn-gray btn-sm">Turbulence</a>'
-            '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Enroute wind</a>'
-            '<a href="/weather/sigmets" class="btn btn-gray btn-sm">SIGMETs</a>'
+            '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Enroute wind</a>' +
+            _sigmets_nav_link(ctx) +
             '<a href="/weather/manual" class="btn btn-gray btn-sm">Refresh</a>'
         )
         return _page_shell(color_scheme, 'Manual weather', nav_html, body, extra_head)
@@ -1808,8 +1833,8 @@ def _build_weather_turb_page(ctx):  # pylint: disable=too-many-locals,too-many-b
             '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
             '<a href="/weather/manual" class="btn btn-gray btn-sm">Manual weather</a>'
             '<a href="/weather/settings" class="btn btn-gray btn-sm">Weather zones</a>'
-            '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Enroute wind</a>'
-            '<a href="/weather/sigmets" class="btn btn-gray btn-sm">SIGMETs</a>'
+            '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Enroute wind</a>' +
+            _sigmets_nav_link(ctx)
         )
         return _page_shell(color_scheme, 'Turbulence', nav_html, body, extra_head)
 
@@ -2202,14 +2227,63 @@ def _sigmet_nearest_rows(entries: list, ac_lat, ac_lon, zones: list) -> str:
     return rows
 
 
+_SIGMET_HANDLE_TYPES = {
+    'TS': ('Thunderstorms (TS)',
+           'frankenweather places weather zones in these areas and gives them CBs'),
+    'TC': ('Tropical cyclones (TC)',
+           'frankenweather places a cluster of weather zones with CBs around the cyclone'),
+    'TURB': ('Turbulence (TURB)', 'frankenweather generates the turbulence itself'),
+    'MTW': ('Mountain wave (MTW)',
+            'frankenweather strengthens its own terrain mountain wave in these areas'),
+}
+
+
+def _sigmet_handle_html(handle: dict) -> str:
+    """Return the SIGMETs page's 'who handles which type' choice and Download now button.
+
+    One row per type with two buttons, "frankenweather" and "PSX", the
+    current choice highlighted, and a line saying what that choice means.
+    """
+    rows = ''
+    for hazard in fw_sigmet.OWN_HAZARDS:
+        name, fw_does = _SIGMET_HANDLE_TYPES[hazard]
+        by_fw = bool(handle.get(hazard, True))
+        buttons = ''
+        for value, label, active in (('1', 'frankenweather', by_fw), ('0', 'PSX', not by_fw)):
+            style = ('background:#2563eb;color:#fff;cursor:default' if active
+                     else 'background:#1c2033;color:#94a3b8;border:1px solid #2a2f45')
+            buttons += (
+                '<form action="/api/weather/sigmets/handle" method="post" style="margin:0">'
+                f'<input type="hidden" name="hazard" value="{hazard}">'
+                f'<input type="hidden" name="enabled" value="{value}">'
+                f'<button type="submit" class="btn btn-sm" style="margin:0;width:auto;{style}"'
+                f'{" disabled" if active else ""}>{label}</button></form>')
+        meaning = (f'{fw_does}. Not sent to PSX.' if by_fw else
+                   'Sent to PSX, which simulates these itself.')
+        rows += (
+            '<tr><td style="width:auto;white-space:nowrap">'
+            f'<b style="color:#e2e8f0">{name}</b></td>'
+            f'<td style="white-space:nowrap"><div style="display:flex;gap:0">{buttons}</div></td>'
+            f'<td style="color:#94a3b8;font-size:0.85em">{meaning}</td></tr>')
+    return (
+        '<p class="note">frankenweather downloads SIGMETs from aviationweather.gov itself '
+        'instead of letting PSX do it. For each type below, choose who handles it: '
+        'frankenweather (PSX doesn\'t get these SIGMETs) or PSX (they are passed on to PSX). '
+        'Volcanic ash (VA) and icing (ICE) always go to PSX. Save the choice to the config '
+        'file on the <a href="/weather/config">Config page</a>.</p>\n'
+        '<div class="card"><table class="sg"><tr><th>Type</th><th>Handled by</th>'
+        f'<th>What that means</th></tr>{rows}</table></div>\n')
+
+
 def _build_weather_sigmets_page(ctx):  # pylint: disable=too-many-locals
-    """Render the /weather/sigmets page: frankenweather's own downloaded SIGMETs (--own-sigmets)."""
+    """Render the /weather/sigmets page: frankenweather's own downloaded SIGMETs (--sigmet)."""
     color_scheme = ctx.color_scheme
     sigstate = ctx.fw_sigmetstate
     now = time.time()
     nav_html = (
         '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
         '<a href="/weather/settings" class="btn btn-gray btn-sm">Weather zones</a>'
+        '<a href="/weather/config" class="btn btn-gray btn-sm">Config</a>'
         '<a href="/weather/sigmets" class="btn btn-gray btn-sm">Refresh</a>'
     )
     extra_head = (
@@ -2225,31 +2299,25 @@ def _build_weather_sigmets_page(ctx):  # pylint: disable=too-many-locals
         '</style>\n'
     )
     state = ctx.fw_state or {}
-    enabled = bool((state.get('config') or {}).get('own_sigmets'))
-    toggle_html = (
-        '<p class="note">With own SIGMETs on, frankenweather downloads SIGMETs from '
-        'aviationweather.gov itself instead of letting PSX do it. PSX gets every SIGMET '
-        'frankenweather could parse except thunderstorms (TS) and tropical cyclones (TC), '
-        'which frankenweather depicts itself as CBs in its weather zones.</p>\n'
-        '<div class="card" style="display:flex;align-items:center;gap:1.5em;flex-wrap:wrap">'
-        '<div><span style="color:#94a3b8;font-size:0.85em">Own SIGMETs</span><br>'
-        f'<b style="color:{"#4ade80" if enabled else "#64748b"}">'
-        f'{"ENABLED" if enabled else "disabled"}</b></div>'
-        '<form action="/api/weather/sigmets/toggle" method="post">'
-        f'<input type="hidden" name="enabled" value="{0 if enabled else 1}">'
-        f'<button type="submit" class="btn {"btn-red" if enabled else "btn-green"} btn-sm">'
-        f'{"Disable" if enabled else "Enable"}</button></form>'
-    )
-    if enabled:
-        toggle_html += ('<form action="/api/weather/sigmets/refresh" method="post">'
-                        '<button type="submit" class="btn btn-gray btn-sm">Download now</button>'
-                        '</form>')
-    toggle_html += '</div>\n'
-    if not sigstate or not enabled:
-        body = toggle_html
-        if enabled:
-            body += ('<div class="card warn"><p style="margin:0">No SIGMET data from '
-                     'frankenweather yet.</p></div>\n')
+    config = state.get('config') or {}
+    # The SIGMET data carries its own copy of the settings: on frankenweather's
+    # own web UI it's there before the PSX connection is up (unlike fw_state).
+    if sigstate:
+        config = {**config, 'sigmet_enabled': sigstate.get('enabled'),
+                  'sigmet_handle': {h: h in sigstate.get('handled', [])
+                                    for h in fw_sigmet.OWN_HAZARDS}}
+    elif not state:
+        body = ('<div class="card warn"><p style="margin:0">No data from frankenweather '
+                'yet.</p></div>\n')
+        return _page_shell(color_scheme, 'SIGMETs', nav_html, body, extra_head)
+    if not config.get('sigmet_enabled'):
+        body = ('<div class="card warn"><p style="margin:0">frankenweather\'s SIGMET system is '
+                'off. Start frankenweather with <code>--sigmet</code> to use it.</p></div>\n')
+        return _page_shell(color_scheme, 'SIGMETs', nav_html, body, extra_head)
+    toggle_html = _sigmet_handle_html(config.get('sigmet_handle') or {})
+    if not sigstate:
+        body = toggle_html + ('<div class="card warn"><p style="margin:0">No SIGMET data from '
+                              'frankenweather yet.</p></div>\n')
         return _page_shell(color_scheme, 'SIGMETs', nav_html, body, extra_head)
 
     entries = sigstate.get('entries') or []
@@ -2261,11 +2329,21 @@ def _build_weather_sigmets_page(ctx):  # pylint: disable=too-many-locals
         f'<td class="val">{_esc(sigstate.get("source") or "?")}</td></tr>'
         f'<tr><td>Last download</td><td class="val">'
         f'{_fmt_relative_epoch(now, sigstate.get("fetched_at"))}</td></tr>'
+        f'<tr><td>Next automatic download</td><td class="val">'
+        f'{_fmt_relative_epoch(now, sigstate.get("next_at"))} '
+        f'<span style="color:#94a3b8;font-weight:400">(every '
+        f'{(sigstate.get("interval_s") or 600) / 60:.0f} minutes)</span></td></tr>'
         f'<tr><td>SIGMETs</td><td class="val">{len(entries)}</td></tr>'
     )
     if error:
         body += f'<tr><td>Last error</td><td class="warn">{_esc(error)}</td></tr>'
-    body += '</table></div>\n'
+    body += ('</table>'
+             '<form action="/api/weather/sigmets/refresh" method="post" style="margin:0.5em 0 0">'
+             '<button type="submit" class="btn btn-gray btn-sm" style="width:auto">'
+             'Download SIGMETs now</button>'
+             '<span style="color:#94a3b8;font-size:0.8em;margin-left:0.6em">fetches a fresh '
+             'set from aviationweather.gov right away, instead of waiting for the next '
+             'automatic download</span></form></div>\n')
 
     counts = {h: [0, 0] for h in _SIGMET_TYPE_ORDER}
     for e in entries:
@@ -2299,7 +2377,7 @@ def _build_weather_sigmets_page(ctx):  # pylint: disable=too-many-locals
     body += ('<h2>Raw SIGMET text</h2><div class="card">'
              '<a href="/weather/sigmets/raw.txt" download="sigmets.txt">Download as text file</a>'
              ' &middot; <a href="/weather/sigmets/psx.txt" download="sigmets-psx.txt">'
-             'Download the text given to PSX (no TS/TC)</a>'
+             'Download the text given to PSX</a>'
              f'<pre class="sg-raw">{_esc(raw)}</pre></div>\n')
     return _page_shell(color_scheme, 'SIGMETs', nav_html, body, extra_head)
 
@@ -2519,7 +2597,8 @@ def register_weather_routes(routes, ctx):  # pylint: disable=too-many-statements
         entries = sigstate.get('entries') or []
         name = "sigmets.txt"
         if request.match_info['which'] == 'psx':
-            entries = fw_sigmet.psx_entries(entries)
+            entries = fw_sigmet.psx_entries(
+                entries, set(sigstate.get('handled', fw_sigmet.OWN_HAZARDS)))
             name = "sigmets-psx.txt"
         text = fw_sigmet.sigmet_text(entries, sigstate.get('fetched_at') or time.time())
         return web.Response(text=text, content_type='text/plain', headers={
@@ -2527,14 +2606,17 @@ def register_weather_routes(routes, ctx):  # pylint: disable=too-many-statements
 
     @routes.post('/api/weather/sigmets/refresh')
     async def _weather_sigmets_refresh(_):
-        await ctx.send_fw_settings_cmd({"own_sigmets_refresh": True})
+        await ctx.send_fw_settings_cmd({"sigmet_refresh": True})
         await asyncio.sleep(3)  # usually enough for the download to finish
         raise web.HTTPFound('/weather/sigmets')
 
-    @routes.post('/api/weather/sigmets/toggle')
-    async def _weather_sigmets_toggle(request):
+    @routes.post('/api/weather/sigmets/handle')
+    async def _weather_sigmets_handle(request):
         data = await request.post()
-        await ctx.send_fw_settings_cmd({"own_sigmets": data.get('enabled') == '1'})
+        hazard = data.get('hazard')
+        if hazard in fw_sigmet.OWN_HAZARDS:
+            await ctx.send_fw_settings_cmd(
+                {"sigmet_handle": {hazard: data.get('enabled') == '1'}})
         raise web.HTTPFound('/weather/sigmets')
 
     @routes.post('/api/weather/enroute-wind/toggle')

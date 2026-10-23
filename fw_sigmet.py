@@ -20,6 +20,10 @@ AIRSIGMET_URL = "https://aviationweather.gov/api/data/airsigmet?format=json"
 HAZARDS = ("TS", "TC", "VA", "TURB", "ICE", "MTW")
 # Hazards frankenweather depicts itself as CB weather zones.
 CB_HAZARDS = ("TS", "TC")
+# Hazards frankenweather generates turbulence for itself.
+TURB_HAZARDS = ("TURB", "MTW")
+# Hazards frankenweather handles itself, so PSX doesn't get them.
+OWN_HAZARDS = CB_HAZARDS + TURB_HAZARDS
 UNKNOWN = "unknown"
 
 _NM_PER_DEG = 60.0
@@ -182,14 +186,19 @@ def sigmet_text(entries: list, fetched_at: float) -> str:
     return "\n".join(lines) + "\n"
 
 
-def psx_entries(entries: list) -> list:
-    """Return the entries to give PSX: usable, and not TS/TC (frankenweather depicts those)."""
-    return [e for e in entries if e["ok"] and e["hazard"] not in CB_HAZARDS]
+def psx_entries(entries: list, handled=OWN_HAZARDS) -> list:
+    """Return the entries to give PSX: usable, and of a type frankenweather doesn't handle.
+
+    handled is the set of hazard types frankenweather handles itself (a
+    subset of OWN_HAZARDS, chosen on the SIGMETs page).
+    """
+    return [e for e in entries if e["ok"] and e["hazard"] not in handled]
 
 
-def psx_text(entries: list, fetched_at: float) -> str:
+def psx_text(entries: list, fetched_at: float, handled=OWN_HAZARDS) -> str:
     """Return the WxSigmet value for PSX: psx_entries() in PSX's layout, "^"-separated."""
-    return sigmet_text(psx_entries(entries), fetched_at).rstrip("\n").replace("\n", "^")
+    return (sigmet_text(psx_entries(entries, handled), fetched_at)
+            .rstrip("\n").replace("\n", "^"))
 
 
 def _unwrap_lons(lon0: float, polygon: list) -> list:
@@ -251,6 +260,16 @@ def _nearest_on_segment(a: tuple, b: tuple) -> tuple:
     seg2 = dx * dx + dy * dy
     t = 0.0 if seg2 == 0 else max(0.0, min(1.0, -(a[0] * dx + a[1] * dy) / seg2))
     return a[0] + t * dx, a[1] + t * dy
+
+
+def inside_depth(lat: float, lon: float, polygon: list):
+    """Return how far inside polygon lat/lon is (nm to the nearest edge), or None if outside."""
+    pts = [_local_xy(lat, lon, p[0], lon_u)
+           for p, lon_u in zip(polygon, _unwrap_lons(lon, polygon))]
+    if not _inside_xy(pts):
+        return None
+    return min(math.hypot(*_nearest_on_segment(a, b))
+               for a, b in zip(pts, pts[1:] + pts[:1]))
 
 
 def entry_distance(lat: float, lon: float, entry: dict) -> tuple:

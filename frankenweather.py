@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import collections
 import copy
+import dataclasses
 import glob
 import inspect
 import json
@@ -96,7 +97,7 @@ _OM_ENROUTE_CACHE_PATH = os.path.join(
 _EVENT_LOG_DIR = os.path.join(os.path.expanduser("~"), ".cache", "frankenweather", "logs")
 _EVENT_LOG_GLOB = "frankenweather_*.log"
 _EVENT_LOG_RETAIN = 10  # keep only the most recent N per-run log files
-# --own-sigmets: SIGMETs we could not use are saved here, one file each, so
+# --sigmet: SIGMETs we could not use are saved here, one file each, so
 # the parser can be improved later (see _save_unparsed_sigmets()).
 _SIGMET_UNPARSED_DIR = os.path.join(_EVENT_LOG_DIR, "sigmet-unparsed")
 # How often log_flush_coro() fsyncs the log files, so a log copied off disk
@@ -257,15 +258,15 @@ _NOAA_METAR_CYCLE_URL = "https://tgftp.nws.noaa.gov/data/observations/metar/cycl
 _NOAA_METAR_CACHE_MAX_S = 1800
 _METAR_FALLBACK_ZONE_COUNT = 7
 _SIGMET_REFRESH_MAX_S = 1800           # re-request PSX's own SIGMET download every 30 minutes
-_OWN_SIGMET_REFRESH_S = 600            # --own-sigmets: own SIGMET download every 10 minutes
+_OWN_SIGMET_REFRESH_S = 600            # --sigmet: own SIGMET download every 10 minutes
 _OWN_SIGMET_TIMEOUT = aiohttp.ClientTimeout(total=30)
-# --own-sigmets "anchor" zone: one CB-free zone always kept near the
+# --sigmet "anchor" zone: one CB-free zone always kept near the
 # aircraft, so the zone PSX uses for the local weather (QNH) is close by and
 # no CB can ever appear right next to the aircraft. See _maintain_anchor_zone().
 _ANCHOR_MAX_NM = 50.0              # a dep/dst airport zone this close does the job instead
 _ANCHOR_AHEAD_NM = (40.0, 50.0)    # where a new anchor goes, along track
 _ANCHOR_HANDOVER_BEHIND_NM = 25.0  # new anchor once the aircraft is this far past the old one
-# --own-sigmets: weather zones placed inside TS/TC SIGMET areas, so the CBs
+# --sigmet: weather zones placed inside TS/TC SIGMET areas, so the CBs
 # frankenweather depicts there (instead of PSX) show up on the radar. See
 # _place_sigmet_zones().
 _SIGMET_ZONE_RANGE_NM = 300.0      # only areas this close (roughly weather radar range)
@@ -273,6 +274,15 @@ _SIGMET_ZONES_PER_TS = 2           # zones per TS area
 _SIGMET_ZONES_PER_TC = 3           # zones per TC area, a tight cluster
 _SIGMET_TC_CLUSTER_SEP_NM = 20.0   # separation between zones in a TC cluster
 _SIGMET_PLACE_INTERVAL_S = 60.0    # move at most one zone this often
+# --sigmet: turbulence frankenweather generates itself for TURB/MTW
+# SIGMETs (PSX doesn't get them). SIGMETs are issued for severe turbulence
+# (moderate goes in AIRMETs), same intensity as a SEV G-AIRMET. It fades in
+# over the first _SIGMET_TURB_FADE_NM inside the area and
+# _SIGMET_TURB_FADE_FT inside its base/top. See _sigmet_turbulence().
+_SIGMET_TURB_INTENSITY = {"SEV": 0.75, "MOD": 0.5}
+_SIGMET_TURB_DEFAULT_INTENSITY = 0.75
+_SIGMET_TURB_FADE_NM = 10.0
+_SIGMET_TURB_FADE_FT = 1000.0
 # SigmetOn (Qi262) is a 0-15 bitmask. Bits 1 and 4 are documented; bit 2
 # was live-tested (2026-10-23) to be PSX's own periodic SIGMET download.
 # Bit 8 is unknown and must never be touched. See _write_sigmet_on().
@@ -1497,7 +1507,8 @@ _BURST_YAW = 200
 _BURST_SPD = 300
 _BURST_GUST = 400
 
-_TURB_TYPES = ('wave', 'rotor', 'mechanical', 'shear', 'cb', 'pirep', 'cape', 'gairmet')
+_TURB_TYPES = ('wave', 'rotor', 'mechanical', 'shear', 'cb', 'pirep', 'cape', 'gairmet',
+               'sigmet')
 
 # ---------------------------------------------------------------------------
 # --config-file (TOML): every setting the web GUI can change, in one place.
@@ -1521,7 +1532,6 @@ _CONFIG_TIMESYNC_FIELDS = (
 _CONFIG_SIGMET_FIELDS = (
     ("use_sigmets", "_use_sigmets", bool),
     ("disable_psx_sigmets", "_disable_psx_sigmets", bool),
-    ("own_sigmets", "_own_sigmets", bool),
 )
 _CONFIG_CB_AVOIDANCE_FIELDS = (
     ("avoid_cb_near_airport", "_avoid_cb_near_airport", bool),
@@ -1851,10 +1861,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._enroute_last_corridor_txt: Optional[str] = None  # last corridor we generated
         self._web_windstate: Optional[dict] = None
         self._web_windstate_received_at: float = 0.0
-        # --own-sigmets: frankenweather's own SIGMET download (see
+        # --sigmet: frankenweather's own SIGMET download (see
         # own_sigmet_coro()) -- normalized entries (fw_sigmet.normalize()),
         # when they were fetched, and the last download error, if any.
-        self._own_sigmets: bool = False   # from --own-sigmets, see handle_args()
+        # --sigmet: frankenweather's SIGMET system (see own_sigmet_coro()),
+        # and which SIGMET types it handles itself (the rest go to PSX),
+        # chosen on the SIGMETs page and saved in the config file.
+        self._sigmet_enabled: bool = False   # see handle_args()
+        self._sigmet_handle: dict = {h: True for h in _fw_sigmet.OWN_HAZARDS}
         # Whether we currently own PSX's SIGMETs (see _sync_own_sigmets()),
         # PSX's last reported WxSigmet text, and the last text we wrote.
         self._own_sigmets_applied: bool = False
@@ -1865,6 +1879,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._anchor_zone: Optional[int] = None
         self._cb_free_zones: dict = {}
         self._sigmet_place_last: float = 0.0  # see _place_sigmet_zones()
+        # zone -> label of the SIGMET that gave its current CB (e.g. "TS
+        # SIGMET MPZL 03 EMBD"), or None; shown in the log and the web UI.
+        self.zone_cb_sigmet: dict = {}
         # Set when we take over the SIGMETs: _place_sigmet_zones() then
         # places every zone it wants at once instead of one per interval.
         self._sigmet_place_burst: bool = False
@@ -1874,8 +1891,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._own_sigmet_fetched_at: Optional[float] = None
         self._own_sigmet_error: Optional[str] = None
         self._sigmetstate_changed_event: asyncio.Event = asyncio.Event()
-        # Set by the web UI's "Download now" button (own_sigmets_refresh command).
+        # Wakes own_sigmet_coro() right away (a setting changed); with
+        # _own_sigmet_download_now also set (the web UI's "Download now"
+        # button, sigmet_refresh command) it downloads straight away too.
         self._own_sigmet_refresh_event: asyncio.Event = asyncio.Event()
+        self._own_sigmet_download_now: bool = False
+        self._own_sigmet_next_at: Optional[float] = None  # next automatic download (epoch)
         self._web_sigmetstate: Optional[dict] = None
         self._web_sigmetstate_received_at: float = 0.0
 
@@ -1911,10 +1932,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # same WxSigmet/Qs499 PSX populates) goes stale for the whole
         # flight. See _write_sigmet_on() for the bitmask this drives.
         self._use_sigmets: bool = True
-        # "PSX SIGMETs off" (/efb): PSX gets no SIGMETs at all (its SIGMET
-        # data is emptied; "embedded in the planet weather model" stays on).
-        # frankenweather then downloads SIGMETs itself for its own CBs,
-        # exactly as with --own-sigmets (see _sync_own_sigmets()).
+        # "PSX SIGMETs off" (/efb). With --sigmet: PSX gets no SIGMETs at all
+        # (its SIGMET data is emptied, "embedded in the planet weather model"
+        # stays on; see _sync_own_sigmets()). Without: PSX's own "embedded"
+        # setting is turned off.
         self._disable_psx_sigmets: bool = False
         # Last-seen SigmetOn (Qi262) value from PSX, tracked via subscription
         # purely so _write_sigmet_on() can read-modify-write without ever
@@ -2501,12 +2522,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
     def handle_sigmet_change(self, _key: str, value: str) -> None:
         """Re-parse all SIGMETs when PSX downloads updated SIGMET data.
 
-        Not while we own the SIGMETs (--own-sigmets): PSX then only has our
-        own filtered text, and our own download is the source of truth.
+        Only with --sigmet, and not while we own the SIGMETs: PSX then only
+        has our own filtered text, and our own download is the source of
+        truth.
         """
         self._psx_sigmet_raw = value
-        if self._own_sigmets_applied:
-            return
+        if not self._sigmet_enabled or self._own_sigmets_applied:
+            return  # without --sigmet, frankenweather doesn't use SIGMETs at all
         self.sigmets = _parse_sigmets(value)
         self.ts_sigmets = [s for s in self.sigmets if s['hazard'] == 'TS']
         self.logger.info("SIGMETs: %d active areas (%d TS) (raw %d bytes)",
@@ -2555,7 +2577,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         (self._sigmet_on_bits), not a bare literal -- SigmetOn is a 0-15
         bitmask and bit 8 is undocumented; whatever it means, this must
         never change it. PSX's own periodic download (bit 2) is only
-        changed when auto_download is given (--own-sigmets).
+        changed when auto_download is given (--sigmet).
 
         Arms Qi243 (WxSlowTransit) first, same as every other PSX weather
         write -- found via forensic log analysis of a real flight where an
@@ -2950,15 +2972,29 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if "disable_psx_sigmets" in cmd:
             self._disable_psx_sigmets = bool(cmd["disable_psx_sigmets"])
             self.logger.info("disable_psx_sigmets → %s", self._disable_psx_sigmets)
-            # Applied by own_sigmet_coro()/_sync_own_sigmets(): PSX SIGMETs
-            # off means we download them ourselves and PSX gets none.
+            if self._sigmet_enabled:
+                # Applied by own_sigmet_coro()/_sync_own_sigmets(): PSX
+                # gets no SIGMETs at all.
+                self._own_sigmet_refresh_event.set()
+            else:
+                # Without --sigmet: PSX's own "embedded in the planet
+                # weather model" setting.
+                self._write_sigmet_on(embed=not self._disable_psx_sigmets, trigger_download=False)
+            settings_changed = True
+        if isinstance(cmd.get("sigmet_handle"), dict):
+            for hazard, val in cmd["sigmet_handle"].items():
+                if hazard in self._sigmet_handle:
+                    self._sigmet_handle[hazard] = bool(val)
+            self.logger.info("sigmet_handle → %s", ", ".join(
+                h for h, on in self._sigmet_handle.items() if on) or "none")
+            if self._own_sigmets_applied:
+                self._use_own_sigmet_data()
+            if self._web_sigmetstate is not None:
+                self._update_web_sigmetstate()  # "handled" is shown on the page
             self._own_sigmet_refresh_event.set()
             settings_changed = True
-        if "own_sigmets" in cmd:
-            self._own_sigmets = bool(cmd["own_sigmets"])
-            self.logger.info("own_sigmets → %s", self._own_sigmets)
-            settings_changed = True
-        if cmd.get("own_sigmets_refresh"):
+        if cmd.get("sigmet_refresh"):
+            self._own_sigmet_download_now = True
             self.logger.info("Own SIGMETs: download requested from the web UI")
             self._own_sigmet_refresh_event.set()
         if "avoid_cb_near_airport" in cmd:
@@ -3179,7 +3215,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "timesync": {
                 key: getattr(self, attr) for key, attr, _cast in _CONFIG_TIMESYNC_FIELDS},
             "sigmet": {
-                key: getattr(self, attr) for key, attr, _cast in _CONFIG_SIGMET_FIELDS},
+                **{key: getattr(self, attr) for key, attr, _cast in _CONFIG_SIGMET_FIELDS},
+                "handle": dict(self._sigmet_handle)},
             "cb_avoidance": {
                 key: getattr(self, attr) for key, attr, _cast in _CONFIG_CB_AVOIDANCE_FIELDS},
             "manual_weather": {
@@ -3190,7 +3227,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         config["turbulence"]["type_biases"] = dict(self._turb_type_biases)
         return config
 
-    def _apply_config_dict(self, config: dict) -> None:  # pylint: disable=too-many-branches
+    def _apply_config_dict(self, config: dict) -> None:  # pylint: disable=too-many-branches,too-many-locals
         """Apply a loaded config-file dict onto runtime state; reconciles side effects after."""
         old_mode = self._fw_mode
         general = config.get("general", {})
@@ -3220,8 +3257,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         for key, attr, cast in _CONFIG_SIGMET_FIELDS:
             if key in sigmet:
                 setattr(self, attr, cast(sigmet[key]))
-        if self.args is not None and self.args.own_sigmets:
-            self._own_sigmets = True  # --own-sigmets always wins over the config file
+        for hazard, val in (sigmet.get("handle") or {}).items():
+            if hazard in self._sigmet_handle:
+                self._sigmet_handle[hazard] = bool(val)
 
         cb_avoidance = config.get("cb_avoidance", {})
         for key, attr, cast in _CONFIG_CB_AVOIDANCE_FIELDS:
@@ -3261,7 +3299,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 if self._turb_wind_mode == "psx" and self.psx_connected:
                     self._turb_update_psx_wind()
         if self.psx_connected and not self._own_sigmets_applied:
-            self._write_sigmet_on(embed=True, trigger_download=False)
+            self._write_sigmet_on(embed=self._sigmet_enabled or not self._disable_psx_sigmets,
+                                  trigger_download=False)
         if self._enroute_wind_enabled:
             self._enable_enroute_wind()
         else:
@@ -3648,6 +3687,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     if _eff(gairmet_state) > _eff(state):
                         state = gairmet_state
 
+                sigmet_state, mtw_state = self._sigmet_turbulence(
+                    lat, lon, alt_ft, terrain_state)
+                for sig_s in (mtw_state, sigmet_state):
+                    if sig_s is not None and _eff(sig_s) > _eff(state):
+                        state = sig_s
+
                 cb_active = state.kind == 'cb'
                 msfs_factor = self._compute_msfs_turb_factor(cb_active)
                 self._turb_msfs_factor = msfs_factor
@@ -3669,7 +3714,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                                           '+' if direction > 0 else '-', magnitude)
 
                 all_sources = []
-                for src_s in [terrain_state, cb_state, pirep_state, cape_state, gairmet_state]:
+                for src_s in [terrain_state, cb_state, pirep_state, cape_state, gairmet_state,
+                              sigmet_state, mtw_state]:
                     if src_s is None or src_s.intensity < 0.01:
                         continue
                     src_eff = min(1.0, src_s.intensity * self._turb_intensity_bias *
@@ -3924,7 +3970,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         return wx_str
 
     def _own_sigmet_cb(self, wx_str: str, pos: tuple, om: dict, zone_label: str) -> str:
-        """Return wx_str with the CB a zone inside a TS/TC SIGMET area gets (--own-sigmets).
+        """Return wx_str with the CB a zone inside a TS/TC SIGMET area gets (--sigmet).
 
         Coverage from the SIGMET's qualifier (see _sigmet_cb_at()), top
         from the SIGMET, base from the zone's own surface temperature/dew
@@ -3956,6 +4002,69 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                              sig['hazard'], sig.get('qualifier') or '-', fields[9],
                              fields[11], fields[10])
         return new_wx
+
+    def _sigmet_turbulence(self, lat: float, lon: float, alt_ft: float,
+                           terrain_state: TurbulenceState) -> tuple:
+        """Return (turb_state, mtw_state) for the TURB/MTW SIGMETs at the aircraft (--sigmet).
+
+        Either is None when not applicable. Only while we own the SIGMETs:
+        PSX then doesn't get TURB/MTW, so frankenweather generates their
+        turbulence itself. Intensity per _SIGMET_TURB_INTENSITY, faded in
+        near the area's edges and its base/top; the strongest SIGMET of
+        each kind wins. A TURB SIGMET gives "sigmet" (random) turbulence.
+        An MTW SIGMET strengthens the terrain model's own mountain wave or
+        rotor to at least its intensity, keeping the terrain model's
+        up/down pattern; where the terrain model finds none, it gives wave
+        turbulence of its own.
+        """
+        if not self._own_sigmets_applied:
+            return None, None
+        best = {}
+        for entry in self._own_sigmet_entries:
+            if not entry["ok"] or entry["hazard"] not in _fw_sigmet.TURB_HAZARDS:
+                continue
+            if not self._sigmet_handle.get(entry["hazard"]):
+                continue  # PSX gets this type (SIGMETs page)
+            factor = self._sigmet_turb_factor(lat, lon, alt_ft, entry)
+            if factor <= 0.0:
+                continue
+            intensity = factor * _SIGMET_TURB_INTENSITY.get(
+                entry["qualifier"], _SIGMET_TURB_DEFAULT_INTENSITY)
+            if intensity > best.get(entry["hazard"], (0.0, None))[0]:
+                best[entry["hazard"]] = (intensity, entry)
+        turb_state = mtw_state = None
+        if "TURB" in best:
+            intensity, entry = best["TURB"]
+            turb_state = TurbulenceState(
+                intensity=intensity, kind="sigmet",
+                reason=f"{entry['qualifier']} TURB SIGMET {entry['fir']} {entry['series']}")
+        if "MTW" in best:
+            intensity, entry = best["MTW"]
+            label = f"{entry['qualifier']} MTW SIGMET {entry['fir']} {entry['series']}"
+            if terrain_state.kind in ("wave", "rotor"):
+                mtw_state = dataclasses.replace(
+                    terrain_state, intensity=max(terrain_state.intensity, intensity),
+                    reason=f"{terrain_state.reason} + {label}")
+            else:
+                mtw_state = TurbulenceState(
+                    intensity=intensity, kind="wave",
+                    reason=f"{label} (no terrain wave found)")
+        return turb_state, mtw_state
+
+    @staticmethod
+    def _sigmet_turb_factor(lat: float, lon: float, alt_ft: float, entry: dict) -> float:
+        """Return 0-1: how much of a TURB/MTW SIGMET's turbulence applies at lat/lon/alt_ft."""
+        base = entry["base_ft"] or 0
+        top = entry["top_ft"] if entry["top_ft"] is not None else 60000
+        if not base <= alt_ft <= top:
+            return 0.0
+        depth = max((d for d in (_fw_sigmet.inside_depth(lat, lon, p) for p in entry["polygons"])
+                     if d is not None), default=None)
+        if depth is None:
+            return 0.0
+        vert = min(top - alt_ft, (alt_ft - base) if base > 0 else _SIGMET_TURB_FADE_FT)
+        return (min(1.0, depth / _SIGMET_TURB_FADE_NM) *
+                min(1.0, vert / _SIGMET_TURB_FADE_FT))
 
     def _sigmet_cb_at(self, pos: tuple) -> Optional[tuple]:
         """Return (oktas, sigmet) for the TS/TC SIGMET area at pos, or None.
@@ -4764,6 +4873,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self._manual_wx_force_update = True
             self.fmc_changed_event.set()
 
+    def _handles_cb_sigmets(self) -> bool:
+        """Return True if frankenweather handles TS and/or TC SIGMETs itself (SIGMETs page)."""
+        return any(self._sigmet_handle.get(h) for h in _fw_sigmet.CB_HAZARDS)
+
     def _is_cb_free_zone(self, zone_num: int) -> bool:
         """Return True if zone_num must not get a CB (see _maintain_anchor_zone())."""
         pos = self._cb_free_zones.get(zone_num)
@@ -4776,7 +4889,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         return True
 
     def _maintain_anchor_zone(self) -> bool:  # pylint: disable=too-many-return-statements
-        """--own-sigmets: keep a CB-free "anchor" zone near the aircraft; True if a zone moved.
+        """--sigmet: keep a CB-free "anchor" zone near the aircraft; True if a zone moved.
 
         Zones placed in TS/TC SIGMET areas get CBs, so one zone is kept near
         the aircraft without any CB: PSX uses the nearest zone for the local
@@ -4789,10 +4902,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         CB popping up just behind the aircraft is no better) until the
         normal relocation rules move it. Only while we own the SIGMETs.
         """
-        if not self._own_sigmets_applied:
+        if not self._own_sigmets_applied or not self._handles_cb_sigmets():
             if self._anchor_zone is not None:
-                self.logger.info("Anchor zone: own SIGMETs off, Zone %d is an ordinary zone again",
-                                 self._anchor_zone)
+                self.logger.info("Anchor zone: TS/TC SIGMETs not handled, Zone %d is an ordinary"
+                                 " zone again", self._anchor_zone)
             self._anchor_zone = None
             self._cb_free_zones.clear()
             return False
@@ -4873,7 +4986,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         return best
 
     def _place_sigmet_zones(self) -> bool:
-        """--own-sigmets: move a zone into a nearby TS/TC SIGMET area; True if one moved.
+        """--sigmet: move a zone into a nearby TS/TC SIGMET area; True if one moved.
 
         TS/TC areas whose nearest point is within _SIGMET_ZONE_RANGE_NM and
         not behind the aircraft, nearest first, each get up to
@@ -4888,7 +5001,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         after taking over the SIGMETs (_sigmet_place_burst), when every
         zone wanted is placed at once.
         """
-        if not self._own_sigmets_applied or self.ac_lat is None or self.ac_hdg is None:
+        if (not self._own_sigmets_applied or not self._handles_cb_sigmets() or
+                self.ac_lat is None or self.ac_hdg is None):
             return False
         if self._sigmet_place_burst:
             self._sigmet_place_burst = False
@@ -4907,6 +5021,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         for entry in self._own_sigmet_entries:
             if not entry["ok"] or entry["hazard"] not in _fw_sigmet.CB_HAZARDS:
                 continue
+            if not self._sigmet_handle.get(entry["hazard"]):
+                continue  # PSX gets this type (SIGMETs page)
             dist, brg = _fw_sigmet.entry_distance(self.ac_lat, self.ac_lon, entry)
             if dist > _SIGMET_ZONE_RANGE_NM:
                 continue
@@ -6068,14 +6184,19 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 wx = (om_to_wx_string(om, radar_echo=radar_echo, lightning=has_lightning)
                       if om else ";".join(_WX_DEFAULTS))
                 new_metars.append(_gen_metar(icao, om, now) if om else None)
-            wx_before_sigmet = wx
             if self._own_sigmets_applied:
                 final_wx = self._own_sigmet_cb(wx, (lat, lon), om, f"Zone {i + 1} {icao}")
             else:
                 final_wx = self._sigmet_cb_override(wx, (lat, lon), om, f"Zone {i + 1} {icao}")
             zone_num = i + 1
+            sigmet_label = None
+            if final_wx != wx:  # a SIGMET gave (or enlarged) this zone's CB
+                best = self._sigmet_cb_at((lat, lon)) if self._own_sigmets_applied else None
+                sigmet_label = best[1].get('label', 'TS SIGMET') if best else 'TS SIGMET'
             if self._is_cb_free_zone(zone_num):
                 final_wx = _strip_cb(final_wx)
+                sigmet_label = None
+            self.zone_cb_sigmet[zone_num] = sigmet_label
             target_parts = final_wx.split(';')
             target_oktas_val = int(target_parts[9]) if len(target_parts) > 11 else 0
             self.zone_cb_target[zone_num] = (
@@ -6092,8 +6213,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 'lightning': has_lightning,
                 'ts_oktas': ts_oktas,
                 'showers_metar': has_showers_metar,
-                'sigmet_override': (final_wx.split(';')[9] != '0' and
-                                    wx_before_sigmet.split(';')[9] == '0'),
+                'sigmet_label': sigmet_label,
             })
 
         if self.args.fake_cb:
@@ -6131,9 +6251,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     if bits:
                         growth_note = (f" [CB ramp: {' '.join(bits)}"
                                        f" -> target {target['oktas']}ok/{target['top']}ft]")
+                sigmet_note = (f"{_per_zone[i]['sigmet_label']}; Open-Meteo: "
+                               if _per_zone[i]['sigmet_label'] else "")
                 cb_part = (f"  CB {cb_oktas} oktas"
                            f" base={parts[11]}ft tops={parts[10]}ft"
-                           f" (WMO={wmo_code} showers={showers_mm:.2f}mm/h){growth_note}")
+                           f" ({sigmet_note}WMO={wmo_code} showers={showers_mm:.2f}mm/h)"
+                           f"{growth_note}")
             elif _cape_to_cb_oktas(cape, cin) > 0 and showers_mm < 0.5:
                 cb_part = (f"  (CAPE suppressed: WMO={wmo_code}"
                            f" showers={showers_mm:.2f}mm/h)")
@@ -6192,8 +6315,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 cb_sources.append(f"radar echo {pz['radar_echo']}")
             if pz['lightning']:
                 cb_sources.append("Blitzortung lightning")
-            if pz['sigmet_override']:
-                cb_sources.append("TS SIGMET override")
+            if pz['sigmet_label']:
+                cb_sources.append(pz['sigmet_label'])
             if cb_oktas > 0:
                 detail = base + f"; CBs {cb_oktas}oktas {parts[11]}-{parts[10]}ft"
                 if cb_sources:
@@ -6295,7 +6418,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "timesync_on_situ_load": self._timesync_on_situ_load,
             "timesync_periodic": self._timesync_periodic,
             "use_sigmets": self._use_sigmets,
-            "own_sigmets": self._own_sigmets,
+            "sigmet_enabled": self._sigmet_enabled,
+            "sigmet_handle": dict(self._sigmet_handle),
             "disable_psx_sigmets": self._disable_psx_sigmets,
             "avoid_cb_near_airport": self._avoid_cb_near_airport,
             "cb_airport_clearance_nm": _CB_AIRPORT_CLEARANCE_NM,
@@ -6339,6 +6463,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 # the zone's *current* oktas/base/top is already available
                 # from Wx<N> itself (see fw_webui.py's _parse_wx_brief()).
                 "cb_target": self.zone_cb_target.get(zone_num),
+                # --sigmet: the SIGMET behind this zone's CB, and whether
+                # this is the CB-free anchor zone
+                "cb_sigmet": self.zone_cb_sigmet.get(zone_num),
+                "anchor": zone_num == self._anchor_zone,
                 "cb_rate": ({
                     "oktas_per_min": round(
                         self.zone_cb_ramp[zone_num].get('last_oktas_rate_per_min', 0.0), 3),
@@ -6469,7 +6597,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         goes stale for the whole flight. Always triggers a download (so our
         own ts_sigmets/CB-override logic keeps working), with "embedded in
         planet weather model" on. Not while we download SIGMETs ourselves
-        (--own-sigmets or /efb "PSX SIGMETs off", see own_sigmet_coro()).
+        (--sigmet or /efb "PSX SIGMETs off", see own_sigmet_coro()).
         See _write_sigmet_on() for the bitmask
         details. Gated on _use_sigmets and only while frankenweather is
         actively driving the weather zones, matching the D-ATIS/ALTN-
@@ -6490,7 +6618,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 if time.time() - last_refresh < _SIGMET_REFRESH_MAX_S:
                     continue
                 last_refresh = time.time()
-                self._write_sigmet_on(embed=True, trigger_download=True)
+                self._write_sigmet_on(embed=self._sigmet_enabled or not self._disable_psx_sigmets,
+                                      trigger_download=True)
                 self.logger.info("SIGMET: requested a fresh PSX download")
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
@@ -6732,7 +6861,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         return f"FRANKENWEATHER:WINDSTATE:{self._instance_uuid}:{payload}"
 
     async def own_sigmet_coro(self) -> None:
-        """--own-sigmets: download SIGMETs from aviationweather.gov every _OWN_SIGMET_REFRESH_S.
+        """--sigmet: download SIGMETs from aviationweather.gov every _OWN_SIGMET_REFRESH_S.
 
         Fetches both the international (isigmet) and US domestic
         (airsigmet) lists as JSON and normalizes them (fw_sigmet.normalize()).
@@ -6756,15 +6885,16 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         except asyncio.TimeoutError:
                             pass
                     first = False
-                    if self._own_sigmet_refresh_event.is_set():
-                        self._own_sigmet_refresh_event.clear()
+                    self._own_sigmet_refresh_event.clear()
+                    if self._own_sigmet_download_now:
+                        self._own_sigmet_download_now = False
                         last_try = 0.0
-                    wanted = ((self._own_sigmets or self._disable_psx_sigmets) and
-                              self._use_sigmets and not self._should_skip_wx_update())
+                    wanted = (self._sigmet_enabled and self._use_sigmets and
+                              not self._should_skip_wx_update())
                     if wanted and time.time() - last_try >= _OWN_SIGMET_REFRESH_S:
                         last_try = time.time()
+                        self._own_sigmet_next_at = last_try + _OWN_SIGMET_REFRESH_S
                         await self._download_own_sigmets(session)
-                        self._sigmetstate_changed_event.set()
                     self._sync_own_sigmets(wanted)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
@@ -6772,6 +6902,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
     async def _download_own_sigmets(self, session: aiohttp.ClientSession) -> None:
         """Fetch, normalize and store both SIGMET lists (see own_sigmet_coro())."""
+        try:
+            await self._fetch_own_sigmets(session)
+        finally:
+            self._update_web_sigmetstate()
+
+    async def _fetch_own_sigmets(self, session: aiohttp.ClientSession) -> None:
+        """Do _download_own_sigmets()'s work."""
         try:
             lists = []
             for url in (_fw_sigmet.ISIGMET_URL, _fw_sigmet.AIRSIGMET_URL):
@@ -6802,12 +6939,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._save_unparsed_sigmets(bad)
 
     def _sync_own_sigmets(self, wanted: bool) -> None:
-        """Take over, keep or hand back PSX's SIGMETs (--own-sigmets).
+        """Take over, keep or hand back PSX's SIGMETs (--sigmet).
 
         While wanted (and once our first download has succeeded), PSX keeps
         embedding SIGMETs but stops downloading them itself, and gets our
-        own text (fw_sigmet.psx_text()): every usable SIGMET except TS and
-        TC, which frankenweather depicts itself as CB weather zones -- or,
+        own text (fw_sigmet.psx_text()): every usable SIGMET frankenweather
+        doesn't handle itself (fw_sigmet.OWN_HAZARDS: TS/TC as CB weather
+        zones, TURB/MTW as its own turbulence) -- or,
         with "PSX SIGMETs off" (/efb), no SIGMETs at all ("#"). The
         SigmetOn bits and the text are re-checked on every call and
         rewritten if anything (a situ load, another addon) changed them.
@@ -6839,8 +6977,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if not bits & _SIGMET_EMBED_BIT or bits & _SIGMET_AUTO_DOWNLOAD_BIT:
             self._write_sigmet_on(embed=True, trigger_download=False, auto_download=False)
         # "PSX SIGMETs off" (/efb): PSX gets no SIGMETs at all
+        handled = self._handled_hazards()
         text = ("#" if self._disable_psx_sigmets else
-                _fw_sigmet.psx_text(self._own_sigmet_entries, self._own_sigmet_fetched_at))
+                _fw_sigmet.psx_text(self._own_sigmet_entries, self._own_sigmet_fetched_at,
+                                    handled))
         # Compare without the "#DOWNLOADED <time>" header line: a new
         # download with the same SIGMETs isn't worth a PSX write.
         if (self._psx_sigmet_raw or "").partition("^")[2] == text.partition("^")[2]:
@@ -6850,17 +6990,22 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         elif self._disable_psx_sigmets:
             self.logger.info("Own SIGMETs: PSX SIGMETs off, emptying PSX's SIGMET data")
         else:
-            kept = len(_fw_sigmet.psx_entries(self._own_sigmet_entries))
+            kept = len(_fw_sigmet.psx_entries(self._own_sigmet_entries, handled))
             self.logger.info(
-                "Own SIGMETs: giving PSX %d SIGMETs (%d bytes), left out %d TS/TC and"
-                " %d unusable", kept, len(text),
+                "Own SIGMETs: giving PSX %d SIGMETs (%d bytes), left out %d handled by"
+                " frankenweather (%s) and %d unusable", kept, len(text),
                 sum(1 for e in self._own_sigmet_entries
-                    if e["ok"] and e["hazard"] in _fw_sigmet.CB_HAZARDS),
+                    if e["ok"] and e["hazard"] in handled),
+                "/".join(sorted(handled)) or "none",
                 sum(1 for e in self._own_sigmet_entries if not e["ok"]))
         self._inject_wx_slow_transit()
         self.psx_send_and_set("WxSigmet", text)
         self._psx_sigmet_raw = text
         self._own_sigmet_written = text
+
+    def _handled_hazards(self) -> set:
+        """Return the SIGMET types frankenweather handles itself (the rest go to PSX)."""
+        return {h for h, on in self._sigmet_handle.items() if on}
 
     def _use_own_sigmet_data(self) -> None:
         """Point self.sigmets/ts_sigmets at our own downloaded SIGMETs.
@@ -6879,9 +7024,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             for poly in e["polygons"]:
                 sigmets.append({"hazard": e["hazard"], "polygon": [tuple(p) for p in poly],
                                 "base_ft": e["base_ft"] or 0, "top_ft": top,
-                                "qualifier": e["qualifier"], "key": e["key"]})
+                                "qualifier": e["qualifier"], "key": e["key"],
+                                "label": (f"{e['hazard']} SIGMET {e['fir']} {e['series']}"
+                                          f" {e['qualifier']}").strip()})
         self.sigmets = sigmets
-        self.ts_sigmets = [s for s in sigmets if s["hazard"] in _fw_sigmet.CB_HAZARDS]
+        # TS/TC areas we depict ourselves; PSX does any type we don't handle
+        self.ts_sigmets = [s for s in sigmets if s["hazard"] in _fw_sigmet.CB_HAZARDS and
+                           self._sigmet_handle.get(s["hazard"])]
 
     def _save_unparsed_sigmets(self, entries: list) -> None:
         """Save each SIGMET we couldn't use to _SIGMET_UNPARSED_DIR, once per SIGMET.
@@ -6909,42 +7058,64 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.logger.warning("Could not save unusable SIGMETs to %s: %s",
                                 _SIGMET_UNPARSED_DIR, exc)
 
+    def _update_web_sigmetstate(self) -> None:
+        """Refresh the SIGMETs page data (self._web_sigmetstate), with or without PSX.
+
+        Done after every download and setting change, so frankenweather's
+        own web UI shows the SIGMETs even before the PSX connection is up
+        (the first download runs right at startup). Routers get it via
+        sigmetstate_broadcast_coro().
+        """
+        self._web_sigmetstate = {
+            "enabled": self._sigmet_enabled,
+            "handled": sorted(self._handled_hazards()),
+            "source": "aviationweather.gov",
+            "fetched_at": self._own_sigmet_fetched_at,
+            "next_at": self._own_sigmet_next_at,
+            "interval_s": _OWN_SIGMET_REFRESH_S,
+            "error": self._own_sigmet_error,
+            "entries": self._own_sigmet_entries,
+        }
+        self._web_sigmetstate_received_at = time.time()
+        self._sigmetstate_changed_event.set()
+
     def _build_sigmetstate_message(self) -> str:
         """Build the FRANKENWEATHER:SIGMETSTATE:<uuid>:<payload> addon message.
 
         <payload> is gzip+base64-encoded JSON (see
-        fw_webui.encode_windstate_payload()) of our own downloaded SIGMETs,
-        for the web UI's SIGMETs page -- the raw text alone runs ~35 KB.
+        fw_webui.encode_windstate_payload()) of self._web_sigmetstate, for
+        the router web UI's SIGMETs page -- the raw text alone runs ~35 KB.
         """
-        state = {
-            "enabled": self._own_sigmets,
-            "source": "aviationweather.gov",
-            "fetched_at": self._own_sigmet_fetched_at,
-            "error": self._own_sigmet_error,
-            "entries": self._own_sigmet_entries,
-        }
-        self._web_sigmetstate = state
-        self._web_sigmetstate_received_at = time.time()
-        payload = _fw_webui.encode_windstate_payload(state)
+        payload = _fw_webui.encode_windstate_payload(self._web_sigmetstate)
         return f"FRANKENWEATHER:SIGMETSTATE:{self._instance_uuid}:{payload}"
 
     async def sigmetstate_broadcast_coro(self) -> None:
-        """Broadcast SIGMETSTATE after each own SIGMET download, and every 5 min for late joiners.
+        """Broadcast SIGMETSTATE when it changes, and every 5 min for routers connecting later.
 
-        The periodic resend is for routers that connect later.
+        A change while PSX isn't connected (e.g. the first download, right
+        at startup) is sent as soon as the connection is up.
         """
         myname = inspect.currentframe().f_code.co_name
+        pending = False
+        last_sent = 0.0
         try:
             self.logger.debug("Starting %s", myname)
             while True:
                 try:
-                    await asyncio.wait_for(self._sigmetstate_changed_event.wait(), timeout=300.0)
+                    await asyncio.wait_for(self._sigmetstate_changed_event.wait(), timeout=10.0)
                 except asyncio.TimeoutError:
                     pass
-                self._sigmetstate_changed_event.clear()
-                if not self._own_sigmets or not self.psx_connected or self._conflict_paused():
+                if self._sigmetstate_changed_event.is_set():
+                    self._sigmetstate_changed_event.clear()
+                    pending = True
+                if not pending and time.time() - last_sent < 300.0:
+                    continue
+                if (not self._sigmet_enabled or self._web_sigmetstate is None or
+                        not self.psx_connected or self._conflict_paused()):
                     continue
                 self._psx_send("addon", self._build_sigmetstate_message())
+                pending = False
+                last_sent = time.time()
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
             self.logger.critical(traceback.format_exc())
@@ -7239,15 +7410,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "timeout; never changes which airport a zone snaps to, and never "
                  "turns a cache miss/stale METAR into a hit. Off by default.")
         parser.add_argument(
-            '--own-sigmets', action='store_true',
-            help="EXPERIMENTAL: download SIGMETs from aviationweather.gov "
-                 "ourselves (every 10 minutes) instead of letting PSX do it. "
-                 "PSX gets every SIGMET we could parse except thunderstorms "
-                 "(TS) and tropical cyclones (TC), which frankenweather "
-                 "depicts itself. All SIGMETs, including any we couldn't "
-                 "parse (also saved to the log directory's sigmet-unparsed "
-                 "folder), are shown on the web UI's SIGMETs page, where "
-                 "this can also be switched on and off. Off by default.")
+            '--sigmet', action='store_true',
+            help="EXPERIMENTAL: frankenweather's SIGMET system. Downloads "
+                 "SIGMETs from aviationweather.gov itself (every 10 "
+                 "minutes) instead of letting PSX do it, and handles the "
+                 "SIGMET types chosen on the web UI's new SIGMETs page "
+                 "itself: thunderstorms (TS) and tropical cyclones (TC) as "
+                 "CBs in its weather zones, turbulence (TURB) and mountain "
+                 "wave (MTW) as its own turbulence. PSX gets the other "
+                 "SIGMETs it could parse. Off by default: frankenweather "
+                 "then doesn't use SIGMETs at all and only has PSX download "
+                 "them regularly.")
         parser.add_argument(
             '--sync-tropopause', action='store_true',
             help="EXPERIMENTAL: keep PSX's Planet Weather page tropopause "
@@ -7370,7 +7543,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 print(f"WARNING: --psx-port-override={self.args.psx_port_override} "
                       f"overrides --psx-port={self.args.psx_port}", file=sys.stderr)
             self.args.psx_port = self.args.psx_port_override
-        self._own_sigmets = self.args.own_sigmets
+        self._sigmet_enabled = self.args.sigmet
 
     # (arg_name, replacement_hint or None for the generic "just remove it" message)
     _REMOVED_ARGS = (
