@@ -22,11 +22,14 @@ ctx must provide:
   ctx.send_mode_cmd(mode: str)          -> coroutine
   ctx.send_fw_settings_cmd(cmd: dict)   -> coroutine
 
-Optional, standalone-only (used by register_weather_logs_routes/the /weather/logs
+Optional, standalone-only (used by register_weather_logs_routes/the Config and logs
 page -- absent on the router's context, since that page has no reason to exist
 on the router UI):
   ctx.event_log_dir       : str           — directory holding per-run event logs
   ctx.event_log_path      : str | None    — this run's own event log file
+
+Optional, router-only:
+  ctx.router_home         : str           — URL of the router's start page
 """
 # pylint: disable=invalid-name,too-many-lines
 import asyncio
@@ -171,14 +174,46 @@ _TURB_KIND_LABELS = {
 # ---------------------------------------------------------------------------
 
 
-def _sigmets_nav_link(ctx, newline: bool = False) -> str:
-    """Return the nav button to the SIGMETs page, or '' without frankenweather's --sigmet."""
+def _sigmets_enabled(ctx) -> bool:
+    """Return True if frankenweather runs with --sigmet (so the SIGMETs page exists)."""
     sigstate = getattr(ctx, 'fw_sigmetstate', None) or {}
-    if not (sigstate.get('enabled') or
-            ((ctx.fw_state or {}).get('config') or {}).get('sigmet_enabled')):
-        return ''
-    return ('<a href="/weather/sigmets" class="btn btn-gray btn-sm">SIGMETs</a>' +
-            ('\n' if newline else ''))
+    return bool(sigstate.get('enabled') or
+                ((ctx.fw_state or {}).get('config') or {}).get('sigmet_enabled'))
+
+
+def _config_page_title(ctx) -> str:
+    """Return the Config page's name: logs are only on frankenweather's own web UI."""
+    return 'Config and logs' if getattr(ctx, 'event_log_dir', None) else 'Config'
+
+
+def _weather_nav(ctx, current: str) -> str:
+    """Return the nav buttons every weather page has at the top, linking to all of them.
+
+    current is the page being shown ('map', 'zones', 'wind', 'sigmets',
+    'turb', 'config'); its button is highlighted. A Refresh button at the
+    end reloads the page. In the router's web UI (ctx.router_home), a
+    button back to the router's start page comes first.
+    The SIGMETs page only exists with frankenweather's --sigmet.
+    """
+    pages = [('map', '/weather', 'Map'),
+             ('zones', '/weather/settings', 'Weather zones'),
+             ('wind', '/weather/enroute-wind', 'Enroute wind')]
+    if _sigmets_enabled(ctx):
+        pages.append(('sigmets', '/weather/sigmets', 'SIGMETs'))
+    pages += [('turb', '/weather/turbulence', 'Extra turbulence'),
+              ('config', '/weather/config', _config_page_title(ctx))]
+    here = next((url for key, url, _ in pages if key == current), '')
+    # In the router's web UI: a way back to the router's own start page
+    home = getattr(ctx, 'router_home', None)
+    home_html = (f'<a href="{home}" class="btn btn-gray btn-sm" '
+                 'style="width:auto;white-space:nowrap">⌂ Router home</a>' if home else '')
+    return home_html + ''.join(
+        f'<a href="{url}" class="btn {"btn-blue" if key == current else "btn-gray"} btn-sm" '
+        f'style="width:auto;white-space:nowrap">{label}</a>'
+        for key, url, label in pages) + (
+        # Reloads in place, so e.g. the map keeps its view (kept in the URL's #)
+        f'<a href="{here}" onclick="location.reload();return false" '
+        'class="btn btn-gray btn-sm" style="width:auto;white-space:nowrap">↻ Refresh</a>')
 
 
 def _page_shell(color_scheme, title, nav_html, body, extra_head=''):
@@ -202,7 +237,8 @@ def _page_shell(color_scheme, title, nav_html, body, extra_head=''):
         '<div class="page-title">'
         '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
         f'<h1>{title}</h1>'
-        f'<div style="margin-left:auto;display:flex;gap:0.5em">{nav_html}</div>'
+        f'<div style="margin-left:auto;display:flex;gap:0.5em;flex-wrap:wrap;'
+        f'justify-content:flex-end">{nav_html}</div>'
         '</div>\n' +
         body +
         '</body>\n</html>\n'
@@ -432,11 +468,7 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
             '</style>\n' +
             _LEAFLET_HEAD
         )
-        nav_html = (
-            '<a href="/weather" class="btn btn-gray btn-sm">Refresh</a>'
-            '<a href="/" class="btn btn-gray btn-sm">Back</a>'
-        )
-        return _page_shell(color_scheme, 'Weather', nav_html, body, extra_head)
+        return _page_shell(color_scheme, 'Weather', _weather_nav(ctx, 'map'), body, extra_head)
 
     if stale:
         msg = 'No data received from frankenweather, check PSX Instructor station'
@@ -1023,16 +1055,6 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
          f'<b style="color:{enroute_wind_color}">{enroute_wind_label}</b></td></tr>\n') +
         '</table>\n</div>\n'
         '<div style="display:flex;flex-direction:column;gap:0.5em">\n'
-        '<a href="/weather/settings" class="btn btn-gray btn-sm">Weather zones</a>\n'
-        '<a href="/weather/turbulence" class="btn btn-gray btn-sm">Extra turbulence</a>\n'
-        '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Enroute wind</a>\n' +
-        _sigmets_nav_link(ctx, newline=True) +
-        '<a href="/weather/config" class="btn btn-gray btn-sm">Config</a>\n' +
-        # Only the standalone context has event_log_dir (see fw_webui module
-        # docstring) -- the router UI has no need to browse frankenweather's
-        # own log files.
-        ('<a href="/weather/logs" class="btn btn-gray btn-sm">Logs</a>\n'
-         if getattr(ctx, 'event_log_dir', None) else '') +
         '<button class="btn btn-blue btn-sm" onclick="openFeedback()">Feedback</button>\n'
         '</div>\n'
     )
@@ -1090,8 +1112,44 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
     return _page(body)
 
 
+_ZONE_MODE_DESC = {
+    'enabled': 'frankenweather fills each of the seven weather zones from live data '
+               '(Open-Meteo, METARs, SIGMETs), shown below.',
+    'manual': 'The weather you set below is put into all seven weather zones. The zones '
+              'are still placed around the aircraft as in Auto.',
+    'paused': 'Paused: the weather zones are frozen, with no updates from frankenweather '
+              'or PSX.',
+    'disabled': 'Disabled: PSX\'s own built-in weather is active; frankenweather does nothing.',
+}
+
+
+def _zone_mode_html(fw_mode: str) -> str:
+    """Return the Weather zones page's Auto/Manual switch, plus Pause and Disable."""
+    def _button(mode, label, active, title):
+        style = ('background:#2563eb;color:#fff;cursor:default' if active
+                 else 'background:#1c2033;color:#94a3b8;border:1px solid #2a2f45')
+        return ('<form action="/api/weather/mode" method="post" style="margin:0">'
+                f'<input type="hidden" name="mode" value="{mode}">'
+                f'<button type="submit" class="btn btn-sm" title="{title}" '
+                f'style="margin:0;width:auto;{style}"{" disabled" if active else ""}>'
+                f'{label}</button></form>')
+    switch = (_button('enabled', 'Auto', fw_mode == 'enabled', _ZONE_MODE_DESC['enabled']) +
+              _button('manual', 'Manual', fw_mode == 'manual', _ZONE_MODE_DESC['manual']))
+    others = ''.join(
+        _button(mode, label, fw_mode == mode, _ZONE_MODE_DESC[mode])
+        for mode, label in (('paused', 'Pause'), ('disabled', 'Disable')))
+    card = 'warn' if fw_mode in ('paused', 'disabled') else 'ok'
+    return (
+        f'<div class="card {card}" style="display:flex;align-items:center;gap:1em;'
+        'flex-wrap:wrap">'
+        f'<div style="display:flex;gap:0">{switch}</div>'
+        f'<div style="flex:1;min-width:16em;color:#94a3b8;font-size:0.88em">'
+        f'{_ZONE_MODE_DESC.get(fw_mode, fw_mode)}</div>'
+        f'<div style="display:flex;gap:0.4em">{others}</div></div>\n')
+
+
 def _build_weather_settings_page(ctx):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
-    """Render the /weather/settings HTML page from the cached FRANKENWEATHER state."""
+    """Render the /weather/settings (Weather zones) page from the cached FRANKENWEATHER state."""
     color_scheme = ctx.color_scheme
     now = time.time()
     state = ctx.fw_state
@@ -1100,17 +1158,9 @@ def _build_weather_settings_page(ctx):  # pylint: disable=too-many-locals,too-ma
     stale = state is None or age_s > 300.0
 
     def _page(body):
-        nav_html = (
-            '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
-            '<a href="/weather/manual" class="btn btn-gray btn-sm">Manual weather</a>'
-            '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Enroute wind</a>' +
-            _sigmets_nav_link(ctx) +
-            '<a href="/weather/config" class="btn btn-gray btn-sm">Config</a>'
-            '<a href="/weather/settings" class="btn btn-gray btn-sm">Refresh</a>'
-        )
         return _page_shell(
-            color_scheme, 'Weather settings', nav_html, body,
-            '\n<style>body { max-width: 64em; }</style>\n')
+            color_scheme, 'Weather zones', _weather_nav(ctx, 'zones'), body,
+            '\n<style>body { max-width: 64em; }</style>\n' + _MANUAL_WX_CSS)
 
     if stale:
         msg = ('No data received from frankenweather, '
@@ -1149,40 +1199,9 @@ def _build_weather_settings_page(ctx):  # pylint: disable=too-many-locals,too-ma
     )
 
     fw_mode = state.get('fw_mode', 'enabled')
-    fw_mode_class = 'ok' if fw_mode == 'enabled' else 'warn'
-    _MODE_BTN = {
-        'enabled': 'btn-green', 'paused': 'btn-amber',
-        'disabled': 'btn-red', 'manual': 'btn-blue',
-    }
-    _MODE_LABEL = {
-        'enabled': 'Enable', 'paused': 'Pause',
-        'disabled': 'Disable', 'manual': 'Manual',
-    }
-    _MODE_DESC = {
-        'enabled': 'FrankenWeather manages weather zones automatically',
-        'paused': 'Weather zones are frozen — no updates from FrankenWeather or PSX',
-        'disabled': 'PSX built-in weather active; FrankenWeather inactive',
-        'manual': 'Weather set manually via the Manual Weather page',
-    }
-    other_modes = [m for m in ('enabled', 'paused', 'disabled', 'manual') if m != fw_mode]
-    body += (
-        '<h2>Mode control</h2>\n'
-        '<div class="card ok">\n<table>\n'
-        f'<tr><td>Current mode</td><td class="{fw_mode_class}">{fw_mode}</td></tr>\n'
-        f'<tr><td></td><td class="note" style="font-size:0.85em">'
-        f'{_MODE_DESC[fw_mode]}</td></tr>\n'
-        '</table>\n</div>\n'
-        '<div class="btn-row">\n'
-    )
-    for m in other_modes:
-        body += (
-            f'<form action="/api/weather/mode" method="post" style="display:inline">\n'
-            f'<input type="hidden" name="mode" value="{m}">\n'
-            f'<button type="submit" class="btn {_MODE_BTN[m]}" title="{_MODE_DESC[m]}">'
-            f'{_MODE_LABEL[m]}</button>\n'
-            '</form>\n'
-        )
-    body += '</div>\n'
+    body = _zone_mode_html(fw_mode) + body
+    if fw_mode == 'manual':
+        return _page(body + _manual_weather_section(ctx))
 
     cfg = state.get('config', {})
     avoid_cb = bool(cfg.get('avoid_cb_near_airport'))
@@ -1409,13 +1428,22 @@ def _build_weather_settings_page(ctx):  # pylint: disable=too-many-locals,too-ma
         '</table>\n</div>\n'
     )
 
+    body += ('<p class="note">Saving, loading and resetting settings: see the '
+             '<a href="/weather/config">Config page</a>.</p>\n')
+
+    body += '<hr>\n<a href="/weather" class="btn btn-gray">Back to map</a>\n'
+    return _page(body)
+
+
+def _config_file_html(cfg: dict) -> str:
+    """Return the Config page's config file section: path, status, save/load/reset buttons."""
     config_file = cfg.get("config_file")
     config_file_exists = cfg.get("config_file_exists", False)
-    body += '<h2>Config file</h2>\n'
+    body = '<h2>Config file</h2>\n'
     if not config_file:
         body += (
             '<div class="card warn"><p style="margin:0">No <code>--config-file</code> given '
-            'at startup — settings above cannot be saved or reloaded from disk. Restart '
+            'at startup — settings cannot be saved or reloaded from disk. Restart '
             'frankenweather with <code>--config-file PATH</code> to enable this.</p></div>\n'
         )
     else:
@@ -1443,13 +1471,11 @@ def _build_weather_settings_page(ctx):  # pylint: disable=too-many-locals,too-ma
             'config file)">Reset settings to default</button></form>\n'
             '</div>\n'
         )
-
-    body += '<hr>\n<a href="/weather" class="btn btn-gray">Back to map</a>\n'
-    return _page(body)
+    return body
 
 
 def _build_weather_config_page(ctx):
-    """Render the /weather/config page (time sync settings for now)."""
+    """Render the /weather/config page: the config file (save/load/reset) and time sync."""
     color_scheme = ctx.color_scheme
     state = ctx.fw_state
     received_at = ctx.fw_state_received_at
@@ -1457,12 +1483,8 @@ def _build_weather_config_page(ctx):
     stale = state is None or age_s > 300.0
 
     def _page(body):
-        nav_html = (
-            '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
-            '<a href="/weather/settings" class="btn btn-gray btn-sm">Weather zones</a>'
-            '<a href="/weather/config" class="btn btn-gray btn-sm">Refresh</a>'
-        )
-        return _page_shell(color_scheme, 'Config', nav_html, body)
+        return _page_shell(color_scheme, _config_page_title(ctx), _weather_nav(ctx, 'config'),
+                           body)
 
     if stale:
         msg = ('No data received from frankenweather, '
@@ -1488,7 +1510,7 @@ def _build_weather_config_page(ctx):
             f' title="Click to toggle">{label}</button></form>'
         )
 
-    body = (
+    body = _config_file_html(cfg) + (
         '<h2>Time sync</h2>\n'
         '<p class="note">Keeps PSX\'s clocks (TimeEarth, and both cockpit clocks) in sync '
         "with your computer's real-world time.</p>\n"
@@ -1516,13 +1538,40 @@ def _build_weather_config_page(ctx):
         '</td></tr>\n'
         '</table>\n</div>\n'
     )
-    body += '<hr>\n<a href="/weather" class="btn btn-gray">Back to map</a>\n'
+    if getattr(ctx, 'event_log_dir', None):
+        body += _event_logs_html(ctx)
     return _page(body)
 
 
-def _build_weather_manual_page(ctx):  # pylint: disable=too-many-locals,too-many-statements
-    """Render the /weather/manual HTML page for manual weather configuration."""
-    color_scheme = ctx.color_scheme
+_MANUAL_WX_CSS = (
+    '\n<style>body { max-width: 56em; }'
+    '.form-grid { display:grid;grid-template-columns:1fr 1fr;gap:1em; }'
+    '.form-section { background:#1c2033;border:1px solid #2a2f45;'
+    'border-radius:6px;padding:1em; }'
+    '.form-section h3 { margin:0 0 0.75em;font-size:0.95em;color:#94a3b8;'
+    'text-transform:uppercase;letter-spacing:0.05em; }'
+    '.field-row { display:flex;align-items:center;gap:0.5em;'
+    'margin-bottom:0.5em;flex-wrap:wrap; }'
+    '.field-label { flex:0 0 7em;font-size:0.88em;color:#94a3b8; }'
+    '.field-input { flex:1;min-width:4em; }'
+    'input[type=number],input[type=text],select { '
+    'background:#0f1117;border:1px solid #2a2f45;border-radius:4px;'
+    'color:#e2e8f0;padding:3px 6px;font-size:0.88em; }'
+    '.metar-box { font-family:monospace;font-size:0.9em;padding:0.75em;'
+    'background:#0f1117;border:1px solid #2a2f45;border-radius:4px;'
+    'color:#4ade80;word-break:break-all;margin-bottom:1em; }'
+    '.mode-badge-manual { color:#60a5fa; }'
+    '.mode-badge-enabled { color:#4ade80; }'
+    '</style>\n'
+)
+
+
+def _manual_weather_section(ctx):  # pylint: disable=too-many-locals,too-many-statements
+    """Return the Weather zones page's manual weather controls (shown in Manual mode).
+
+    The weather set here is put into all seven weather zones. Needs
+    _MANUAL_WX_CSS in the page's <head>.
+    """
     state = ctx.fw_state
     params = {}
     if state:
@@ -1538,36 +1587,7 @@ def _build_weather_manual_page(ctx):  # pylint: disable=too-many-locals,too-many
         pass
 
     def _page(body):
-        extra_head = (
-            '\n<style>body { max-width: 56em; }'
-            '.form-grid { display:grid;grid-template-columns:1fr 1fr;gap:1em; }'
-            '.form-section { background:#1c2033;border:1px solid #2a2f45;'
-            'border-radius:6px;padding:1em; }'
-            '.form-section h3 { margin:0 0 0.75em;font-size:0.95em;color:#94a3b8;'
-            'text-transform:uppercase;letter-spacing:0.05em; }'
-            '.field-row { display:flex;align-items:center;gap:0.5em;'
-            'margin-bottom:0.5em;flex-wrap:wrap; }'
-            '.field-label { flex:0 0 7em;font-size:0.88em;color:#94a3b8; }'
-            '.field-input { flex:1;min-width:4em; }'
-            'input[type=number],input[type=text],select { '
-            'background:#0f1117;border:1px solid #2a2f45;border-radius:4px;'
-            'color:#e2e8f0;padding:3px 6px;font-size:0.88em; }'
-            '.metar-box { font-family:monospace;font-size:0.9em;padding:0.75em;'
-            'background:#0f1117;border:1px solid #2a2f45;border-radius:4px;'
-            'color:#4ade80;word-break:break-all;margin-bottom:1em; }'
-            '.mode-badge-manual { color:#60a5fa; }'
-            '.mode-badge-enabled { color:#4ade80; }'
-            '</style>\n'
-        )
-        nav_html = (
-            '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
-            '<a href="/weather/settings" class="btn btn-gray btn-sm">Zone settings</a>'
-            '<a href="/weather/turbulence" class="btn btn-gray btn-sm">Turbulence</a>'
-            '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Enroute wind</a>' +
-            _sigmets_nav_link(ctx) +
-            '<a href="/weather/manual" class="btn btn-gray btn-sm">Refresh</a>'
-        )
-        return _page_shell(color_scheme, 'Manual weather', nav_html, body, extra_head)
+        return body
 
     mode_color = 'mode-badge-manual' if fw_mode == 'manual' else 'mode-badge-enabled'
     zones = (state or {}).get("zones", [])
@@ -1599,20 +1619,6 @@ def _build_weather_manual_page(ctx):  # pylint: disable=too-many-locals,too-many
             f'<button type="submit" class="btn btn-amber btn-sm">'
             f'Copy zone {focused_zone} weather</button>'
             f'</form>'
-        )
-    if fw_mode != 'manual':
-        body += (
-            '<form action="/api/weather/mode" method="post">'
-            '<input type="hidden" name="mode" value="manual">'
-            '<button type="submit" class="btn btn-blue btn-sm">Switch to manual mode</button>'
-            '</form>'
-        )
-    else:
-        body += (
-            '<form action="/api/weather/mode" method="post">'
-            '<input type="hidden" name="mode" value="enabled">'
-            '<button type="submit" class="btn btn-green btn-sm">Back to normal</button>'
-            '</form>'
         )
     body += '</div></div>\n'
 
@@ -1829,14 +1835,8 @@ def _build_weather_turb_page(ctx):  # pylint: disable=too-many-locals,too-many-b
             '</style>\n'
             '<script>setTimeout(function(){location.reload();},30000);</script>\n'
         )
-        nav_html = (
-            '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
-            '<a href="/weather/manual" class="btn btn-gray btn-sm">Manual weather</a>'
-            '<a href="/weather/settings" class="btn btn-gray btn-sm">Weather zones</a>'
-            '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Enroute wind</a>' +
-            _sigmets_nav_link(ctx)
-        )
-        return _page_shell(color_scheme, 'Turbulence', nav_html, body, extra_head)
+        return _page_shell(color_scheme, 'Extra turbulence', _weather_nav(ctx, 'turb'), body,
+                           extra_head)
 
     stale_banner = ''
     if not tstate:
@@ -2280,12 +2280,7 @@ def _build_weather_sigmets_page(ctx):  # pylint: disable=too-many-locals
     color_scheme = ctx.color_scheme
     sigstate = ctx.fw_sigmetstate
     now = time.time()
-    nav_html = (
-        '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
-        '<a href="/weather/settings" class="btn btn-gray btn-sm">Weather zones</a>'
-        '<a href="/weather/config" class="btn btn-gray btn-sm">Config</a>'
-        '<a href="/weather/sigmets" class="btn btn-gray btn-sm">Refresh</a>'
-    )
+    nav_html = _weather_nav(ctx, 'sigmets')
     extra_head = (
         '\n<style>body { max-width: 64em; }'
         'table.sg { border-collapse:collapse;width:100%;font-size:0.88em; }'
@@ -2399,13 +2394,8 @@ def _build_weather_enroute_wind_page(ctx):  # pylint: disable=too-many-locals,to
             'td.ew-diff-hi { color:#f59e0b;font-weight:600; }'
             '</style>\n'
         )
-        nav_html = (
-            '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
-            '<a href="/weather/manual" class="btn btn-gray btn-sm">Manual weather</a>'
-            '<a href="/weather/settings" class="btn btn-gray btn-sm">Weather zones</a>'
-            '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Refresh</a>'
-        )
-        return _page_shell(color_scheme, 'Enroute wind', nav_html, body, extra_head)
+        return _page_shell(color_scheme, 'Enroute wind', _weather_nav(ctx, 'wind'), body,
+                           extra_head)
 
     enabled = bool(windstate and windstate.get("enabled"))
     toggle_label = "Disable" if enabled else "Enable"
@@ -2577,7 +2567,8 @@ def register_weather_routes(routes, ctx):  # pylint: disable=too-many-statements
 
     @routes.get('/weather/manual')
     async def _weather_manual_get(_):
-        return web.Response(text=_paused_or(_build_weather_manual_page), content_type='text/html')
+        # Manual weather is now part of the Weather zones page (its Manual mode)
+        raise web.HTTPFound('/weather/settings')
 
     @routes.get('/weather/enroute-wind')
     async def _weather_enroute_wind_get(_):
@@ -2665,7 +2656,7 @@ def register_weather_routes(routes, ctx):  # pylint: disable=too-many-statements
         cmd["inv_on"] = "inv_on" in data
         if cmd:
             await ctx.send_manualwx_cmd(cmd)
-        raise web.HTTPFound('/weather/manual')
+        raise web.HTTPFound('/weather/settings')
 
     @routes.post('/api/weather/manual/copy_zone')
     async def _weather_manual_copy(request):
@@ -2679,7 +2670,7 @@ def register_weather_routes(routes, ctx):  # pylint: disable=too-many-statements
             cmd = _wx_string_to_manual_params(wx_str)
             if cmd:
                 await ctx.send_manualwx_cmd(cmd)
-        raise web.HTTPFound('/weather/manual')
+        raise web.HTTPFound('/weather/settings')
 
     @routes.post('/api/weather/settings')
     async def _weather_settings_post(request):
@@ -2711,17 +2702,17 @@ def register_weather_routes(routes, ctx):  # pylint: disable=too-many-statements
     @routes.post('/api/weather/config/save')
     async def _weather_config_save(_):
         await ctx.send_fw_settings_cmd({"config_action": "save"})
-        raise web.HTTPFound('/weather/settings')
+        raise web.HTTPFound('/weather/config')
 
     @routes.post('/api/weather/config/load')
     async def _weather_config_load(_):
         await ctx.send_fw_settings_cmd({"config_action": "load"})
-        raise web.HTTPFound('/weather/settings')
+        raise web.HTTPFound('/weather/config')
 
     @routes.post('/api/weather/config/reset')
     async def _weather_config_reset(_):
         await ctx.send_fw_settings_cmd({"config_action": "reset"})
-        raise web.HTTPFound('/weather/settings')
+        raise web.HTTPFound('/weather/config')
 
     @routes.post('/api/weather/turbulence')
     async def _weather_turb_post(request):  # pylint: disable=too-many-branches
@@ -2806,13 +2797,11 @@ def _list_event_logs(log_dir: str) -> list:
     return entries
 
 
-def _build_weather_logs_page(ctx):
-    """Render the /weather/logs page: list this instance's per-run event logs."""
-    color_scheme = ctx.color_scheme
+def _event_logs_html(ctx) -> str:
+    """Return the Config and logs page's Logs section (frankenweather's own web UI only)."""
 
     def _page(body):
-        nav_html = '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
-        return _page_shell(color_scheme, 'Event logs', nav_html, body)
+        return '<h2 id="logs">Logs</h2>\n' + body
 
     log_dir = ctx.event_log_dir
     current = ctx.event_log_path
@@ -2855,7 +2844,7 @@ def _build_weather_logs_page(ctx):
 
 
 def register_weather_logs_routes(routes, ctx):
-    """Register /weather/logs and its download route (standalone server only).
+    """Register the log download route, and /weather/logs as a redirect (standalone only).
 
     Not called from the router's web API -- the router has no reason to
     expose frankenweather's own per-run event logs (see ctx.event_log_dir/
@@ -2865,7 +2854,7 @@ def register_weather_logs_routes(routes, ctx):
 
     @routes.get('/weather/logs')
     async def _weather_logs_get(_):
-        return web.Response(text=_build_weather_logs_page(ctx), content_type='text/html')
+        raise web.HTTPFound('/weather/config#logs')  # now part of the Config and logs page
 
     @routes.get('/weather/logs/download/{name}')
     async def _weather_logs_download(request):

@@ -2090,6 +2090,11 @@ class RouterFWContext:
         return self._router.frankenweather_windstate_received_at
 
     @property
+    def router_home(self):
+        """Return the router's start page URL, for the weather pages' "Router home" button."""
+        return '/'
+
+    @property
     def fw_sigmetstate(self):
         """Return cached SIGMETSTATE dict."""
         return self._router.frankenweather_sigmetstate

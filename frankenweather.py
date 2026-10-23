@@ -91,7 +91,7 @@ _OM_ENROUTE_CACHE_PATH = os.path.join(
 # Per-run event log: every console line, one timestamped file per run, so a
 # problem report (e.g. "Open-Meteo wasn't reachable for 10 minutes") can be
 # diagnosed from a downloadable file instead of reconstructed from memory --
-# see the /weather/logs web UI page. Same ~/.cache/frankenweather/ directory
+# see the web UI's Config and logs page. Same ~/.cache/frankenweather/ directory
 # as the caches above, so it exists and is writable on both Linux and
 # Windows without any extra setup.
 _EVENT_LOG_DIR = os.path.join(os.path.expanduser("~"), ".cache", "frankenweather", "logs")
@@ -1697,7 +1697,7 @@ class StandaloneFWContext:
 
     @property
     def event_log_dir(self):
-        """Return the per-run event log directory (see /weather/logs).
+        """Return the per-run event log directory (see the Config and logs page).
 
         Only present on the standalone context -- the router UI has no
         need for this page (see fw_webui.py's nav gating), so RouterFWContext
@@ -7641,7 +7641,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
         _fw_webui.register_weather_routes(routes, ctx)
         # Standalone-only: the router UI has no need to browse/download
-        # frankenweather's own per-run event logs (see /weather/logs docstring).
+        # frankenweather's own per-run event logs (see the Config and logs page).
         _fw_webui.register_weather_logs_routes(routes, ctx)
 
         static_path = pathlib.Path(__file__).parent / 'router' / 'frankenrouter' / 'static'

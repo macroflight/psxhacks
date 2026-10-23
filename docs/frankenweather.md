@@ -180,9 +180,18 @@ Features:
 - Web UI: a standalone HTTP server is started by default on port 9747;
   pass `--web-port PORT` to use a different port, or `--no-web-ui` to
   disable it entirely. The same UI is also available through the
-  frankenrouter web interface. The web UI provides a live weather map,
-  zone details, manual weather entry, turbulence tuning, the MSFS bridge
-  settings toggles, and (on `/weather/config`) the time sync toggles.
+  frankenrouter web interface. Every page has the same buttons at the
+  top linking to all of them (plus Refresh, and in the router's UI a
+  button back to the router's start page):
+  - **Map**: the live weather map.
+  - **Weather zones**: an Auto/Manual switch (plus Pause and Disable).
+    In Auto, the details of all seven weather zones; in Manual, the
+    manual weather controls, whose weather goes into all seven zones.
+  - **Enroute wind**: the enroute wind importer.
+  - **SIGMETs**: only with `--sigmet`, see [SIGMETs](#sigmets).
+  - **Extra turbulence**: turbulence tuning.
+  - **Config and logs**: the configuration file (save/load/reset), the
+    time sync toggles, and (in frankenweather's own UI) its log files.
 
 - Settings persistence: pass `--config-file PATH` to load every setting
   the web UI can change from a TOML file at startup, and to enable the
@@ -321,7 +330,7 @@ flag off, CBs snap to forecast instantly, as before.
 
 Both the forecast target and the live ramp rate are visible, not just the
 current (ramped) value: the web UI's weather map popup and the
-`/weather/settings` zone cards show the CB's current oktas/top next to
+Weather zones page's zone cards show the CB's current oktas/top next to
 its target (only when they differ) and its current growth/decay rate —
 this applies to the frankenrouter web UI too, since it serves the same
 pages. The console's per-zone log line gains a `[CB ramp: ...]` suffix
@@ -390,7 +399,7 @@ actual position.
 
 Keeps PSX's clocks (`TimeEarth`, and both cockpit clocks `TimeClockL`/
 `TimeClockR`) matched to your computer's real-world time. Controlled by
-three independent toggles on the `/weather/config` web page (or the
+three independent toggles on the Config and logs web page (or the
 `[timesync]` section of the [config file](#configuration-file)):
 
 - **`on_startup`** (default on) — sync every time frankenweather connects
@@ -522,9 +531,9 @@ Behaviour:
   built-in defaults. If it doesn't exist yet (the common case on first
   run), frankenweather starts with its built-in defaults and does
   **not** create the file — nothing is written until you explicitly
-  click "Save current settings to file" on the `/weather/settings` page
+  click "Save current settings to file" on the Config and logs page
   (or the file is created by hand).
-- The settings page also shows the file's path and whether it currently
+- The Config and logs page also shows the file's path and whether it currently
   exists, plus a "Load settings from file" button (re-reads the file,
   discarding any unsaved runtime changes) and a "Reset settings to
   default" button (resets everything below to its built-in default —
