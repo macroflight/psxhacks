@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-10-23: version 1.23.0
+
+- **New: SIGMETs page in the weather web UI**, for frankenweather 1.9.0's
+  SIGMET system (`--sigmet`): which SIGMET types frankenweather handles,
+  download status, counts per type, nearest and nearby areas,
+  unparseable SIGMETs and the raw text. The page and its button only
+  appear when frankenweather runs with `--sigmet`. The weather map also
+  gets range rings, SIGMET areas of every type and the CBs' actual
+  positions (see frankenweather's changelog).
+- The weather web UI is reorganised into six pages (see frankenweather's
+  changelog), with the same buttons at the top of every page, including
+  "⌂ Router home" back to the router's start page.
+- The /efb "PSX SIGMETs Off" hint now describes what the setting does
+  with frankenweather 1.9.0: PSX doesn't use SIGMETs, and with
+  frankenweather's `--sigmet` gets none at all.
+
 ## 2026-10-23: version 1.22.1
 
 - **Fixed:** a client connecting while the router was still learning new
