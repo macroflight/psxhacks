@@ -1,5 +1,20 @@
 # frankenweather changelog
 
+## 1.8.6 (2026-10-23)
+
+- **Change: `--sync-tropopause` only sets the tropopause from reliable
+  data.** PSX's own automatic tropopause is fine for most purposes, so
+  frankenweather now leaves it on auto for the first 15 minutes after
+  starting, and until it has at least 3 tropopause values for the
+  current area. It then uses their median, on the ground as well as in
+  flight. After a situ load or reposition (a jump of more than 150 nm),
+  the earlier values are discarded and the tropopause goes back to auto
+  until there are 3 new ones.
+- **Fix: a tropopause above 50,000 ft was written again and again.** PSX
+  doesn't accept a tropopause higher than 50,000 ft, which is common in
+  the tropics, so it stored 50,000 ft instead, and frankenweather kept
+  trying to correct it. The tropopause is now capped at 50,000 ft.
+
 ## 1.8.5 (2026-10-22)
 
 - **Fix: `--sync-tropopause` caused PFD altitude jumps in flight.** On
