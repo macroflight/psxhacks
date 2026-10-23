@@ -2,6 +2,7 @@
 # pylint: disable=invalid-name,duplicate-code,too-many-lines
 import argparse
 import asyncio
+import collections
 import copy
 import glob
 import inspect
@@ -59,6 +60,7 @@ from fw_cb import (
     apply_fake_cb as _apply_fake_cb,
 )
 import fw_webui as _fw_webui  # pylint: disable=wrong-import-order
+import fw_sigmet as _fw_sigmet  # pylint: disable=wrong-import-order
 from psxhacks_version import get_version
 
 
@@ -94,6 +96,9 @@ _OM_ENROUTE_CACHE_PATH = os.path.join(
 _EVENT_LOG_DIR = os.path.join(os.path.expanduser("~"), ".cache", "frankenweather", "logs")
 _EVENT_LOG_GLOB = "frankenweather_*.log"
 _EVENT_LOG_RETAIN = 10  # keep only the most recent N per-run log files
+# --own-sigmets: SIGMETs we could not use are saved here, one file each, so
+# the parser can be improved later (see _save_unparsed_sigmets()).
+_SIGMET_UNPARSED_DIR = os.path.join(_EVENT_LOG_DIR, "sigmet-unparsed")
 # How often log_flush_coro() fsyncs the log files, so a log copied off disk
 # mid-flight (e.g. from ~/.cache/frankenweather/logs on Windows) is never
 # more than this far behind -- same cadence as frankenrouter's own logs.
@@ -252,9 +257,27 @@ _NOAA_METAR_CYCLE_URL = "https://tgftp.nws.noaa.gov/data/observations/metar/cycl
 _NOAA_METAR_CACHE_MAX_S = 1800
 _METAR_FALLBACK_ZONE_COUNT = 7
 _SIGMET_REFRESH_MAX_S = 1800           # re-request PSX's own SIGMET download every 30 minutes
-# SigmetOn (Qi262) is a 0-15 bitmask; only these two bits are documented --
-# bit 2 and bit 8 are unknown and must never be touched. See _write_sigmet_on().
+_OWN_SIGMET_REFRESH_S = 600            # --own-sigmets: own SIGMET download every 10 minutes
+_OWN_SIGMET_TIMEOUT = aiohttp.ClientTimeout(total=30)
+# --own-sigmets "anchor" zone: one CB-free zone always kept near the
+# aircraft, so the zone PSX uses for the local weather (QNH) is close by and
+# no CB can ever appear right next to the aircraft. See _maintain_anchor_zone().
+_ANCHOR_MAX_NM = 50.0              # a dep/dst airport zone this close does the job instead
+_ANCHOR_AHEAD_NM = (40.0, 50.0)    # where a new anchor goes, along track
+_ANCHOR_HANDOVER_BEHIND_NM = 25.0  # new anchor once the aircraft is this far past the old one
+# --own-sigmets: weather zones placed inside TS/TC SIGMET areas, so the CBs
+# frankenweather depicts there (instead of PSX) show up on the radar. See
+# _place_sigmet_zones().
+_SIGMET_ZONE_RANGE_NM = 300.0      # only areas this close (roughly weather radar range)
+_SIGMET_ZONES_PER_TS = 2           # zones per TS area
+_SIGMET_ZONES_PER_TC = 3           # zones per TC area, a tight cluster
+_SIGMET_TC_CLUSTER_SEP_NM = 20.0   # separation between zones in a TC cluster
+_SIGMET_PLACE_INTERVAL_S = 60.0    # move at most one zone this often
+# SigmetOn (Qi262) is a 0-15 bitmask. Bits 1 and 4 are documented; bit 2
+# was live-tested (2026-10-23) to be PSX's own periodic SIGMET download.
+# Bit 8 is unknown and must never be touched. See _write_sigmet_on().
 _SIGMET_EMBED_BIT = 1                 # SIGMETs embedded in the planet weather model
+_SIGMET_AUTO_DOWNLOAD_BIT = 2         # PSX downloads SIGMETs itself
 _SIGMET_DOWNLOAD_BIT = 4              # trigger an immediate download (self-clearing)
 _SIGMET_KNOWN_BITS = _SIGMET_EMBED_BIT | _SIGMET_DOWNLOAD_BIT
 # AeroCkBxs (Qi184) is a 3-bit Aerodynamics-page-checkboxes mask (Max=7):
@@ -1347,6 +1370,14 @@ def _wxmode_equivalent(a: Optional[str], b: Optional[str]) -> bool:
     return pa[2:5] == pb[2:5] and pa[5][:-3] == pb[5][:-3]
 
 
+def _strip_cb(wx: str) -> str:
+    """Return a Wx<N> zone string with its CB coverage (field 9) set to 0."""
+    parts = wx.split(';')
+    if len(parts) > 9:
+        parts[9] = '0'
+    return ';'.join(parts)
+
+
 def _parse_wxaloft_tropopause(wxaloft: Optional[str]) -> Optional[tuple]:
     """Return (alt_ft, temp_c, wind_u_kt, wind_v_kt) from a "Constantly" WxAloft, else None.
 
@@ -1490,6 +1521,7 @@ _CONFIG_TIMESYNC_FIELDS = (
 _CONFIG_SIGMET_FIELDS = (
     ("use_sigmets", "_use_sigmets", bool),
     ("disable_psx_sigmets", "_disable_psx_sigmets", bool),
+    ("own_sigmets", "_own_sigmets", bool),
 )
 _CONFIG_CB_AVOIDANCE_FIELDS = (
     ("avoid_cb_near_airport", "_avoid_cb_near_airport", bool),
@@ -1637,6 +1669,16 @@ class StandaloneFWContext:
     def fw_windstate_received_at(self):
         """Return epoch of last WINDSTATE broadcast."""
         return self._fw._web_windstate_received_at  # pylint: disable=protected-access
+
+    @property
+    def fw_sigmetstate(self):
+        """Return the last-broadcast SIGMETSTATE dict."""
+        return self._fw._web_sigmetstate  # pylint: disable=protected-access
+
+    @property
+    def fw_sigmetstate_received_at(self):
+        """Return epoch of last SIGMETSTATE broadcast."""
+        return self._fw._web_sigmetstate_received_at  # pylint: disable=protected-access
 
     @property
     def fw_conflict_paused(self):
@@ -1809,6 +1851,33 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._enroute_last_corridor_txt: Optional[str] = None  # last corridor we generated
         self._web_windstate: Optional[dict] = None
         self._web_windstate_received_at: float = 0.0
+        # --own-sigmets: frankenweather's own SIGMET download (see
+        # own_sigmet_coro()) -- normalized entries (fw_sigmet.normalize()),
+        # when they were fetched, and the last download error, if any.
+        self._own_sigmets: bool = False   # from --own-sigmets, see handle_args()
+        # Whether we currently own PSX's SIGMETs (see _sync_own_sigmets()),
+        # PSX's last reported WxSigmet text, and the last text we wrote.
+        self._own_sigmets_applied: bool = False
+        # The current anchor zone (see _maintain_anchor_zone()), and every
+        # zone kept CB-free: zone -> (lat, lon) it was at when made CB-free.
+        # A zone stays CB-free (an earlier anchor, now behind the aircraft)
+        # until it is moved anywhere else.
+        self._anchor_zone: Optional[int] = None
+        self._cb_free_zones: dict = {}
+        self._sigmet_place_last: float = 0.0  # see _place_sigmet_zones()
+        # Set when we take over the SIGMETs: _place_sigmet_zones() then
+        # places every zone it wants at once instead of one per interval.
+        self._sigmet_place_burst: bool = False
+        self._psx_sigmet_raw: Optional[str] = None
+        self._own_sigmet_written: Optional[str] = None
+        self._own_sigmet_entries: list = []
+        self._own_sigmet_fetched_at: Optional[float] = None
+        self._own_sigmet_error: Optional[str] = None
+        self._sigmetstate_changed_event: asyncio.Event = asyncio.Event()
+        # Set by the web UI's "Download now" button (own_sigmets_refresh command).
+        self._own_sigmet_refresh_event: asyncio.Event = asyncio.Event()
+        self._web_sigmetstate: Optional[dict] = None
+        self._web_sigmetstate_received_at: float = 0.0
 
         # All parsed SIGMETs (any recognized hazard type), and ts_sigmets, the
         # TS-only subset used to lift WMO/showers CB suppression when CAPE agrees.
@@ -1842,10 +1911,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # same WxSigmet/Qs499 PSX populates) goes stale for the whole
         # flight. See _write_sigmet_on() for the bitmask this drives.
         self._use_sigmets: bool = True
-        # Whether PSX's own "SIGMETs embedded in the planet weather model"
-        # bit should be kept off -- frankenweather still downloads/parses
-        # SIGMETs for its own CB-override logic either way, this only
-        # controls whether PSX's own weather engine also consumes them.
+        # "PSX SIGMETs off" (/efb): PSX gets no SIGMETs at all (its SIGMET
+        # data is emptied; "embedded in the planet weather model" stays on).
+        # frankenweather then downloads SIGMETs itself for its own CBs,
+        # exactly as with --own-sigmets (see _sync_own_sigmets()).
         self._disable_psx_sigmets: bool = False
         # Last-seen SigmetOn (Qi262) value from PSX, tracked via subscription
         # purely so _write_sigmet_on() can read-modify-write without ever
@@ -2430,7 +2499,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.logger.warning("Enroute wind: failed to save log: %s", exc)
 
     def handle_sigmet_change(self, _key: str, value: str) -> None:
-        """Re-parse all SIGMETs when PSX downloads updated SIGMET data."""
+        """Re-parse all SIGMETs when PSX downloads updated SIGMET data.
+
+        Not while we own the SIGMETs (--own-sigmets): PSX then only has our
+        own filtered text, and our own download is the source of truth.
+        """
+        self._psx_sigmet_raw = value
+        if self._own_sigmets_applied:
+            return
         self.sigmets = _parse_sigmets(value)
         self.ts_sigmets = [s for s in self.sigmets if s['hazard'] == 'TS']
         self.logger.info("SIGMETs: %d active areas (%d TS) (raw %d bytes)",
@@ -2471,13 +2547,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         """Track PSX's raw WxAloft (Qs327) string, for _write_tropopause()'s read-modify-write."""
         self._wxaloft_raw = value
 
-    def _write_sigmet_on(self, embed: bool, trigger_download: bool) -> None:
+    def _write_sigmet_on(self, embed: bool, trigger_download: bool,
+                         auto_download: Optional[bool] = None) -> None:
         """Write SigmetOn (Qi262), touching only the embed/download bits.
 
         Read-modify-write against the last value PSX itself reported
         (self._sigmet_on_bits), not a bare literal -- SigmetOn is a 0-15
-        bitmask and bits 2/8 are undocumented; whatever they mean, this
-        must never change them.
+        bitmask and bit 8 is undocumented; whatever it means, this must
+        never change it. PSX's own periodic download (bit 2) is only
+        changed when auto_download is given (--own-sigmets).
 
         Arms Qi243 (WxSlowTransit) first, same as every other PSX weather
         write -- found via forensic log analysis of a real flight where an
@@ -2494,6 +2572,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             new_value |= _SIGMET_EMBED_BIT
         if trigger_download:
             new_value |= _SIGMET_DOWNLOAD_BIT
+        if auto_download is True:
+            new_value |= _SIGMET_AUTO_DOWNLOAD_BIT
+        elif auto_download is False:
+            new_value &= ~_SIGMET_AUTO_DOWNLOAD_BIT
         self.psx_send_and_set("SigmetOn", str(new_value))
 
     def _write_tropopause(self) -> None:
@@ -2735,12 +2817,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 "DIAG: qnh_offset_hpa set to %s", self._diag_qnh_offset_hpa)
             self._manual_wx_force_update = True
             return
-        # STATE/TURBSTATE/WINDSTATE are the three self-broadcast message types
+        # STATE/TURBSTATE/WINDSTATE/SIGMETSTATE are the self-broadcast message types
         # that carry a sending instance's UUID — used only for detecting
         # another FRANKENWEATHER instance on the network, the payload itself
         # is otherwise ignored here (frankenweather.py never consumes another
         # instance's data, only the router UI does).
-        for prefix in ("STATE:", "TURBSTATE:", "WINDSTATE:"):
+        for prefix in ("STATE:", "TURBSTATE:", "WINDSTATE:", "SIGMETSTATE:"):
             if not rest.startswith(prefix):
                 continue
             body = rest[len(prefix):]
@@ -2868,12 +2950,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if "disable_psx_sigmets" in cmd:
             self._disable_psx_sigmets = bool(cmd["disable_psx_sigmets"])
             self.logger.info("disable_psx_sigmets → %s", self._disable_psx_sigmets)
-            # Apply immediately rather than waiting for the next scheduled
-            # sigmet_refresh_coro() cycle (up to 30 min) -- no download
-            # trigger here, just the embed bit, so toggling this doesn't
-            # also force an unwanted re-download.
-            self._write_sigmet_on(embed=not self._disable_psx_sigmets, trigger_download=False)
+            # Applied by own_sigmet_coro()/_sync_own_sigmets(): PSX SIGMETs
+            # off means we download them ourselves and PSX gets none.
+            self._own_sigmet_refresh_event.set()
             settings_changed = True
+        if "own_sigmets" in cmd:
+            self._own_sigmets = bool(cmd["own_sigmets"])
+            self.logger.info("own_sigmets → %s", self._own_sigmets)
+            settings_changed = True
+        if cmd.get("own_sigmets_refresh"):
+            self.logger.info("Own SIGMETs: download requested from the web UI")
+            self._own_sigmet_refresh_event.set()
         if "avoid_cb_near_airport" in cmd:
             self._avoid_cb_near_airport = bool(cmd["avoid_cb_near_airport"])
             self.logger.info("avoid_cb_near_airport → %s", self._avoid_cb_near_airport)
@@ -3133,6 +3220,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         for key, attr, cast in _CONFIG_SIGMET_FIELDS:
             if key in sigmet:
                 setattr(self, attr, cast(sigmet[key]))
+        if self.args is not None and self.args.own_sigmets:
+            self._own_sigmets = True  # --own-sigmets always wins over the config file
 
         cb_avoidance = config.get("cb_avoidance", {})
         for key, attr, cast in _CONFIG_CB_AVOIDANCE_FIELDS:
@@ -3171,8 +3260,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 self._turb_engine.clear_fixed_wind()
                 if self._turb_wind_mode == "psx" and self.psx_connected:
                     self._turb_update_psx_wind()
-        if self.psx_connected:
-            self._write_sigmet_on(embed=not self._disable_psx_sigmets, trigger_download=False)
+        if self.psx_connected and not self._own_sigmets_applied:
+            self._write_sigmet_on(embed=True, trigger_download=False)
         if self._enroute_wind_enabled:
             self._enable_enroute_wind()
         else:
@@ -3834,6 +3923,63 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return ';'.join(fields)
         return wx_str
 
+    def _own_sigmet_cb(self, wx_str: str, pos: tuple, om: dict, zone_label: str) -> str:
+        """Return wx_str with the CB a zone inside a TS/TC SIGMET area gets (--own-sigmets).
+
+        Coverage from the SIGMET's qualifier (see _sigmet_cb_at()), top
+        from the SIGMET, base from the zone's own surface temperature/dew
+        point. A CB the zone already has from Open-Meteo/METAR (CAPE) can
+        only make it bigger. Zones outside every TS/TC area are returned
+        unchanged.
+        """
+        best = self._sigmet_cb_at(pos)
+        if best is None:
+            return wx_str
+        oktas, sig = best
+        fields = wx_str.split(';')
+        have_oktas = int(fields[9]) if fields[9].isdigit() else 0
+        hourly = om.get("hourly", {})
+        hi = datetime.now(timezone.utc).hour
+        if have_oktas > 0:
+            base = int(fields[11])
+            top = max(int(fields[10]), sig['top_ft'])
+        else:
+            base = _cb_base_ft(_om_hval(hourly, "temperature_2m", hi, 15.0),
+                               _om_hval(hourly, "dewpoint_2m", hi, 10.0))
+            top = max(_cb_tops_ft(_om_hval(hourly, "cape", hi, 0)), sig['top_ft'])
+        fields[9] = str(max(oktas, have_oktas))
+        fields[10] = str(min(top, _CB_TOP_MAX_FT))
+        fields[11] = str(base)
+        new_wx = ';'.join(fields)
+        if new_wx != wx_str:
+            self.logger.info("%s: CB from %s SIGMET %s (%s oktas, %s-%sft)", zone_label,
+                             sig['hazard'], sig.get('qualifier') or '-', fields[9],
+                             fields[11], fields[10])
+        return new_wx
+
+    def _sigmet_cb_at(self, pos: tuple) -> Optional[tuple]:
+        """Return (oktas, sigmet) for the TS/TC SIGMET area at pos, or None.
+
+        Coverage from the qualifier (fw_sigmet.TS_QUALIFIER_OKTAS), a TC
+        within fw_sigmet.TC_OKTAS. With several overlapping areas, the one
+        giving the most coverage wins.
+        """
+        best: Optional[tuple] = None
+        best_oktas = -1
+        for sig in self.ts_sigmets:
+            if not _point_in_polygon(pos[0], pos[1], sig['polygon']):
+                continue
+            if sig['hazard'] == 'TC':
+                low, high = _fw_sigmet.TC_OKTAS
+                # Stable per position, so it doesn't flicker between updates
+                oktas = low + int(abs(pos[0] * 1000 + pos[1] * 1000)) % (high - low + 1)
+            else:
+                oktas = _fw_sigmet.TS_QUALIFIER_OKTAS.get(
+                    sig.get('qualifier', ''), _fw_sigmet.TS_DEFAULT_OKTAS)
+            if oktas > best_oktas:
+                best, best_oktas = (oktas, sig), oktas
+        return best
+
     @staticmethod
     def _cb_growth_start_pct(dist_nm: float) -> float:
         """Return a random starting fraction of forecast CB size for a CB this far out.
@@ -4368,6 +4514,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
     def _place_all_zones(self) -> None:
         """Place all 7 zones randomly around the aircraft on startup."""
         self.zone_positions.clear()
+        self._anchor_zone = None
+        self._cb_free_zones.clear()
         self.zone_relocated_time.clear()
         self.zone_cb_ramp.clear()
         self.zone_cb_create_dist_nm.clear()
@@ -4493,6 +4641,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         protected_zones = {self._nearest_zone_num()}
         if self.focused_zone:
             protected_zones.add(self.focused_zone)
+        if self._anchor_zone is not None:
+            protected_zones.add(self._anchor_zone)  # moved only by _maintain_anchor_zone()
         any_moved = False
         now = time.time()
         for zone_num in range(1, 8):
@@ -4613,6 +4763,243 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if moved:
             self._manual_wx_force_update = True
             self.fmc_changed_event.set()
+
+    def _is_cb_free_zone(self, zone_num: int) -> bool:
+        """Return True if zone_num must not get a CB (see _maintain_anchor_zone())."""
+        pos = self._cb_free_zones.get(zone_num)
+        cur = self.zone_positions.get(zone_num)
+        if pos is None or cur is None:
+            return False
+        if tuple(cur[:2]) != pos:
+            del self._cb_free_zones[zone_num]  # moved elsewhere since: an ordinary zone again
+            return False
+        return True
+
+    def _maintain_anchor_zone(self) -> bool:  # pylint: disable=too-many-return-statements
+        """--own-sigmets: keep a CB-free "anchor" zone near the aircraft; True if a zone moved.
+
+        Zones placed in TS/TC SIGMET areas get CBs, so one zone is kept near
+        the aircraft without any CB: PSX uses the nearest zone for the local
+        weather, so the local QNH stays right, and no CB can ever appear
+        right next to the aircraft. Not needed while a dep/dst airport zone
+        is within _ANCHOR_MAX_NM. The anchor itself is never moved: once
+        the aircraft is _ANCHOR_HANDOVER_BEHIND_NM past it (or it's more
+        than _ANCHOR_MAX_NM away), another zone becomes the anchor,
+        _ANCHOR_AHEAD_NM ahead on track. The old anchor stays CB-free (a
+        CB popping up just behind the aircraft is no better) until the
+        normal relocation rules move it. Only while we own the SIGMETs.
+        """
+        if not self._own_sigmets_applied:
+            if self._anchor_zone is not None:
+                self.logger.info("Anchor zone: own SIGMETs off, Zone %d is an ordinary zone again",
+                                 self._anchor_zone)
+            self._anchor_zone = None
+            self._cb_free_zones.clear()
+            return False
+        if self.ac_lat is None or self.ac_hdg is None or not self.zone_positions:
+            return False
+        arpt_icaos = {icao for icao, _, _ in self._arpt_coverage_needed()}
+        for lat, lon, icao in self.zone_positions.values():
+            if (icao in arpt_icaos and
+                    self._dist_nm(self.ac_lat, self.ac_lon, lat, lon) <= _ANCHOR_MAX_NM):
+                return False
+        anchor = self._anchor_zone
+        if anchor is not None and not self._is_cb_free_zone(anchor):
+            anchor = None  # moved by something else
+        if anchor is not None and not self._anchor_due(anchor):
+            return False
+        if anchor is None:
+            nearest = self._nearest_zone_num()
+            if nearest is not None and not self._anchor_due(nearest):
+                self._make_anchor(nearest, "nearest zone")
+                return False
+        zone_num = self._expendable_for_anchor()
+        if zone_num is None:
+            return False
+        az_rad = math.radians(self.ac_hdg)
+        dist_m = random.uniform(*_ANCHOR_AHEAD_NM) * _NM_TO_M
+        lon, lat, _ = self.geod.fwd(lons=self.ac_lon, lats=self.ac_lat,
+                                    az=math.degrees(az_rad), dist=dist_m)
+        lon = ((lon + 180.0) % 360.0) - 180.0
+        old = self.zone_positions[zone_num]
+        icao = f"X{random.randint(100, 999):03d}"
+        self.zone_positions[zone_num] = (lat, lon, icao)
+        self.zone_placement_reason[zone_num] = self._placement_desc(lat, lon, icao)
+        self.zone_relocated_time[zone_num] = time.time()
+        self.zone_cb_ramp.pop(zone_num, None)
+        self.zone_cb_create_dist_nm[zone_num] = dist_m / _NM_TO_M
+        self.logger.info("Zone %d: relocated from %s @ %.3f/%.3f → %s @ %.3f/%.3f"
+                         " [%.0f°/%.0fnm] (new anchor zone)",
+                         zone_num, old[2], old[0], old[1], icao, lat, lon,
+                         self.ac_hdg % 360, dist_m / _NM_TO_M)
+        self._make_anchor(zone_num, "placed ahead")
+        return True
+
+    def _anchor_due(self, zone_num: int) -> bool:
+        """Return True if zone_num is no use as an anchor (too far away, or passed)."""
+        lat, lon, _ = self.zone_positions[zone_num]
+        az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
+        dist_nm = dist_m / _NM_TO_M
+        behind = abs((az - self.ac_hdg + 180) % 360 - 180) > 90.0
+        return dist_nm > _ANCHOR_MAX_NM or (behind and dist_nm >= _ANCHOR_HANDOVER_BEHIND_NM)
+
+    def _make_anchor(self, zone_num: int, how: str) -> None:
+        """Make zone_num the (CB-free) anchor zone."""
+        self._anchor_zone = zone_num
+        self._cb_free_zones[zone_num] = tuple(self.zone_positions[zone_num][:2])
+        self.logger.info("Anchor zone: Zone %d (%s), kept free of CBs", zone_num, how)
+
+    def _expendable_for_anchor(self) -> Optional[int]:
+        """Return the zone to turn into a new anchor zone, or None.
+
+        Never the nearest zone, PSX's focused zone, the current anchor or a
+        dep/dst airport zone. Preferred: a zone behind the aircraft (the
+        farthest), then one ahead without a CB (the farthest) -- a CB that
+        may be on the radar is only taken away if nothing else is left.
+        """
+        arpt_icaos = {icao for icao, _, _ in self._arpt_coverage_needed()}
+        protected = {self._nearest_zone_num(), self.focused_zone, self._anchor_zone}
+        best, best_key = None, None
+        for zone_num, (lat, lon, icao) in self.zone_positions.items():
+            if zone_num in protected or icao in arpt_icaos:
+                continue
+            az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
+            behind = abs((az - self.ac_hdg + 180) % 360 - 180) > 90.0
+            wx = (self.zone_wx.get(zone_num) or "").split(";")
+            no_cb = len(wx) < 10 or wx[9] == "0"
+            key = (behind, no_cb, dist_m)
+            if best_key is None or key > best_key:
+                best, best_key = zone_num, key
+        return best
+
+    def _place_sigmet_zones(self) -> bool:
+        """--own-sigmets: move a zone into a nearby TS/TC SIGMET area; True if one moved.
+
+        TS/TC areas whose nearest point is within _SIGMET_ZONE_RANGE_NM and
+        not behind the aircraft, nearest first, each get up to
+        _SIGMET_ZONES_PER_TS (TC: _SIGMET_ZONES_PER_TC, clustered around the
+        cyclone's centre) zones. New positions are inside the area, at least
+        _CB_SQUEEZE_MIN_FWD_NM from the aircraft (so a CB never appears
+        close by), preferably ahead and as close as that allows. Only zones
+        that can go without anyone noticing are used: behind the aircraft,
+        or ahead without a CB -- never the anchor, the nearest or focused
+        zone, a dep/dst airport zone, or a zone already in a TS/TC area.
+        Moves at most one zone per _SIGMET_PLACE_INTERVAL_S, except right
+        after taking over the SIGMETs (_sigmet_place_burst), when every
+        zone wanted is placed at once.
+        """
+        if not self._own_sigmets_applied or self.ac_lat is None or self.ac_hdg is None:
+            return False
+        if self._sigmet_place_burst:
+            self._sigmet_place_burst = False
+            moved = False
+            while self._place_one_sigmet_zone():
+                moved = True
+            return moved
+        if time.time() - self._sigmet_place_last < _SIGMET_PLACE_INTERVAL_S:
+            return False
+        return self._place_one_sigmet_zone()
+
+    def _place_one_sigmet_zone(self) -> bool:  # pylint: disable=too-many-locals
+        """Move one zone into a TS/TC SIGMET area that wants one; True if moved."""
+        now = time.time()
+        areas = []
+        for entry in self._own_sigmet_entries:
+            if not entry["ok"] or entry["hazard"] not in _fw_sigmet.CB_HAZARDS:
+                continue
+            dist, brg = _fw_sigmet.entry_distance(self.ac_lat, self.ac_lon, entry)
+            if dist > _SIGMET_ZONE_RANGE_NM:
+                continue
+            if brg is not None and abs((brg - self.ac_hdg + 180) % 360 - 180) > 90.0:
+                continue  # behind the aircraft
+            areas.append((dist, entry))
+        if not areas:
+            return False
+        areas.sort(key=lambda a: a[0])
+        zone_num = self._expendable_for_sigmet()
+        if zone_num is None:
+            return False
+        for _, entry in areas:
+            inside = [zn for zn, (lat, lon, _) in self.zone_positions.items()
+                      if _fw_sigmet.entry_distance(lat, lon, entry)[0] == 0.0]
+            want = (_SIGMET_ZONES_PER_TC if entry["hazard"] == "TC"
+                    else _SIGMET_ZONES_PER_TS)
+            if len(inside) >= want:
+                continue
+            pos = self._sigmet_zone_position(entry, exclude_zone=zone_num)
+            if pos is None:
+                continue
+            lat, lon, dist_nm, brg = pos
+            old = self.zone_positions[zone_num]
+            icao = f"X{random.randint(100, 999):03d}"
+            label = f"{entry['fir']} {entry['series']} {entry['qualifier']}".strip()
+            self.zone_positions[zone_num] = (lat, lon, icao)
+            self.zone_placement_reason[zone_num] = (
+                f"{self._placement_desc(lat, lon, icao)}, inside {entry['hazard']} SIGMET {label}")
+            self.zone_relocated_time[zone_num] = now
+            self.zone_cb_ramp.pop(zone_num, None)
+            self.zone_cb_create_dist_nm[zone_num] = dist_nm
+            self._sigmet_place_last = now
+            self.logger.info("Zone %d: relocated from %s @ %.3f/%.3f → %s @ %.3f/%.3f"
+                             " [%.0f°/%.0fnm] (inside %s SIGMET %s)",
+                             zone_num, old[2], old[0], old[1], icao, lat, lon, brg,
+                             dist_nm, entry["hazard"], label)
+            return True
+        return False
+
+    def _expendable_for_sigmet(self) -> Optional[int]:
+        """Return the zone _place_sigmet_zones() may move, or None (see there)."""
+        arpt_icaos = {icao for icao, _, _ in self._arpt_coverage_needed()}
+        protected = {self._nearest_zone_num(), self.focused_zone, self._anchor_zone}
+        best, best_key = None, None
+        for zone_num, (lat, lon, icao) in self.zone_positions.items():
+            if (zone_num in protected or icao in arpt_icaos or
+                    self._is_cb_free_zone(zone_num)):
+                continue
+            if any(_point_in_polygon(lat, lon, sig['polygon']) for sig in self.ts_sigmets):
+                continue
+            az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
+            behind = abs((az - self.ac_hdg + 180) % 360 - 180) > 90.0
+            wx = (self.zone_wx.get(zone_num) or "").split(";")
+            has_cb = len(wx) > 9 and wx[9] not in ("", "0")
+            if not behind and has_cb:
+                continue  # a CB that may be on the radar never just vanishes
+            key = (behind, dist_m)
+            if best_key is None or key > best_key:
+                best, best_key = zone_num, key
+        return best
+
+    def _sigmet_zone_position(self, entry: dict, exclude_zone: int) -> Optional[tuple]:
+        """Return (lat, lon, dist_nm, bearing) for a new zone inside a SIGMET area, or None.
+
+        See _place_sigmet_zones(). For a TC the points nearest the
+        cyclone's centre (if the SIGMET gives one) come first, with a
+        tighter zone separation, so its zones form a cluster.
+        """
+        points = []
+        for poly in entry["polygons"]:
+            points += _fw_sigmet.points_in_polygon(
+                self.ac_lat, self.ac_lon, poly, _SIGMET_ZONE_RANGE_NM)
+        points = [p for p in points if p[2] >= _CB_SQUEEZE_MIN_FWD_NM]
+        if not points:
+            return None
+        others = [(lat, lon) for zn, (lat, lon, _) in self.zone_positions.items()
+                  if zn != exclude_zone]
+        is_tc = entry["hazard"] == "TC"
+        min_sep = _SIGMET_TC_CLUSTER_SEP_NM if is_tc else self.args.new_zone_notnear
+        center = _fw_sigmet.tc_center(entry) if is_tc else None
+
+        def rank(p):
+            rel = abs((p[3] - self.ac_hdg + 180) % 360 - 180)
+            ahead = 0 if rel <= 60.0 else 1 if rel <= 90.0 else 2
+            if center is not None:
+                return (self._dist_nm(p[0], p[1], *center), p[2])
+            return (ahead, p[2])
+
+        for p in sorted(points, key=rank):
+            if all(self._dist_nm(p[0], p[1], o[0], o[1]) >= min_sep for o in others):
+                return p
+        return None
 
     def _ensure_arpt_zones(self) -> bool:
         """Ensure dep/dst airports within arpt_zone_dist have a dedicated zone.
@@ -5682,8 +6069,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                       if om else ";".join(_WX_DEFAULTS))
                 new_metars.append(_gen_metar(icao, om, now) if om else None)
             wx_before_sigmet = wx
-            final_wx = self._sigmet_cb_override(wx, (lat, lon), om, f"Zone {i + 1} {icao}")
+            if self._own_sigmets_applied:
+                final_wx = self._own_sigmet_cb(wx, (lat, lon), om, f"Zone {i + 1} {icao}")
+            else:
+                final_wx = self._sigmet_cb_override(wx, (lat, lon), om, f"Zone {i + 1} {icao}")
             zone_num = i + 1
+            if self._is_cb_free_zone(zone_num):
+                final_wx = _strip_cb(final_wx)
             target_parts = final_wx.split(';')
             target_oktas_val = int(target_parts[9]) if len(target_parts) > 11 else 0
             self.zone_cb_target[zone_num] = (
@@ -5706,7 +6098,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
         if self.args.fake_cb:
             oktas, base_ft, top_ft = self.args.fake_cb
-            new_wxs = [_apply_fake_cb(wx, oktas, base_ft, top_ft) for wx in new_wxs]
+            new_wxs = [wx if self._is_cb_free_zone(i + 1) else
+                       _apply_fake_cb(wx, oktas, base_ft, top_ft)
+                       for i, wx in enumerate(new_wxs)]
             self.logger.debug("fake-cb applied: %d oktas, base %dft, top %dft",
                               oktas, base_ft, top_ft)
 
@@ -5901,6 +6295,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "timesync_on_situ_load": self._timesync_on_situ_load,
             "timesync_periodic": self._timesync_periodic,
             "use_sigmets": self._use_sigmets,
+            "own_sigmets": self._own_sigmets,
             "disable_psx_sigmets": self._disable_psx_sigmets,
             "avoid_cb_near_airport": self._avoid_cb_near_airport,
             "cb_airport_clearance_nm": _CB_AIRPORT_CLEARANCE_NM,
@@ -5952,11 +6347,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 } if zone_num in self.zone_cb_ramp else None),
             })
         zone_positions = [(z["lat"], z["lon"]) for z in zones]
+        # For the web map: SIGMET areas of every type within its largest
+        # range ring of the aircraft, or near/around a weather zone.
         _SIGMET_MAX_NM = 100.0
+        _SIGMET_MAP_RANGE_NM = 640.0
         sigmets = []
-        for s in self.ts_sigmets:
+        for s in self.sigmets:
             poly = s["polygon"]
-            relevant = any(
+            relevant = (
+                self.ac_lat is not None and _fw_sigmet.polygon_distance(
+                    self.ac_lat, self.ac_lon, poly)[0] <= _SIGMET_MAP_RANGE_NM
+            ) or any(
                 self._dist_nm(zlat, zlon, vlat, vlon) <= _SIGMET_MAX_NM
                 for zlat, zlon in zone_positions
                 for vlat, vlon in poly
@@ -5966,7 +6367,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             )
             if relevant:
                 sigmets.append({
+                    "hazard": s["hazard"],
                     "polygon": [[round(la, 4), round(lo, 4)] for la, lo in poly],
+                    "base_ft": s["base_ft"],
                     "top_ft": s["top_ft"],
                 })
         state = {
@@ -6064,11 +6467,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         left alone, PSX's SIGMET data (and our own ts_sigmets, parsed from
         the same WxSigmet/Qs499 PSX populates -- see handle_sigmet_change)
         goes stale for the whole flight. Always triggers a download (so our
-        own ts_sigmets/CB-override logic keeps working) and separately sets
-        the "embedded in planet weather model" bit based on
-        self._disable_psx_sigmets, which the /efb "disable PSX SIGMETs"
-        toggle controls (immediately, via _handle_fw_command -- this loop
-        just keeps re-downloading). See _write_sigmet_on() for the bitmask
+        own ts_sigmets/CB-override logic keeps working), with "embedded in
+        planet weather model" on. Not while we download SIGMETs ourselves
+        (--own-sigmets or /efb "PSX SIGMETs off", see own_sigmet_coro()).
+        See _write_sigmet_on() for the bitmask
         details. Gated on _use_sigmets and only while frankenweather is
         actively driving the weather zones, matching the D-ATIS/ALTN-
         supplement gating.
@@ -6083,10 +6485,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     continue
                 if not self._use_sigmets or self._should_skip_wx_update():
                     continue
+                if self._own_sigmets_applied:
+                    continue  # we download SIGMETs ourselves, see own_sigmet_coro()
                 if time.time() - last_refresh < _SIGMET_REFRESH_MAX_S:
                     continue
                 last_refresh = time.time()
-                self._write_sigmet_on(embed=not self._disable_psx_sigmets, trigger_download=True)
+                self._write_sigmet_on(embed=True, trigger_download=True)
                 self.logger.info("SIGMET: requested a fresh PSX download")
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
@@ -6226,6 +6630,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     else:
                         any_relocated = self._check_and_relocate()
                         any_relocated = self._ensure_arpt_zones() or any_relocated
+                        any_relocated = self._maintain_anchor_zone() or any_relocated
+                        any_relocated = self._place_sigmet_zones() or any_relocated
                     elapsed = time.time() - last_update_time
                     force = self._manual_wx_force_update
                     self._manual_wx_force_update = False
@@ -6324,6 +6730,224 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._web_windstate_received_at = time.time()
         payload = _fw_webui.encode_windstate_payload(state)
         return f"FRANKENWEATHER:WINDSTATE:{self._instance_uuid}:{payload}"
+
+    async def own_sigmet_coro(self) -> None:
+        """--own-sigmets: download SIGMETs from aviationweather.gov every _OWN_SIGMET_REFRESH_S.
+
+        Fetches both the international (isigmet) and US domestic
+        (airsigmet) lists as JSON and normalizes them (fw_sigmet.normalize()).
+        A failed download keeps the last good set, minus anything that has
+        expired meanwhile. Gated like sigmet_refresh_coro(). The web UI can
+        ask for a download right away (_own_sigmet_refresh_event). Every
+        pass also takes over, keeps or hands back PSX's SIGMETs
+        (_sync_own_sigmets()).
+        """
+        myname = inspect.currentframe().f_code.co_name
+        last_try = 0.0
+        try:
+            self.logger.debug("Starting %s", myname)
+            async with aiohttp.ClientSession(timeout=_OWN_SIGMET_TIMEOUT) as session:
+                first = True
+                while True:
+                    if not first:  # first pass right away: SIGMETs as early as possible
+                        try:
+                            await asyncio.wait_for(
+                                self._own_sigmet_refresh_event.wait(), timeout=10.0)
+                        except asyncio.TimeoutError:
+                            pass
+                    first = False
+                    if self._own_sigmet_refresh_event.is_set():
+                        self._own_sigmet_refresh_event.clear()
+                        last_try = 0.0
+                    wanted = ((self._own_sigmets or self._disable_psx_sigmets) and
+                              self._use_sigmets and not self._should_skip_wx_update())
+                    if wanted and time.time() - last_try >= _OWN_SIGMET_REFRESH_S:
+                        last_try = time.time()
+                        await self._download_own_sigmets(session)
+                        self._sigmetstate_changed_event.set()
+                    self._sync_own_sigmets(wanted)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
+            self.logger.critical(traceback.format_exc())
+
+    async def _download_own_sigmets(self, session: aiohttp.ClientSession) -> None:
+        """Fetch, normalize and store both SIGMET lists (see own_sigmet_coro())."""
+        try:
+            lists = []
+            for url in (_fw_sigmet.ISIGMET_URL, _fw_sigmet.AIRSIGMET_URL):
+                async with session.get(url) as resp:
+                    if resp.status != 200:
+                        raise RuntimeError(f"HTTP {resp.status} from {url}")
+                    lists.append(await resp.json(content_type=None))
+            entries = _fw_sigmet.normalize(lists[0], lists[1])
+        except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError, ValueError) as exc:
+            self._own_sigmet_error = f"{type(exc).__name__}: {exc}"
+            now = time.time()
+            self._own_sigmet_entries = [
+                e for e in self._own_sigmet_entries if not e["valid_to"] or e["valid_to"] >= now]
+            self.logger.warning("SIGMET download failed (keeping %d earlier SIGMETs): %s",
+                                len(self._own_sigmet_entries), self._own_sigmet_error)
+            return
+        self._own_sigmet_entries = entries
+        self._own_sigmet_fetched_at = time.time()
+        self._own_sigmet_error = None
+        if self._own_sigmets_applied:
+            self._use_own_sigmet_data()
+        bad = [e for e in entries if not e["ok"]]
+        counts = collections.Counter(e["hazard"] for e in entries if e["ok"])
+        self.logger.info(
+            "SIGMET download: %d usable (%s), %d unusable",
+            len(entries) - len(bad),
+            ", ".join(f"{n} {h}" for h, n in sorted(counts.items())) or "none", len(bad))
+        self._save_unparsed_sigmets(bad)
+
+    def _sync_own_sigmets(self, wanted: bool) -> None:
+        """Take over, keep or hand back PSX's SIGMETs (--own-sigmets).
+
+        While wanted (and once our first download has succeeded), PSX keeps
+        embedding SIGMETs but stops downloading them itself, and gets our
+        own text (fw_sigmet.psx_text()): every usable SIGMET except TS and
+        TC, which frankenweather depicts itself as CB weather zones -- or,
+        with "PSX SIGMETs off" (/efb), no SIGMETs at all ("#"). The
+        SigmetOn bits and the text are re-checked on every call and
+        rewritten if anything (a situ load, another addon) changed them.
+        When no longer wanted, PSX's own download is switched back on and
+        triggered, and its text is parsed as before.
+        """
+        if not self.psx_connected:
+            return
+        if not wanted:
+            if self._own_sigmets_applied:
+                self._own_sigmets_applied = False
+                self._own_sigmet_written = None
+                self._write_sigmet_on(embed=True, trigger_download=True, auto_download=True)
+                self.logger.info("Own SIGMETs: handing SIGMETs back to PSX (download requested)")
+            return
+        if self._own_sigmet_fetched_at is None:
+            return  # nothing of our own yet: leave PSX's SIGMETs alone
+        if not self._own_sigmets_applied:
+            self._own_sigmets_applied = True
+            self._use_own_sigmet_data()
+            # Zones already placed (e.g. at startup, before this first
+            # download) get their TS/TC CBs right away, and the zones
+            # wanted in TS/TC areas are all placed at once.
+            self._sigmet_place_burst = True
+            self._manual_wx_force_update = True
+            self.fmc_changed_event.set()
+            self.logger.info("Own SIGMETs: taking over SIGMETs from PSX")
+        bits = self._sigmet_on_bits
+        if not bits & _SIGMET_EMBED_BIT or bits & _SIGMET_AUTO_DOWNLOAD_BIT:
+            self._write_sigmet_on(embed=True, trigger_download=False, auto_download=False)
+        # "PSX SIGMETs off" (/efb): PSX gets no SIGMETs at all
+        text = ("#" if self._disable_psx_sigmets else
+                _fw_sigmet.psx_text(self._own_sigmet_entries, self._own_sigmet_fetched_at))
+        # Compare without the "#DOWNLOADED <time>" header line: a new
+        # download with the same SIGMETs isn't worth a PSX write.
+        if (self._psx_sigmet_raw or "").partition("^")[2] == text.partition("^")[2]:
+            return
+        if self._own_sigmet_written == text:
+            self.logger.info("Own SIGMETs: PSX's SIGMET text was changed, writing ours again")
+        elif self._disable_psx_sigmets:
+            self.logger.info("Own SIGMETs: PSX SIGMETs off, emptying PSX's SIGMET data")
+        else:
+            kept = len(_fw_sigmet.psx_entries(self._own_sigmet_entries))
+            self.logger.info(
+                "Own SIGMETs: giving PSX %d SIGMETs (%d bytes), left out %d TS/TC and"
+                " %d unusable", kept, len(text),
+                sum(1 for e in self._own_sigmet_entries
+                    if e["ok"] and e["hazard"] in _fw_sigmet.CB_HAZARDS),
+                sum(1 for e in self._own_sigmet_entries if not e["ok"]))
+        self._inject_wx_slow_transit()
+        self.psx_send_and_set("WxSigmet", text)
+        self._psx_sigmet_raw = text
+        self._own_sigmet_written = text
+
+    def _use_own_sigmet_data(self) -> None:
+        """Point self.sigmets/ts_sigmets at our own downloaded SIGMETs.
+
+        Same dict layout _parse_sigmets() produces (one dict per polygon),
+        so the CB override, the map and everything else using them works
+        unchanged. ts_sigmets also holds TC: neither reaches PSX any more.
+        """
+        sigmets = []
+        for e in self._own_sigmet_entries:
+            if not e["ok"]:
+                continue
+            top = e["top_ft"] or 35000
+            if e["hazard"] in _fw_sigmet.CB_HAZARDS:
+                top = max(top, 25000)  # same sanity floor as _parse_sigmets()
+            for poly in e["polygons"]:
+                sigmets.append({"hazard": e["hazard"], "polygon": [tuple(p) for p in poly],
+                                "base_ft": e["base_ft"] or 0, "top_ft": top,
+                                "qualifier": e["qualifier"], "key": e["key"]})
+        self.sigmets = sigmets
+        self.ts_sigmets = [s for s in sigmets if s["hazard"] in _fw_sigmet.CB_HAZARDS]
+
+    def _save_unparsed_sigmets(self, entries: list) -> None:
+        """Save each SIGMET we couldn't use to _SIGMET_UNPARSED_DIR, once per SIGMET.
+
+        One small text file per SIGMET (reason, then its raw text), named
+        after its unique key, so the parser can be improved later.
+        Existing files are left alone, so a SIGMET seen on every download
+        is only written once.
+        """
+        if not entries:
+            return
+        try:
+            os.makedirs(_SIGMET_UNPARSED_DIR, exist_ok=True)
+            for entry in entries:
+                name = re.sub(r"[^A-Za-z0-9_.-]", "_", entry["key"]) + ".txt"
+                path = os.path.join(_SIGMET_UNPARSED_DIR, name)
+                if os.path.exists(path):
+                    continue
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(f"Reason: {entry['reason']}\n"
+                            f"Hazard: {entry['raw_hazard']}\n\n{entry['raw']}\n")
+                self.logger.info("SIGMET %s unusable (%s), saved to %s",
+                                 entry["key"], entry["reason"], path)
+        except OSError as exc:
+            self.logger.warning("Could not save unusable SIGMETs to %s: %s",
+                                _SIGMET_UNPARSED_DIR, exc)
+
+    def _build_sigmetstate_message(self) -> str:
+        """Build the FRANKENWEATHER:SIGMETSTATE:<uuid>:<payload> addon message.
+
+        <payload> is gzip+base64-encoded JSON (see
+        fw_webui.encode_windstate_payload()) of our own downloaded SIGMETs,
+        for the web UI's SIGMETs page -- the raw text alone runs ~35 KB.
+        """
+        state = {
+            "enabled": self._own_sigmets,
+            "source": "aviationweather.gov",
+            "fetched_at": self._own_sigmet_fetched_at,
+            "error": self._own_sigmet_error,
+            "entries": self._own_sigmet_entries,
+        }
+        self._web_sigmetstate = state
+        self._web_sigmetstate_received_at = time.time()
+        payload = _fw_webui.encode_windstate_payload(state)
+        return f"FRANKENWEATHER:SIGMETSTATE:{self._instance_uuid}:{payload}"
+
+    async def sigmetstate_broadcast_coro(self) -> None:
+        """Broadcast SIGMETSTATE after each own SIGMET download, and every 5 min for late joiners.
+
+        The periodic resend is for routers that connect later.
+        """
+        myname = inspect.currentframe().f_code.co_name
+        try:
+            self.logger.debug("Starting %s", myname)
+            while True:
+                try:
+                    await asyncio.wait_for(self._sigmetstate_changed_event.wait(), timeout=300.0)
+                except asyncio.TimeoutError:
+                    pass
+                self._sigmetstate_changed_event.clear()
+                if not self._own_sigmets or not self.psx_connected or self._conflict_paused():
+                    continue
+                self._psx_send("addon", self._build_sigmetstate_message())
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
+            self.logger.critical(traceback.format_exc())
 
     async def windstate_broadcast_coro(self) -> None:
         """Broadcast WINDSTATE to the PSX network when enroute wind state changes."""
@@ -6538,6 +7162,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     ("TimeSync", self.time_sync_coro),
                     ("OmFailureBanner", self.om_failure_banner_coro),
                     ("SigmetRefresh", self.sigmet_refresh_coro),
+                    ("OwnSigmet", self.own_sigmet_coro),
+                    ("SigmetStateBroadcast", self.sigmetstate_broadcast_coro),
                     ("LogFlush", self.log_flush_coro),
                 ]
                 coros += [
@@ -6612,6 +7238,16 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "silently to the already-selected cached METAR on failure or "
                  "timeout; never changes which airport a zone snaps to, and never "
                  "turns a cache miss/stale METAR into a hit. Off by default.")
+        parser.add_argument(
+            '--own-sigmets', action='store_true',
+            help="EXPERIMENTAL: download SIGMETs from aviationweather.gov "
+                 "ourselves (every 10 minutes) instead of letting PSX do it. "
+                 "PSX gets every SIGMET we could parse except thunderstorms "
+                 "(TS) and tropical cyclones (TC), which frankenweather "
+                 "depicts itself. All SIGMETs, including any we couldn't "
+                 "parse (also saved to the log directory's sigmet-unparsed "
+                 "folder), are shown on the web UI's SIGMETs page, where "
+                 "this can also be switched on and off. Off by default.")
         parser.add_argument(
             '--sync-tropopause', action='store_true',
             help="EXPERIMENTAL: keep PSX's Planet Weather page tropopause "
@@ -6734,6 +7370,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 print(f"WARNING: --psx-port-override={self.args.psx_port_override} "
                       f"overrides --psx-port={self.args.psx_port}", file=sys.stderr)
             self.args.psx_port = self.args.psx_port_override
+        self._own_sigmets = self.args.own_sigmets
 
     # (arg_name, replacement_hint or None for the generic "just remove it" message)
     _REMOVED_ARGS = (

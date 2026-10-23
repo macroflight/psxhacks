@@ -10,6 +10,8 @@ ctx must provide:
   ctx.fw_state_received_at      : float   — epoch of last STATE
   ctx.fw_turbstate_received_at  : float   — epoch of last TURBSTATE
   ctx.fw_windstate_received_at  : float   — epoch of last WINDSTATE
+  ctx.fw_sigmetstate      : dict | None   — SIGMETSTATE payload (--own-sigmets)
+  ctx.fw_sigmetstate_received_at : float  — epoch of last SIGMETSTATE
   ctx.fw_conflict_paused   : bool         — True while this instance is paused
                                             because a second FRANKENWEATHER
                                             instance is on the network
@@ -27,15 +29,19 @@ on the router UI):
   ctx.event_log_path      : str | None    — this run's own event log file
 """
 # pylint: disable=invalid-name,too-many-lines
+import asyncio
 import base64
 import datetime
 import gzip
+from html import escape as _esc
 import json
 import math
 import os
 import time
 
 from aiohttp import web  # pylint: disable=import-error
+
+import fw_sigmet
 
 
 def encode_windstate_payload(state: dict) -> str:
@@ -361,6 +367,34 @@ def _fmt_data_status(now: float, epoch, timeout_s: float = _DATA_STALE_TIMEOUT_S
     return '#22c55e', 'OK', age_label
 
 
+def _zone_cb_position(wxmode: str, time_earth_ms: int):
+    """Return (lat, lon) of a local zone's CB, or None if wxmode doesn't parse.
+
+    PSX puts a local zone's CB 7 nm from the zone centre, at a bearing that
+    turns once an hour with sim time (Aerowinx/Hardy):
+    (minutes * 6 + seconds * 0.1 + zone elevation ft + 2000) % 360. Same
+    formula as frankenturb/cb.py's _cb_bearing(), repeated here because the
+    router's web UI doesn't include frankenturb.
+    """
+    try:
+        parts = wxmode.split(';')
+        lat, lon, elev_ft = float(parts[0]), float(parts[1]), float(parts[3])
+    except (ValueError, IndexError, AttributeError):
+        return None
+    if abs(lat) <= math.pi / 2 and abs(lon) <= math.pi:  # radians, as PSX sends them
+        lat, lon = math.degrees(lat), math.degrees(lon)
+    t = datetime.datetime.fromtimestamp(time_earth_ms / 1000.0, tz=datetime.timezone.utc)
+    bearing = math.radians((t.minute * 6.0 + (t.second + t.microsecond / 1e6) * 0.1 +
+                            elev_ft + 2000.0) % 360.0)
+    ang = 7.0 * 1852.0 / 6371000.0
+    lat_r, lon_r = math.radians(lat), math.radians(lon)
+    cb_lat = math.asin(math.sin(lat_r) * math.cos(ang) +
+                       math.cos(lat_r) * math.sin(ang) * math.cos(bearing))
+    cb_lon = lon_r + math.atan2(math.sin(bearing) * math.sin(ang) * math.cos(lat_r),
+                                math.cos(ang) - math.sin(lat_r) * math.sin(cb_lat))
+    return round(math.degrees(cb_lat), 5), round((math.degrees(cb_lon) + 540.0) % 360.0 - 180.0, 5)
+
+
 def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-statements,too-many-branches
     """Render the /weather page with a Leaflet tile map centred on the aircraft."""
     import re as _re  # pylint: disable=import-outside-toplevel
@@ -417,6 +451,10 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
     except (ValueError, TypeError):
         pass
 
+    try:
+        time_earth_ms = int(ctx.cache_get('TimeEarth') or 0) or int(now * 1000)
+    except ValueError:
+        time_earth_ms = int(now * 1000)
     zone_data = []
     for zone in zones:
         zone_num = zone.get('zone')
@@ -454,6 +492,9 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
             'wx_raw': wx_str,
             'cb_target': zone.get('cb_target'),
             'cb_rate': zone.get('cb_rate'),
+            # Where PSX actually draws this zone's CB, if it has one
+            'cb_pos': (_zone_cb_position(ctx.cache_get(f'WxMode{zone_num}') or '', time_earth_ms)
+                       if (wx.get('cb_raw') or {}).get('oktas') else None),
         })
 
     zones_js = json.dumps(zone_data)
@@ -574,15 +615,35 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         "+nm+' nm</span>'})}).addTo(map);\n"
         "});\n"
         "var bounds=L.latLngBounds([[acLat,acLon]]);\n"
+        # One colour per SIGMET type, with a legend for the types shown
+        "var _sigCol={TS:'#ef4444',TC:'#d946ef',VA:'#78716c',TURB:'#f97316',"
+        "ICE:'#0ea5e9',MTW:'#16a34a'};\n"
+        "function _fl(ft){return ft?'FL'+('00'+Math.round(ft/100)).slice(-3):'SFC';}\n"
+        "var _sigSeen={};\n"
         "sigmets.forEach(function(s){\n"
+        "  var hz=s.hazard||'TS',col=_sigCol[hz]||'#64748b';_sigSeen[hz]=col;\n"
         "  var pts=s.polygon.map(function(p){return[p[0],p[1]];});\n"
-        "  var topFL=Math.round(s.top_ft/100);\n"
-        "  L.polygon(pts,{color:'#ef4444',weight:2,opacity:0.9,"
-        "fillColor:'#ef4444',fillOpacity:0.15})"
-        ".bindTooltip('<b>TS SIGMET</b><br>Top FL'+topFL,"
+        "  L.polygon(pts,{color:col,weight:2,opacity:0.9,fillColor:col,fillOpacity:0.15})"
+        ".bindTooltip('<b>'+hz+' SIGMET</b><br>'+_fl(s.base_ft)+' – '+_fl(s.top_ft),"
         "{sticky:true,className:'sigmet-label'})"
         ".addTo(map);\n"
         "});\n"
+        "var _hasCb=zones.some(function(z){return z.cb_pos;});\n"
+        "if(Object.keys(_sigSeen).length||_hasCb){\n"
+        "  var _lg=L.control({position:'bottomleft'});\n"
+        "  _lg.onAdd=function(){var d=L.DomUtil.create('div');"
+        "d.style.cssText='background:rgba(255,255,255,0.85);color:#1e293b;padding:4px 6px;"
+        "border-radius:4px;font-size:11px;line-height:1.5';"
+        "var h='';"
+        "if(_hasCb)h+='<span style=\"display:inline-block;width:10px;margin-right:4px;"
+        "color:#dc2626;font-weight:700;text-align:center\">✕</span>CB actual position';"
+        "if(Object.keys(_sigSeen).length)h+=(h?'<br>':'')+'<b>SIGMETs</b><br>'"
+        "+Object.keys(_sigSeen).map(function(k){"
+        "return '<span style=\"display:inline-block;width:10px;height:10px;margin-right:4px;"
+        "background:'+_sigSeen[k]+'\"></span>'+k;}).join('<br>');"
+        "d.innerHTML=h;return d;};\n"
+        "  _lg.addTo(map);\n"
+        "}\n"
         "var _LDIST=55,_secUsed={},_secAssign=[];\n"
         "var _natSecs=zones.map(function(z){"
         "var b=Math.atan2((z.lon-acLon)*Math.cos(acLat*Math.PI/180),"
@@ -621,6 +682,12 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         "  }\n"
         "  var tip='<b>WX'+z.zone+'</b> '+z.icao+cbLabel;\n"
         "  var tipCls=z.is_focused?'zone-label zone-label-focused':'zone-label';\n"
+        "  if(z.cb_pos)L.marker(z.cb_pos,{icon:L.divIcon({className:'',iconSize:[0,0],"
+        "html:'<span style=\"display:inline-block;transform:translate(-50%,-50%);"
+        "color:#dc2626;font-weight:700;font-size:16px;line-height:1;"
+        "text-shadow:0 0 2px #fff,0 0 2px #fff\">✕</span>'})})"
+        ".bindTooltip('<b>CB of WX'+z.zone+'</b><br>'+wx.cb_raw.oktas+\"/8 \"+wx.cb_raw.base"
+        "+\"'-\"+wx.cb_raw.top+\"'\",{direction:'top'}).addTo(map);\n"
         "  if(z.is_focused)L.circleMarker([z.lat,z.lon],"
         "{radius:14,color:'#3b82f6',weight:2.5,fill:false,opacity:0.9}).addTo(map);\n"
         "  var cbRow=wx.cb_raw"
@@ -810,16 +877,16 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         "    if(inside.length>0){\n"
         "      L.push('  AIRCRAFT INSIDE '+inside.length+' SIGMET(S):');\n"
         "      inside.forEach(function(x){\n"
-        "        L.push('    SIGMET '+x.idx+': Top FL'+Math.round(x.s.top_ft/100)"
-        "+'  ('+x.s.polygon.length+' pts)');\n"
+        "        L.push('    SIGMET '+x.idx+' ('+(x.s.hazard||'TS')+'): Top FL'"
+        "+Math.round(x.s.top_ft/100)+'  ('+x.s.polygon.length+' pts)');\n"
         "      });\n"
         "    }\n"
         "    if(nearby.length>0){\n"
         "      nearby.sort(function(a,b){return a.dist-b.dist;});\n"
         "      L.push('  Nearby (<200 nm):');\n"
         "      nearby.forEach(function(x){\n"
-        "        L.push('    SIGMET '+x.idx+': Top FL'+Math.round(x.s.top_ft/100)"
-        "+'  '+x.dist+' nm  ('+x.s.polygon.length+' pts)');\n"
+        "        L.push('    SIGMET '+x.idx+' ('+(x.s.hazard||'TS')+'): Top FL'"
+        "+Math.round(x.s.top_ft/100)+'  '+x.dist+' nm  ('+x.s.polygon.length+' pts)');\n"
         "      });\n"
         "    }\n"
         "  }\n"
@@ -941,6 +1008,7 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         '<a href="/weather/settings" class="btn btn-gray btn-sm">Weather zones</a>\n'
         '<a href="/weather/turbulence" class="btn btn-gray btn-sm">Extra turbulence</a>\n'
         '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Enroute wind</a>\n'
+        '<a href="/weather/sigmets" class="btn btn-gray btn-sm">SIGMETs</a>\n'
         '<a href="/weather/config" class="btn btn-gray btn-sm">Config</a>\n' +
         # Only the standalone context has event_log_dir (see fw_webui module
         # docstring) -- the router UI has no need to browse frankenweather's
@@ -1018,6 +1086,7 @@ def _build_weather_settings_page(ctx):  # pylint: disable=too-many-locals,too-ma
             '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
             '<a href="/weather/manual" class="btn btn-gray btn-sm">Manual weather</a>'
             '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Enroute wind</a>'
+            '<a href="/weather/sigmets" class="btn btn-gray btn-sm">SIGMETs</a>'
             '<a href="/weather/config" class="btn btn-gray btn-sm">Config</a>'
             '<a href="/weather/settings" class="btn btn-gray btn-sm">Refresh</a>'
         )
@@ -1470,6 +1539,7 @@ def _build_weather_manual_page(ctx):  # pylint: disable=too-many-locals,too-many
             '<a href="/weather/settings" class="btn btn-gray btn-sm">Zone settings</a>'
             '<a href="/weather/turbulence" class="btn btn-gray btn-sm">Turbulence</a>'
             '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Enroute wind</a>'
+            '<a href="/weather/sigmets" class="btn btn-gray btn-sm">SIGMETs</a>'
             '<a href="/weather/manual" class="btn btn-gray btn-sm">Refresh</a>'
         )
         return _page_shell(color_scheme, 'Manual weather', nav_html, body, extra_head)
@@ -1739,6 +1809,7 @@ def _build_weather_turb_page(ctx):  # pylint: disable=too-many-locals,too-many-b
             '<a href="/weather/manual" class="btn btn-gray btn-sm">Manual weather</a>'
             '<a href="/weather/settings" class="btn btn-gray btn-sm">Weather zones</a>'
             '<a href="/weather/enroute-wind" class="btn btn-gray btn-sm">Enroute wind</a>'
+            '<a href="/weather/sigmets" class="btn btn-gray btn-sm">SIGMETs</a>'
         )
         return _page_shell(color_scheme, 'Turbulence', nav_html, body, extra_head)
 
@@ -2059,6 +2130,180 @@ def _fmt_relative_epoch(now: float, epoch) -> str:
     return f'{span} ago' if delta <= 0 else f'in {span}'
 
 
+_SIGMET_TYPE_ORDER = fw_sigmet.HAZARDS + (fw_sigmet.UNKNOWN,)
+
+
+def _sigmet_label(entry: dict) -> str:
+    """Return a short human-readable SIGMET name, e.g. 'KZWY CHARLIE 23 FRQ'."""
+    label = f"{entry.get('fir', '?')} {entry.get('series', '?')}"
+    if entry.get('qualifier'):
+        label += f" {entry['qualifier']}"
+    return label
+
+
+def _sigmet_level(feet, zero_label: str = '—') -> str:
+    """Format a SIGMET base/top in feet as e.g. 'FL360', or zero_label for 0 ('SFC' for a base)."""
+    if feet is None:
+        return '?'
+    if feet == 0:
+        return zero_label
+    return f"FL{feet // 100:03.0f}"
+
+
+_SIGMET_NEARBY_NM = 320.0  # SIGMETs page: also list every area at least this close
+
+
+def _sigmet_row(hazard: str, entry: dict, dist: float, brg, zones: list) -> str:
+    """Return one <tr> of the SIGMETs page's 'nearest and nearby' table."""
+    inside = dist == 0.0
+    where = '<b>INSIDE</b>' if inside else f'{dist:.0f} nm / {brg:03.0f}°'
+    levels = (f"{_sigmet_level(entry.get('base_ft'), 'SFC')} – "
+              f"{_sigmet_level(entry.get('top_ft'))}")
+    zone_cell = ''
+    if hazard in fw_sigmet.CB_HAZARDS:
+        inside_zones = [
+            f"Wx{z['zone']}" for z in zones
+            if z.get('lat') is not None and any(
+                fw_sigmet.polygon_distance(z['lat'], z['lon'], poly)[0] == 0.0
+                for poly in entry['polygons'])]
+        zone_cell = ', '.join(inside_zones) or 'none'
+    style = ' style="background:#3b1d1d"' if inside else ''
+    valid_to = (time.strftime("%H%MZ", time.gmtime(entry["valid_to"]))
+                if entry.get("valid_to") else "—")
+    return (f'<tr{style}><td>{hazard}</td>'
+            f'<td>{_esc(_sigmet_label(entry))}</td>'
+            f'<td>{where}</td><td>{levels}</td>'
+            f'<td>{valid_to}</td>'
+            f'<td>{zone_cell}</td></tr>')
+
+
+def _sigmet_nearest_rows(entries: list, ac_lat, ac_lon, zones: list) -> str:
+    """Return the rows of the SIGMETs page's 'nearest and nearby' table.
+
+    Per type: the nearest area, plus every other area whose nearest point
+    is less than _SIGMET_NEARBY_NM away, nearest first.
+    """
+    rows = ''
+    for hazard in fw_sigmet.HAZARDS:
+        usable = [e for e in entries if e['ok'] and e['hazard'] == hazard]
+        if not usable:
+            rows += f'<tr><td>{hazard}</td><td colspan="5" style="color:#64748b">none</td></tr>'
+            continue
+        if ac_lat is None:
+            rows += (f'<tr><td>{hazard}</td><td colspan="5" style="color:#64748b">'
+                     f'{len(usable)} active, aircraft position unknown</td></tr>')
+            continue
+        ranked = sorted(((*fw_sigmet.entry_distance(ac_lat, ac_lon, e), e) for e in usable),
+                        key=lambda d: d[0])
+        for i, (dist, brg, entry) in enumerate(ranked):
+            if i > 0 and dist >= _SIGMET_NEARBY_NM:
+                break
+            rows += _sigmet_row(hazard, entry, dist, brg, zones)
+    return rows
+
+
+def _build_weather_sigmets_page(ctx):  # pylint: disable=too-many-locals
+    """Render the /weather/sigmets page: frankenweather's own downloaded SIGMETs (--own-sigmets)."""
+    color_scheme = ctx.color_scheme
+    sigstate = ctx.fw_sigmetstate
+    now = time.time()
+    nav_html = (
+        '<a href="/weather" class="btn btn-gray btn-sm">Map</a>'
+        '<a href="/weather/settings" class="btn btn-gray btn-sm">Weather zones</a>'
+        '<a href="/weather/sigmets" class="btn btn-gray btn-sm">Refresh</a>'
+    )
+    extra_head = (
+        '\n<style>body { max-width: 64em; }'
+        'table.sg { border-collapse:collapse;width:100%;font-size:0.88em; }'
+        'table.sg th { text-align:left;color:#64748b;font-size:0.8em;'
+        'padding:2px 6px;border-bottom:1px solid #2a2f45; }'
+        'table.sg td { width:auto;padding:2px 6px;border-bottom:1px solid #1c2033;'
+        'color:#e2e8f0;font-size:1em; }'
+        'pre.sg-raw { max-height:30em;overflow:auto;background:#111827;padding:0.75em;'
+        'border-radius:0.45em;font-size:0.8em;white-space:pre-wrap; }'
+        'details summary { cursor:pointer;color:#94a3b8; }'
+        '</style>\n'
+    )
+    state = ctx.fw_state or {}
+    enabled = bool((state.get('config') or {}).get('own_sigmets'))
+    toggle_html = (
+        '<p class="note">With own SIGMETs on, frankenweather downloads SIGMETs from '
+        'aviationweather.gov itself instead of letting PSX do it. PSX gets every SIGMET '
+        'frankenweather could parse except thunderstorms (TS) and tropical cyclones (TC), '
+        'which frankenweather depicts itself as CBs in its weather zones.</p>\n'
+        '<div class="card" style="display:flex;align-items:center;gap:1.5em;flex-wrap:wrap">'
+        '<div><span style="color:#94a3b8;font-size:0.85em">Own SIGMETs</span><br>'
+        f'<b style="color:{"#4ade80" if enabled else "#64748b"}">'
+        f'{"ENABLED" if enabled else "disabled"}</b></div>'
+        '<form action="/api/weather/sigmets/toggle" method="post">'
+        f'<input type="hidden" name="enabled" value="{0 if enabled else 1}">'
+        f'<button type="submit" class="btn {"btn-red" if enabled else "btn-green"} btn-sm">'
+        f'{"Disable" if enabled else "Enable"}</button></form>'
+    )
+    if enabled:
+        toggle_html += ('<form action="/api/weather/sigmets/refresh" method="post">'
+                        '<button type="submit" class="btn btn-gray btn-sm">Download now</button>'
+                        '</form>')
+    toggle_html += '</div>\n'
+    if not sigstate or not enabled:
+        body = toggle_html
+        if enabled:
+            body += ('<div class="card warn"><p style="margin:0">No SIGMET data from '
+                     'frankenweather yet.</p></div>\n')
+        return _page_shell(color_scheme, 'SIGMETs', nav_html, body, extra_head)
+
+    entries = sigstate.get('entries') or []
+    ac_lat, ac_lon = state.get('ac_lat'), state.get('ac_lon')
+    error = sigstate.get('error')
+    body = toggle_html + (
+        f'<div class="card {"warn" if error else "ok"}">'
+        '<table><tr><td>Source</td>'
+        f'<td class="val">{_esc(sigstate.get("source") or "?")}</td></tr>'
+        f'<tr><td>Last download</td><td class="val">'
+        f'{_fmt_relative_epoch(now, sigstate.get("fetched_at"))}</td></tr>'
+        f'<tr><td>SIGMETs</td><td class="val">{len(entries)}</td></tr>'
+    )
+    if error:
+        body += f'<tr><td>Last error</td><td class="warn">{_esc(error)}</td></tr>'
+    body += '</table></div>\n'
+
+    counts = {h: [0, 0] for h in _SIGMET_TYPE_ORDER}
+    for e in entries:
+        counts.setdefault(e['hazard'], [0, 0])[0 if e['ok'] else 1] += 1
+    body += ('<h2>By type</h2><div class="card"><table class="sg">'
+             '<tr><th>Type</th><th>Parsed</th><th>Could not parse</th></tr>')
+    for hazard, (good, bad) in counts.items():
+        bad_cell = f'<b style="color:#f87171">{bad}</b>' if bad else '0'
+        body += f'<tr><td>{hazard}</td><td>{good}</td><td>{bad_cell}</td></tr>'
+    body += '</table></div>\n'
+
+    body += ('<h2>Nearest and nearby</h2><div class="card"><table class="sg">'
+             '<tr><th>Type</th><th>SIGMET</th><th>Distance / bearing</th><th>Base – top</th>'
+             '<th>Valid to</th><th>Weather zones inside</th></tr>')
+    body += _sigmet_nearest_rows(entries, ac_lat, ac_lon, state.get('zones') or [])
+    body += ('</table><p style="color:#64748b;font-size:0.8em;margin:0.5em 0 0">'
+             'For each type: the nearest area, and every other area less than '
+             f'{_SIGMET_NEARBY_NM:.0f} nm away. Distance is to the nearest edge of the '
+             'area. Weather zones are only listed for TS and TC.</p></div>\n')
+
+    bad = [e for e in entries if not e['ok']]
+    if bad:
+        body += f'<h2>Could not parse ({len(bad)})</h2><div class="card">'
+        for e in bad:
+            body += (f'<details><summary>{_esc(e["raw_hazard"] or "?")} '
+                     f'{_esc(_sigmet_label(e))}: {_esc(e["reason"] or "")}</summary>'
+                     f'<pre class="sg-raw">{_esc(e["raw"])}</pre></details>')
+        body += '</div>\n'
+
+    raw = fw_sigmet.sigmet_text(entries, sigstate.get('fetched_at') or now)
+    body += ('<h2>Raw SIGMET text</h2><div class="card">'
+             '<a href="/weather/sigmets/raw.txt" download="sigmets.txt">Download as text file</a>'
+             ' &middot; <a href="/weather/sigmets/psx.txt" download="sigmets-psx.txt">'
+             'Download the text given to PSX (no TS/TC)</a>'
+             f'<pre class="sg-raw">{_esc(raw)}</pre></div>\n')
+    return _page_shell(color_scheme, 'SIGMETs', nav_html, body, extra_head)
+
+
 def _build_weather_enroute_wind_page(ctx):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     """Render the /weather/enroute-wind page: flight-plan vs. Open-Meteo per-waypoint wind."""
     color_scheme = ctx.color_scheme
@@ -2260,6 +2505,37 @@ def register_weather_routes(routes, ctx):  # pylint: disable=too-many-statements
     async def _weather_enroute_wind_get(_):
         return web.Response(
             text=_paused_or(_build_weather_enroute_wind_page), content_type='text/html')
+
+    @routes.get('/weather/sigmets')
+    async def _weather_sigmets_get(_):
+        return web.Response(
+            text=_paused_or(_build_weather_sigmets_page), content_type='text/html')
+
+    @routes.get('/weather/sigmets/{which:(raw|psx)}.txt')
+    async def _weather_sigmets_text(request):
+        sigstate = ctx.fw_sigmetstate
+        if not sigstate:
+            return web.Response(text="No SIGMET data\n", status=404)
+        entries = sigstate.get('entries') or []
+        name = "sigmets.txt"
+        if request.match_info['which'] == 'psx':
+            entries = fw_sigmet.psx_entries(entries)
+            name = "sigmets-psx.txt"
+        text = fw_sigmet.sigmet_text(entries, sigstate.get('fetched_at') or time.time())
+        return web.Response(text=text, content_type='text/plain', headers={
+            'Content-Disposition': f'attachment; filename="{name}"'})
+
+    @routes.post('/api/weather/sigmets/refresh')
+    async def _weather_sigmets_refresh(_):
+        await ctx.send_fw_settings_cmd({"own_sigmets_refresh": True})
+        await asyncio.sleep(3)  # usually enough for the download to finish
+        raise web.HTTPFound('/weather/sigmets')
+
+    @routes.post('/api/weather/sigmets/toggle')
+    async def _weather_sigmets_toggle(request):
+        data = await request.post()
+        await ctx.send_fw_settings_cmd({"own_sigmets": data.get('enabled') == '1'})
+        raise web.HTTPFound('/weather/sigmets')
 
     @routes.post('/api/weather/enroute-wind/toggle')
     async def _weather_enroute_wind_toggle(request):
