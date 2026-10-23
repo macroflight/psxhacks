@@ -49,8 +49,12 @@ class RouterCache():  # pylint: disable=too-few-public-methods
         return float(365 * 24 * 3600)
 
     def get_keywords(self):
-        """Return a list of all keywords in the cache."""
-        return self.cache.keys()
+        """Return a list of all keywords in the cache.
+
+        A copy, so callers can await while iterating over it without
+        crashing if a new keyword is cached meanwhile.
+        """
+        return list(self.cache.keys())
 
     def clear(self):
         """Remove every keyword from the cache."""
