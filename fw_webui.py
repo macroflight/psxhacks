@@ -375,6 +375,9 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         extra_head = (
             '\n<style>'
             'body { max-width: none; }'
+            # Clicking a polygon (e.g. a SIGMET area) gives it keyboard
+            # focus, and browsers then draw a focus ring around its bounding box
+            '.leaflet-interactive:focus { outline: none; }'
             '#map { width: min(calc(100vh - 7rem), 72vw);'
             ' height: min(calc(100vh - 7rem), 72vw);'
             ' border-radius: 8px; border: 1px solid #2a2f45; flex-shrink: 0; }'
@@ -516,10 +519,17 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         'var xi=poly[i][0],yi=poly[i][1],xj=poly[j][0],yj=poly[j][1];'
         'if(((yi>lon)!==(yj>lon))&&(lat<(xj-xi)*(lon-yi)/(yj-yi)+xi))inside=!inside;}'
         'return inside;}\n'
+        # The view (lat,lon,zoom) survives the periodic reload, along with
+        # when the user last panned/zoomed; 2 minutes after that it's
+        # dropped, so the map refits to the aircraft and zones again
+        # instead of leaving them to drift off screen.
+        'var _VIEW_KEEP_MS=120000;'
         'function parseSavedView(){'
         'var h=location.hash.slice(1).split(",");'
-        'if(h.length===3){var la=parseFloat(h[0]),lo=parseFloat(h[1]),z=parseFloat(h[2]);'
-        'if(!isNaN(la)&&!isNaN(lo)&&!isNaN(z))return{lat:la,lon:lo,zoom:z};}'
+        'if(h.length===4){var la=parseFloat(h[0]),lo=parseFloat(h[1]),z=parseFloat(h[2]),'
+        't=parseFloat(h[3]);'
+        'if(!isNaN(la)&&!isNaN(lo)&&!isNaN(z)&&!isNaN(t)&&Date.now()-t<_VIEW_KEEP_MS)'
+        'return{lat:la,lon:lo,zoom:z,t:t};}'
         'return null;}\n'
         f'var acLat={ac_lat},acLon={ac_lon},acHdg={ac_hdg:.0f},acAlt={ac_alt_ft};\n'
         f'var fwMode={json.dumps(fw_mode)},navMode={json.dumps(nav_mode)};\n'
@@ -528,6 +538,7 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         f'var turbSummary={turb_summary_js};\n'
         f'var sigmets={sigmets_js};\n'
         "var _sv=parseSavedView();\n"
+        "var _lastUserView=_sv?_sv.t:0;\n"
         "var map=L.map('map',{zoomSnap:0.25,zoomDelta:0.5,wheelPxPerZoomLevel:120})"
         ".setView(_sv?[_sv.lat,_sv.lon]:[acLat,acLon],_sv?_sv.zoom:7);\n"
         "L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',{\n"
@@ -551,6 +562,17 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         "  +'</svg>';\n"
         "L.marker([acLat,acLon],"
         "{icon:L.divIcon({html:acSvg,className:'',iconAnchor:[18,18]})}).addTo(map);\n"
+        # Range rings around the aircraft, labelled at the top of each ring
+        "[40,80,160,320,640].forEach(function(nm){\n"
+        "  L.circle([acLat,acLon],{radius:nm*1852,color:'#1e293b',weight:1.5,"
+        "opacity:0.6,dashArray:'6 6',fill:false,interactive:false}).addTo(map);\n"
+        "  L.marker([acLat+nm/60,acLon],{interactive:false,keyboard:false,"
+        "icon:L.divIcon({className:'',iconSize:[0,0],"
+        "html:'<span style=\"display:inline-block;transform:translate(-50%,-50%);"
+        "font-size:10px;line-height:1;padding:1px 4px;border-radius:3px;"
+        "background:rgba(255,255,255,0.75);color:#1e293b;white-space:nowrap\">'"
+        "+nm+' nm</span>'})}).addTo(map);\n"
+        "});\n"
         "var bounds=L.latLngBounds([[acLat,acLon]]);\n"
         "sigmets.forEach(function(s){\n"
         "  var pts=s.polygon.map(function(p){return[p[0],p[1]];});\n"
@@ -644,6 +666,9 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         "  _zData.push({z:z,tip:tip,tipCls:tipCls,sec:_secAssign[_zi]});\n"
         "});\n"
         "if(zones.length>0&&!_sv)map.fitBounds(bounds.pad(0.4));\n"
+        # Only user pans/zooms count: attached after our own initial fit
+        "setTimeout(function(){map.on('dragstart zoomstart',function(){"
+        "_lastUserView=Date.now();});},1000);\n"
         "var _labelLayers=[];\n"
         "var _tfs=["
         "'translateX(-50%) translateY(-100%)',"
@@ -702,7 +727,8 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         "}\n"
         "setTimeout(function(){"
         "var c=map.getCenter(),z=map.getZoom();"
-        "location.hash=c.lat.toFixed(5)+','+c.lng.toFixed(5)+','+z.toFixed(2);"
+        "location.hash=c.lat.toFixed(5)+','+c.lng.toFixed(5)+','+z.toFixed(2)"
+        "+','+_lastUserView;"
         "location.reload();},30000);\n"
         "function openFeedback(){\n"
         "  document.getElementById('fb-overlay').style.display='flex';\n"
