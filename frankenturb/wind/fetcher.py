@@ -51,11 +51,16 @@ _DISK_CACHE_MAX_AGE_S = 6 * 3600.0
 # tropopause sits at or just below 100 hPa, and without a level above it
 # the WMO lapse-rate test has nothing to compare 100 hPa against, so no
 # tropopause is ever found anywhere in the tropics.
+# 275/225/175/125 hPa fill in the cruise/tropopause region (~30-50k ft):
+# with only 300/250/200/150/100 the detected tropopause could only take
+# one of those levels' heights, 4-6k ft apart, and flipped between them
+# from one forecast to the next (2026-10-22 VHHH-EGLL: 33.7k/38.6k/44.4k/
+# 45.4k ft within minutes).
 # ---------------------------------------------------------------------------
 LEVELS_HPA: list[int] = [
     1000, 975, 950, 925, 900, 850, 800, 750, 700,
     650, 600, 550, 500, 450, 400, 350, 300,
-    250, 200, 150, 100, 70,
+    275, 250, 225, 200, 175, 150, 125, 100, 70,
 ]
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"

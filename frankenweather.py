@@ -12,6 +12,7 @@ import os
 import pathlib
 import random
 import re
+import statistics
 import sys
 import textwrap
 import time
@@ -330,6 +331,21 @@ _MSFS_CLOUD_BASE_FLOOR_FT = 100.0
 # cruise PFD altitude snap >=9ft coincided with a WxBasic write in the same
 # zone batch, against 0 of 260 batches without one.
 _WXBASIC_MAX_WRITE_TAS_KT = 50.0
+# --sync-tropopause in flight (TAS >= _TROPO_INFLIGHT_MIN_TAS_KT): every
+# WxAloft write can snap pending smooth transits like WxBasic does
+# (2026-10-22 VHHH-EGLL: 7 of 17 cruise batches with a WxAloft write
+# jumped the PFD up to 81ft, 0 of 45 without). The real tropopause only
+# changes on a weather-system scale, so in flight we write the median of
+# the last _TROPO_SMOOTH_WINDOW_S of samples, and only when it differs
+# from what PSX has by at least one of the _TROPO_MIN_CHANGE_* amounts,
+# at most once per _TROPO_MIN_WRITE_INTERVAL_S. On the ground every new
+# value is written straight away. See _write_tropopause().
+_TROPO_INFLIGHT_MIN_TAS_KT = 50.0
+_TROPO_SMOOTH_WINDOW_S = 3600.0
+_TROPO_MIN_WRITE_INTERVAL_S = 1800.0
+_TROPO_MIN_CHANGE_FT = 3000.0
+_TROPO_MIN_CHANGE_C = 5.0
+_TROPO_MIN_CHANGE_WIND_KT = 30.0    # vector difference
 _NM_TO_M = 1852.0
 # How long a paused instance waits without hearing from the conflicting
 # (higher-UUID) FRANKENWEATHER instance before resuming — see _note_conflict()
@@ -1320,6 +1336,29 @@ def _wxmode_equivalent(a: Optional[str], b: Optional[str]) -> bool:
     return pa[2:5] == pb[2:5] and pa[5][:-3] == pb[5][:-3]
 
 
+def _parse_wxaloft_tropopause(wxaloft: Optional[str]) -> Optional[tuple]:
+    """Return (alt_ft, temp_c, wind_u_kt, wind_v_kt) from a "Constantly" WxAloft, else None.
+
+    None if any of the three tropopause fields is in PSX's own "auto" mode
+    (lowercase letter) or the string doesn't parse. See _write_tropopause()
+    for the format.
+    """
+    m = re.match(r"A(\d+)T(\d+)W\d{3}(\d{3})(\d+);", wxaloft or "")
+    if not m:
+        return None
+    dir_rad = math.radians(int(m.group(3)))
+    speed = int(m.group(4))
+    return (float(m.group(1)), -float(m.group(2)),
+            speed * math.sin(dir_rad), speed * math.cos(dir_rad))
+
+
+def _tropo_change_significant(current: tuple, target: tuple) -> bool:
+    """Return True if target differs from current by any of the _TROPO_MIN_CHANGE_* amounts."""
+    return (abs(target[0] - current[0]) >= _TROPO_MIN_CHANGE_FT or
+            abs(target[1] - current[1]) >= _TROPO_MIN_CHANGE_C or
+            math.hypot(target[2] - current[2], target[3] - current[3]) >= _TROPO_MIN_CHANGE_WIND_KT)
+
+
 def _parse_cb_arg(s: str) -> tuple:
     """Parse --fake-cb=O:B:T into (oktas, base_ft, top_ft)."""
     parts = s.split(':')
@@ -1812,6 +1851,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # position reference is PSX's own and is never ours to construct,
         # only to preserve verbatim.
         self._wxaloft_raw: Optional[str] = None
+        # --sync-tropopause smoothing (see _write_tropopause()): recent
+        # (monotonic time, result) samples, result being
+        # (alt_ft, temp_c, wind_u_kt, wind_v_kt) or None if none was found,
+        # and when we last wrote WxAloft in flight.
+        self._tropo_samples: list = []
+        self._tropo_last_write_mono: Optional[float] = None
         # Whether to offset the departure/destination zone's centre away
         # from the real airport (see _arpt_coverage_needed()) so any CB
         # PSX generates there can never land within _CB_AIRPORT_CLEARANCE_NM
@@ -2465,6 +2510,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         Arms Qi243 first: this is literally Aerowinx's own example of
         "weather data" to arm before injecting (Qi243's own documentation
         uses "tropopause data" as its example), unlike SigmetOn above.
+
+        In flight, a WxAloft write can still snap pending smooth transits
+        and jump the PFD altitude (see _TROPO_INFLIGHT_MIN_TAS_KT), so it
+        writes the median of the last hour's samples (_tropo_target()),
+        only when that differs significantly from PSX's current value
+        (_tropo_change_significant()), and at most once per
+        _TROPO_MIN_WRITE_INTERVAL_S. On the ground every new value is
+        written straight away.
         """
         if self._wxaloft_raw is None or self.ac_lat is None or self.ac_lon is None:
             return
@@ -2478,34 +2531,67 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         suffix = self._wxaloft_raw[idx:]
         profile = self._turb_engine.wind_fetcher.get(
             self.ac_lat, self.ac_lon, datetime.now(timezone.utc))
-        result = profile.tropopause() if profile is not None else None
-        if result is None:
+        now_mono = time.monotonic()
+        # Unknown TAS counts as in flight: the cautious choice.
+        in_flight = self.ac_tas_kt is None or self.ac_tas_kt >= _TROPO_INFLIGHT_MIN_TAS_KT
+        target = self._tropo_target(
+            profile.tropopause() if profile is not None else None, now_mono, in_flight)
+        if (in_flight and self._tropo_last_write_mono is not None and
+                now_mono - self._tropo_last_write_mono < _TROPO_MIN_WRITE_INTERVAL_S):
+            return
+        if target is None:
             # No data of our own: hand the tropopause back to PSX's own
             # "auto" modes rather than leave an earlier fixed value of ours
             # in place indefinitely -- lowercase letters, numbers kept as-is
             # (the same toggle the Planet Weather page itself sends).
-            auto_value = re.sub(r"^[aA](\d+)[tT](\d+)[wW]",
-                                lambda m: f"a{m.group(1)}t{m.group(2)}w", self._wxaloft_raw)
-            if auto_value != self._wxaloft_raw:
-                self.logger.info(
-                    "Tropopause: %s — returning WxAloft to PSX auto (%s → %s)",
-                    "no wind profile" if profile is None else "not found in wind profile",
-                    self._wxaloft_raw, auto_value)
-                self._inject_wx_slow_transit()
-                self.psx_send_and_set("WxAloft", auto_value)
+            new_value = re.sub(r"^[aA](\d+)[tT](\d+)[wW]",
+                               lambda m: f"a{m.group(1)}t{m.group(2)}w", self._wxaloft_raw)
+            what = (f"{'no wind profile' if profile is None else 'not found in wind profile'}"
+                    " — returning WxAloft to PSX auto")
+        else:
+            current = _parse_wxaloft_tropopause(self._wxaloft_raw)
+            if in_flight and current is not None and not _tropo_change_significant(current, target):
+                return
+            speed = round(math.hypot(target[2], target[3]))
+            direction = round(math.degrees(math.atan2(target[2], target[3]))) % 360
+            new_value = (f"A{round(target[0])}T{round(abs(target[1]))}"
+                         f"W{0:03d}{direction:03d}{speed};{speed}{suffix}")
+            what = (f"{round(target[0])}ft -{round(abs(target[1]))}C {direction:03d}°/{speed}kt"
+                    f"{' (smoothed, in flight)' if in_flight else ''}")
+        if new_value == self._wxaloft_raw:
             return
-        alt_m, temp_c, speed_kt, dir_deg = result
-        alt_ft = round(alt_m / 0.3048)
-        temp_abs = round(abs(temp_c))
-        speed = round(speed_kt)
-        direction = round(dir_deg) % 360
+        self.logger.info("Tropopause: %s (WxAloft %s → %s)", what, self._wxaloft_raw, new_value)
         self._inject_wx_slow_transit()
-        new_value = f"A{alt_ft}T{temp_abs}W{0:03d}{direction:03d}{speed};{speed}{suffix}"
-        if new_value != self._wxaloft_raw:
-            self.logger.info(
-                "Tropopause: %dft -%dC %03d°/%dkt (WxAloft %s → %s)",
-                alt_ft, temp_abs, direction, speed, self._wxaloft_raw, new_value)
         self.psx_send_and_set("WxAloft", new_value)
+        if in_flight:
+            self._tropo_last_write_mono = now_mono
+
+    def _tropo_target(self, result: Optional[tuple], now_mono: float,
+                      in_flight: bool) -> Optional[tuple]:
+        """Record a tropopause sample and return the (alt_ft, temp_c, u_kt, v_kt) to aim for.
+
+        result is WindProfile.tropopause()'s return value (None if none was
+        found). On the ground that sample itself is the target; in flight
+        it's the per-component median of every sample found within the last
+        _TROPO_SMOOTH_WINDOW_S, so a single forecast flipping between two
+        tropopause layers can't trigger a write. None if there's nothing to
+        aim for.
+        """
+        sample = None
+        if result is not None:
+            alt_m, temp_c, speed_kt, dir_deg = result
+            dir_rad = math.radians(dir_deg)
+            sample = (alt_m / 0.3048, temp_c,
+                      speed_kt * math.sin(dir_rad), speed_kt * math.cos(dir_rad))
+        self._tropo_samples.append((now_mono, sample))
+        self._tropo_samples = [
+            s for s in self._tropo_samples if now_mono - s[0] <= _TROPO_SMOOTH_WINDOW_S]
+        if not in_flight:
+            return sample
+        valid = [s for _, s in self._tropo_samples if s is not None]
+        if not valid:
+            return None
+        return tuple(statistics.median(s[k] for s in valid) for k in range(4))
 
     def _aircraft_sigmet_hazards(self) -> list:
         """Return the sorted, deduplicated hazard types of every SIGMET the aircraft is in.
@@ -6502,8 +6588,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             help="EXPERIMENTAL: keep PSX's Planet Weather page tropopause "
                  "altitude/temperature/wind set to \"Constantly\" with real "
                  "values computed from Open-Meteo's pressure-level data at the "
-                 "aircraft's current position (WMO lapse-rate definition), "
-                 "refreshed on the same cadence as the weather zones. Wind "
+                 "aircraft's current position (WMO lapse-rate definition). "
+                 "On the ground it follows every update; in flight it uses the "
+                 "median of the last hour and only changes PSX's value when "
+                 "that differs by at least 3000ft, 5C or 30kt of wind, at most "
+                 "every 30 minutes (every in-flight write risks a PFD altitude "
+                 "jump). Wind "
                  "variability is always written as 0 (no ensemble-spread data "
                  "available) and gust is always set equal to speed. Off by "
                  "default -- leaves PSX on its own \"variable by latitude and "

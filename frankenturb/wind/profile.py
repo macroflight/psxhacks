@@ -271,6 +271,14 @@ class WindProfile:  # pylint: disable=too-many-instance-attributes
         tropopause. Wind at the found altitude is read via wind_at(), so
         it benefits from the same u/v interpolation as everything else.
 
+        The altitude is then refined between pressure levels (as in
+        Reichler et al. 2003): each layer's lapse rate is assigned to its
+        midpoint, and the tropopause is placed where that lapse rate
+        crosses 2 degC/km between the layer below the qualifying level and
+        the one above it. Without this, the result could only ever be one
+        of the pressure levels' own heights, and would jump a whole level
+        whenever the forecast nudged the test across a level boundary.
+
         Returns None if there are too few valid temperature levels, or no
         qualifying level is found in the available profile. The top level
         can never qualify itself (nothing above it to test against), which
@@ -288,8 +296,17 @@ class WindProfile:  # pylint: disable=too-many-instance-attributes
             if alts[i] < 5000.0 or not _is_tropopause_level(alts, temps, i):
                 continue
             alt_m = float(alts[i])
+            if i > 0:
+                lapse_below = (temps[i - 1] - temps[i]) / ((alts[i] - alts[i - 1]) / 1000.0)
+                lapse_above = (temps[i] - temps[i + 1]) / ((alts[i + 1] - alts[i]) / 1000.0)
+                if lapse_below > 2.0 >= lapse_above:
+                    mid_below = (alts[i - 1] + alts[i]) / 2.0
+                    mid_above = (alts[i] + alts[i + 1]) / 2.0
+                    frac = (lapse_below - 2.0) / (lapse_below - lapse_above)
+                    alt_m = float(mid_below + frac * (mid_above - mid_below))
+            temp_c = float(np.interp(alt_m, alts, temps))
             speed_kt, dir_deg = self.wind_at(alt_m)
-            return alt_m, float(temps[i]), speed_kt, dir_deg
+            return alt_m, temp_c, speed_kt, dir_deg
         return None
 
     # ------------------------------------------------------------------
