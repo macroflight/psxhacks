@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-10-23: version 1.23.1
+
+- **New: CB turbulence on the weather map**, for frankenweather 1.10.0:
+  each CB's turbulence area is drawn as rings around where PSX draws the
+  CB, the core (red) and the inner (yellow) and outer (green) half of
+  the flank zone (see frankenweather's changelog). Needs frankenweather
+  1.10.0 or later, which sends the ring sizes; with an older one the map
+  is as before.
+
 ## 2026-10-23: version 1.23.0
 
 - **New: SIGMETs page in the weather web UI**, for frankenweather 1.9.0's
