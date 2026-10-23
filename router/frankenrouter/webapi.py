@@ -1798,9 +1798,9 @@ def _efb_controls_card(w):
         _efb_bool_chip_row(
             '/api/efb/toggle', 'disable_psx_sigmets', w['disable_psx_sigmets'],
             true_label='PSX SIGMETs Off', false_label='PSX SIGMETs On', small=True) +
-        '<p class="efb-hint">Off: PSX gets no SIGMETs at all (no volcanic ash, '
-        'turbulence, icing or mountain wave either). FrankenWeather still downloads '
-        'them and shows thunderstorms as CBs in its weather zones.</p>\n'
+        '<p class="efb-hint">Off: PSX doesn\'t use SIGMETs. With FrankenWeather\'s '
+        'SIGMET system (--sigmet) PSX gets none at all, while FrankenWeather still '
+        'handles the types chosen on its SIGMETs page.</p>\n'
         '</div>\n'
     )
 
