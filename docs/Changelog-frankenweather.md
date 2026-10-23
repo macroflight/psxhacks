@@ -1,5 +1,25 @@
 # frankenweather changelog
 
+## 1.8.5 (2026-10-22)
+
+- **Fix: `--sync-tropopause` caused PFD altitude jumps in flight.** On
+  the VHHH-EGLL flight, 7 of the 17 cruise weather updates that changed
+  the tropopause made the PFD altitude jump (up to 81 ft), and none of
+  the 45 updates that didn't. The tropopause was rewritten about every
+  5 minutes. In flight, frankenweather now uses the median of the last
+  hour's tropopause values, and only changes PSX's tropopause when that
+  differs by at least 3,000 ft, 5°C or 30 kt of wind, at most every 30
+  minutes. On the ground it is still updated straight away.
+- **Fix: the detected tropopause jumped between a few fixed heights.**
+  It could only ever be the height of one of the Open-Meteo pressure
+  levels around cruise (about 30,000, 34,000, 39,000, 45,000 or
+  53,000 ft), and flipped between them from one forecast to the next.
+  frankenweather now also fetches the levels in between (275, 225, 175
+  and 125 hPa) and interpolates the tropopause height between levels.
+  Where Open-Meteo's model has no data for the extra levels, the old
+  levels are still used. The extra levels also give the turbulence
+  engine a finer wind profile around cruise altitude.
+
 ## 1.8.4 (2026-10-21)
 
 - **Change: the CB squeeze no longer places new zones closer than 100 nm
