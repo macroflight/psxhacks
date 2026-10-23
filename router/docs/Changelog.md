@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-10-23: version 1.22.0
+
+- **New: malfunctions from newly connected clients are dropped.** For the
+  first 30 seconds after a client connects, the router drops any
+  malfunction variable (`Mf*`, e.g. `MfAcBus1`) it sends, and logs a
+  warning for each one. A PSX instance in a slave sim that starts from a
+  situ with a stale malfunction (seen after a lightning strike) could
+  otherwise send it on connecting and fail systems in the whole shared
+  cockpit. This happened twice in flight, failing all four AC buses.
+  Malfunctions triggered deliberately from a slave sim later on are
+  unaffected, and nothing coming from upstream is ever filtered. For the
+  protection to work, it's the slave sim's router that needs this version.
+- **Fixed:** the router no longer drops the PSX main server's own takeoff
+  page no-go string (Qs546) for the first 5 seconds after connecting
+  upstream. Clients joining later could get no value, or a stale one,
+  until it next changed. The 5-second filter now only applies to
+  newly connected clients, as intended.
+- In Basic Mode, the console now switches to the normal router log and
+  status display once data is flowing from the master sim.
+- The Basic Mode checklist now warns not to run BACARS, a VATSIM CPDLC
+  client, FrankenWeather, SRSL (except in client mode) or CMC-PSX in a
+  slave sim, since in a shared cockpit these only run in the master sim.
+
 ## 2026-10-21: version 1.21.0
 
 - **New: Basic Mode is now a web page.** Basic Mode is meant for
