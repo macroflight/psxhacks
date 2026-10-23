@@ -95,10 +95,11 @@ Features:
 
 - CAPE-based CB (cumulonimbus) generation: computes CB coverage and
   tops from Open-Meteo CAPE/CIN data, with convective inhibition
-  suppression when CIN is high. TS SIGMETs downloaded by PSX are
-  honoured: if the aircraft is in a TS SIGMET area, CBs are always
-  generated (minimum 4 oktas) even when CAPE is zero, since TS SIGMETs
-  report observed thunderstorms. METAR convective indicators (TS, TSRA,
+  suppression when CIN is high. TS SIGMETs are honoured: a zone inside
+  a TS SIGMET area always gets a CB (minimum 4 oktas) even when CAPE is
+  zero, since TS SIGMETs report observed thunderstorms. With [own
+  SIGMETs](#own-sigmets) on, frankenweather goes further and places
+  zones in TS/TC SIGMET areas itself. METAR convective indicators (TS, TSRA,
   SHRA, GR, LTG, FC, CB sky groups) are also used and can override or
   refine the Open-Meteo prediction. See [CB growth and
   decay](#cb-growth-and-decay) below for `--cb-growth`, an opt-in,
@@ -328,6 +329,47 @@ this applies to the frankenrouter web UI too, since it serves the same
 pages. The console's per-zone log line gains a `[CB ramp: ...]` suffix
 with the signed oktas/min and ft/min rate and the target whenever that
 zone's CB is actively changing.
+
+### Own SIGMETs
+
+`--own-sigmets` (experimental, off by default; also a toggle on the web
+UI's SIGMETs page and a setting in the configuration file) makes
+frankenweather responsible for SIGMETs instead of PSX:
+
+- frankenweather downloads SIGMETs from aviationweather.gov itself
+  (international and US) every 10 minutes, or right away with the
+  SIGMETs page's "Download now" button. SIGMETs it can't parse (no
+  usable area, unknown type) are left out and saved, one file each, to
+  the `sigmet-unparsed` folder in the log directory.
+- PSX's own SIGMET download is turned off. PSX gets every SIGMET
+  frankenweather could parse except thunderstorms (TS) and tropical
+  cyclones (TC), so it keeps simulating volcanic ash, turbulence, icing
+  and mountain wave SIGMETs as before. If anything else changes PSX's
+  SIGMET data (a situ load, another addon), frankenweather writes its
+  own back.
+- frankenweather depicts TS and TC itself, as CBs in its weather zones,
+  so CB turbulence and MSFS (through PSX.NET.Orchestration) see them
+  too. TS/TC areas within 300 nm that aren't behind the aircraft get 2
+  zones each (a TC: a cluster of 3 around the cyclone's centre), in the
+  part nearest the aircraft but at least 100 nm away. CB coverage comes
+  from the SIGMET's wording: ISOL 2/8, OCNL 4/8, EMBD 5/8, FRQ 6/8, SQL
+  7/8, TC 6-8/8. The top comes from the SIGMET, the base from the zone's
+  own surface temperature and dew point. CAPE can only make a CB bigger.
+- One "anchor" zone is always kept near the aircraft without any CB, so
+  the zone PSX uses for the local weather (QNH) is close by and no CB
+  can appear right next to the aircraft. Near the departure or
+  destination airport, the airport's own zone does this instead.
+- Turning it off hands the SIGMETs back to PSX's own download.
+
+The router's /efb "PSX SIGMETs Off" setting works the same way, except
+that PSX gets no SIGMETs at all.
+
+The SIGMETs page shows the download status, the number of SIGMETs of
+each type that could and couldn't be parsed, the nearest area of each
+type and every other one within 320 nm (with the weather zones inside
+TS/TC areas), the SIGMETs that couldn't be parsed, and the raw text. The
+weather map shows SIGMET areas of every type within 640 nm, one colour
+per type, and marks each zone's CB at its actual position.
 
 ### Time sync
 
