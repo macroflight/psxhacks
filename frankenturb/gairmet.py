@@ -91,7 +91,16 @@ def _extract_polygon(props: dict, geom) -> list:
             # GeoJSON uses [lon, lat] order.
             return [(float(c[1]), float(c[0])) for c in ring if len(c) >= 2]
 
-    # Flat JSON: try known coordinate field names.
+    # aviationweather.gov's own JSON: "coords" is a list of {"lat", "lon"}
+    # (string values).
+    coords = props.get("coords")
+    if coords and isinstance(coords[0], dict):
+        try:
+            return [(float(c["lat"]), float(c["lon"])) for c in coords]
+        except (KeyError, TypeError, ValueError):
+            return []
+
+    # Other flat JSON: try known coordinate field names.
     raw = props.get("coordinates") or props.get("area") or []
     if not raw or len(raw[0]) < 2:
         return []
@@ -99,6 +108,53 @@ def _extract_polygon(props: dict, geom) -> list:
     if abs(float(raw[0][0])) > 90.0:
         return [(float(c[1]), float(c[0])) for c in raw]
     return [(float(c[0]), float(c[1])) for c in raw]
+
+
+def _still_valid(props: dict, now: float) -> bool:
+    """Return False if the G-AIRMET has expired (expireTime epoch, or validTimeTo ISO)."""
+    expire = props.get("expireTime")
+    if isinstance(expire, (int, float)):
+        return expire >= now
+    try:
+        vt_str = (props.get("validTimeTo") or "").replace("Z", "+00:00")
+        return datetime.datetime.fromisoformat(vt_str).timestamp() >= now
+    except (ValueError, AttributeError):
+        return True
+
+
+def _flight_level_ft(value, default: float):
+    """Return feet for an API base/top: "SFC" -> 0, "240" (hundreds of ft) -> 24000.
+
+    None for a value that can't be read (e.g. "FZL", the freezing level).
+    """
+    if value is None or value == "":
+        return default
+    text = str(value).strip().upper()
+    if text == "SFC":
+        return 0.0
+    try:
+        return float(text) * 100.0
+    except ValueError:
+        return None
+
+
+def _altitude_range(props: dict) -> tuple:
+    """Return (low_ft, high_ft) of a G-AIRMET, or (None, None) if it can't be read.
+
+    aviationweather.gov gives "base"/"top" in hundreds of feet; older
+    feeds used altitudeLow1Ft/altitudeHi1Ft in feet.
+    """
+    if "base" in props or "top" in props:
+        low = _flight_level_ft(props.get("base"), 0.0)
+        high = _flight_level_ft(props.get("top"), 60000.0)
+        if low is None or high is None:
+            return None, None
+        return low, high
+    try:
+        return (float(props.get("altitudeLow1Ft") or 0),
+                float(props.get("altitudeHi1Ft") or 60000))
+    except (TypeError, ValueError):
+        return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -174,18 +230,11 @@ class GairmetFetcher:
             if intensity < 0.05:
                 continue
 
-            try:
-                vt_str = (props.get("validTimeTo") or "").replace("Z", "+00:00")
-                valid_to = datetime.datetime.fromisoformat(vt_str).timestamp()
-                if valid_to < now:
-                    continue
-            except (ValueError, AttributeError):
-                pass
+            if not _still_valid(props, now):
+                continue
 
-            try:
-                alt_low = float(props.get("altitudeLow1Ft") or 0)
-                alt_high = float(props.get("altitudeHi1Ft") or 60000)
-            except (TypeError, ValueError):
+            alt_low, alt_high = _altitude_range(props)
+            if alt_low is None:
                 continue
 
             polygon = _extract_polygon(props, geom)
@@ -193,7 +242,7 @@ class GairmetFetcher:
                 continue
 
             due_to = str(
-                props.get("dueTo") or props.get("hazard") or
+                props.get("dueTo") or props.get("due_to") or props.get("hazard") or
                 props.get("airmetType") or "TURB"
             )
             regions.append(GairmetRegion(
