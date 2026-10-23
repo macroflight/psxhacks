@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-23: version 1.22.1
+
+- **Fixed:** a client connecting while the router was still learning new
+  variables (typically at startup) could be disconnected with "dictionary
+  changed size during iteration" and had to reconnect.
+
 ## 2026-10-23: version 1.22.0
 
 - **New: malfunctions from newly connected clients are dropped.** For the
