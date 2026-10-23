@@ -84,6 +84,15 @@ PTT_TO_GROUND_HANDLING = {
 # route/perf change entered later (i.e. after this window) is unaffected.
 QS546_CONNECT_FILTER_WINDOW_S = 5.0
 
+# How long after a client connects we drop any malfunction variable
+# (name starting with "Mf", e.g MfAcBus1-4, MfStrike, MfEvent) it sends.
+# A PSX instance that starts from a situ containing a stale malfunction
+# state (seen after a lightning strike) briefly simulates on its own
+# after connecting and sends e.g "MfAcBus1=0;6;<now>", failing all AC
+# buses in the shared cockpit. Malfunctions deliberately triggered from
+# a slave sim later on are unaffected. Never applied to upstream.
+MALFUNCTION_CONNECT_FILTER_WINDOW_S = 30.0
+
 # Addon names that are expected to produce regular addon= traffic; their
 # forwarded messages are logged at debug rather than info. FRANKENWEATHER is
 # not listed here since it never reaches this classification -- it is
@@ -242,6 +251,7 @@ class RulesCode(enum.Enum):
     LAYOUT = enum.auto()
     PTT = enum.auto()
     QS546_CONNECT_FILTER = enum.auto()
+    MALFUNCTION_CONNECT_FILTER = enum.auto()
     PSXNETVATSIM = enum.auto()
     CDUPROXY = enum.auto()
     KEYVALUE_FILTERED_INGRESS_SIM_LOCAL = enum.auto()
@@ -1331,6 +1341,18 @@ class Rules():  # pylint: disable=too-many-public-methods
                     self.sender.display_name, age, QS546_CONNECT_FILTER_WINDOW_S)
                 return self.myreturn(RulesAction.DROP, RulesCode.QS546_CONNECT_FILTER)
 
+        if not self.sender.upstream:
+            age = time.perf_counter() - self.sender.connected_at
+            if (
+                    age < MALFUNCTION_CONNECT_FILTER_WINDOW_S and
+                    self.router.variables.get_variable_name(key).startswith('Mf')
+            ):
+                self.logger.warning(
+                    "Dropping malfunction %s from %s: connection is only %.1fs old (< %.0fs): %s",
+                    self.router.variables.get_variable_name(key), self.sender.display_name,
+                    age, MALFUNCTION_CONNECT_FILTER_WINDOW_S, self.line)
+                return self.myreturn(RulesAction.DROP, RulesCode.MALFUNCTION_CONNECT_FILTER)
+
         if (
                 key in PTT_KEYWORDS and
                 self.sender.is_frankenrouter and
@@ -1715,6 +1737,10 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         def reconcile_lexicon_entry(self, _key, _name):
             """Fake Lexicon reconciliation: no-op, never matches."""
             return False
+
+        def get_variable_name(self, keyword):
+            """Return a fake variable name for a few keywords."""
+            return {'Qs196': 'MfAcBus1', 'Qi130': 'MfEvent'}.get(keyword, keyword)
 
     class DummyCache():  # pylint: disable=too-few-public-methods
         """Implement small parts of the router for unit testing."""
@@ -2942,3 +2968,35 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         (action, code, *_) = rules.route("Qs546=avsfC200;11;-2625;-1;-99;-1;-1;8;", testpeer)
         self.assertEqual(action, RulesAction.NORMAL)
         self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
+
+    def test_malfunction_connect_filter(self):
+        """Test the malfunction (Mf*) connect-window ingress filter."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+
+        router.upstream = self.DummyUpstreamConnection()
+        router.clients = {
+            ('127.0.0.1', 12345): self.DummyClientConnection(('127.0.0.1', 12345)),
+        }
+        testpeer = router.clients[('127.0.0.1', 12345)]
+
+        # Freshly connected: malfunctions are dropped, other variables pass
+        testpeer.connected_at = time.perf_counter()
+        for line in ("Qs196=0;6;035427", "Qi130=1"):
+            (action, code, *_) = rules.route(line, testpeer)
+            self.assertEqual(action, RulesAction.DROP)
+            self.assertEqual(code, RulesCode.MALFUNCTION_CONNECT_FILTER)
+        (action, code, *_) = rules.route("Qs197=0;6;-99", testpeer)
+        self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
+
+        # Past the window: a malfunction deliberately set from that sim passes
+        testpeer.connected_at = (
+            time.perf_counter() - MALFUNCTION_CONNECT_FILTER_WINDOW_S - 1.0)
+        (action, code, *_) = rules.route("Qs196=0;6;035427", testpeer)
+        self.assertEqual(action, RulesAction.NORMAL)
+        self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
+
+        # Never applied to upstream, even right after connecting
+        router.upstream.connected_at = time.perf_counter()
+        (action, code, *_) = rules.route("Qs196=0;6;-99", router.upstream)
+        self.assertNotEqual(code, RulesCode.MALFUNCTION_CONNECT_FILTER)
