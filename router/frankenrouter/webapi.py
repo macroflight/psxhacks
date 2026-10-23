@@ -594,6 +594,9 @@ the <b>green</b> indicator above.<span class="live" id="live3"></span></span></l
 <li><input type="checkbox"><span>Start your sim. Your PSX main clients and addons should
 automatically connect to the router. Verify that you see them in the list of
 connected clients below.</span></li>
+<li><input type="checkbox"><span>Make sure you do <b>not</b> run BACARS, a VATSIM CPDLC
+client, FrankenWeather, SRSL (except in client mode) or CMC-PSX &ndash; in a
+shared cockpit, these only run in the master sim.</span></li>
 <li><input type="checkbox"><span>Find your PSX main server and reconfigure it. On the
 <b>Network &gt; Main</b> page of Instructor, switch it from &ldquo;The main
 server&rdquo; to &ldquo;A main client&rdquo;, connecting to <b>127.0.0.1</b>
