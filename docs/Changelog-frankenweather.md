@@ -1,5 +1,79 @@
 # frankenweather changelog
 
+## 1.9.0 (2026-10-23)
+
+- **New (experimental): frankenweather's SIGMET system (`--sigmet`).**
+  Off by default. frankenweather downloads SIGMETs from aviationweather.gov
+  itself, turns off PSX's own SIGMET download, and handles the SIGMET
+  types chosen on the new SIGMETs page itself (all four by default, can
+  be saved in the configuration file). PSX gets the other types it
+  could parse, and always volcanic ash and icing:
+  - **Thunderstorms (TS) and tropical cyclones (TC)** become CBs in
+    frankenweather's weather zones, so CB turbulence (and MSFS, through
+    PSX.NET.Orchestration) sees every thunderstorm the radar shows.
+    Zones are placed in the nearest part of TS/TC areas within 300 nm, at
+    least 100 nm away (2 per TS area, a cluster of 3 per TC). CB coverage
+    follows the SIGMET's wording (ISOL 2/8, OCNL 4/8, EMBD 5/8, FRQ 6/8,
+    SQL 7/8, TC 6-8/8), the top comes from the SIGMET, the base from
+    Open-Meteo. CAPE can only make a CB bigger. A CB-free "anchor" zone
+    is always kept near the aircraft for the local QNH, so no CB can
+    appear right next to the aircraft.
+  - **Turbulence (TURB) and mountain wave (MTW)** become frankenweather's
+    own turbulence, a new "SIGMET" source: severe (0.75) inside the
+    area and between its base and top, fading in near the edges. MTW
+    strengthens the terrain model's own mountain wave or rotor, keeping
+    its pattern.
+  - At startup, the SIGMETs are downloaded right away, and zones get
+    their SIGMET CBs as soon as they arrive.
+  - SIGMETs that can't be parsed are left out and saved to the log
+    directory's `sigmet-unparsed` folder.
+  See [SIGMETs](frankenweather.md#sigmets).
+- **Change: without `--sigmet`, frankenweather no longer uses SIGMETs.**
+  It only has PSX download them regularly. Previously it also read PSX's
+  SIGMET text to force CBs into zones inside TS SIGMET areas and to draw
+  TS areas on the map.
+- **Change: "PSX SIGMETs Off" (router /efb)** with `--sigmet` gives PSX
+  no SIGMETs at all (frankenweather still handles its chosen types).
+  Without `--sigmet` it still turns off PSX's "SIGMETs embedded in the
+  planet weather model".
+- **New: SIGMETs web page** (with `--sigmet`; also in the router's web UI,
+  with a router that has it): which types frankenweather handles,
+  download status (with the next automatic download and a "Download
+  SIGMETs now" button), the number of SIGMETs of each type that
+  could and couldn't be parsed, the nearest area of each type and every
+  other one within 320 nm (with the weather zones inside TS/TC areas),
+  unparseable SIGMETs, and the raw text and the text given to PSX as
+  downloads.
+- **New: weather map additions.**
+  - Range rings at 40, 80, 160, 320 and 640 nm around the aircraft.
+  - SIGMET areas of every type within 640 nm, one colour per type, with
+    a legend (previously only TS areas near a weather zone).
+  - Each zone's CB marked at its actual position (7 nm from the zone
+    centre, at the bearing PSX uses).
+  - With `--sigmet`, zones whose CB comes from a SIGMET are marked (also
+    in the log and on the weather zones page, naming the SIGMET), and so
+    is the CB-free anchor zone.
+  - The map refits to the aircraft and zones on its periodic reload,
+    unless you've panned or zoomed in the last 2 minutes.
+- **Change: the web UI is reorganised into six pages:** Map, Weather
+  zones, Enroute wind, SIGMETs (with `--sigmet`), Extra turbulence, and
+  Config and logs. Every page has the same buttons at the top linking to
+  all of them, plus Refresh (and, in the router's UI, a button back to
+  the router's start page).
+  - Weather zones has an Auto/Manual switch at the top (plus Pause and
+    Disable). Auto shows the weather zones; Manual shows the manual
+    weather controls, which used to be their own page, and puts that
+    weather into all seven zones.
+  - Config and logs has the configuration file's Save/Load/Reset buttons
+    (moved from the weather zones page), the time sync settings and, in
+    frankenweather's own web UI, the log files (formerly their own page).
+  - The old `/weather/manual` and `/weather/logs` addresses redirect to
+    the new pages.
+- **Fix: G-AIRMET turbulence never applied.** aviationweather.gov's
+  G-AIRMET data has a different layout than frankenweather expected, so
+  no G-AIRMET area was ever found ("G-AIRMET: 0 active turbulence
+  regions"). G-AIRMETs only cover the US.
+
 ## 1.8.6 (2026-10-23)
 
 - **Change: `--sync-tropopause` only sets the tropopause from reliable
