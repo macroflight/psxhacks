@@ -537,6 +537,7 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
             'cb_rate': zone.get('cb_rate'),
             'cb_sigmet': zone.get('cb_sigmet'),
             'anchor': bool(zone.get('anchor')),
+            'cb_turb': zone.get('cb_turb'),
             # Where PSX actually draws this zone's CB, if it has one
             'cb_pos': (_zone_cb_position(ctx.cache_get(f'WxMode{zone_num}') or '', time_earth_ms)
                        if (wx.get('cb_raw') or {}).get('oktas') else None),
@@ -674,6 +675,7 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         ".addTo(map);\n"
         "});\n"
         "var _hasCb=zones.some(function(z){return z.cb_pos;});\n"
+        "var _hasCbTurb=zones.some(function(z){return z.cb_pos&&z.cb_turb;});\n"
         "if(Object.keys(_sigSeen).length||_hasCb){\n"
         "  var _lg=L.control({position:'bottomleft'});\n"
         "  _lg.onAdd=function(){var d=L.DomUtil.create('div');"
@@ -682,6 +684,11 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         "var h='';"
         "if(_hasCb)h+='<span style=\"display:inline-block;width:10px;margin-right:4px;"
         "color:#dc2626;font-weight:700;text-align:center\">✕</span>CB actual position';"
+        "if(_hasCbTurb)h+='<br><b>CB turbulence</b> (cloud levels)<br>'"
+        "+[['#dc2626','core'],['#eab308','inner flank'],['#22c55e','outer flank']].map(function(k){"
+        "return '<span style=\"display:inline-block;width:10px;height:10px;margin-right:4px;"
+        "border:1.5px solid '+k[0]+';border-radius:50%;box-sizing:border-box\"></span>'+k[1];})"
+        ".join('<br>');"
         "if(Object.keys(_sigSeen).length)h+=(h?'<br>':'')+'<b>SIGMETs</b><br>'"
         "+Object.keys(_sigSeen).map(function(k){"
         "return '<span style=\"display:inline-block;width:10px;height:10px;margin-right:4px;"
@@ -728,6 +735,13 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         "  if(cbLabel&&z.cb_sigmet)cbLabel+=' · SIGMET';\n"
         "  var tip='<b>WX'+z.zone+'</b> '+z.icao+(z.anchor?' ⚓':'')+cbLabel;\n"
         "  var tipCls=z.is_focused?'zone-label zone-label-focused':'zone-label';\n"
+        "  var ct=z.cb_turb;\n"
+        "  if(z.cb_pos&&ct&&ct.shape==='circle'){\n"
+        "    [[ct.core_nm+ct.flank_nm,'#22c55e'],[ct.core_nm+ct.flank_nm/2,'#eab308'],"
+        "[ct.core_nm,'#dc2626']].forEach(function(r){\n"
+        "      if(r[0]>0)L.circle(z.cb_pos,{radius:r[0]*1852,color:r[1],weight:1.5,opacity:0.8,"
+        "fillColor:r[1],fillOpacity:0.12,interactive:false}).addTo(map);});\n"
+        "  }\n"
         "  if(z.cb_pos)L.marker(z.cb_pos,{icon:L.divIcon({className:'',iconSize:[0,0],"
         "html:'<span style=\"display:inline-block;transform:translate(-50%,-50%);"
         "color:#dc2626;font-weight:700;font-size:16px;line-height:1;"
@@ -2010,7 +2024,7 @@ def _build_weather_turb_page(ctx):  # pylint: disable=too-many-locals,too-many-b
         f'<tr><td style="{_th}">CB lateral size bias (%)</td>'
         f'<td style="{_td}">{_bias_input("lateral_size_bias", lat_bias)}'
         f'<div style="{_note}">Controls how quickly CB turbulence fades with lateral '
-        'distance from the CB zone centre. Higher = CB influence extends further sideways.</div>'
+        'distance from the CB. Higher = CB influence extends further sideways.</div>'
         '</td></tr>'
         f'<tr><td style="{_th}">MSFS influence magnitude (%)</td>'
         f'<td style="{_td}">'

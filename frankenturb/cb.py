@@ -16,7 +16,7 @@ four cell lat/lon positions (in radians).
 Lateral radius
 --------------
 For local zones the CB radius is half the distance to the nearest
-neighbouring known zone center, guaranteeing no lateral overlap.
+neighbouring known zone center, measured around the CB cell itself.
 A fallback of 30 nm is used when fewer than two positions are known.
 For planet-weather clusters the radius scales with cloud depth:
 10 nm (0 ft) to 40 nm (28 000 ft).
@@ -157,11 +157,13 @@ def find_nearest_cb(  # pylint: disable=too-many-arguments,too-many-positional-a
         bearing = _cb_bearing(time_earth_ms, zone_elev)
         cb_lat, cb_lon = _translate(zone_lat, zone_lon, bearing, _CB_OFFSET_NM * _NM_TO_M)
 
-        # The nearest-neighbour radius is measured from zone centres, so the
-        # edge distance must also be measured from the zone centre (not the CB
-        # cloud centre, which is 7 nm away).
-        radius = _nearest_neighbor_radius_nm(zone_idx, zone_positions) * lat_scale
-        zone_dist = _distance_nm(acft_lat, acft_lon, zone_lat, zone_lon)
+        # Centred on the CB cell, where PSX draws it on the radar -- not on
+        # the zone centre 7 nm away: with a radius under 7 nm (close
+        # neighbours, lateral bias) a core around the zone centre missed the
+        # cell entirely, so flying through the radar's CB gave only flank
+        # turbulence (live, 2026-10-23: 2 nm from the cell, 5 nm outside the
+        # core).
+        radius = zone_cb_radius_nm(zone_idx, zone_positions, lat_scale)
         dist = _distance_nm(acft_lat, acft_lon, cb_lat, cb_lon)
         brg = _bearing_deg(acft_lat, acft_lon, cb_lat, cb_lon)
 
@@ -172,7 +174,7 @@ def find_nearest_cb(  # pylint: disable=too-many-arguments,too-many-positional-a
             bearing_deg=brg,
             range_center_nm=dist,
             lateral_radius_nm=radius,
-            range_edge_nm=zone_dist - radius,
+            range_edge_nm=dist - radius,
             cloud_base_ft_msl=float(base_agl) + zone_elev,
             cloud_top_ft_msl=float(top_agl) + zone_elev,
             coverage=coverage,
@@ -278,6 +280,18 @@ def _bearing_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return (math.degrees(math.atan2(x_comp, y_comp)) + 360.0) % 360.0
 
 
+def zone_cb_radius_nm(
+    zone_idx: int,
+    zone_positions: dict[int, tuple[float, float, float]],
+    lat_scale: float = 1.0,
+) -> float:
+    """Return the lateral radius (nm) of a local zone's CB, around the CB cell.
+
+    zone_positions and lat_scale are as for find_nearest_cb().
+    """
+    return _nearest_neighbor_radius_nm(zone_idx, zone_positions) * lat_scale
+
+
 def _nearest_neighbor_radius_nm(
     zone_idx: int,
     zone_positions: dict[int, tuple[float, float, float]],
@@ -286,8 +300,9 @@ def _nearest_neighbor_radius_nm(
     """Return half the distance to the nearest other known zone centre (nm).
 
     Returns fallback_nm (default 30 nm) when this is the only known zone.
-    Halving the nearest-neighbour distance guarantees that the lateral
-    extents of neighbouring CBs never overlap.
+    Halving the nearest-neighbour distance keeps the lateral extents of
+    neighbouring CBs apart, give or take the 7 nm each CB sits from its zone
+    centre (find_nearest_cb() picks the nearest one anyway).
     """
     lat, lon, _ = zone_positions[zone_idx]
     min_dist = None

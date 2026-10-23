@@ -48,7 +48,9 @@ from frankenturb import (
 )
 from frankenturb.cb import (
     find_nearest_cb, parse_wx_zone_basic, parse_wx_zone_position, parse_wx_clust,
+    zone_cb_radius_nm,
 )
+from frankenturb.cb_turbulence import cb_flank_width_nm
 from frankenturb.disk_cache import DiskCache
 from fw_cb import (
     WX_DEFAULTS as _WX_DEFAULTS,
@@ -264,7 +266,8 @@ _OWN_SIGMET_TIMEOUT = aiohttp.ClientTimeout(total=30)
 # aircraft, so the zone PSX uses for the local weather (QNH) is close by and
 # no CB can ever appear right next to the aircraft. See _maintain_anchor_zone().
 _ANCHOR_MAX_NM = 50.0              # a dep/dst airport zone this close does the job instead
-_ANCHOR_AHEAD_NM = (40.0, 50.0)    # where a new anchor goes, along track
+_ANCHOR_AHEAD_NM = (40.0, 50.0)    # how far away a new anchor goes, ahead
+_ANCHOR_LATERAL_NM = 20.0          # ... and at most this far either side of track
 _ANCHOR_HANDOVER_BEHIND_NM = 25.0  # new anchor once the aircraft is this far past the old one
 # --sigmet: weather zones placed inside TS/TC SIGMET areas, so the CBs
 # frankenweather depicts there (instead of PSX) show up on the radar. See
@@ -662,32 +665,6 @@ def _hpa_to_psx_qnh(hpa: float) -> int:
     return int(round(hpa * 2.953))
 
 
-def _dewpoint(temp_c: float, rh_pct: float) -> float:
-    """Magnus-formula dew point from temperature (°C) and relative humidity (%)."""
-    a, b = 17.625, 243.04
-    gamma = math.log(max(rh_pct, 0.01) / 100.0) + a * temp_c / (b + temp_c)
-    return b * gamma / (a - gamma)
-
-
-def _fmt_temp(t: float) -> str:
-    t_int = round(t)
-    return f"M{-t_int:02d}" if t_int < 0 else f"{t_int:02d}"
-
-
-_WMO_METAR_WX: dict = {
-    45: "FG", 48: "FZFG",
-    51: "-DZ", 53: "-DZ", 55: "DZ",
-    56: "-FZDZ", 57: "FZDZ",
-    61: "-RA", 63: "RA", 65: "+RA",
-    66: "-FZRA", 67: "FZRA",
-    71: "-SN", 73: "SN", 75: "+SN",
-    77: "SG",
-    80: "-SHRA", 81: "SHRA", 82: "+SHRA",
-    85: "SHSN", 86: "+SHSN",
-    95: "TS", 96: "TSRA", 99: "+TSRA",
-}
-
-
 def _cloud_base_ft(wmo_code: int) -> int:
     """Estimate cloud base in feet from WMO weather code."""
     if wmo_code in (45, 48):
@@ -708,29 +685,6 @@ def _cloud_base_ft(wmo_code: int) -> int:
 _OKTAS_TO_CAPE = {0: 0.0, 2: 300.0, 4: 1000.0, 6: 2250.0, 8: 4000.0}
 
 
-def _metar_wind_str(wind_dir: int, wind_spd: int, wind_gust: int) -> str:
-    """Format a METAR wind group string."""
-    if wind_spd == 0:
-        return "00000KT"
-    gust = f"G{wind_gust:02d}" if wind_gust > wind_spd + 10 else ""
-    return f"{wind_dir:03d}{wind_spd:02d}{gust}KT"
-
-
-def _metar_sky_str(cloud_pct: float, wmo_code: int) -> str:
-    """Format a METAR sky condition group string."""
-    oktas = _cloud_pct_to_oktas(cloud_pct)
-    base_str = f"{_cloud_base_ft(wmo_code) // 100:03d}"
-    if oktas == 0:
-        return "SKC"
-    if oktas <= 2:
-        return f"FEW{base_str}"
-    if oktas <= 4:
-        return f"SCT{base_str}"
-    if oktas <= 6:
-        return f"BKN{base_str}"
-    return f"OVC{base_str}"
-
-
 def _parse_vatsim_metar_lines(text: str) -> dict:
     """Parse a VATSIM METAR dump (bulk /all or a live ICAO-list fetch) into icao -> raw line."""
     metars: dict = {}
@@ -744,29 +698,6 @@ def _parse_vatsim_metar_lines(text: str) -> dict:
             if len(icao) == 4 and icao.upper() == icao and icao.isalnum():
                 metars[icao] = line
     return metars
-
-
-def _gen_metar(icao: str, om: dict, now: datetime) -> str:
-    """Generate a METAR-format string from Open-Meteo current weather."""
-    cur = om.get("current", {})
-    wind_dir = int(round(float(cur.get("wind_direction_10m", 0)) / 10.0)) * 10
-    wind_spd = int(round(float(cur.get("wind_speed_10m", 0))))
-    wind_gust = int(round(float(cur.get("wind_gusts_10m", 0))))
-    vis_m = float(cur.get("visibility", 10000))
-    wmo_code = int(cur.get("weather_code", 0))
-    cloud_pct = float(cur.get("cloud_cover", 0))
-    temp_c = float(cur.get("temperature_2m", 15))
-    rh_pct = float(cur.get("relative_humidity_2m", 60))
-    qnh_hpa = float(cur.get("pressure_msl", 1013.25))
-    dp_c = _dewpoint(temp_c, rh_pct)
-
-    parts = [icao, now.strftime('%d%H%MZ'),
-             _metar_wind_str(wind_dir, wind_spd, wind_gust),
-             "9999" if vis_m >= 10000 else f"{int(min(vis_m, 9000)):04d}"]
-    parts += ([_WMO_METAR_WX[wmo_code]] if wmo_code in _WMO_METAR_WX else [])
-    parts += [_metar_sky_str(cloud_pct, wmo_code),
-              f"{_fmt_temp(temp_c)}/{_fmt_temp(dp_c)}", f"Q{int(round(qnh_hpa)):04d}"]
-    return ' '.join(parts)
 
 
 _METAR_WIND_RE = re.compile(r'(VRB|\d{3})(\d{2,3})(?:G(\d{2,3}))?KT')
@@ -1806,6 +1737,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # zone_num -> "VATSIM" or "NOAA", only meaningful when zone_is_metar
         # is True. See --primary-metar-source / _metar_source_label().
         self.zone_metar_source: dict = {}
+        # zone -> station-only METAR last given to PSX, see _station_only_metar()
+        self._zone_station_metar: dict = {}
         self.last_write_time = 0.0
 
         # --cb-growth ramp state (see _ramp_cb_wx()): zone_num → dict of
@@ -2159,6 +2092,25 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if not self._psx_send(key, value):
             return
         self.psx._set(key, value)  # pylint: disable=protected-access
+
+    def _station_only_metar(self, zone_num: int, icao: str, now: datetime) -> str:
+        """Return the METAR for a zone whose weather we build ourselves: "<icao> <DDHHMMZ>".
+
+        No weather groups on purpose: PSX rebuilds a zone's weather from its
+        METAR whenever the METAR's weather content changes, undoing
+        everything not in it -- SIGMET CBs, our CB tops, cloud layers
+        (live-tested 2026-10-23). A station-and-time-only METAR doesn't
+        trigger that, and replaces the earlier METAR on PSX's Instructor
+        weather page; an empty one is ignored by PSX, leaving a stale METAR
+        there. The time is that of the zone's placement: the same string is
+        reused for as long as the zone keeps its name, so it isn't resent.
+        """
+        cached = self._zone_station_metar.get(zone_num)
+        if cached is not None and cached.split(" ", 1)[0] == icao:
+            return cached
+        metar = f"{icao} {now.strftime('%d%H%MZ')}"
+        self._zone_station_metar[zone_num] = metar
+        return metar
 
     def _stable_zone_elev(self, zone_num: int, lat: float, lon: float, elev_m: float) -> float:
         """Return the elevation to send in zone_num's WxMode, fixed for as long as it stays put.
@@ -4620,18 +4572,59 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         _, _, lat_c, lon_c, icao = candidates[0]
         return lat_c, lon_c, icao
 
-    def _place_all_zones(self) -> None:
-        """Place all 7 zones randomly around the aircraft on startup."""
+    def _cb_turb_in_reach(self, zone_num: int) -> Optional[str]:
+        """Return why zone_num's CB turbulence can reach the aircraft, or None if it can't.
+
+        A zone whose CB the aircraft is in, or still near enough to for its
+        turbulence (core plus flank zone, or plus the anvil zone above the
+        cloud top), is never moved: the turbulence would stop at once
+        (live, 2026-10-23). Measured from the zone centre, generously: the
+        CB itself is _CB_TO_ZONE_OFFSET_NM from it (see frankenturb/cb.py).
+        """
+        raw = self.psx.get(f"Wx{zone_num}") if self.psx else None
+        cb = parse_wx_zone_basic(raw) if raw else None
+        if (cb is None or cb[0] == 0 or self.ac_lat is None or
+                zone_num not in self.zone_positions):
+            return None
+        coverage, top_ft, base_ft = cb
+        positions = {zn: (lat, lon, 0.0) for zn, (lat, lon, _) in self.zone_positions.items()}
+        reach_nm = (zone_cb_radius_nm(zone_num, positions, self._turb_lateral_size_bias / 100.0) +
+                    cb_flank_width_nm(coverage, top_ft, base_ft,
+                                      anvil=(self.ac_alt_ft or 0.0) > top_ft) +
+                    _CB_TO_ZONE_OFFSET_NM)
+        dist_nm = self._dist_nm(self.ac_lat, self.ac_lon, *self.zone_positions[zone_num][:2])
+        if dist_nm > reach_nm:
+            return None
+        return f"CB turbulence reaches {reach_nm:.0f}nm, aircraft {dist_nm:.0f}nm away"
+
+    def _place_all_zones(self, keep_cb_turb: bool = False) -> None:
+        """Place all 7 zones randomly around the aircraft (startup, reposition, maneuvering).
+
+        With keep_cb_turb, zones whose CB turbulence can reach the aircraft
+        stay where they are (see _cb_turb_in_reach()).
+        """
+        kept = {}
+        if keep_cb_turb:
+            for zone_num, pos in self.zone_positions.items():
+                why = self._cb_turb_in_reach(zone_num)
+                if why is not None:
+                    kept[zone_num] = pos
+                    self.logger.info("Zone %d: %s left in place (%s)", zone_num, pos[2], why)
         self.zone_positions.clear()
+        self.zone_positions.update(kept)
         self._anchor_zone = None
         self._cb_free_zones.clear()
-        self.zone_relocated_time.clear()
-        self.zone_cb_ramp.clear()
-        self.zone_cb_create_dist_nm.clear()
-        next_zone = 1
+        for per_zone in (self.zone_relocated_time, self.zone_cb_ramp, self.zone_cb_create_dist_nm):
+            for zone_num in [zn for zn in per_zone if zn not in kept]:
+                del per_zone[zone_num]
+        free = [zn for zn in range(1, 8) if zn not in kept]
+        kept_icaos = {icao for _, _, icao in kept.values()}
         for icao, lat, lon in self._arpt_coverage_needed():
-            if next_zone > 7:
+            if not free:
                 break
+            if icao in kept_icaos:
+                continue
+            next_zone = free.pop(0)
             az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
             self.zone_positions[next_zone] = (lat, lon, icao)
             self.zone_placement_reason[next_zone] = self._placement_desc(
@@ -4640,8 +4633,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.logger.info(
                 "Zone %d: initial placement at %s @ %.3f/%.3f  %.0f°/%.0fnm (dep/dst arpt)",
                 next_zone, icao, lat, lon, az % 360, dist_m / _NM_TO_M)
-            next_zone += 1
-        for zone_num in range(next_zone, 8):
+        for zone_num in free:
             lat, lon, icao = self._pick_position(initial=True)
             self.zone_positions[zone_num] = (lat, lon, icao)
             self.zone_placement_reason[zone_num] = self._placement_desc(lat, lon, icao)
@@ -4761,14 +4753,16 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             reason = self._zone_relocate_reason(zone_num, in_cruise, arpt_icaos)
             if reason is None:
                 continue
-            if zone_num in protected_zones:
+            why_kept = ("nearest and/or PSX's FocussedWxZone" if zone_num in protected_zones
+                        else self._cb_turb_in_reach(zone_num))
+            if why_kept is not None:
                 last_logged = self._zone_protected_last_logged.get(zone_num, 0)
                 if now - last_logged >= _ZONE_PROTECTED_LOG_INTERVAL_S:
                     self._zone_protected_last_logged[zone_num] = now
                     self.logger.info(
                         "Zone %d: relocation due (%s) but zone is protected"
-                        " (nearest and/or PSX's FocussedWxZone) — left in place",
-                        zone_num, reason)
+                        " (%s) — left in place",
+                        zone_num, reason, why_kept)
                 continue
             if not in_cruise or self._maneuvering:
                 if now - self.zone_relocated_time.get(zone_num, 0) < _REFRESH_MAX_S:
@@ -4827,7 +4821,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         """Return the zone number farthest from aircraft not serving an excluded airport."""
         best_zn, best_dist = None, -1.0
         for zn, (zlat, zlon, zicao) in self.zone_positions.items():
-            if zicao in exclude_icaos:
+            if zicao in exclude_icaos or self._cb_turb_in_reach(zn) is not None:
                 continue
             d = self._dist_nm(self.ac_lat, self.ac_lon, zlat, zlon)
             if d > best_dist:
@@ -4929,24 +4923,53 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         zone_num = self._expendable_for_anchor()
         if zone_num is None:
             return False
-        az_rad = math.radians(self.ac_hdg)
-        dist_m = random.uniform(*_ANCHOR_AHEAD_NM) * _NM_TO_M
-        lon, lat, _ = self.geod.fwd(lons=self.ac_lon, lats=self.ac_lat,
-                                    az=math.degrees(az_rad), dist=dist_m)
-        lon = ((lon + 180.0) % 360.0) - 180.0
+        lat, lon, dist_m = self._pick_anchor_position(zone_num)
         old = self.zone_positions[zone_num]
-        icao = f"X{random.randint(100, 999):03d}"
+        other_icaos = {icao for zn, (_, _, icao) in self.zone_positions.items() if zn != zone_num}
+        icao = next(name for name in (f"X{random.randint(100, 999):03d}" for _ in iter(int, 1))
+                    if name not in other_icaos)
         self.zone_positions[zone_num] = (lat, lon, icao)
         self.zone_placement_reason[zone_num] = self._placement_desc(lat, lon, icao)
         self.zone_relocated_time[zone_num] = time.time()
         self.zone_cb_ramp.pop(zone_num, None)
         self.zone_cb_create_dist_nm[zone_num] = dist_m / _NM_TO_M
         self.logger.info("Zone %d: relocated from %s @ %.3f/%.3f → %s @ %.3f/%.3f"
-                         " [%.0f°/%.0fnm] (new anchor zone)",
+                         " [%.0fnm] (new anchor zone)",
                          zone_num, old[2], old[0], old[1], icao, lat, lon,
-                         self.ac_hdg % 360, dist_m / _NM_TO_M)
+                         dist_m / _NM_TO_M)
         self._make_anchor(zone_num, "placed ahead")
         return True
+
+    def _pick_anchor_position(self, zone_num: int) -> tuple[float, float, float]:
+        """Return (lat, lon, dist_m) for a new anchor zone ahead of the aircraft.
+
+        Like _pick_position(), but _ANCHOR_AHEAD_NM away (never beyond
+        _ANCHOR_MAX_NM, or it'd be due for replacing at once) and at most
+        _ANCHOR_LATERAL_NM either side of track: of 10 random candidates, the
+        first one at least new_zone_notnear from every other zone, else the
+        one farthest from them. A zone too close would also shrink a nearby
+        CB's turbulence radius (half the distance to the nearest zone, see
+        frankenturb/cb.py) -- live 2026-10-23, an anchor 8.9nm from a SIGMET
+        CB zone left that CB a 2.2nm core.
+        """
+        others = [(lat, lon) for zn, (lat, lon, _) in self.zone_positions.items()
+                  if zn != zone_num]
+        best, best_sep = None, -1.0
+        for _ in range(10):
+            dist_nm = random.uniform(*_ANCHOR_AHEAD_NM)
+            max_off = math.degrees(math.asin(min(1.0, _ANCHOR_LATERAL_NM / dist_nm)))
+            bearing = (self.ac_hdg + random.uniform(-max_off, max_off)) % 360.0
+            dist_m = dist_nm * _NM_TO_M
+            lon, lat, _ = self.geod.fwd(lons=self.ac_lon, lats=self.ac_lat,
+                                        az=bearing, dist=dist_m)
+            lon = ((lon + 180.0) % 360.0) - 180.0
+            sep = min((self._dist_nm(lat, lon, o[0], o[1]) for o in others),
+                      default=float('inf'))
+            if sep > best_sep:
+                best, best_sep = (lat, lon, dist_m), sep
+            if sep >= self.args.new_zone_notnear:
+                break
+        return best
 
     def _anchor_due(self, zone_num: int) -> bool:
         """Return True if zone_num is no use as an anchor (too far away, or passed)."""
@@ -4974,7 +4997,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         protected = {self._nearest_zone_num(), self.focused_zone, self._anchor_zone}
         best, best_key = None, None
         for zone_num, (lat, lon, icao) in self.zone_positions.items():
-            if zone_num in protected or icao in arpt_icaos:
+            if (zone_num in protected or icao in arpt_icaos or
+                    self._cb_turb_in_reach(zone_num) is not None):
                 continue
             az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
             behind = abs((az - self.ac_hdg + 180) % 360 - 180) > 90.0
@@ -5070,7 +5094,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         best, best_key = None, None
         for zone_num, (lat, lon, icao) in self.zone_positions.items():
             if (zone_num in protected or icao in arpt_icaos or
-                    self._is_cb_free_zone(zone_num)):
+                    self._is_cb_free_zone(zone_num) or
+                    self._cb_turb_in_reach(zone_num) is not None):
                 continue
             if any(_point_in_polygon(lat, lon, sig['polygon']) for sig in self.ts_sigmets):
                 continue
@@ -6183,7 +6208,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     lat, lon, self._stable_zone_elev(i + 1, lat, lon, elev), month, icao))
                 wx = (om_to_wx_string(om, radar_echo=radar_echo, lightning=has_lightning)
                       if om else ";".join(_WX_DEFAULTS))
-                new_metars.append(_gen_metar(icao, om, now) if om else None)
+                new_metars.append(self._station_only_metar(i + 1, icao, now) if om else None)
             if self._own_sigmets_applied:
                 final_wx = self._own_sigmet_cb(wx, (lat, lon), om, f"Zone {i + 1} {icao}")
             else:
@@ -6384,7 +6409,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.psx_send_and_set(f"Wx{zone_num}", wx)
 
         for i, metar in enumerate(new_metars):
-            if metar:
+            if metar is not None:
                 self.psx_send_and_set(f"Metar{i + 1}", metar)
 
         self._state_changed_event.set()
@@ -6396,6 +6421,26 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
     # ------------------------------------------------------------------
     # API state broadcast
     # ------------------------------------------------------------------
+
+    def _cb_turb_area(self, zone_num: int, zone_positions: dict) -> Optional[dict]:
+        """Return the CB turbulence area of a zone for the web map, or None if no CB.
+
+        Same geometry as the turbulence itself (_get_nearest_cb()): a circle
+        around the CB cell -- which the map places itself -- with the core
+        out to core_nm and the flank zone out to flank_nm beyond that. A
+        "shape" so other shapes can be added later.
+        """
+        raw = self.psx.get(f"Wx{zone_num}") if self.psx else None
+        cb = parse_wx_zone_basic(raw) if raw else None
+        if cb is None or cb[0] == 0 or zone_num not in zone_positions:
+            return None
+        coverage, top_ft, base_ft = cb
+        return {
+            "shape": "circle",
+            "core_nm": round(zone_cb_radius_nm(zone_num, zone_positions,
+                                               self._turb_lateral_size_bias / 100.0), 1),
+            "flank_nm": round(cb_flank_width_nm(coverage, top_ft, base_ft), 1),
+        }
 
     def _build_state_message(self) -> str:  # pylint: disable=too-many-locals
         """Build the FRANKENWEATHER:<uuid>:<json> addon message payload."""
@@ -6428,6 +6473,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         }
         psx_governed = self._fw_mode == "disabled"
         arpt_icaos = {self.fmc_dep_icao, self.fmc_dst_icao} - {None}
+        all_positions = {}  # every zone, as _get_nearest_cb() sees them
+        for zone_num in range(1, 8):
+            raw_mode = self.psx.get(f"WxMode{zone_num}") if self.psx else None
+            pos = parse_wx_zone_position(raw_mode) if raw_mode else None
+            if pos is not None:
+                all_positions[zone_num] = pos
         zones = []
         for zone_num in range(1, 8):
             raw_mode = self.psx.get(f"WxMode{zone_num}") if self.psx else None
@@ -6467,6 +6518,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 # this is the CB-free anchor zone
                 "cb_sigmet": self.zone_cb_sigmet.get(zone_num),
                 "anchor": zone_num == self._anchor_zone,
+                "cb_turb": self._cb_turb_area(zone_num, all_positions),
                 "cb_rate": ({
                     "oktas_per_min": round(
                         self.zone_cb_ramp[zone_num].get('last_oktas_rate_per_min', 0.0), 3),
@@ -6722,7 +6774,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         continue
                     if self.ac_lat is None:
                         continue
-                    entered_maneuvering = self._update_maneuvering_mode()
+                    # Only entering maneuvering mode re-places the zones (all
+                    # around the aircraft); on leaving it the ordinary
+                    # relocation below moves zones as they fall behind. It
+                    # used to re-place them on leaving too, taking away a CB
+                    # the aircraft was in (live, 2026-10-23).
+                    entered_maneuvering = (self._update_maneuvering_mode() and
+                                           self._maneuvering)
                     # When PSX manages its own weather (WxAutoSet=1, "disabled"
                     # mode only), don't reposition zones — PSX will move them
                     # and we'd overwrite that on recovery. The last known
@@ -6754,7 +6812,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         self._place_all_zones()
                         any_relocated = True
                     elif entered_maneuvering:
-                        self._place_all_zones()
+                        self._place_all_zones(keep_cb_turb=True)
                         any_relocated = True
                     else:
                         any_relocated = self._check_and_relocate()

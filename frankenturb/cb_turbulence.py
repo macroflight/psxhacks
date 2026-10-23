@@ -105,11 +105,28 @@ def compute_cb_turbulence(alt_ft: float, cb: CbInfo) -> TurbulenceState:  # pyli
 # Zone helpers
 # ---------------------------------------------------------------------------
 
+def cb_flank_width_nm(coverage: int, top_ft: float, base_ft: float,
+                      anvil: bool = False) -> float:
+    """Return how far (nm) CB turbulence reaches beyond a CB's lateral radius.
+
+    The flank (outflow) zone at and below cloud levels, or with anvil=True
+    the anvil CAT zone above the cloud top, which reaches three times as far.
+    """
+    if coverage < _MIN_COVERAGE:
+        return 0.0
+    return ((_ANVIL_MAX_NM if anvil else _OUTFLOW_MAX_NM) *
+            _severity_of(coverage, top_ft - base_ft))
+
+
 def _severity(cb: CbInfo) -> float:
     """Geometric mean of coverage fraction and cloud-depth fraction."""
-    coverage_f = cb.coverage / 8.0
-    depth_ft = max(0.0, cb.cloud_top_ft_msl - cb.cloud_base_ft_msl)
-    depth_f = min(1.0, depth_ft / _DEPTH_SAT_FT)
+    return _severity_of(cb.coverage, cb.cloud_top_ft_msl - cb.cloud_base_ft_msl)
+
+
+def _severity_of(coverage: int, depth_ft: float) -> float:
+    """Geometric mean of coverage fraction and cloud-depth fraction."""
+    coverage_f = coverage / 8.0
+    depth_f = min(1.0, max(0.0, depth_ft) / _DEPTH_SAT_FT)
     return math.sqrt(coverage_f * depth_f)
 
 

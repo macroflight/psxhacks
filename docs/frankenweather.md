@@ -93,6 +93,13 @@ Features:
   weather for that zone is taken from the live VATSIM METAR for that
   airport when available, otherwise from Open-Meteo.
 
+- A zone whose weather comes from Open-Meteo gets a METAR with only its
+  name and the time it was placed (e.g. `X328 231230Z`), so PSX's
+  Instructor doesn't keep showing an old zone's METAR. It has no weather
+  in it on purpose: PSX rebuilds a zone's weather from its METAR whenever
+  the METAR's weather changes, which would undo frankenweather's CBs,
+  cloud layers and tops.
+
 - CAPE-based CB (cumulonimbus) generation: computes CB coverage and
   tops from Open-Meteo CAPE/CIN data, with convective inhibition
   suppression when CIN is high. With [`--sigmet`](#sigmets),
@@ -137,7 +144,12 @@ Features:
   to 5 Hz. Turbulence kinds modelled: terrain wave, rotor, mechanical,
   wind-shear CAT, CB, CAPE-driven convective, PIREPs, and G-AIRMET
   regions. The MCDU C (observer panel CDU) shows a live status display
-  and allows tuning of intensity per turbulence type. DEM tiles (~26 MB
+  and allows tuning of intensity per turbulence type. CB turbulence is
+  centred on the CB itself, where PSX draws it on the radar (7 nm from
+  its zone's centre): a core (CB interior) of half the distance to the
+  nearest other zone, times the CB lateral size bias -- the closer the
+  zones, the smaller PSX's radar return too -- and a flank zone beyond
+  it of up to 20 nm, depending on how big the CB is. DEM tiles (~26 MB
   each, 1°×1°) are downloaded on demand and cached at
   `~/.cache/frankenturb/terrain/` (up to 9 tiles ≈ 235 MB).
 
@@ -183,7 +195,9 @@ Features:
   frankenrouter web interface. Every page has the same buttons at the
   top linking to all of them (plus Refresh, and in the router's UI a
   button back to the router's start page):
-  - **Map**: the live weather map.
+  - **Map**: the live weather map. Each CB is marked where PSX actually
+    draws it, with its turbulence area as rings: the core (red), the
+    inner (yellow) and outer (green) half of the flank zone.
   - **Weather zones**: an Auto/Manual switch (plus Pause and Disable).
     In Auto, the details of all seven weather zones; in Manual, the
     manual weather controls, whose weather goes into all seven zones.
@@ -235,7 +249,10 @@ nearest the aircraft — which is almost always also the one PSX itself
 reports as its active weather zone (`FocussedWxZone`) — is never relocated
 either, even when it would otherwise qualify below. Relocating either would
 strip away the zone actually influencing the aircraft and force an abrupt
-handoff to unrelated weather with no gradual transition.
+handoff to unrelated weather with no gradual transition. Nor is a zone
+whose CB turbulence can still reach the aircraft (its core plus flank
+zone, or plus the anvil zone above the cloud top), for any reason: the
+turbulence would stop at once.
 
 Everything else follows the current flight phase:
 
@@ -266,7 +283,9 @@ trailing 5-minute window: accumulating more than 180° of change enters
 maneuvering mode (a hold or vectoring pattern), and dropping back below
 60° of change exits it back to normal cruise placement. The 180°/60° gap
 is deliberate hysteresis so the mode doesn't flap back and forth near the
-boundary.
+boundary. Entering maneuvering mode re-places all zones around the
+aircraft, except those whose CB turbulence can still reach it; leaving it
+doesn't move any zone, the ordinary relocation rules take over.
 
 ### CB growth and decay
 
@@ -375,6 +394,9 @@ With `--sigmet`:
 - While TS or TC is handled, one "anchor" zone is always kept near the
   aircraft without any CB, so the zone PSX uses for the local weather
   (QNH) is close by and no CB can appear right next to the aircraft.
+  A new anchor goes 40-50 nm ahead, within 20 nm of track, as far from
+  the other zones as it can (a zone close to a CB would shrink that CB's
+  radar return and turbulence).
   Near the departure or destination airport, the airport's own zone
   does this instead.
 - TURB and MTW (when handled) become frankenweather's own turbulence, a
