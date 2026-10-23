@@ -82,6 +82,7 @@ PTT_TO_GROUND_HANDLING = {
 # after connecting; forwarded unfiltered, this silently resets valid
 # CG/TRIM and RWY/POS entries elsewhere in the shared cockpit. A genuine
 # route/perf change entered later (i.e. after this window) is unaffected.
+# Never applied to upstream, whose Qs546 is authoritative.
 QS546_CONNECT_FILTER_WINDOW_S = 5.0
 
 # How long after a client connects we drop any malfunction variable
@@ -1333,7 +1334,7 @@ class Rules():  # pylint: disable=too-many-public-methods
         if key == 'layout':
             return self.handle_layout()
 
-        if key == 'Qs546':
+        if key == 'Qs546' and not self.sender.upstream:
             age = time.perf_counter() - self.sender.connected_at
             if age < QS546_CONNECT_FILTER_WINDOW_S:
                 self.logger.info(
@@ -2968,6 +2969,11 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         (action, code, *_) = rules.route("Qs546=avsfC200;11;-2625;-1;-99;-1;-1;8;", testpeer)
         self.assertEqual(action, RulesAction.NORMAL)
         self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
+
+        # Never applied to upstream, even right after connecting
+        router.upstream.connected_at = time.perf_counter()
+        (action, code, *_) = rules.route("Qs546=avsfC200;11;-2625;-1;-99;-1;-1;8;", router.upstream)
+        self.assertNotEqual(code, RulesCode.QS546_CONNECT_FILTER)
 
     def test_malfunction_connect_filter(self):
         """Test the malfunction (Mf*) connect-window ingress filter."""
