@@ -135,8 +135,11 @@ jobs:
               if ($existing.Count -gt $retain) {
                   $toDelete = $existing | Select-Object -Skip $retain
                   foreach ($old in $toDelete) {
-                      Write-Output "Deleting old release $($old.tagName)"
-                      gh release delete $old.tagName --yes --cleanup-tag
+                      # The release (the EXE download) goes, its git tag
+                      # stays, so every build can still be traced back to
+                      # the commit it was built from.
+                      Write-Output "Deleting old release $($old.tagName) (keeping the tag)"
+                      gh release delete $old.tagName --yes
                   }
               }
           }

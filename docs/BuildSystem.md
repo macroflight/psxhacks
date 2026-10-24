@@ -86,8 +86,9 @@ For each addon that needs building, the `build` job:
    `<addon>-testing-v<version>` (`testing`, marked pre-release), with the
    bare `dist\<addon>.exe` as the only release asset.
 1. Prunes older releases for that same addon+branch: anything beyond the
-   configured retention count gets deleted (both the release and its git
-   tag).
+   configured retention count gets deleted. Only the release (its EXE
+   download) is deleted; its git tag is kept, so every build can still
+   be traced back to the commit it was built from.
 
 Only the venv is set up once per workflow run and PyInstaller/build steps
 are reused across every addon in that run, `venv` reused via
