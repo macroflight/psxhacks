@@ -545,6 +545,7 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
 
     zones_js = json.dumps(zone_data)
     sigmets_js = json.dumps(state.get('sigmets', []))
+    gairmets_js = json.dumps(state.get('gairmets', []))
     ac_alt_ft = state.get('ac_alt_ft') or 0
     turbstate = ctx.fw_turbstate or {}
     turb_src_lat = turbstate.get('source_lat')
@@ -624,6 +625,7 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         f'var turbInfo={turb_js};\n'
         f'var turbSummary={turb_summary_js};\n'
         f'var sigmets={sigmets_js};\n'
+        f'var gairmets={gairmets_js};\n'
         "var _sv=parseSavedView();\n"
         "var _lastUserView=_sv?_sv.t:0;\n"
         "var map=L.map('map',{zoomSnap:0.25,zoomDelta:0.5,wheelPxPerZoomLevel:120})"
@@ -681,9 +683,21 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         "{sticky:true,className:'sigmet-label'})"
         ".addTo(map);\n"
         "});\n"
+        # G-AIRMET turbulence areas (US), one colour, dashed when
+        # frankenweather doesn't use them (G-AIRMET turbulence switched off)
+        "var _gaCol='#a855f7',_gaSeen=false;\n"
+        "gairmets.forEach(function(g){\n"
+        "  _gaSeen=true;if(!g.used)_sigUnused=true;\n"
+        "  L.polygon(g.polygon,{color:_gaCol,weight:2,opacity:g.used?0.9:0.7,"
+        "dashArray:g.used?null:'6 5',fillColor:_gaCol,fillOpacity:g.used?0.12:0.05})"
+        ".bindTooltip('<b>G-AIRMET '+g.severity+' TURB</b> ('+g.due_to+')<br>'"
+        "+_fl(g.base_ft)+' – '+_fl(g.top_ft)+'<br>'+(g.used?'Used by frankenweather':"
+        "'Not used (G-AIRMET turbulence switched off)'),"
+        "{sticky:true,className:'sigmet-label'}).addTo(map);\n"
+        "});\n"
         "var _hasCb=zones.some(function(z){return z.cb_pos;});\n"
         "var _hasCbTurb=zones.some(function(z){return z.cb_pos&&z.cb_turb;});\n"
-        "if(Object.keys(_sigSeen).length||_hasCb){\n"
+        "if(Object.keys(_sigSeen).length||_hasCb||_gaSeen){\n"
         "  var _lg=L.control({position:'bottomleft'});\n"
         "  _lg.onAdd=function(){var d=L.DomUtil.create('div');"
         "d.style.cssText='background:rgba(255,255,255,0.85);color:#1e293b;padding:4px 6px;"
@@ -696,10 +710,14 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         "return '<span style=\"display:inline-block;width:10px;height:10px;margin-right:4px;"
         "border:1.5px solid '+k[0]+';border-radius:50%;box-sizing:border-box\"></span>'+k[1];})"
         ".join('<br>');"
-        "if(Object.keys(_sigSeen).length)h+=(h?'<br>':'')+'<b>SIGMETs</b><br>'"
+        "if(Object.keys(_sigSeen).length||_gaSeen)h+=(h?'<br>':'')"
+        "+'<b>Weather areas</b> (within 640 nm)<br>'"
         "+Object.keys(_sigSeen).map(function(k){"
         "return '<span style=\"display:inline-block;width:10px;height:10px;margin-right:4px;"
         "background:'+_sigSeen[k]+'\"></span>'+k;}).join('<br>')"
+        "+(_gaSeen?(Object.keys(_sigSeen).length?'<br>':'')+'<span style=\"display:inline-block;"
+        "width:10px;height:10px;margin-right:4px;"
+        "background:'+_gaCol+'\"></span>G-AIRMET turbulence':'')"
         "+(_sigUnused?'<br><span style=\"display:inline-block;width:10px;height:10px;"
         "margin-right:4px;border:1.5px dashed #475569;box-sizing:border-box\"></span>"
         "not used by frankenweather':'');"

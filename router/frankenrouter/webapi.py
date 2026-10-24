@@ -1515,6 +1515,15 @@ body { padding: 0.8rem 1.1rem 1rem; }
 .efb-chip.active { background: #f4d100; border-color: #f4d100; color: #1a1a1a; }
 .efb-chip.active.blue { background: #2058a8; border-color: #3b7fe0; color: #fff; }
 .efb-chip-sm { padding: 0.3rem 0.6rem; font-size: 0.76rem; flex-shrink: 0; white-space: nowrap; }
+#efb-pirep {
+  display: none; position: fixed; left: 50%; top: 20%; transform: translateX(-50%);
+  min-width: 15rem; max-width: 90vw; z-index: 10; cursor: pointer;
+  background: #0d1826; border: 1px solid #3b7fe0; border-radius: 10px;
+  padding: 0.75rem 1rem; box-shadow: 0 8px 30px rgba(0,0,0,0.7);
+}
+#efb-pirep table { border-collapse: collapse; width: 100%; font-size: 0.95rem; }
+#efb-pirep td { padding: 0.2rem 0.4rem; }
+#efb-pirep tr.cur td { background: #16233a; font-weight: 700; }
 .efb-src-row {
   display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline;
   gap: 0.15rem 0.5rem; font-size: 0.82rem; padding: 0.28rem 0; border-bottom: 1px solid #16233a;
@@ -1672,7 +1681,9 @@ def _efb_status_dict(router, ctx):  # pylint: disable=too-many-locals
         'turb_intensity_pct': round((turbstate or {}).get('active_intensity', 0.0) * 100),
         'turb_age': turb_age,
         'turb_reason': (turbstate or {}).get('active_reason') or '—',
-        'turb_ramp': (turbstate or {}).get('sigmet_ramp'),
+        # "sigmet_ramp" is FrankenWeather 1.11.0's name for it
+        'turb_ramp': ((turbstate or {}).get('intensity_ramp') or
+                      (turbstate or {}).get('sigmet_ramp')),
     }
     return {'router': router_info, 'weather': weather_info}
 
@@ -1859,33 +1870,6 @@ def _efb_turb_text(w):
     return f"{w['turb_kind']}, {w['turb_intensity_pct']}%"
 
 
-def _efb_duration(seconds):
-    """Format seconds as e.g. '45 s' or '2:05'."""
-    seconds = max(0, round(seconds))
-    return f'{seconds} s' if seconds < 60 else f'{seconds // 60}:{seconds % 60:02d}'
-
-
-def _efb_turb_ramp_text(ramp, now=None):
-    """Describe where FrankenWeather's varying SIGMET turbulence intensity is heading.
-
-    ramp is TURBSTATE's "sigmet_ramp" (levels 0-1, epoch end times), or
-    None when no SIGMET drives the turbulence right now.
-    """
-    if not ramp:
-        return None
-    now = time.time() if now is None else now
-    target = round(ramp['target'] * 100)
-    if now < ramp['ramp_end']:
-        start = round(ramp['from'] * 100)
-        way = 'rising' if target > start else 'easing'
-        return (f"{way} {start}% → {target}%"
-                f"{' (abrupt)' if ramp.get('abrupt') else ''}, "
-                f"{_efb_duration(ramp['ramp_end'] - now)} left, "
-                f"then holds {_efb_duration(ramp['hold_s'])}")
-    return (f"holding at {target}% for {_efb_duration(ramp['hold_end'] - now)} more, "
-            "then a new level")
-
-
 def _efb_turb_color(w):
     """Return the extra-turbulence row color: intensity-graded when active, else neutral/alert."""
     if not w['turb_available']:
@@ -1911,7 +1895,7 @@ def _efb_datasources_card(w):
         _efb_src_row('Turbulence reason', '#64748b', w['turb_reason'])
         if _efb_turb_injected(w) else ''
     ) + (
-        _efb_src_row('SIGMET intensity', '#64748b', _efb_turb_ramp_text(w['turb_ramp']))
+        _efb_src_row('Intensity trend', '#64748b', _fw_sigmet.ramp_text(w['turb_ramp']))
         if _efb_turb_injected(w) and w['turb_ramp'] else ''
     )
     rows = (
@@ -2062,6 +2046,37 @@ def _efb_claim_sources_html(info):
     )
 
 
+_EFB_PIREP_SHOW_MS = 8000  # the PIREP popup closes by itself after this long
+_PIREP_RIDE_COLORS = {
+    'smooth': '#22c55e', 'light': '#a3e635', 'moderate': '#eab308', 'rough': '#ef4444'}
+
+
+def _efb_pirep_html(ctx, now=None):
+    """Render the PIREP popup: FrankenWeather's ride reports near the current flight level.
+
+    The reports (TURBSTATE "pireps", FrankenWeather after 1.11.0) rate
+    every source of turbulence at each level, refreshed every minute and
+    on a flight level change; highest level first, the current one marked.
+    """
+    now = time.time() if now is None else now
+    turbstate = ctx.fw_turbstate
+    fresh, _, _ = _efb_data_status(now, ctx.fw_turbstate_received_at)
+    head = '<div class="efb-eyebrow">PIREPs – reported ride</div>\n'
+    if turbstate is None or fresh != '#22c55e':
+        return head + '<p class="efb-hint">No data from FrankenWeather.</p>\n'
+    reports = turbstate.get('pireps')
+    if not reports:
+        return head + '<p class="efb-hint">No reports yet.</p>\n'
+    rows = ''
+    for rep in sorted(reports, key=lambda x: -x['fl']):
+        color = _PIREP_RIDE_COLORS.get(rep['ride'], '#cbd8ea')
+        rows += (f'<tr{" class=\"cur\"" if rep.get("current") else ""}>'
+                 f'<td>FL{rep["fl"]:03d}</td>'
+                 f'<td style="color:{color};font-weight:700">{rep["ride"]}</td>'
+                 f'<td style="color:#7e97ba">{"◀ you" if rep.get("current") else ""}</td></tr>')
+    return head + f'<table>{rows}</table>\n'
+
+
 def _build_efb_page(router, ctx, page_url):
     """Build the compact /efb status+control page for the PSX.NET EFB app."""
     status = _efb_status_dict(router, ctx)
@@ -2090,7 +2105,10 @@ def _build_efb_page(router, ctx, page_url):
         _efb_router_card(r) + _efb_datasources_card(w) +
         _efb_controls_card(w) + _efb_location_wx_card(loc, w['sigmet_hazards']) +
         '</div>\n'
-        '<div style="text-align:right;margin-top:0.5rem">' +
+        '<div id="efb-pirep" onclick="efbPirepClose()"></div>\n'
+        '<div style="text-align:right;margin-top:0.5rem">'
+        '<button type="button" class="efb-chip efb-chip-sm" onclick="efbPirep()">'
+        'PIREP</button> ' +
         music_link +
         '<a href="/" class="efb-chip efb-chip-sm">Full router/weather control panel</a></div>\n'
         '<script>\n'
@@ -2112,6 +2130,22 @@ def _build_efb_page(router, ctx, page_url):
         '  }).catch(function() {});\n'
         '}\n'
         'setInterval(efbPoll, 5000);\n'
+        # PIREP button: a popup that closes by itself after a few seconds
+        # (or when tapped)
+        'var efbPirepTimer = null;\n'
+        'function efbPirepClose() {\n'
+        '  document.getElementById("efb-pirep").style.display = "none";\n'
+        '}\n'
+        'function efbPirep() {\n'
+        '  fetch("/api/efb/pirep", {cache: "no-store"}).then(function(r) { return r.json(); })'
+        '.then(function(p) {\n'
+        '    var box = document.getElementById("efb-pirep");\n'
+        '    box.innerHTML = p.html;\n'
+        '    box.style.display = "block";\n'
+        '    if (efbPirepTimer) clearTimeout(efbPirepTimer);\n'
+        f'    efbPirepTimer = setTimeout(efbPirepClose, {_EFB_PIREP_SHOW_MS});\n'
+        '  }).catch(function() {});\n'
+        '}\n'
         '</script>\n'
         '</body>\n</html>\n'
     )
@@ -2880,6 +2914,11 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     text=_build_efb_page(router, _efb_ctx, str(request.url)),
                     content_type='text/html',
                     headers={'Cache-Control': 'no-store'})
+
+            @routes.get('/api/efb/pirep')
+            async def handle_efb_pirep_get(_):
+                return web.json_response({'html': _efb_pirep_html(_efb_ctx)},
+                                         headers={'Cache-Control': 'no-store'})
 
             @routes.get('/api/efb/status')
             async def handle_efb_status_get(_):

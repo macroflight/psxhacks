@@ -229,6 +229,44 @@ def current_preset(sigmet_active: bool, psx_off: bool, handled) -> str:
     return None
 
 
+def _duration(seconds: float) -> str:
+    """Format seconds as e.g. '45 s' or '2:05'."""
+    seconds = max(0, round(seconds))
+    return f'{seconds} s' if seconds < 60 else f'{seconds // 60}:{seconds % 60:02d}'
+
+
+def ramp_text(ramp, now=None):
+    """Describe where frankenweather's varying SIGMET turbulence intensity is heading.
+
+    ramp is TURBSTATE's "intensity_ramp" ("sigmet_ramp" in 1.11.0; levels 0-1, epoch end times), or
+    None when nothing layered drives the turbulence right now (returns None).
+    Used by frankenweather's console and the router's /efb page.
+    """
+    if not ramp:
+        return None
+    now = time.time() if now is None else now
+    target = round(ramp['target'] * 100)
+    # The altitude layer (missing from frankenweather 1.11.0's TURBSTATE)
+    layer = ''
+    if ramp.get('layer_base_ft') is not None:
+        layer = (f"FL{max(0, ramp['layer_base_ft']) / 100:03.0f}-"
+                 f"{ramp['layer_top_ft'] / 100:03.0f} ")
+    # "ramping" is missing from frankenweather 1.11.0's TURBSTATE
+    start = round(ramp['from'] * 100)
+    if start == target:
+        # A ramp that hardly changes the level isn't worth showing as one
+        return (f"{layer}steady at {target}% for {_duration(ramp['hold_end'] - now)} more, "
+                "then a new level")
+    if ramp.get('ramping', True) and now < ramp['ramp_end']:
+        way = 'rising' if target > start else 'easing'
+        return (f"{layer}{way} {start}% → {target}%"
+                f"{' (abrupt)' if ramp.get('abrupt') else ''}, "
+                f"{_duration(ramp['ramp_end'] - now)} left, "
+                f"then holds {_duration(ramp['hold_s'])}")
+    return (f"{layer}holding at {target}% for {_duration(ramp['hold_end'] - now)} more, "
+            "then a new level")
+
+
 def psx_entries(entries: list, handled=OWN_HAZARDS) -> list:
     """Return the entries to give PSX: usable, and of a type frankenweather doesn't handle.
 

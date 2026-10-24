@@ -17,6 +17,7 @@ import re
 import statistics
 import sys
 import textwrap
+import threading
 import time
 import tomllib
 import traceback
@@ -52,7 +53,7 @@ from frankenturb.cb import (
 )
 from frankenturb.cb_turbulence import cb_flank_width_nm
 from frankenturb.disk_cache import DiskCache
-from frankenturb.intensity_profile import IntensityProfile
+from frankenturb.intensity_profile import GustinessProfile, LayeredIntensityProfile
 from fw_cb import (
     WX_DEFAULTS as _WX_DEFAULTS,
     CB_TOP_MAX_FT as _CB_TOP_MAX_FT,
@@ -286,6 +287,38 @@ _SIGMET_PLACE_INTERVAL_S = 60.0    # move at most one zone this often
 # area and _SIGMET_TURB_FADE_FT inside its base/top. See
 # _sigmet_turbulence().
 _SIGMET_TURB_QUALIFIER_SCALE = {"SEV": 1.0, "MOD": 2.0 / 3.0}
+# Depth of the altitude layers with independent levels (and blend either
+# side of a boundary), per type: TURB is mostly thin clear-air turbulence
+# layers, a mountain wave is much deeper, so a level change helps less.
+_SIGMET_TURB_LAYERS = {"TURB": (2000.0, 300.0), "MTW": (6000.0, 500.0)}
+# Gustiness of physically computed turbulence: a layered multiplier around
+# 1 (frankenturb/intensity_profile.py GustinessProfile) per family of
+# turbulence kinds (_gust_family()): (low, high, layer_ft, blend_ft).
+# Mountain wave is deep and steady, wind-shear clear-air turbulence thin
+# and variable.
+_TURB_GUST = {
+    "shear": (0.4, 1.6, 2000.0, 300.0),
+    "wave": (0.7, 1.3, 6000.0, 500.0),
+    "lowlevel": (0.5, 1.5, 2000.0, 300.0),   # rotor, mechanical
+    "cape": (0.5, 1.5, 2000.0, 300.0),
+}
+# G-AIRMET turbulence areas vary like a TURB SIGMET (_gairmet_vary()): a
+# layered level (0-75%) scaled by the area's severity relative to SEV
+# (frankenturb/gairmet.py: SEV 0.75, so MOD gets two thirds), in 2000 ft
+# layers.
+_GAIRMET_SEV_INTENSITY = 0.75
+_GAIRMET_LAYERS = (2000.0, 300.0)
+# "PIREPs" (router /efb PIREP button): the ride at whole flight levels this
+# far above and below the current one (FL010-FL470), refreshed this often,
+# on a flight level change and when the driving source changes
+# (pirep_levels_coro()). A level's ride is rated by the long-run share of
+# time its turbulence is at _PIREP_MODERATE effective intensity or more
+# (moderate or worse): a smooth layer of a SEV SIGMET is there 9% of the
+# time, a rough one 63%; a MOD area's 4% to 48%.
+_PIREP_RANGE_FT = 4000
+_PIREP_INTERVAL_S = 60.0
+_PIREP_MODERATE = 0.25
+_PIREP_RIDES = ((0.10, "smooth"), (0.20, "light"), (0.35, "moderate"), (math.inf, "rough"))
 _SIGMET_TURB_FADE_NM = 10.0
 _SIGMET_TURB_FADE_FT = 1000.0
 # SigmetOn (Qi262) is a 0-15 bitmask. Bits 1 and 4 are documented; bit 2
@@ -1809,16 +1842,38 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._sigmet_enabled: bool = False   # see handle_args()
         self._sigmet_own: bool = True
         self._sigmet_handle: dict = {h: True for h in _fw_sigmet.OWN_HAZARDS}
-        # The varying intensity of TURB/MTW SIGMET turbulence, one per type
-        # (see _sigmet_turbulence()).
+        # The varying intensity of TURB/MTW SIGMET turbulence, one per type,
+        # each with its own timeline per altitude layer (see
+        # _sigmet_turbulence()), and the altitude it was last asked for.
         self._sigmet_turb_profiles: dict = {
-            h: IntensityProfile() for h in _fw_sigmet.TURB_HAZARDS}
-        # The SIGMET type whose profile drives the turbulence being injected
-        # (None if no SIGMET does), and per type the factor (edge fade x
-        # qualifier) its profile level was scaled by: shown on the router's
-        # /efb page (TURBSTATE "sigmet_ramp").
-        self._turb_sigmet_hazard: Optional[str] = None
+            h: LayeredIntensityProfile(layer_ft=_SIGMET_TURB_LAYERS[h][0],
+                                       blend_ft=_SIGMET_TURB_LAYERS[h][1])
+            for h in _fw_sigmet.TURB_HAZARDS}
+        self._sigmet_turb_alt_ft: float = 0.0
+        # The TURB/MTW SIGMET areas at the aircraft's position, for PIREPs:
+        # [(hazard, lateral factor, entry)], see _sigmet_turbulence()
+        self._sigmet_turb_areas: list = []
+        # Per type the factor (edge fade x qualifier) its SIGMET level was
+        # scaled by, see _sigmet_turbulence()
         self._sigmet_turb_scale: dict = {}
+        # Gustiness multipliers for physically computed turbulence, per
+        # family (_TURB_GUST, _gust_family())
+        self._gust_profiles: dict = {
+            fam: GustinessProfile(low, high, layer_ft=layer_ft, blend_ft=blend_ft)
+            for fam, (low, high, layer_ft, blend_ft) in _TURB_GUST.items()}
+        # The varying level of G-AIRMET turbulence (_gairmet_vary())
+        self._gairmet_turb_profile = LayeredIntensityProfile(
+            layer_ft=_GAIRMET_LAYERS[0], blend_ft=_GAIRMET_LAYERS[1])
+        # What drives the injected turbulence's intensity over time, for the
+        # ramp shown on the console and the router's /efb page (TURBSTATE
+        # "intensity_ramp"): (name, layered profile, scale to intensity) and
+        # the altitude, or None. See _turb_ramp_status().
+        self._turb_driver: Optional[tuple] = None
+        self._turb_driver_alt_ft: float = 0.0
+        # The PIREP ride reports near the aircraft (pirep_levels_coro()),
+        # and the event that asks for a fresh set (flight level change)
+        self._pirep_levels: Optional[list] = None
+        self._pirep_refresh_event = asyncio.Event()
         # Whether we currently own PSX's SIGMETs (see _sync_own_sigmets()),
         # PSX's last reported WxSigmet text, and the last text we wrote.
         self._own_sigmets_applied: bool = False
@@ -2051,6 +2106,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._turb_pirep_fetcher = None
         self._turb_cape_fetcher = None
         self._turb_gairmet_fetcher = None
+        # The turbulence engine and fetchers aren't thread-safe; both
+        # turbulence_coro() and pirep_levels_coro() call them in executor
+        # threads, so each is called under its own lock (_turb_locked()).
+        self._turb_locks: dict = {name: threading.Lock()
+                                  for name in ("engine", "pirep", "cape", "gairmet")}
 
         # Standalone web UI state cache (populated by broadcast coroutines)
         self._web_state: Optional[dict] = None
@@ -3543,7 +3603,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     "active_kind": state.kind if state else "none",
                     "active_intensity": round(state.intensity, 3) if state else 0.0,
                     "active_reason": state.reason if state else "",
-                    "sigmet_ramp": self._sigmet_ramp_status(),
+                    "intensity_ramp": self._turb_ramp_status(),
+                    "pireps": self._pirep_levels,
                     "source_lat": src_lat,
                     "source_lon": src_lon,
                     "sources": [
@@ -3574,12 +3635,142 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.logger.critical("Unhandled exception %s in %s", exc, myname)
             self.logger.critical(traceback.format_exc())
 
+    def _turb_locked(self, name: str, func, *args):
+        """Call a turbulence engine/fetcher function under its lock (see _turb_locks)."""
+        with self._turb_locks[name]:
+            return func(*args)
+
+    def _pirep_physics(self, lat: float, lon: float, levels_ft: list) -> tuple:
+        """Compute the physical turbulence sources at each level (PIREPs, executor thread).
+
+        Returns (cape_sample, [(terrain_state, pirep_record, gairmet_region)]
+        per level). The gustiness and SIGMET layers are applied by
+        _pirep_rate() in the event loop thread.
+        """
+        cape_sample = self._turb_locked("cape", self._turb_cape_fetcher.get, lat, lon)
+        per_level = [
+            (self._turb_locked("engine", self._turb_engine.compute, lat, lon, level_ft),
+             self._turb_locked("pirep", self._turb_pirep_fetcher.find_relevant,
+                               lat, lon, level_ft),
+             self._turb_locked("gairmet", self._turb_gairmet_fetcher.get_active,
+                               lat, lon, level_ft))
+            for level_ft in levels_ft]
+        return cape_sample, per_level
+
+    def _pirep_minimum(self, kind: str) -> Optional[float]:
+        """Return the raw intensity of a kind that is _PIREP_MODERATE effective, or None.
+
+        Effective means after the intensity biases from the turbulence
+        page; None when the kind is switched off.
+        """
+        bias = self._turb_intensity_bias * self._turb_type_effective_bias(kind) / 10000.0
+        return _PIREP_MODERATE / bias if bias > 0 else None
+
+    def _pirep_share(self, state: Optional[TurbulenceState], level_ft: float) -> float:
+        """Return the long-run share of time a source is moderate or worse at level_ft (PIREPs).
+
+        A kind with gustiness by its family's multiplier at the layer's
+        current roughness (not the moment's value); a kind without it is
+        either always (1) or never (0) moderate or worse.
+        """
+        if state is None or state.intensity <= 0.0:
+            return 0.0
+        minimum = self._pirep_minimum(state.kind)
+        if minimum is None:
+            return 0.0
+        family = self._gust_family(state.kind)
+        if family is None:
+            return 1.0 if state.intensity >= minimum else 0.0
+        return self._gust_profiles[family].share_at_least(level_ft, minimum / state.intensity)
+
+    def _pirep_rate(self, lat: float, lon: float, fls: list, here: int,  # pylint: disable=too-many-locals
+                    physics: tuple) -> list:
+        """Return the PIREP ride report per flight level (pirep_levels_coro()).
+
+        fls are flight levels in thousands of feet, here the current one.
+        Each level's ride is rated by _PIREP_RIDES from the largest long-run
+        share of time any source there is moderate or worse
+        (_pirep_share(), _gairmet_share() and _sigmet_share_at()).
+        """
+        cape_sample, per_level = physics
+        cb = self._get_nearest_cb(lat, lon)
+        reports = []
+        for fl_k, (terrain, pirep_rec, gairmet) in zip(fls, per_level):
+            level_ft = fl_k * 1000.0
+            sources = [
+                terrain,
+                compute_cb_turbulence(level_ft, cb) if cb is not None else None,
+                compute_pirep_turbulence(level_ft, pirep_rec) if pirep_rec is not None else None,
+                compute_cape_turbulence(level_ft, cape_sample) if cape_sample is not None else None,
+            ]
+            share = max(max(self._pirep_share(src, level_ft) for src in sources),
+                        self._gairmet_share(gairmet, level_ft),
+                        self._sigmet_share_at(level_ft))
+            ride = next(label for limit, label in _PIREP_RIDES if share < limit)
+            reports.append({"fl": fl_k * 10, "ride": ride, "share": round(share, 3),
+                            "current": fl_k == here})
+        return reports
+
+    def _gairmet_share(self, region, level_ft: float) -> float:
+        """Return the long-run share of time a G-AIRMET area is moderate or worse at level_ft.
+
+        Like a TURB SIGMET (_gairmet_vary()): the layer at its current
+        roughness, scaled by the area's intensity relative to SEV.
+        """
+        minimum = self._pirep_minimum("gairmet")
+        if region is None or minimum is None:
+            return 0.0
+        scale = compute_gairmet_turbulence(level_ft, region).intensity / _GAIRMET_SEV_INTENSITY
+        if scale <= 0.0:
+            return 0.0
+        return self._gairmet_turb_profile.share_at_least(level_ft, minimum / scale)
+
+    async def pirep_levels_coro(self) -> None:
+        """Keep the PIREP ride reports near the aircraft fresh (router /efb PIREP button).
+
+        Every _PIREP_INTERVAL_S, and right away when the aircraft's flight
+        level or the driving source changes (turbulence_coro() sets
+        _pirep_refresh_event), or SIGMETs are taken over or handed back: whole
+        flight levels up to _PIREP_RANGE_FT above and below the current
+        one, FL010-FL470. The physical sources run in an executor thread
+        (_pirep_physics()), the rating in the event loop (_pirep_rate()).
+        A new set is broadcast with the next TURBSTATE.
+        """
+        myname = inspect.currentframe().f_code.co_name
+        loop = asyncio.get_running_loop()
+        try:
+            self.logger.debug("Starting %s", myname)
+            while True:
+                try:
+                    await asyncio.wait_for(self._pirep_refresh_event.wait(),
+                                           timeout=_PIREP_INTERVAL_S)
+                except asyncio.TimeoutError:
+                    pass
+                self._pirep_refresh_event.clear()
+                if (self._turb_engine is None or self.ac_lat is None or
+                        self.ac_lon is None or self.ac_alt_ft is None):
+                    continue
+                lat, lon, alt_ft = self.ac_lat, self.ac_lon, self.ac_alt_ft
+                here = int(round(alt_ft / 1000.0))
+                span = _PIREP_RANGE_FT // 1000
+                fls = [k for k in range(here - span, here + span + 1) if 1 <= k <= 47]
+                physics = await loop.run_in_executor(
+                    None, self._pirep_physics, lat, lon, [k * 1000.0 for k in fls])
+                self._pirep_levels = self._pirep_rate(lat, lon, fls, here, physics)
+                self._turb_state_changed_event.set()
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in %s", exc, myname)
+            self.logger.critical(traceback.format_exc())
+
     async def turbulence_coro(self) -> None:  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
         """Compute turbulence, inject WxBurst into PSX, broadcast state changes."""
         myname = inspect.currentframe().f_code.co_name
         last_print = 0.0
         last_quiet_print = 0.0
         last_ramp_key = None
+        last_pirep_fl = None
+        last_here_fl = None
+        last_driver_name = None
         # kind/intensity last announced, see state_changed below
         announced_kind, announced_intensity = None, 0.0
         try:
@@ -3641,15 +3832,22 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     continue
 
                 state, pirep_rec, cape_sample, gairmet_region = await asyncio.gather(
-                    loop.run_in_executor(None, self._turb_engine.compute, lat, lon, alt_ft),
-                    loop.run_in_executor(
-                        None, self._turb_pirep_fetcher.find_relevant, lat, lon, alt_ft),
-                    loop.run_in_executor(None, self._turb_cape_fetcher.get, lat, lon),
-                    loop.run_in_executor(
-                        None, self._turb_gairmet_fetcher.get_active, lat, lon, alt_ft),
+                    loop.run_in_executor(None, self._turb_locked, "engine",
+                                         self._turb_engine.compute, lat, lon, alt_ft),
+                    loop.run_in_executor(None, self._turb_locked, "pirep",
+                                         self._turb_pirep_fetcher.find_relevant, lat, lon, alt_ft),
+                    loop.run_in_executor(None, self._turb_locked, "cape",
+                                         self._turb_cape_fetcher.get, lat, lon),
+                    loop.run_in_executor(None, self._turb_locked, "gairmet",
+                                         self._turb_gairmet_fetcher.get_active, lat, lon, alt_ft),
                 )
 
+                # Gustiness: layered multipliers on the physically computed
+                # kinds (_apply_gust()); drivers maps each state to what
+                # drives its intensity over time (_turb_ramp_status())
+                state, terrain_driver = self._apply_gust(state, alt_ft)
                 terrain_state = state
+                drivers = {id(terrain_state): terrain_driver}
 
                 def _eff(s):
                     return s.intensity * self._turb_type_effective_bias(s.kind)
@@ -3669,13 +3867,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
                 cape_state = None
                 if cape_sample is not None:
-                    cape_state = compute_cape_turbulence(alt_ft, cape_sample)
+                    cape_state, drivers_cape = self._apply_gust(
+                        compute_cape_turbulence(alt_ft, cape_sample), alt_ft)
+                    drivers[id(cape_state)] = drivers_cape
                     if _eff(cape_state) > _eff(state):
                         state = cape_state
 
                 gairmet_state = None
                 if gairmet_region is not None:
-                    gairmet_state = compute_gairmet_turbulence(alt_ft, gairmet_region)
+                    gairmet_state, drivers_gairmet = self._gairmet_vary(
+                        compute_gairmet_turbulence(alt_ft, gairmet_region), alt_ft)
+                    drivers[id(gairmet_state)] = drivers_gairmet
                     if _eff(gairmet_state) > _eff(state):
                         state = gairmet_state
 
@@ -3684,18 +3886,36 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 for sig_s in (mtw_state, sigmet_state):
                     if sig_s is not None and _eff(sig_s) > _eff(state):
                         state = sig_s
-                # An MTW SIGMET only drives the intensity when it's stronger
-                # than the terrain model's own wave (see _sigmet_turbulence())
-                self._turb_sigmet_hazard = (
-                    "TURB" if state is sigmet_state else
-                    "MTW" if (state is mtw_state and
-                              state.intensity > terrain_state.intensity) else None)
-                # Announced when a new ramp starts and when it ends
+                # What drives the chosen state's intensity over time. An
+                # MTW SIGMET only does when it's stronger than the terrain
+                # model's own (gusty) wave (see _sigmet_turbulence()).
+                for sig_s, hazard in ((sigmet_state, "TURB"), (mtw_state, "MTW")):
+                    if sig_s is not None:
+                        drivers[id(sig_s)] = (
+                            (f"{hazard} SIGMET", self._sigmet_turb_profiles[hazard],
+                             self._sigmet_turb_scale.get(hazard, 1.0))
+                            if hazard == "TURB" or sig_s.intensity > terrain_state.intensity
+                            else terrain_driver)
+                self._turb_driver = drivers.get(id(state))
+                self._turb_driver_alt_ft = alt_ft
+                # Announced when a new ramp starts, when it ends and on a
+                # change of altitude layer
                 ramp_key = None
-                if self._turb_sigmet_hazard:
-                    profile = self._sigmet_turb_profiles[self._turb_sigmet_hazard]
-                    ramp_key = (self._turb_sigmet_hazard, profile.segment,
-                                profile.status()["ramp_left_s"] > 0)
+                if self._turb_driver is not None:
+                    ramp_st = self._turb_driver[1].status(alt_ft)
+                    ramp_key = (self._turb_driver[0], ramp_st["layer"],
+                                ramp_st["segment"], ramp_st["ramp_left_s"] > 0)
+                # PIREPs (/efb) are for the current flight level: a fresh
+                # set on a change (pirep_levels_coro()), announced when ready
+                here_fl = int(round(alt_ft / 1000.0))
+                driver_name = self._turb_driver[0] if self._turb_driver else None
+                if here_fl != last_here_fl or driver_name != last_driver_name:
+                    # Also when the driving source changes, e.g. entering or
+                    # leaving a turbulence area
+                    last_here_fl, last_driver_name = here_fl, driver_name
+                    self._pirep_refresh_event.set()
+                pirep_fl = next((r["fl"] for r in self._pirep_levels or ()
+                                 if r["current"]), None)
 
                 cb_active = state.kind == 'cb'
                 msfs_factor = self._compute_msfs_turb_factor(cb_active)
@@ -3734,12 +3954,18 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 # far less than 0.05 per tick but must still be announced.
                 state_changed = (
                     ramp_key != last_ramp_key or  # /efb shows the SIGMET ramp
+                    pirep_fl != last_pirep_fl or
                     announced_kind != state.kind or
                     abs(announced_intensity - (state.intensity or 0.0)) > 0.05
                 )
                 self._turb_state = state
                 self._turb_sources = all_sources
+                # Each new ramp or altitude layer is logged right away (debugging)
+                if ramp_key is not None and ramp_key[:3] != (last_ramp_key or ())[:3]:
+                    self.logger.info("Turbulence intensity (%s): %s", ramp_key[0],
+                                     _fw_sigmet.ramp_text(self._turb_ramp_status()))
                 last_ramp_key = ramp_key
+                last_pirep_fl = pirep_fl
                 if state_changed:
                     announced_kind, announced_intensity = state.kind, state.intensity or 0.0
                     self._turb_state_changed_event.set()
@@ -3790,6 +4016,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                             "base=%.0fft top=%.0fft cov=%d",
                             cb.source, cb.bearing_deg, cb.range_center_nm,
                             cb.cloud_base_ft_msl, cb.cloud_top_ft_msl, cb.coverage)
+                    if src is state and self._turb_driver is not None:
+                        self.logger.info("           [  ramp     ] %s: %s", self._turb_driver[0],
+                                         _fw_sigmet.ramp_text(self._turb_ramp_status()))
 
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s", exc, myname)
@@ -4018,8 +4247,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
         Either is None when not applicable. Only while we own the SIGMETs:
         PSX then doesn't get TURB/MTW, so frankenweather generates their
-        turbulence itself. The intensity varies over time (one
-        IntensityProfile per type), scaled per _SIGMET_TURB_QUALIFIER_SCALE,
+        turbulence itself. The intensity varies over time and altitude (one
+        LayeredIntensityProfile per type), scaled per
+        _SIGMET_TURB_QUALIFIER_SCALE,
         faded in near the area's edges and its base/top; the strongest
         SIGMET of each kind wins. A TURB SIGMET gives "sigmet" (random) turbulence.
         An MTW SIGMET strengthens the terrain model's own mountain wave or
@@ -4028,16 +4258,23 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         turbulence of its own.
         """
         if not self._own_sigmets_applied:
+            self._sigmet_turb_areas = []
             return None, None
         best = {}
-        levels = {h: p.value() for h, p in self._sigmet_turb_profiles.items()}
+        areas = []  # (hazard, lateral factor, entry) of the areas at lat/lon, for PIREPs
+        self._sigmet_turb_alt_ft = alt_ft
+        levels = {h: p.value(alt_ft) for h, p in self._sigmet_turb_profiles.items()}
         self._sigmet_turb_scale = {}
         for entry in self._own_sigmet_entries:
             if not entry["ok"] or entry["hazard"] not in _fw_sigmet.TURB_HAZARDS:
                 continue
             if not self._sigmet_handle.get(entry["hazard"]):
                 continue  # PSX gets this type (SIGMETs page)
-            factor = self._sigmet_turb_factor(lat, lon, alt_ft, entry)
+            lateral = self._sigmet_turb_lateral(lat, lon, entry)
+            if lateral <= 0.0:
+                continue
+            areas.append((entry["hazard"], lateral, entry))
+            factor = lateral * self._sigmet_turb_vertical(alt_ft, entry)
             if factor <= 0.0:
                 continue
             intensity = (factor * levels[entry["hazard"]] *
@@ -4046,6 +4283,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 best[entry["hazard"]] = (intensity, entry)
                 self._sigmet_turb_scale[entry["hazard"]] = (
                     intensity / levels[entry["hazard"]] if levels[entry["hazard"]] else 0.0)
+        self._sigmet_turb_areas = areas
         turb_state = mtw_state = None
         if "TURB" in best:
             intensity, entry = best["TURB"]
@@ -4065,44 +4303,120 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     reason=f"{label} (no terrain wave found)")
         return turb_state, mtw_state
 
-    def _sigmet_ramp_status(self) -> Optional[dict]:
-        """Return the varying SIGMET intensity's current ramp for TURBSTATE, or None.
+    def _turb_ramp_status(self) -> Optional[dict]:
+        """Return the current ramp of what drives the turbulence's intensity, or None.
 
-        Levels are scaled like the injected intensity (edge fade, qualifier),
+        For TURBSTATE "intensity_ramp" and the console (fw_sigmet.ramp_text()).
+        Levels are scaled like the injected intensity (a SIGMET's edge fade
+        and qualifier, or the physical intensity a gustiness multiplies),
         so they match active_intensity. ramp_end/hold_end are epoch times,
         so the router can count down between TURBSTATE messages.
         """
-        hazard = self._turb_sigmet_hazard
-        if hazard is None:
+        if self._turb_driver is None:
             return None
-        st = self._sigmet_turb_profiles[hazard].status()
-        scale = self._sigmet_turb_scale.get(hazard, 1.0)
+        name, profile, scale = self._turb_driver
+        st = profile.status(self._turb_driver_alt_ft)
         now = time.time()
         return {
-            "hazard": hazard,
-            "from": round(st["from"] * scale, 3),
-            "target": round(st["target"] * scale, 3),
+            "source": name,
+            "layer_base_ft": st["layer_base_ft"],
+            "layer_top_ft": st["layer_top_ft"],
+            "from": round(min(1.0, st["from"] * scale), 3),
+            "target": round(min(1.0, st["target"] * scale), 3),
             "ramp_s": round(st["ramp_s"]),
             "hold_s": round(st["hold_s"]),
             "abrupt": st["abrupt"],
-            "ramp_end": round(now + st["ramp_left_s"], 1),
-            "hold_end": round(now + st["ramp_left_s"] + st["hold_left_s"], 1),
+            # ramping: whether the ramp is still going at the time of this
+            # status; the end times are not rounded up past the real ones
+            "ramping": st["ramp_left_s"] > 0,
+            "ramp_end": math.floor((now + st["ramp_left_s"]) * 10) / 10,
+            "hold_end": math.floor((now + st["ramp_left_s"] + st["hold_left_s"]) * 10) / 10,
         }
 
     @staticmethod
-    def _sigmet_turb_factor(lat: float, lon: float, alt_ft: float, entry: dict) -> float:
-        """Return 0-1: how much of a TURB/MTW SIGMET's turbulence applies at lat/lon/alt_ft."""
+    def _gust_family(kind: str) -> Optional[str]:
+        """Return the gustiness family (_TURB_GUST) of a turbulence kind, or None.
+
+        "X+shear" is wind shear that outweighs X (frankenturb/turbulence.py).
+        """
+        if kind == "shear" or kind.endswith("+shear"):
+            return "shear"
+        if kind == "wave":
+            return "wave"
+        if kind in ("rotor", "mechanical"):
+            return "lowlevel"
+        if kind == "cape":
+            return kind
+        return None
+
+    def _apply_gust(self, state: TurbulenceState, alt_ft: float) -> tuple:
+        """Return (state, driver): state with its family's gustiness applied at alt_ft.
+
+        driver is (name, GustinessProfile, physical intensity) for
+        _turb_ramp_status(), or None for a kind without gustiness (state
+        unchanged).
+        """
+        family = self._gust_family(state.kind)
+        if family is None or state.intensity <= 0.0:
+            return state, None
+        gust = self._gust_profiles[family]
+        mult = gust.value(alt_ft)
+        return (dataclasses.replace(state, intensity=min(1.0, state.intensity * mult),
+                                    reason=f"{state.reason} (gust x{mult:.2f})"),
+                (f"{family} gust", gust, state.intensity))
+
+    def _gairmet_vary(self, state: TurbulenceState, alt_ft: float) -> tuple:
+        """Return (state, driver): G-AIRMET turbulence with its varying level at alt_ft.
+
+        Like a TURB SIGMET: the layered level (_gairmet_turb_profile) times
+        the area's own intensity relative to SEV (_GAIRMET_SEV_INTENSITY;
+        severity and altitude fade, frankenturb/gairmet.py). driver is for
+        _turb_ramp_status().
+        """
+        if state.intensity <= 0.0:
+            return state, None
+        scale = state.intensity / _GAIRMET_SEV_INTENSITY
+        level = self._gairmet_turb_profile.value(alt_ft)
+        return (dataclasses.replace(state, intensity=min(1.0, scale * level),
+                                    reason=f"{state.reason} (level {level:.0%})"),
+                ("G-AIRMET", self._gairmet_turb_profile, scale))
+
+    def _sigmet_share_at(self, level_ft: float) -> float:
+        """Return the long-run share of time the TURB/MTW SIGMETs are moderate or worse at level_ft.
+
+        For PIREPs, at the aircraft's position (_sigmet_turb_areas): each
+        layer at its current roughness (not the moment's level, like
+        reports from aircraft that flew there), scaled like the real
+        intensity (edge and base/top fade, qualifier). 0 outside any area.
+        """
+        minimum = self._pirep_minimum("sigmet")
+        if minimum is None:
+            return 0.0
+        best = 0.0
+        for hazard, lateral, entry in self._sigmet_turb_areas:
+            scale = (lateral * self._sigmet_turb_vertical(level_ft, entry) *
+                     _SIGMET_TURB_QUALIFIER_SCALE.get(entry["qualifier"], 1.0))
+            if scale > 0.0:
+                best = max(best, self._sigmet_turb_profiles[hazard].share_at_least(
+                    level_ft, minimum / scale))
+        return best
+
+    @staticmethod
+    def _sigmet_turb_lateral(lat: float, lon: float, entry: dict) -> float:
+        """Return 0-1: how much of a TURB/MTW SIGMET's turbulence applies at lat/lon (edge fade)."""
+        depth = max((d for d in (_fw_sigmet.inside_depth(lat, lon, p) for p in entry["polygons"])
+                     if d is not None), default=None)
+        return 0.0 if depth is None else min(1.0, depth / _SIGMET_TURB_FADE_NM)
+
+    @staticmethod
+    def _sigmet_turb_vertical(alt_ft: float, entry: dict) -> float:
+        """Return 0-1: how much of a TURB/MTW SIGMET's turbulence applies at alt_ft (base/top)."""
         base = entry["base_ft"] or 0
         top = entry["top_ft"] if entry["top_ft"] is not None else 60000
         if not base <= alt_ft <= top:
             return 0.0
-        depth = max((d for d in (_fw_sigmet.inside_depth(lat, lon, p) for p in entry["polygons"])
-                     if d is not None), default=None)
-        if depth is None:
-            return 0.0
         vert = min(top - alt_ft, (alt_ft - base) if base > 0 else _SIGMET_TURB_FADE_FT)
-        return (min(1.0, depth / _SIGMET_TURB_FADE_NM) *
-                min(1.0, vert / _SIGMET_TURB_FADE_FT))
+        return min(1.0, vert / _SIGMET_TURB_FADE_FT)
 
     def _sigmet_cb_at(self, pos: tuple) -> Optional[tuple]:
         """Return (oktas, sigmet) for the TS/TC SIGMET area at pos, or None.
@@ -6650,6 +6964,23 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                                 if id(s) in cb_used or s["hazard"] in turb_used
                                 else "PSX" if psx_gets else None),
                 })
+        # G-AIRMET turbulence areas within the map's range (the router's map
+        # only, US areas), "used" unless G-AIRMET turbulence is switched off
+        gairmets = []
+        if self._turb_gairmet_fetcher is not None and self.ac_lat is not None:
+            gairmet_used = self._turb_type_effective_bias("gairmet") > 0
+            for region in self._turb_gairmet_fetcher.regions():
+                if _fw_sigmet.polygon_distance(
+                        self.ac_lat, self.ac_lon, region.polygon)[0] > _SIGMET_MAP_RANGE_NM:
+                    continue
+                gairmets.append({
+                    "severity": region.severity,
+                    "due_to": region.due_to,
+                    "polygon": [[round(la, 4), round(lo, 4)] for la, lo in region.polygon],
+                    "base_ft": region.alt_low_ft,
+                    "top_ft": region.alt_high_ft,
+                    "used": gairmet_used,
+                })
         state = {
             "fw_mode": self._fw_mode,
             "metar_fallback_active": self._metar_fallback_active,
@@ -6666,6 +6997,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "zones": zones,
             "config": config,
             "sigmets": sigmets,
+            "gairmets": gairmets,
             "manual_wx_params": dict(self._manual_wx_params),
         }
         self._web_state = state
@@ -7123,6 +7455,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     embed=self._sigmet_active() or not self._disable_psx_sigmets,
                     trigger_download=True, auto_download=True)
                 self.logger.info("Own SIGMETs: handing SIGMETs back to PSX (download requested)")
+                self._pirep_refresh_event.set()  # PIREPs without our SIGMETs now
             return
         if self._own_sigmet_fetched_at is None:
             return  # nothing of our own yet: leave PSX's SIGMETs alone
@@ -7136,6 +7469,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self._manual_wx_force_update = True
             self.fmc_changed_event.set()
             self.logger.info("Own SIGMETs: taking over SIGMETs from PSX")
+            self._pirep_refresh_event.set()  # PIREPs with our SIGMETs now
         bits = self._sigmet_on_bits
         if not bits & _SIGMET_EMBED_BIT or bits & _SIGMET_AUTO_DOWNLOAD_BIT:
             self._write_sigmet_on(embed=True, trigger_download=False, auto_download=False)
@@ -7506,6 +7840,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     ("TurbulenceTask", self.turbulence_coro),
                     ("PSXWind", self.psx_wind_coro),
                     ("TurbBroadcast", self.turb_state_broadcast_coro),
+                    ("PirepLevels", self.pirep_levels_coro),
                 ]
                 for name, coro_fn in coros:
                     if name not in running:

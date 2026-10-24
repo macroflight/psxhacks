@@ -196,6 +196,14 @@ class GairmetFetcher:
                 best = region
         return best
 
+    def regions(self) -> list[GairmetRegion]:
+        """Return a copy of the cached G-AIRMET regions, for display (no fetch).
+
+        Safe to call from another thread than get_active(): the cache is
+        only ever replaced as a whole.
+        """
+        return list(self._cache)
+
     def clear(self) -> None:
         """Invalidate the cache, forcing a fresh fetch on the next call."""
         self._cache_time = 0.0

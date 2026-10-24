@@ -418,18 +418,31 @@ With `--sigmet`:
   "SIGMET" source with its own setting on the turbulence page. It
   applies inside the SIGMET's area and between its base and top, fading
   in over the first 10 nm inside the area and 1,000 ft inside its base
-  and top. The intensity varies over time between 10% and 75%: it ramps
-  smoothly to a new random level, usually over half a minute to three
-  minutes but sometimes within seconds, stays there for a random time,
-  and then picks the next level. The router's /efb page shows where it
-  is heading ("SIGMET intensity"). It is mostly light: 10-25% about half the time,
-  45% or more about 10 minutes per hour, 70% or more less than a minute
-  per hour. TURB and MTW each have their own varying level, and a SIGMET
-  that says MOD gets two thirds of it. An MTW SIGMET strengthens the
-  terrain model's own mountain wave or rotor to at least that intensity,
-  keeping its
-  pattern of up- and downdrafts; where the terrain model finds none, it
-  gives mountain wave turbulence of its own.
+  and top. A SIGMET that says MOD gets two thirds of the intensity. An
+  MTW SIGMET strengthens the terrain model's own mountain wave or rotor
+  to at least that intensity, keeping its pattern of up- and
+  downdrafts; where the terrain model finds none, it gives mountain wave
+  turbulence of its own.
+- The intensity varies over time between 0% and 75%. It ramps smoothly
+  to a new random level, usually over half a minute to three minutes
+  but sometimes within seconds, stays there for a random time, and then
+  picks the next level. It is mostly light or smooth: on average below
+  5% (smooth air) about 14 minutes per hour, 10-25% about 23 minutes per
+  hour, 45% or more about 11 minutes per hour, 70% or more less than a
+  minute per hour.
+- Like real turbulence it comes in layers. Every 2,000 ft layer
+  (FL255-275, FL275-295 and so on) has its own, independent level,
+  blended over 300 ft either side of a boundary, so every flight level
+  is in one layer and a 2,000 ft climb or descent always gives a
+  different ride. MTW uses 6,000 ft layers (FL235-295, FL295-355 and so
+  on, blended over 500 ft), since a mountain wave is much deeper. Each
+  layer also has its own lasting roughness, from smooth to rough, that
+  stays for 30-90 minutes and then slowly changes: a smooth layer is at
+  45% or more only about a minute per hour, a rough one about 25
+  minutes. So a good level found by climbing or descending tends to
+  stay good for a while.
+- The console and the router's /efb page show the current layer and
+  where its level is heading ("Intensity trend").
 
 The SIGMETs page also shows the download status, the number of SIGMETs
 of each type that could and couldn't be parsed, the nearest area of each
@@ -442,6 +455,45 @@ settings (PSX gets them, or nobody does with the Off preset) are drawn
 with a dashed outline; hovering over an area says which. Without
 `--sigmet`, or with the Off or PSX preset, the map shows the SIGMETs PSX
 downloaded, all dashed.
+
+### Turbulence gustiness and PIREPs
+
+The turbulence frankenweather works out itself from physics (the
+terrain model's mountain wave, rotor and mechanical turbulence, wind
+shear and CAPE) gets the same kind of layers, as a
+"gustiness" multiplier that averages about 1: it varies over time with
+smooth ramps, every altitude layer has its own, and each layer has a
+lasting roughness, so some levels are smoother than others for a while.
+The physics still decides where turbulence is and how strong it is on
+average:
+
+| Kind | Layers | Multiplier |
+|---|---|---|
+| Wind shear (clear-air turbulence) | 2,000 ft | 0.4-1.6 |
+| Mountain wave | 6,000 ft | 0.7-1.3 |
+| Rotor and mechanical | 2,000 ft | 0.5-1.5 |
+| CAPE | 2,000 ft | 0.5-1.5 |
+
+G-AIRMET turbulence areas (US) vary like a TURB SIGMET instead: the
+same varying level in 2,000 ft layers, scaled by the area's severity (a
+MOD area gets two thirds of it, like a MOD SIGMET), so a moderate
+G-AIRMET is mostly light with moderate spells. The weather map shows the
+G-AIRMET turbulence areas within 640 nm too.
+
+CB turbulence and real PIREPs are not changed. The console shows the
+multiplier in the turbulence reason, e.g. `(gust x1.24)`.
+
+The router's /efb page has a PIREP button, a bit like asking ATC for
+ride reports. It shows the reported ride at each whole flight level up
+to 4,000 ft above and below the current one (at most FL470), from every
+source of turbulence and each layer's lasting roughness, not the
+moment's turbulence. The rating says how often a level is bumpy: the
+share of time it is at moderate turbulence (25%) or worse is under 10%
+for smooth, under 20% for light, under 35% for moderate, and more for
+rough. So even a smooth level can have the odd bump. The reports are
+refreshed every minute, when the flight level changes and when entering
+or leaving a turbulence area. The popup closes by itself after a few
+seconds.
 
 ### Time sync
 
