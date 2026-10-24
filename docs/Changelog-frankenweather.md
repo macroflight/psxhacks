@@ -1,5 +1,44 @@
 # frankenweather changelog
 
+## 1.11.0 (2026-10-24)
+
+- **Change (`--sigmet`): TURB and MTW SIGMET turbulence varies over
+  time** instead of staying at a fixed 75% (severe, with large bank and
+  speed excursions) for the whole area. The intensity now moves between
+  10% and 75% and is mostly light: 10-25% about half the time, 45% or
+  more about 10 minutes per hour, 70% or more less than a minute per
+  hour. It ramps to a new random level along a smooth S-curve, usually
+  over 30 seconds to 3 minutes but one time in five within seconds,
+  holds there for a random time, and then picks the next level. TURB and
+  MTW each have their own varying level, and a SIGMET marked MOD gets
+  two thirds of it. The fade-in near the area's edges is unchanged.
+- **New (`--sigmet`): SIGMET presets** on the SIGMETs page and the
+  router's /efb page:
+  - **Off**: no SIGMETs at all. Neither frankenweather nor PSX uses any.
+  - **Normal**: frankenweather handles TS, TC, TURB and MTW, PSX gets
+    VA and ICE (the default).
+  - **PSX**: frankenweather's SIGMET system is switched off, as without
+    `--sigmet`. PSX handles every SIGMET itself, and frankenweather only
+    asks it to download fresh ones regularly.
+
+  Off and PSX keep the per-type choice on the SIGMETs page for when the
+  system is switched back on. Saved in the config file as `[sigmet]`
+  `own`.
+- **New: the weather map shows which SIGMET areas frankenweather uses.**
+  Areas it doesn't use with the current settings (PSX gets them, or
+  nobody does) are drawn with a dashed outline, and hovering over an
+  area says which. Without `--sigmet`, or with the Off or PSX preset,
+  the map now shows the SIGMETs PSX downloaded, all dashed.
+- **New: `--log-web-requests`.** The web UI's per-request log lines are
+  no longer printed unless this option is given.
+- **Fix: the turbulence status sent to the router and web UI followed
+  gradual changes late.** A new status was only sent when the intensity
+  changed by more than 0.05 from one 200 ms tick to the next, so a
+  gradual change could go unreported for up to a minute. It is now
+  compared with the last status sent.
+- The turbulence status includes the SIGMET intensity's current ramp,
+  shown by the router's /efb page (router 1.24.0).
+
 ## 1.10.0 (2026-10-23)
 
 - **Fix: CBs in frankenweather's own zones no longer vanish.**
