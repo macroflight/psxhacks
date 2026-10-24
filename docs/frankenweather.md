@@ -94,11 +94,13 @@ Features:
   airport when available, otherwise from Open-Meteo.
 
 - A zone whose weather comes from Open-Meteo gets a METAR with only its
-  name and the time it was placed (e.g. `X328 231230Z`), so PSX's
-  Instructor doesn't keep showing an old zone's METAR. It has no weather
-  in it on purpose: PSX rebuilds a zone's weather from its METAR whenever
-  the METAR's weather changes, which would undo frankenweather's CBs,
-  cloud layers and tops.
+  name, the time it was placed and a remark saying why
+  (e.g. `X328 231230Z RMK FRANKENWX MODEL WX`), so PSX's Instructor
+  doesn't keep showing an old zone's METAR. It has no weather in it on
+  purpose: PSX rebuilds a zone's weather from its METAR whenever the
+  METAR's weather changes, which would undo frankenweather's CBs, cloud
+  layers and tops. Every METAR frankenweather gives PSX that isn't a
+  real one says so in a `RMK FRANKENWX ...` remark.
 
 - CAPE-based CB (cumulonimbus) generation: computes CB coverage and
   tops from Open-Meteo CAPE/CIN data, with convective inhibition
@@ -138,6 +140,29 @@ Features:
   destination airports always get their own dedicated zone. See
   [Zone placement and relocation](#zone-placement-and-relocation) below.
 
+- **CB near dep/arr: Off / Move zone / Remove CB** (Off by default;
+  Weather zones page, or `/efb` on the router): keeps CBs at least 15 nm
+  from the FMC departure and arrival airports, e.g. so an approach on
+  VATSIM doesn't go through a CB nobody else has. PSX always puts a
+  zone's CB 7 nm from the zone's centre, at a direction that keeps
+  turning with the time. Changing the setting in flight takes effect at
+  once.
+  - **Move zone** moves the airport's weather zone 23 nm north of the
+    airport, so its CB is always 16-30 nm from it. The zone keeps the
+    airport's real METAR. Moving the zone in flight can make the PFD
+    jump, and the airport's QNH and wind come from whichever zone is
+    nearest. Other zones' CBs aren't moved.
+  - **Remove CB** removes the CB of every zone centred within 22 nm of
+    either airport, whatever it came from (METAR, CAPE, radar,
+    lightning or a TS SIGMET). The zones stay where they are, so the
+    airport keeps its real weather. PSX makes a CB of its own from a
+    METAR with TS (also VCTS and recent TS) or CB clouds, so for these
+    zones frankenweather takes those out of the METAR it gives PSX
+    (`+TSRA` becomes `+RA`, `BKN020CB` becomes `BKN020`) and adds
+    `RMK FRANKENWX CB REMOVED`. Showers, TCU, trend groups and remarks
+    don't make PSX CBs and are left alone. The D-ATIS still shows the
+    real METAR.
+
 - Terrain turbulence (from the `frankenturb` engine, now integrated):
   fetches real-time wind from Open-Meteo and terrain elevation from
   Copernicus GLO-30 DEMs, then injects `WxBurst` events into PSX at up
@@ -161,7 +186,8 @@ Features:
 - MSFS QNH sync: compares the MSFS sea-level pressure with the active
   PSX zone QNH. In **CHECK** mode (default) a warning is logged when
   they differ by more than 1 hPa. In **SYNC** mode the PSX QNH and
-  METAR are also updated to match MSFS. QNH is never updated for zones
+  METAR are also updated to match MSFS (an updated METAR gets
+  `RMK FRANKENWX QNH SYNC`). QNH is never updated for zones
   whose weather comes from a real METAR (the METAR is authoritative for
   those zones). Toggleable between CHECK and SYNC from the web UI.
 

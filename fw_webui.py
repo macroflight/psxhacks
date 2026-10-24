@@ -77,6 +77,42 @@ def encode_lzma_json_payload(data) -> str:
     return base64.b64encode(lzma.compress(raw, preset=9 | lzma.PRESET_EXTREME)).decode('ascii')
 
 
+# CB avoidance near the departure/arrival airport (frankenweather's
+# cb_airport_mode): (mode, label, hint), as on the router's /efb too.
+CB_AIRPORT_MODES = (
+    ("off", "Off", "CBs stay where the weather puts them"),
+    ("move", "Move zone",
+     "moves the airport's weather zone 23 nm away, so its CB stays at least 15 nm from "
+     "the airport; the airport keeps its real METAR"),
+    ("remove", "Remove CB",
+     "removes every CB that could come within 15 nm of the airport, and the TS/CB in "
+     "the METARs PSX gets for those zones; the zones stay put"),
+)
+
+
+def cb_airport_mode(cfg: dict):
+    """Return frankenweather's cb_airport_mode from its STATE config dict.
+
+    Before 1.13.0 frankenweather only had avoid_cb_near_airport (on meant
+    moving the zone). Returns (mode, has_modes): has_modes False for such
+    an older frankenweather, which can't remove CBs.
+    """
+    if 'cb_airport_mode' in cfg:
+        return cfg['cb_airport_mode'], True
+    return ('move' if cfg.get('avoid_cb_near_airport') else 'off'), False
+
+
+def cb_airport_mode_command(mode: str):
+    """Return the frankenweather settings command for a cb_airport_mode, or None.
+
+    Also carries the on/off avoid_cb_near_airport that frankenweather
+    before 1.13.0 understands (where on means moving the zone).
+    """
+    if mode not in [m for m, _label, _hint in CB_AIRPORT_MODES]:
+        return None
+    return {"cb_airport_mode": mode, "avoid_cb_near_airport": mode != "off"}
+
+
 def decode_lzma_json_payload(encoded: str):
     """Reverse encode_lzma_json_payload(); raises ValueError if malformed."""
     try:
@@ -1265,28 +1301,7 @@ def _build_weather_settings_page(ctx):  # pylint: disable=too-many-locals,too-ma
     if fw_mode == 'manual':
         return _page(body + _manual_weather_section(ctx))
 
-    cfg = state.get('config', {})
-    avoid_cb = bool(cfg.get('avoid_cb_near_airport'))
-    avoid_cb_clearance_nm = cfg.get('cb_airport_clearance_nm', 15)
-    avoid_cb_toggle_label = "Disable" if avoid_cb else "Enable"
-    avoid_cb_toggle_class = "btn-red" if avoid_cb else "btn-green"
-    body += (
-        '<h2>Weather zones</h2>\n'
-        '<div class="card" style="display:flex;align-items:center;gap:1.5em;flex-wrap:wrap">'
-        '<div style="flex:1;min-width:18em">'
-        '<span style="color:#94a3b8;font-size:0.85em">Avoid CB near departure/destination</span>'
-        '<br><b style="color:'
-        f'{"#4ade80" if avoid_cb else "#64748b"}">{"ENABLED" if avoid_cb else "disabled"}</b>'
-        '<br><span style="font-size:0.8em;color:#64748b">Offsets the departure/destination '
-        "zone's centre (keeping the airport's real weather/METAR) so any CB PSX places there "
-        f"can never land within {avoid_cb_clearance_nm:.0f}nm of the airport.</span>"
-        '</div>'
-        '<form action="/api/weather/avoid-cb-near-airport/toggle" method="post">'
-        f'<input type="hidden" name="enabled" value="{0 if avoid_cb else 1}">'
-        f'<button type="submit" class="btn {avoid_cb_toggle_class} btn-sm">'
-        f'{avoid_cb_toggle_label}</button>'
-        '</form></div>\n'
-    )
+    body += '<h2>Weather zones</h2>\n' + _cb_airport_mode_html(state.get('config', {}))
 
     zones = state.get('zones', [])
     body += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1em;align-items:start">\n'
@@ -2300,6 +2315,30 @@ _SIGMET_HANDLE_TYPES = {
 }
 
 
+def _cb_airport_mode_html(cfg: dict) -> str:
+    """Return the Weather zones page's CB near dep/arr buttons (Off/Move zone/Remove CB)."""
+    current, has_modes = cb_airport_mode(cfg)
+    buttons = ''
+    for mode, label, _hint in CB_AIRPORT_MODES:
+        if mode == 'remove' and not has_modes:
+            continue
+        active = mode == current
+        style = ('background:#2563eb;color:#fff;cursor:default' if active
+                 else 'background:#1c2033;color:#94a3b8;border:1px solid #2a2f45')
+        buttons += (
+            '<form action="/api/weather/cb-airport-mode" method="post" style="margin:0">'
+            f'<input type="hidden" name="mode" value="{mode}">'
+            f'<button type="submit" class="btn btn-sm" style="margin:0;width:auto;{style}"'
+            f'{" disabled" if active else ""}>{label}</button></form>')
+    hints = '; '.join(f'<b>{label}</b>: {hint}' for mode, label, hint in CB_AIRPORT_MODES
+                      if mode != 'remove' or has_modes)
+    return (
+        '<div class="card"><div style="display:flex;gap:0;align-items:center;flex-wrap:wrap">'
+        '<b style="color:#e2e8f0;margin-right:0.8em">CB near dep/arr</b>'
+        f'{buttons}</div>'
+        f'<p class="note" style="margin:0.5em 0 0">{hints}.</p></div>\n')
+
+
 def _sigmet_preset_html(current) -> str:
     """Return the SIGMETs page's preset buttons (Off/Normal/PSX, as on the router's /efb).
 
@@ -2732,11 +2771,12 @@ def register_weather_routes(routes, ctx):  # pylint: disable=too-many-statements
         await ctx.send_fw_settings_cmd({"enroute_wind_enabled": enabled})
         raise web.HTTPFound('/weather/enroute-wind')
 
-    @routes.post('/api/weather/avoid-cb-near-airport/toggle')
-    async def _weather_avoid_cb_toggle(request):
+    @routes.post('/api/weather/cb-airport-mode')
+    async def _weather_cb_airport_mode(request):
         data = await request.post()
-        enabled = data.get('enabled') == '1'
-        await ctx.send_fw_settings_cmd({"avoid_cb_near_airport": enabled})
+        cmd = cb_airport_mode_command(data.get('mode'))
+        if cmd:
+            await ctx.send_fw_settings_cmd(cmd)
         raise web.HTTPFound('/weather/settings')
 
     @routes.post('/api/weather/enroute-wind/deviation')

@@ -12,6 +12,22 @@
 - **Change: `/api/sigmet/latest/json` has `generated_at` and
   `generated_at_utc`**: when it was put together, so "expired" and
   "used_by" are as of then.
+- **New: "Avoid CB near departure/destination" is now "CB near dep/arr"
+  with three modes: Off, Move zone and Remove CB.** Move zone is the
+  old behaviour: the airport's zone moves 23 nm north, so its CB stays
+  at least 15 nm away. New, Remove CB removes the CB of every zone
+  centred within 22 nm of the departure or arrival airport, so no CB
+  comes within 15 nm of it, from any zone. The zones stay put (no PFD
+  jump when switching it on in flight) and the airport keeps its real
+  weather. TS and CB are taken out of these zones' METARs given to PSX,
+  since PSX makes a CB of its own from those (live-tested which METAR
+  codes do: TS, VCTS, recent TS and CB clouds; showers, TCU, trends and
+  remarks don't). Config files with the old setting switched on get Move
+  zone. Loading a config file now also moves the zone right away.
+- **New: METARs given to PSX that aren't real say so** in a remark:
+  `RMK FRANKENWX MODEL WX` (Open-Meteo zones, station and time only),
+  `RMK FRANKENWX CB REMOVED` (TS/CB removed, see above) and
+  `RMK FRANKENWX QNH SYNC` (QNH changed by MSFS QNH sync).
 
 ## 1.12.1 (2026-10-24)
 

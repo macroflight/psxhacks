@@ -354,17 +354,21 @@ _ALTN_SUPPLEMENT_HEADER = "FRANKENWEATHER ALTN WX^^"
 # the literal text "<ICAO> UNAVAIL" for some other reason can't misfire it.
 _DATIS_PRINT_HEADER = "ACARS D-ATIS:"
 _AIRPORT_SNAP_NM = 25.0               # snap zone to a real airport if within this radius
-# CB-near-airport avoidance (see _avoid_cb_near_airport / _arpt_coverage_needed()):
+# CB-near-airport avoidance (self._cb_airport_mode, see _CB_AIRPORT_MODES):
 # PSX always places a zone's CB exactly _CB_TO_ZONE_OFFSET_NM from the zone centre
 # (bearing varies with sim time/zone elevation, but the radius never does -- see
-# frankenturb/cb.py's _cb_bearing()/_CB_OFFSET_NM, same figure). So offsetting the
-# dep/dst zone centre itself by at least _CB_AIRPORT_CLEARANCE_NM +
-# _CB_TO_ZONE_OFFSET_NM from the real airport, in any fixed direction, geometrically
-# guarantees the CB can never land within _CB_AIRPORT_CLEARANCE_NM of the airport --
-# no need to track the (constantly rotating) bearing at all.
+# frankenturb/cb.py's _cb_bearing()/_CB_OFFSET_NM, same figure). So either
+# - "move": offset the dep/dst zone centre itself by at least
+#   _CB_AIRPORT_CLEARANCE_NM + _CB_TO_ZONE_OFFSET_NM from the real airport, in any
+#   fixed direction (_arpt_coverage_needed()), or
+# - "remove": remove the CB of every zone centred within that distance of the
+#   dep/dst airport (_cb_removed_near_airport()),
+# and no CB can come within _CB_AIRPORT_CLEARANCE_NM of the airport -- no need to
+# track the (constantly rotating) bearing at all.
+_CB_AIRPORT_MODES = ("off", "move", "remove")
 _CB_TO_ZONE_OFFSET_NM = 7.0
 _CB_AIRPORT_CLEARANCE_NM = 15.0
-_CB_AVOIDANCE_BEARING_DEG = 0.0       # fixed direction to offset in; arbitrary but stable
+_CB_AVOIDANCE_BEARING_DEG = 0.0       # "move": fixed direction to offset in; arbitrary but stable
 _REPOSITION_DIST_NM = 500.0           # zone this far away → aircraft was repositioned
 _REFRESH_MAX_S = 300                  # always refresh weather after this many seconds
 _ZONE_PROTECTED_LOG_INTERVAL_S = 300   # throttle for the "due but protected" log line
@@ -1354,6 +1358,83 @@ def _strip_cb(wx: str) -> str:
     return ';'.join(parts)
 
 
+# What makes PSX build a CB from a METAR (live-tested 2026-10-24): TS in
+# present or recent weather (TS, +TSRA, VCTS, RETSRA...) and CB cloud groups
+# (FEW030CB, ///CB...). Showers, hail, squalls, funnel clouds, TCU, trend
+# groups and remarks don't. See _strip_convective_metar().
+_METAR_DESCRIPTOR_CODES = frozenset(('MI', 'PR', 'BC', 'DR', 'BL', 'SH', 'FZ'))
+_METAR_PRESENT_WX_RE = re.compile(
+    r'^(RE)?([+-]|VC)?((?:MI|PR|BC|DR|BL|SH|TS|FZ|DZ|RA|SN|SG|IC|PL|GR|GS|UP|BR|FG|FU|'
+    r'VA|DU|SA|HZ|PY|PO|SQ|FC|SS|DS)+)$')
+_METAR_CB_SKY_RE = re.compile(r'^((?:FEW|SCT|BKN|OVC)(?:\d{3}|///)|///|//////)CB$')
+_METAR_MAX_LEN = 200          # PSX's Metar1-7 limit (Variables.txt Max=200)
+# Remarks added to the METARs frankenweather gives PSX that aren't real ones
+METAR_NOTE_MODEL = "FRANKENWX MODEL WX"        # no METAR: weather from Open-Meteo
+METAR_NOTE_CB_REMOVED = "FRANKENWX CB REMOVED"  # real METAR, TS/CB taken out
+METAR_NOTE_QNH_SYNC = "FRANKENWX QNH SYNC"      # real METAR, QNH from MSFS
+
+
+def _strip_ts_cb_token(token: str) -> Optional[str]:
+    """Return a METAR token without TS/CB, None to drop it (see _strip_convective_metar())."""
+    m = _METAR_CB_SKY_RE.match(token)
+    if m:
+        return None if m.group(1)[0] == '/' else m.group(1)
+    m = _METAR_PRESENT_WX_RE.match(token)
+    if not m:
+        return token
+    codes = [m.group(3)[k:k + 2] for k in range(0, len(m.group(3)), 2)]
+    if 'TS' not in codes:
+        return token
+    kept = [c for c in codes if c != 'TS']
+    if not any(c not in _METAR_DESCRIPTOR_CODES for c in kept):
+        return None
+    return (m.group(1) or '') + (m.group(2) or '') + ''.join(kept)
+
+
+def _strip_convective_metar(raw: str) -> str:
+    """Return a METAR without anything PSX builds a CB from, noted in its remarks.
+
+    For the METAR given to PSX for a zone whose CB frankenweather removes
+    (Remove CB near dep/arr): PSX rebuilds a zone's weather from its METAR
+    whenever the METAR changes, and makes a CB from TS and CB groups (see
+    _METAR_CB_SKY_RE above). Only the observation itself is edited, up to
+    the first trend group or the remarks: TS goes from present and recent
+    weather (keeping the precipitation: +TSRA becomes +RA, VCTS and RETS
+    go) and CB from cloud groups (FEW020CB becomes FEW020, ///CB goes).
+    Returns raw itself when there is nothing to remove.
+    """
+    tokens = raw.split()
+    out = []
+    for idx, token in enumerate(tokens):
+        if (token == 'RMK' or token in _METAR_TREND_MARKERS or
+                _METAR_PROB_RE.match(token)):
+            out.extend(tokens[idx:])
+            break
+        if idx == 0 or (idx == 1 and tokens[0] in ('METAR', 'SPECI')):
+            out.append(token)  # station
+            continue
+        stripped = _strip_ts_cb_token(token)
+        if stripped is not None:
+            out.append(stripped)
+    if out == tokens:
+        return raw
+    return _metar_with_note(' '.join(out), METAR_NOTE_CB_REMOVED)
+
+
+def _metar_with_note(metar: str, note: str) -> str:
+    """Return metar with a frankenweather remark added (once), within PSX's length limit.
+
+    The note goes at the end of the remarks, or in a new RMK section. If
+    that would be too long for PSX, the real remarks make way for it.
+    """
+    if note in metar.split(' RMK ', 1)[-1]:
+        return metar
+    noted = f"{metar} {note}" if ' RMK ' in f" {metar} " else f"{metar} RMK {note}"
+    if len(noted) > _METAR_MAX_LEN:
+        noted = f"{metar.split(' RMK ', 1)[0]} RMK {note}"
+    return noted
+
+
 def _parse_wxaloft_tropopause(wxaloft: Optional[str]) -> Optional[tuple]:
     """Return (alt_ft, temp_c, wind_u_kt, wind_v_kt) from a "Constantly" WxAloft, else None.
 
@@ -1501,7 +1582,7 @@ _CONFIG_SIGMET_FIELDS = (
     ("disable_psx_sigmets", "_disable_psx_sigmets", bool),
 )
 _CONFIG_CB_AVOIDANCE_FIELDS = (
-    ("avoid_cb_near_airport", "_avoid_cb_near_airport", bool),
+    ("mode", "_cb_airport_mode", str),
 )
 _CONFIG_MANUAL_WX_FIELDS = (
     "hi_oktas", "hi_top", "hi_base", "lo_oktas", "lo_top", "lo_base",
@@ -1970,13 +2051,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._tropo_last_write_mono: Optional[float] = None
         self._tropo_start_mono = time.monotonic()
         self._tropo_last_pos: Optional[tuple] = None
-        # Whether to offset the departure/destination zone's centre away
-        # from the real airport (see _arpt_coverage_needed()) so any CB
-        # PSX generates there can never land within _CB_AIRPORT_CLEARANCE_NM
-        # of the airport. Opt-in: the zone's weather still describes the
-        # real airport (see _update_zones()'s dep/dst bypass), but its
-        # broadcast position (and hence CB placement) is shifted.
-        self._avoid_cb_near_airport: bool = False
+        # How to keep CBs at least _CB_AIRPORT_CLEARANCE_NM from the
+        # departure/destination airport, e.g. so a VATSIM approach doesn't go
+        # through a CB nobody else has (_CB_AIRPORT_MODES): "off" (default),
+        # "move" the airport's zone (_arpt_coverage_needed(), keeping the
+        # airport's real weather/METAR, see _update_zones()'s dep/dst bypass)
+        # or "remove" the CBs near it (_cb_removed_near_airport()).
+        self._cb_airport_mode: str = "off"
         self.focused_zone: int = 0          # 0 = WxBasic, 1-7 = Wx1-Wx7
         self.cloud_sync_last_alt_ft: float = 0.0
 
@@ -2175,21 +2256,23 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self.psx._set(key, value)  # pylint: disable=protected-access
 
     def _station_only_metar(self, zone_num: int, icao: str, now: datetime) -> str:
-        """Return the METAR for a zone whose weather we build ourselves: "<icao> <DDHHMMZ>".
+        """Return the METAR for a zone whose weather we build ourselves.
 
-        No weather groups on purpose: PSX rebuilds a zone's weather from its
-        METAR whenever the METAR's weather content changes, undoing
-        everything not in it -- SIGMET CBs, our CB tops, cloud layers
-        (live-tested 2026-10-23). A station-and-time-only METAR doesn't
-        trigger that, and replaces the earlier METAR on PSX's Instructor
-        weather page; an empty one is ignored by PSX, leaving a stale METAR
-        there. The time is that of the zone's placement: the same string is
-        reused for as long as the zone keeps its name, so it isn't resent.
+        "<icao> <DDHHMMZ> RMK FRANKENWX MODEL WX": no weather groups on
+        purpose. PSX rebuilds a zone's weather from its METAR whenever the
+        METAR's weather content changes, undoing everything not in it --
+        SIGMET CBs, our CB tops, cloud layers (live-tested 2026-10-23). A
+        station-and-time-only METAR doesn't trigger that, not even with the
+        remark (live-tested 2026-10-24), which tells the Instructor weather
+        page why it's so short. It replaces the earlier METAR there; an
+        empty one is ignored by PSX, leaving a stale METAR there. The time
+        is that of the zone's placement: the same string is reused for as
+        long as the zone keeps its name, so it isn't resent.
         """
         cached = self._zone_station_metar.get(zone_num)
         if cached is not None and cached.split(" ", 1)[0] == icao:
             return cached
-        metar = f"{icao} {now.strftime('%d%H%MZ')}"
+        metar = f"{icao} {now.strftime('%d%H%MZ')} RMK {METAR_NOTE_MODEL}"
         self._zone_station_metar[zone_num] = metar
         return metar
 
@@ -3046,10 +3129,19 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self._own_sigmet_download_now = True
             self.logger.info("Own SIGMETs: download requested from the web UI")
             self._own_sigmet_refresh_event.set()
-        if "avoid_cb_near_airport" in cmd:
-            self._avoid_cb_near_airport = bool(cmd["avoid_cb_near_airport"])
-            self.logger.info("avoid_cb_near_airport → %s", self._avoid_cb_near_airport)
+        # cb_airport_mode; avoid_cb_near_airport (true = "move") from routers
+        # before 1.26.0
+        mode = cmd.get("cb_airport_mode")
+        if mode is None and "avoid_cb_near_airport" in cmd:
+            mode = "move" if cmd["avoid_cb_near_airport"] else "off"
+        if mode in _CB_AIRPORT_MODES and mode != self._cb_airport_mode:
+            self._cb_airport_mode = mode
+            self.logger.info("cb_airport_mode → %s", mode)
+            # Takes effect immediately: move a dep/dst zone to or from its
+            # offset position, and rewrite the zones out of cycle
             self._reposition_arpt_zones_for_cb_avoidance()
+            self._manual_wx_force_update = True
+            self.fmc_changed_event.set()
             settings_changed = True
         if "enroute_wind_enabled" in cmd:
             self._enroute_wind_enabled = bool(cmd["enroute_wind_enabled"])
@@ -3314,6 +3406,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         for key, attr, cast in _CONFIG_CB_AVOIDANCE_FIELDS:
             if key in cb_avoidance:
                 setattr(self, attr, cast(cb_avoidance[key]))
+        if "mode" not in cb_avoidance and "avoid_cb_near_airport" in cb_avoidance:
+            # Config files before 1.13.0: on meant moving the airport zone
+            self._cb_airport_mode = "move" if cb_avoidance["avoid_cb_near_airport"] else "off"
+        if self._cb_airport_mode not in _CB_AIRPORT_MODES:
+            self._cb_airport_mode = "off"
 
         manual_wx = config.get("manual_weather", {})
         for key in _CONFIG_MANUAL_WX_FIELDS:
@@ -3356,6 +3453,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self._enable_enroute_wind()
         else:
             self._restore_corridor_snapshot()
+        # cb_airport_mode may have moved a dep/dst zone's place (no-op at startup)
+        self._reposition_arpt_zones_for_cb_avoidance()
         if self.psx_connected and self._fw_mode != old_mode:
             if self._fw_mode == "disabled":
                 self._inject_wx_slow_transit()
@@ -4688,6 +4787,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     if old_metar:
                         new_metar = _update_metar_qnh(old_metar, self.msfs_qnh_hpa)
                         if new_metar != old_metar:
+                            new_metar = _metar_with_note(new_metar, METAR_NOTE_QNH_SYNC)
                             self.psx_send_and_set(f"Metar{metar_zone_num}", new_metar)
                 else:
                     self.logger.warning(
@@ -5207,7 +5307,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             lat, lon = self.airports[icao]
             dist = self._dist_nm(self.ac_lat, self.ac_lon, lat, lon)
             if dist <= _ARPT_ZONE_DIST_NM:
-                if self._avoid_cb_near_airport:
+                if self._cb_airport_mode == "move":
                     offset_nm = _CB_AIRPORT_CLEARANCE_NM + _CB_TO_ZONE_OFFSET_NM + 1.0
                     offset_lon, offset_lat, _ = self.geod.fwd(
                         lons=lon, lats=lat, az=_CB_AVOIDANCE_BEARING_DEG,
@@ -5232,7 +5332,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         return best_zn
 
     def _reposition_arpt_zones_for_cb_avoidance(self) -> None:
-        """Immediately re-apply the current avoid_cb_near_airport offset in place.
+        """Immediately re-apply the current cb_airport_mode zone position in place.
 
         _ensure_arpt_zones()/_place_all_zones() only ever assign a *new*
         zone to an airport that doesn't already have one -- an
@@ -5240,11 +5340,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         (repositioning a zone the aircraft currently depends on risks the
         same instant-PFD-jump pattern this whole avoidance feature exists
         to sidestep). But per explicit user request, toggling
-        avoid_cb_near_airport in flight should take effect immediately even
-        at that cost, rather than only applying to the next fresh
-        assignment -- so this directly moves any already-assigned dep/dst
-        zone to match what _arpt_coverage_needed() would now place it at,
-        and forces an out-of-cycle _update_zones() write to apply it.
+        cb_airport_mode in flight should take effect immediately even at
+        that cost, rather than only applying to the next fresh assignment --
+        so this directly moves any already-assigned dep/dst zone to match
+        what _arpt_coverage_needed() would now place it at (offset for
+        "move", the airport itself otherwise), and forces an out-of-cycle
+        _update_zones() write to apply it.
         """
         needed = {icao: (lat, lon) for icao, lat, lon in self._arpt_coverage_needed()}
         moved = False
@@ -5262,13 +5363,33 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             _, _, new_dist_m = self.geod.inv(self.ac_lon, self.ac_lat, new_lon, new_lat)
             self.zone_cb_create_dist_nm[zone_num] = new_dist_m / _NM_TO_M
             self.logger.info(
-                "Zone %d: repositioned %s for avoid_cb_near_airport toggle "
+                "Zone %d: repositioned %s for cb_airport_mode %s "
                 "(%.3f/%.3f → %.3f/%.3f)",
-                zone_num, icao, lat, lon, new_lat, new_lon)
+                zone_num, icao, self._cb_airport_mode, lat, lon, new_lat, new_lon)
             moved = True
         if moved:
             self._manual_wx_force_update = True
             self.fmc_changed_event.set()
+
+    def _cb_removed_near_airport(self, lat: float, lon: float) -> Optional[str]:
+        """Return the dep/dst airport whose CB avoidance removes a CB at (lat, lon), else None.
+
+        With cb_airport_mode "remove", a zone centred within
+        _CB_AIRPORT_CLEARANCE_NM + _CB_TO_ZONE_OFFSET_NM of the FMC
+        departure or destination airport gets no CB, and the METAR PSX gets
+        for it no TS/CB (_strip_convective_metar()), so no CB can come within
+        _CB_AIRPORT_CLEARANCE_NM of the airport. The zone stays where it is,
+        so the airport keeps its real weather.
+        """
+        if self._cb_airport_mode != "remove":
+            return None
+        for icao in (self.fmc_dep_icao, self.fmc_dst_icao):
+            if icao and icao in self.airports:
+                alat, alon = self.airports[icao]
+                if (self._dist_nm(lat, lon, alat, alon) <=
+                        _CB_AIRPORT_CLEARANCE_NM + _CB_TO_ZONE_OFFSET_NM):
+                    return icao
+        return None
 
     def _handles_cb_sigmets(self) -> bool:
         """Return True if frankenweather handles TS and/or TC SIGMETs itself (SIGMETs page)."""
@@ -6384,7 +6505,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         stale_metar_discarded: dict = {}
 
         for i, (lat, lon, stored_icao) in enumerate(positions):
-            if (self._avoid_cb_near_airport and stored_icao and
+            if (self._cb_airport_mode == "move" and stored_icao and
                     stored_icao in (self.fmc_dep_icao, self.fmc_dst_icao) and
                     stored_icao not in used_icaos):
                 # positions[i] was deliberately offset from the real airport
@@ -6577,6 +6698,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             om = om_by_zone.get(i, {})
             radar_echo = self._rv_echo_at(lat, lon)
             has_lightning = self._bz_near(lat, lon)
+            cb_removed_for = self._cb_removed_near_airport(lat, lon)
             ts_oktas = 0
             has_showers_metar = False
             if raw_metars[i] is not None:
@@ -6604,7 +6726,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         # OM suppressed CBs but METAR directly observes TS/GR — keep
                         # METAR-derived coverage; OM is lagging the actual observation.
                         pass
-                new_metars.append(raw_metars[i])
+                new_metars.append(_strip_convective_metar(raw_metars[i]) if cb_removed_for
+                                  else raw_metars[i])
             else:
                 elev = float(om.get("elevation", 0)) if om else 0.0
                 new_modes.append(build_wxmode_string(
@@ -6621,7 +6744,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             if final_wx != wx:  # a SIGMET gave (or enlarged) this zone's CB
                 best = self._sigmet_cb_at((lat, lon)) if self._own_sigmets_applied else None
                 sigmet_label = best[1].get('label', 'TS SIGMET') if best else 'TS SIGMET'
-            if self._is_cb_free_zone(zone_num):
+            if self._is_cb_free_zone(zone_num) or cb_removed_for:
                 final_wx = _strip_cb(final_wx)
                 sigmet_label = None
             self.zone_cb_sigmet[zone_num] = sigmet_label
@@ -6630,7 +6753,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.zone_cb_target[zone_num] = (
                 {'oktas': target_oktas_val, 'base': int(target_parts[11]),
                  'top': int(target_parts[10])} if target_oktas_val > 0 else None)
-            if self.args.cb_growth and in_cruise:
+            if self.args.cb_growth and in_cruise and not cb_removed_for:
                 cape_here = _om_hval(om.get("hourly", {}), "cape", now.hour, 0) if om else 0.0
                 final_wx = self._ramp_cb_wx(zone_num, final_wx, cape_here)
             else:
@@ -6642,11 +6765,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 'ts_oktas': ts_oktas,
                 'showers_metar': has_showers_metar,
                 'sigmet_label': sigmet_label,
+                'cb_removed_for': cb_removed_for,
             })
 
         if self.args.fake_cb:
             oktas, base_ft, top_ft = self.args.fake_cb
-            new_wxs = [wx if self._is_cb_free_zone(i + 1) else
+            new_wxs = [wx if self._is_cb_free_zone(i + 1) or _per_zone[i]['cb_removed_for'] else
                        _apply_fake_cb(wx, oktas, base_ft, top_ft)
                        for i, wx in enumerate(new_wxs)]
             self.logger.debug("fake-cb applied: %d oktas, base %dft, top %dft",
@@ -6765,6 +6889,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     detail += "; no CBs (" + ", ".join(reasons_no_cb) + ")"
                 elif not is_metar:
                     detail += "; no CBs"
+            if pz['cb_removed_for']:
+                detail += f"; CBs removed (Remove CB near dep/arr: {pz['cb_removed_for']})"
             self.zone_weather_detail[i + 1] = detail
 
         self._inject_wx_slow_transit()
@@ -6870,7 +6996,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "sigmet_own": self._sigmet_own,
             "sigmet_handle": dict(self._sigmet_handle),
             "disable_psx_sigmets": self._disable_psx_sigmets,
-            "avoid_cb_near_airport": self._avoid_cb_near_airport,
+            "cb_airport_mode": self._cb_airport_mode,
+            # Routers before 1.26.0 only know this on/off form
+            "avoid_cb_near_airport": self._cb_airport_mode != "off",
             "cb_airport_clearance_nm": _CB_AIRPORT_CLEARANCE_NM,
             "config_file": cfg.config_file,
             "config_file_exists": bool(cfg.config_file and os.path.exists(cfg.config_file)),

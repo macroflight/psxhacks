@@ -1657,7 +1657,9 @@ def _efb_status_dict(router, ctx):  # pylint: disable=too-many-locals
         'status_color': fw_color, 'status_label': fw_label, 'age_label': fw_age,
         'fw_mode': (state or {}).get('fw_mode', 'unknown'),
         'enroute_wind_enabled': bool(cfg.get('enroute_wind_enabled', False)),
-        'avoid_cb_near_airport': bool(cfg.get('avoid_cb_near_airport', False)),
+        # (mode, has_modes): has_modes False for FrankenWeather before
+        # 1.13.0, which can only move the zone
+        'cb_airport_mode': _fw_webui.cb_airport_mode(cfg),
         'cb_airport_clearance_nm': cfg.get('cb_airport_clearance_nm', 15),
         'disable_psx_sigmets': bool(cfg.get('disable_psx_sigmets', False)),
         'sigmet_enabled': bool(cfg.get('sigmet_enabled', False)),
@@ -1777,6 +1779,24 @@ def _efb_weather_mode_row(current):
     return f'<div class="efb-chip-row">{chips}</div>\n'
 
 
+def _efb_cb_airport_mode_row(w):
+    """Render the Off/Move zone/Remove CB chip row (fw_webui.CB_AIRPORT_MODES).
+
+    Remove CB is only offered by FrankenWeather 1.13.0 or later.
+    """
+    current, has_modes = w['cb_airport_mode']
+    chips = ''.join(
+        f'<form class="efb-inline" method="post" action="/api/efb/cb-airport-mode">'
+        f'<input type="hidden" name="mode" value="{mode}">'
+        f'<button type="submit" '
+        f'class="efb-chip efb-chip-sm{" active" if current == mode else ""}">'
+        f'{label}</button></form>\n'
+        for mode, label, _hint in _fw_webui.CB_AIRPORT_MODES
+        if mode != 'remove' or has_modes
+    )
+    return f'<div class="efb-chip-row">{chips}</div>\n'
+
+
 def _efb_sigmet_preset_row(w):
     """Render the Off/Normal/PSX SIGMET preset chip row (fw_sigmet.PRESETS).
 
@@ -1840,11 +1860,10 @@ def _efb_controls_card(w):
         _efb_bool_chip_row(
             '/api/efb/turb-toggle', 'enabled', w['turb_enabled'], small=True) +
         '<p class="efb-hint">Wind, terrain, convection, CB proximity, etc.</p>\n'
-        '<div class="efb-eyebrow" style="margin-top:0.6rem">Avoid CB Near Airport</div>\n' +
-        _efb_bool_chip_row(
-            '/api/efb/toggle', 'avoid_cb_near_airport', w['avoid_cb_near_airport'],
-            small=True) +
-        '<p class="efb-hint">Shifts departure/arrival CBs away from the airport.</p>\n'
+        '<div class="efb-eyebrow" style="margin-top:0.6rem">CB Near Dep/Arr</div>\n' +
+        _efb_cb_airport_mode_row(w) +
+        '<p class="efb-hint">Move zone: moves the airport\'s weather zone so its CB stays '
+        '15 nm away. Remove CB: removes every CB within 15 nm.</p>\n'
         '<div class="efb-eyebrow" style="margin-top:0.6rem">SIGMETs</div>\n' +
         _efb_sigmet_preset_row(w) +
         f'<p class="efb-hint">{_efb_sigmet_hint(w)}</p>\n'
@@ -2978,12 +2997,19 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     await _efb_ctx.send_fw_settings_cmd(cmd)
                 raise web.HTTPFound('/efb')
 
+            @routes.post('/api/efb/cb-airport-mode')
+            async def handle_efb_cb_airport_mode_post(request):
+                data = await request.post()
+                cmd = _fw_webui.cb_airport_mode_command(data.get('mode'))
+                if cmd:
+                    await _efb_ctx.send_fw_settings_cmd(cmd)
+                raise web.HTTPFound('/efb')
+
             @routes.post('/api/efb/toggle')
             async def handle_efb_toggle_post(request):
                 data = await request.post()
                 field = data.get('field')
-                if field in ('enroute_wind_enabled', 'avoid_cb_near_airport',
-                             'disable_psx_sigmets'):
+                if field in ('enroute_wind_enabled', 'disable_psx_sigmets'):
                     await _efb_ctx.send_fw_settings_cmd({field: data.get('value') == '1'})
                 raise web.HTTPFound('/efb')
 
