@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-10-24: version 1.25.0
+
+- **New: PIREP button on /efb**, a bit like asking ATC for ride
+  reports: a popup (closing by itself after a few seconds) with the
+  reported ride, smooth, light, moderate or rough, at each whole flight
+  level up to 4,000 ft above and below the current one (at most FL470),
+  from frankenweather 1.12.0.
+- **Change: the "SIGMET intensity" row on /efb is now "Intensity
+  trend"** and shows the ramp of whatever drives the turbulence (a
+  SIGMET, a G-AIRMET or the gustiness of the physically computed
+  turbulence), with its altitude layer, e.g. `FL275-295 holding at 13%
+  for 2:48 more, then a new level`. A ramp that hardly changes the
+  level shows as "steady". Works with frankenweather 1.11.0 too.
+- **New: the weather pages get frankenweather 1.12.0's changes**:
+  G-AIRMET turbulence areas on the weather map, and a legend saying that
+  weather areas are only shown within 640 nm.
+
 ## 2026-10-24: version 1.24.0
 
 - **New: SIGMET presets on /efb**, replacing the "PSX SIGMETs On/Off"
