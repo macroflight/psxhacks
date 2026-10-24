@@ -1,5 +1,18 @@
 # frankenweather changelog
 
+## 1.12.1 (2026-10-24)
+
+- **New (`--sigmet`): the downloaded SIGMETs on frankenweather's own web
+  port** (not the router's), as text in PSX's own SIGMET layout:
+  `/api/sigmet/latest/raw` (every SIGMET of the last download, including
+  expired, unknown and unparseable ones), `/api/sigmet/latest/sanitized`
+  (only the usable ones) and `/api/sigmet/latest/topsx` (exactly what
+  frankenweather last gave PSX). `/api/sigmet/latest/json` has the whole
+  download parsed: download time, next download, last error, settings,
+  counts, and every SIGMET with its area, levels, validity, raw text,
+  whether it is usable (and why not), whether it has expired, and who
+  uses it.
+
 ## 1.12.0 (2026-10-24)
 
 - **New: turbulence comes in altitude layers, and a smooth level stays
