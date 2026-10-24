@@ -1,5 +1,52 @@
 # frankenweather changelog
 
+## 1.12.0 (2026-10-24)
+
+- **New: turbulence comes in altitude layers, and a smooth level stays
+  smooth for a while.** Like real turbulence, each 2,000 ft layer
+  (FL255-275, FL275-295 and so on; boundaries at x500 ft, so every
+  flight level is in one layer) has its own, independent intensity over
+  time, blended over 300 ft either side of a boundary, and its own
+  lasting roughness (30-90 minutes, then slowly changing). A climb or
+  descent of 2,000 ft therefore always gives a different ride, and a
+  good level found that way tends to stay good. MTW SIGMETs and mountain
+  wave use 6,000 ft layers, since a mountain wave is much deeper.
+- **Change (`--sigmet`): TURB/MTW SIGMET turbulence now has smooth
+  spells**: 0-75% instead of 10-75%, smooth air about 14 minutes per
+  hour on average. A smooth layer is at 45% or more about 1 minute per
+  hour, a rough one about 25 minutes.
+- **New: gustiness for the turbulence frankenweather works out from
+  physics.** Mountain wave, rotor, mechanical turbulence, wind shear and
+  CAPE turbulence are multiplied by a layered "gustiness" that averages
+  about 1 (wind shear 0.4-1.6, mountain wave 0.7-1.3, rotor and
+  mechanical and CAPE 0.5-1.5), varying over time and per layer like the
+  SIGMET turbulence. The physics still decides where turbulence is and
+  how strong it is on average. The turbulence reason shows the
+  multiplier, e.g. `(gust x1.24)`.
+- **Change: G-AIRMET turbulence varies like a TURB SIGMET** instead of
+  staying at the area's fixed intensity: the same layered level, scaled
+  by severity (a MOD area gets two thirds of it), so a moderate G-AIRMET
+  is mostly light with moderate spells.
+- **New: PIREPs.** frankenweather rates the ride at every whole flight
+  level up to 4,000 ft above and below the aircraft (FL010-FL470) from
+  every source of turbulence, by how often each level is at moderate
+  turbulence or worse (smooth under 10% of the time, light under 20%,
+  moderate under 35%, rough above), refreshed every minute, on a flight
+  level change and when entering or leaving a turbulence area. The
+  router's /efb page shows them with its PIREP button (router 1.25.0).
+- **New: the console shows the turbulence's intensity ramp**: a
+  `[  ramp     ]` line under the driving source and a line whenever a
+  new ramp or layer starts, e.g. `Turbulence intensity (TURB SIGMET):
+  FL275-295 rising 16% → 55%, 41 s left, then holds 3:19`. The router's
+  /efb page shows the same ("Intensity trend").
+- **New: G-AIRMET turbulence areas on the weather map** (within 640 nm,
+  dashed when G-AIRMET turbulence is switched off). The legend says that
+  weather areas are only shown within 640 nm.
+- **Fix: the turbulence status could show a ramp that had already
+  ended** as "rising … 0 s left" every other time (rounding).
+- The turbulence engine and data fetchers are now called under locks,
+  since the new PIREP task calls them from a second thread.
+
 ## 1.11.0 (2026-10-24)
 
 - **Change (`--sigmet`): TURB and MTW SIGMET turbulence varies over
