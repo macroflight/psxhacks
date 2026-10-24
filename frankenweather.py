@@ -3805,6 +3805,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         family = self._gust_family(state.kind)
         if family is None:
             return 1.0 if state.intensity >= minimum else 0.0
+        if minimum > state.max_intensity:   # capped below it (low-level wind shear)
+            return 0.0
         return self._gust_profiles[family].share_at_least(level_ft, minimum / state.intensity)
 
     def _pirep_rate(self, lat: float, lon: float, fls: list, here: int,  # pylint: disable=too-many-locals
@@ -4480,7 +4482,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return state, None
         gust = self._gust_profiles[family]
         mult = gust.value(alt_ft)
-        return (dataclasses.replace(state, intensity=min(1.0, state.intensity * mult),
+        intensity = min(1.0, state.max_intensity, state.intensity * mult)
+        return (dataclasses.replace(state, intensity=intensity,
                                     reason=f"{state.reason} (gust x{mult:.2f})"),
                 (f"{family} gust", gust, state.intensity))
 

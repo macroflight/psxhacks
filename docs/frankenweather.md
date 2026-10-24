@@ -535,6 +535,11 @@ average:
 | Rotor and mechanical | 2,000 ft | 0.5-1.5 |
 | CAPE | 2,000 ft | 0.5-1.5 |
 
+Wind shear near the ground (on a windy day the wind normally increases
+steeply in the lowest few thousand feet) is not clear-air turbulence:
+below 3,000 ft above the ground it gives at most 30%, rising to no limit
+at 5,000 ft. The turbulence reason then says "Low-level wind shear".
+
 G-AIRMET turbulence areas (US) vary like a TURB SIGMET instead: the
 same varying level in 2,000 ft layers, scaled by the area's severity (a
 MOD area gets two thirds of it, like a MOD SIGMET), so a moderate

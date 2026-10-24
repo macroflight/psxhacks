@@ -83,6 +83,15 @@ ROTOR_DISTANCE_KM = 15.0      # max distance downwind for active rotor
 SHEAR_MODERATE = 8.0
 SHEAR_SEVERE = 14.0
 
+# Near the ground the wind normally increases steeply with height on a windy
+# day; that shear isn't clear-air turbulence. It's capped at
+# LOW_LEVEL_SHEAR_CAP (after gustiness) below LOW_LEVEL_SHEAR_AGL_FT, the
+# cap rising linearly to none at LOW_LEVEL_SHEAR_BLEND_FT. A pilot departing
+# EGLL on a windy day got 100% (2026-10-24).
+LOW_LEVEL_SHEAR_CAP = 0.30
+LOW_LEVEL_SHEAR_AGL_FT = 3000.0
+LOW_LEVEL_SHEAR_BLEND_FT = 5000.0
+
 # Maximum wind speed (m/s) used for normalisation.
 # Rotor uses surface wind; wave uses ridge-top wind with a lower norm so that
 # strong-wind / moderate-barrier scenarios (e.g. Greenland ice cap: BGTL
@@ -107,6 +116,8 @@ class TurbulenceState:  # pylint: disable=too-few-public-methods,too-many-instan
     Directional components are in [-1, 1].  NaN means "unknown/random" —
     the caller should substitute random noise scaled by intensity.
     source_lat/source_lon: lat/lon of terrain peak driving turbulence (NaN if not terrain).
+    max_intensity: ceiling for intensity after the caller's gustiness
+    multiplier (low-level wind shear, see LOW_LEVEL_SHEAR_CAP).
     """
 
     intensity: float = 0.0
@@ -117,6 +128,7 @@ class TurbulenceState:  # pylint: disable=too-few-public-methods,too-many-instan
     reason: str = ""
     source_lat: float = field(default_factory=lambda: float("nan"))
     source_lon: float = field(default_factory=lambda: float("nan"))
+    max_intensity: float = 1.0
 
     def is_random(self) -> bool:
         """Return True when all directional components are NaN (pure random noise)."""
@@ -283,10 +295,16 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
         # ---- 5. Blend in wind-shear CAT ------------------------------------
         if shear_factor > 0.05 and state.intensity < shear_factor * 0.5:
             # Shear CAT dominates — pure random
+            cap = _low_level_shear_cap(agl_m / FT_TO_M)
+            reason = f"Wind shear CAT: {shear:.1f}kt/1000ft vertical shear"
+            if cap < 1.0:
+                reason = (f"Low-level wind shear: {shear:.1f}kt/1000ft vertical shear "
+                          f"(at most {cap:.0%})")
             return TurbulenceState(
                 intensity=max(state.intensity, shear_factor * 0.5),
                 kind=f"{state.kind}+shear" if state.kind != "none" else "shear",
-                reason=f"Wind shear CAT: {shear:.1f}kt/1000ft vertical shear",
+                reason=reason,
+                max_intensity=max(cap, state.intensity),
             )
         # Otherwise just boost existing intensity slightly
         return replace(state, intensity=min(1.0, state.intensity + shear_factor * 0.15))
@@ -438,6 +456,16 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+def _low_level_shear_cap(agl_ft: float) -> float:
+    """Return the most wind-shear turbulence there may be at agl_ft (see LOW_LEVEL_SHEAR_CAP)."""
+    if agl_ft <= LOW_LEVEL_SHEAR_AGL_FT:
+        return LOW_LEVEL_SHEAR_CAP
+    if agl_ft >= LOW_LEVEL_SHEAR_BLEND_FT:
+        return 1.0
+    frac = (agl_ft - LOW_LEVEL_SHEAR_AGL_FT) / (LOW_LEVEL_SHEAR_BLEND_FT - LOW_LEVEL_SHEAR_AGL_FT)
+    return LOW_LEVEL_SHEAR_CAP + (1.0 - LOW_LEVEL_SHEAR_CAP) * frac
+
 
 def _normalise(value: float, low: float, high: float) -> float:
     """Map value linearly from [low, high] → [0, 1], clamped."""
