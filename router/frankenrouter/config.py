@@ -116,6 +116,12 @@ class _RouterConfigLog:  # pylint: disable=missing-class-docstring,too-few-publi
         if not isinstance(self.traffic, bool):
             raise RouterConfigError("The traffic setting must be true or false")
 
+        # Log addon= messages from addons the router doesn't know about at
+        # info level; when false (the default) they're logged at debug only.
+        self.unknown_addons = data.get('unknown_addons', False)
+        if not isinstance(self.unknown_addons, bool):
+            raise RouterConfigError("The unknown_addons setting must be true or false")
+
         self.directory = data.get('directory', os.getcwd())
         if not os.path.exists(self.directory):
             raise RouterConfigError(f"Log directory {self.directory} does not exist")
@@ -788,6 +794,14 @@ match_name = '^dumbclient.*$'
 keywords = ["Qs123"]
 """)
         self.assertEqual(conf.egress_name_filter[0].log, False)
+
+    def test_log_unknown_addons(self):
+        """log.unknown_addons defaults to false and must be a boolean."""
+        self.assertEqual(RouterConfig(config_data="").log.unknown_addons, False)
+        conf = RouterConfig(config_data="[log]\nunknown_addons = true\n")
+        self.assertEqual(conf.log.unknown_addons, True)
+        with self.assertRaises(RouterConfigError):
+            RouterConfig(config_data="[log]\nunknown_addons = 'yes'\n")
 
     def test_egress_name_filter_rejects_bad_input(self):
         """egress_name_filter validates match_name, keywords and log."""

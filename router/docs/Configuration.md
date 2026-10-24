@@ -160,6 +160,10 @@ port = 10748
   output log. The value is in **bytes**.
 - `output_keep_versions`: as `traffic_keep_versions`, but for the
   router status output log.
+- `unknown_addons`: if set to true, `addon=` messages from addons the
+  router doesn't recognise are logged ("Non-frankenrouter addon message
+  ... forwarded"). The default is false, which only logs them at debug
+  level. They are forwarded either way.
 
 Example:
 
