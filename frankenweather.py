@@ -1893,6 +1893,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._psx_sigmet_raw: Optional[str] = None
         self._own_sigmet_written: Optional[str] = None
         self._own_sigmet_entries: list = []
+        # Every SIGMET of the last successful download, expired ones too
+        # (fw_sigmet.all_entries()), for /api/sigmet/latest/raw
+        self._own_sigmet_downloaded: list = []
         self._own_sigmet_fetched_at: Optional[float] = None
         self._own_sigmet_error: Optional[str] = None
         self._sigmetstate_changed_event: asyncio.Event = asyncio.Event()
@@ -7405,6 +7408,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         raise RuntimeError(f"HTTP {resp.status} from {url}")
                     lists.append(await resp.json(content_type=None))
             entries = _fw_sigmet.normalize(lists[0], lists[1])
+            downloaded = _fw_sigmet.all_entries(lists[0], lists[1])
         except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError, ValueError) as exc:
             self._own_sigmet_error = f"{type(exc).__name__}: {exc}"
             now = time.time()
@@ -7414,6 +7418,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                                 len(self._own_sigmet_entries), self._own_sigmet_error)
             return
         self._own_sigmet_entries = entries
+        self._own_sigmet_downloaded = downloaded
         self._own_sigmet_fetched_at = time.time()
         self._own_sigmet_error = None
         if self._own_sigmets_applied:
@@ -8131,6 +8136,95 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             print("All tasks created")
         print("All tasks completed")
 
+    def _sigmet_json(self) -> dict:
+        """Return /api/sigmet/latest/json: the last download, parsed, with its status.
+
+        Every SIGMET of the last download (fw_sigmet.all_entries(): all
+        normalized fields, ok/reason), each also with "expired" and
+        "used_by": "frankenweather" (a type it handles), "PSX" (given to
+        PSX) or None (unusable, expired, or no SIGMETs for PSX).
+        """
+        now = time.time()
+        handled = self._handled_hazards()
+        own = self._own_sigmets_applied
+        entries = []
+        for entry in self._own_sigmet_downloaded:
+            expired = bool(entry["valid_to"]) and entry["valid_to"] < now
+            used_by = None
+            if entry["ok"] and not expired and own:
+                if entry["hazard"] in handled:
+                    used_by = "frankenweather"
+                elif not self._disable_psx_sigmets:
+                    used_by = "PSX"
+            entries.append({**entry, "expired": expired, "used_by": used_by})
+
+        def _utc(epoch):
+            return (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(epoch))
+                    if epoch else None)
+        return {
+            "source": "aviationweather.gov",
+            "urls": [_fw_sigmet.ISIGMET_URL, _fw_sigmet.AIRSIGMET_URL],
+            "fetched_at": self._own_sigmet_fetched_at,
+            "fetched_at_utc": _utc(self._own_sigmet_fetched_at),
+            "next_download_at": self._own_sigmet_next_at,
+            "next_download_at_utc": _utc(self._own_sigmet_next_at),
+            "last_error": self._own_sigmet_error,
+            "frankenweather_owns_psx_sigmets": own,
+            "sigmet_system_on": self._sigmet_active(),
+            "psx_sigmets_off": self._disable_psx_sigmets,
+            "handled_by_frankenweather": sorted(handled),
+            "counts": {
+                "total": len(entries),
+                "usable": sum(1 for e in entries if e["ok"] and not e["expired"]),
+                "unusable": sum(1 for e in entries if not e["ok"]),
+                "expired": sum(1 for e in entries if e["expired"]),
+                "by_hazard": dict(collections.Counter(e["hazard"] for e in entries)),
+            },
+            "sigmets": entries,
+        }
+
+    def _sigmet_text_response(self, kind: str):
+        """Return the /api/sigmet/latest/<kind> response (see _register_sigmet_text_routes())."""
+        from aiohttp import web as _web  # pylint: disable=import-outside-toplevel
+        if not self._sigmet_enabled:
+            return _web.Response(status=404, text=(
+                "frankenweather's SIGMET system is off (start it with --sigmet)\n"))
+        if kind == "json":
+            if self._own_sigmet_fetched_at is None:
+                return _web.Response(status=404, text="No SIGMETs downloaded yet\n")
+            return _web.json_response(self._sigmet_json(), headers={
+                "Content-Disposition": 'inline; filename="sigmets.json"'})
+        if kind == "topsx":
+            if not self._own_sigmets_applied or self._own_sigmet_written is None:
+                return _web.Response(status=404, text=(
+                    "frankenweather isn't giving PSX any SIGMETs right now "
+                    "(PSX downloads its own, or nothing has been written yet)\n"))
+            # PSX separates lines with "^"
+            text = self._own_sigmet_written.replace("^", "\n").rstrip("\n") + "\n"
+        else:
+            if self._own_sigmet_fetched_at is None:
+                return _web.Response(status=404, text="No SIGMETs downloaded yet\n")
+            entries = (self._own_sigmet_downloaded if kind == "raw" else
+                       [e for e in self._own_sigmet_entries if e["ok"]])
+            text = _fw_sigmet.sigmet_text(entries, self._own_sigmet_fetched_at)
+        return _web.Response(text=text, content_type="text/plain", headers={
+            "Content-Disposition": f'attachment; filename="sigmets-{kind}.txt"'})
+
+    def _register_sigmet_text_routes(self, routes) -> None:
+        """Register the SIGMET text downloads (--sigmet; frankenweather's own web port only).
+
+        /api/sigmet/latest/raw: every SIGMET of the last download, expired,
+        unknown and unparseable ones included. /api/sigmet/latest/sanitized:
+        only the usable ones (the rest left out). /api/sigmet/latest/topsx:
+        exactly what frankenweather last gave PSX. All three in PSX's own
+        SIGMET text layout (fw_sigmet.sigmet_text()), one line per line.
+        /api/sigmet/latest/json: the whole download parsed, with its status
+        (_sigmet_json()).
+        """
+        @routes.get('/api/sigmet/latest/{kind:(raw|sanitized|topsx|json)}')
+        async def _sigmet_latest(request):
+            return self._sigmet_text_response(request.match_info['kind'])
+
     async def run_web_ui_coro(self) -> None:
         """Run a standalone aiohttp web server exposing the FrankenWeather UI."""
         from aiohttp import web as _web  # pylint: disable=import-outside-toplevel
@@ -8146,6 +8240,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # Standalone-only: the router UI has no need to browse/download
         # frankenweather's own per-run event logs (see the Config and logs page).
         _fw_webui.register_weather_logs_routes(routes, ctx)
+        self._register_sigmet_text_routes(routes)
 
         static_path = pathlib.Path(__file__).parent / 'router' / 'frankenrouter' / 'static'
 

@@ -176,10 +176,21 @@ def normalize(isigmets: list, airsigmets: list, now: float = None) -> list:
     """
     if now is None:
         now = time.time()
+    return [e for e in all_entries(isigmets, airsigmets)
+            if not e["valid_to"] or e["valid_to"] >= now]
+
+
+def all_entries(isigmets: list, airsigmets: list) -> list:
+    """Return every SIGMET of a download as normalized dicts, nothing left out.
+
+    Like normalize(), but keeping expired SIGMETs too (unknown and
+    unparseable ones are kept by normalize() as well, with ok False). Only
+    the airsigmet endpoint's SIGMETs are included, not its AIRMETs.
+    """
     entries = [_isigmet_entry(item) for item in isigmets or []]
     entries += [_airsigmet_entry(item) for item in airsigmets or []
                 if (item.get("airSigmetType") or "").upper() == "SIGMET"]
-    return [e for e in entries if not e["valid_to"] or e["valid_to"] >= now]
+    return entries
 
 
 def sigmet_text(entries: list, fetched_at: float) -> str:

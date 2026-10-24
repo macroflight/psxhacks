@@ -444,6 +444,19 @@ With `--sigmet`:
 - The console and the router's /efb page show the current layer and
   where its level is heading ("Intensity trend").
 
+frankenweather's own web port (not the router's) also serves the SIGMETs
+for download, as text in PSX's own SIGMET layout:
+
+- `/api/sigmet/latest/raw`: every SIGMET of the last download, including
+  expired, unknown and unparseable ones
+- `/api/sigmet/latest/sanitized`: only the ones frankenweather could use
+- `/api/sigmet/latest/topsx`: exactly what frankenweather last gave PSX
+- `/api/sigmet/latest/json`: the whole download parsed, as JSON: the
+  download time, the next download, the last error, the current
+  settings, counts per type, and every SIGMET with its area, levels,
+  validity and raw text, whether it is usable (and why not), whether it
+  has expired, and who uses it (frankenweather, PSX or nobody)
+
 The SIGMETs page also shows the download status, the number of SIGMETs
 of each type that could and couldn't be parsed, the nearest area of each
 type and every other one within 320 nm (with the weather zones inside
