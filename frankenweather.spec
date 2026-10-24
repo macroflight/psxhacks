@@ -15,6 +15,7 @@ a = Analysis(
         'frankenturb.cb',
         'frankenturb.cb_turbulence',
         'frankenturb.gairmet',
+        'frankenturb.intensity_profile',
         'frankenturb.pirep',
         'frankenturb.terrain',
         'frankenturb.terrain.elevation',

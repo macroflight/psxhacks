@@ -23,6 +23,7 @@ if _PSXHACKS not in sys.path:
 
 from aiohttp import web  # noqa: E402  pylint: disable=import-error,wrong-import-position
 
+import fw_sigmet as _fw_sigmet  # noqa: E402  pylint: disable=wrong-import-position
 import fw_webui as _fw_webui  # noqa: E402  pylint: disable=wrong-import-position
 
 from . import variables as _variables  # noqa: E402  pylint: disable=wrong-import-position
@@ -1650,6 +1651,13 @@ def _efb_status_dict(router, ctx):  # pylint: disable=too-many-locals
         'avoid_cb_near_airport': bool(cfg.get('avoid_cb_near_airport', False)),
         'cb_airport_clearance_nm': cfg.get('cb_airport_clearance_nm', 15),
         'disable_psx_sigmets': bool(cfg.get('disable_psx_sigmets', False)),
+        'sigmet_enabled': bool(cfg.get('sigmet_enabled', False)),
+        # sigmet_own: switched off by the Off/PSX presets (missing from
+        # FrankenWeather versions before the presets: always on)
+        'sigmet_preset': _fw_sigmet.current_preset(
+            bool(cfg.get('sigmet_enabled', False)) and bool(cfg.get('sigmet_own', True)),
+            bool(cfg.get('disable_psx_sigmets', False)),
+            {h for h, on in (cfg.get('sigmet_handle') or {}).items() if on}),
         'sigmet_hazards': list((state or {}).get('sigmet_hazards', [])),
         'src_router_color': fw_color, 'src_router_label': fw_label, 'src_router_age': fw_age,
         'src_msfs_color': msfs_color,
@@ -1664,6 +1672,7 @@ def _efb_status_dict(router, ctx):  # pylint: disable=too-many-locals
         'turb_intensity_pct': round((turbstate or {}).get('active_intensity', 0.0) * 100),
         'turb_age': turb_age,
         'turb_reason': (turbstate or {}).get('active_reason') or '—',
+        'turb_ramp': (turbstate or {}).get('sigmet_ramp'),
     }
     return {'router': router_info, 'weather': weather_info}
 
@@ -1757,6 +1766,37 @@ def _efb_weather_mode_row(current):
     return f'<div class="efb-chip-row">{chips}</div>\n'
 
 
+def _efb_sigmet_preset_row(w):
+    """Render the Off/Normal/PSX SIGMET preset chip row (fw_sigmet.PRESETS).
+
+    Normal is only offered with FrankenWeather's SIGMET system (--sigmet).
+    No chip is highlighted when the settings are a custom choice made on
+    the SIGMETs page.
+    """
+    chips = ''.join(
+        f'<form class="efb-inline" method="post" action="/api/efb/sigmet-preset">'
+        f'<input type="hidden" name="preset" value="{preset}">'
+        f'<button type="submit" '
+        f'class="efb-chip efb-chip-sm{" active" if w["sigmet_preset"] == preset else ""}">'
+        f'{label}</button></form>\n'
+        for preset, label, _hint in _fw_sigmet.PRESETS
+        if preset != 'normal' or w['sigmet_enabled']
+    )
+    return f'<div class="efb-chip-row">{chips}</div>\n'
+
+
+def _efb_sigmet_hint(w):
+    """Return the /efb hint line explaining the SIGMET presets."""
+    if not w['sigmet_enabled']:
+        return ('Off: no SIGMETs at all, neither FrankenWeather nor PSX uses any. '
+                'PSX: PSX handles every SIGMET itself. '
+                'Start FrankenWeather with --sigmet for Normal.')
+    hint = '. '.join(f'{label}: {hint}' for preset, label, hint in _fw_sigmet.PRESETS)
+    if w['sigmet_preset'] is None:
+        hint += '. Now: a custom choice from the SIGMETs page'
+    return hint + '.'
+
+
 def _efb_controls_card(w):
     """Render the weather-mode, turbulence, and CB-avoidance control card.
 
@@ -1795,12 +1835,8 @@ def _efb_controls_card(w):
             small=True) +
         '<p class="efb-hint">Shifts departure/arrival CBs away from the airport.</p>\n'
         '<div class="efb-eyebrow" style="margin-top:0.6rem">SIGMETs</div>\n' +
-        _efb_bool_chip_row(
-            '/api/efb/toggle', 'disable_psx_sigmets', w['disable_psx_sigmets'],
-            true_label='PSX SIGMETs Off', false_label='PSX SIGMETs On', small=True) +
-        '<p class="efb-hint">Off: PSX doesn\'t use SIGMETs. With FrankenWeather\'s '
-        'SIGMET system (--sigmet) PSX gets none at all, while FrankenWeather still '
-        'handles the types chosen on its SIGMETs page.</p>\n'
+        _efb_sigmet_preset_row(w) +
+        f'<p class="efb-hint">{_efb_sigmet_hint(w)}</p>\n'
         '</div>\n'
     )
 
@@ -1821,6 +1857,33 @@ def _efb_turb_text(w):
     if w['turb_kind'] in (None, 'none'):
         return 'none active'
     return f"{w['turb_kind']}, {w['turb_intensity_pct']}%"
+
+
+def _efb_duration(seconds):
+    """Format seconds as e.g. '45 s' or '2:05'."""
+    seconds = max(0, round(seconds))
+    return f'{seconds} s' if seconds < 60 else f'{seconds // 60}:{seconds % 60:02d}'
+
+
+def _efb_turb_ramp_text(ramp, now=None):
+    """Describe where FrankenWeather's varying SIGMET turbulence intensity is heading.
+
+    ramp is TURBSTATE's "sigmet_ramp" (levels 0-1, epoch end times), or
+    None when no SIGMET drives the turbulence right now.
+    """
+    if not ramp:
+        return None
+    now = time.time() if now is None else now
+    target = round(ramp['target'] * 100)
+    if now < ramp['ramp_end']:
+        start = round(ramp['from'] * 100)
+        way = 'rising' if target > start else 'easing'
+        return (f"{way} {start}% → {target}%"
+                f"{' (abrupt)' if ramp.get('abrupt') else ''}, "
+                f"{_efb_duration(ramp['ramp_end'] - now)} left, "
+                f"then holds {_efb_duration(ramp['hold_s'])}")
+    return (f"holding at {target}% for {_efb_duration(ramp['hold_end'] - now)} more, "
+            "then a new level")
 
 
 def _efb_turb_color(w):
@@ -1847,6 +1910,9 @@ def _efb_datasources_card(w):
     reason_row = (
         _efb_src_row('Turbulence reason', '#64748b', w['turb_reason'])
         if _efb_turb_injected(w) else ''
+    ) + (
+        _efb_src_row('SIGMET intensity', '#64748b', _efb_turb_ramp_text(w['turb_ramp']))
+        if _efb_turb_injected(w) and w['turb_ramp'] else ''
     )
     rows = (
         _efb_src_row('Extra turbulence', _efb_turb_color(w), _efb_turb_text(w)) +
@@ -2848,6 +2914,16 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                         {'mode': cmd['mode'], 'enroute_wind_enabled': cmd['enroute_wind_enabled']})
                     await _efb_ctx.send_turb_cmd({'enabled': cmd['enabled']})
                     await asyncio.sleep(3)
+                raise web.HTTPFound('/efb')
+
+            @routes.post('/api/efb/sigmet-preset')
+            async def handle_efb_sigmet_preset_post(request):
+                data = await request.post()
+                status = _efb_status_dict(router, _efb_ctx)
+                cmd = _fw_sigmet.preset_command(
+                    data.get('preset'), status['weather']['sigmet_enabled'])
+                if cmd:
+                    await _efb_ctx.send_fw_settings_cmd(cmd)
                 raise web.HTTPFound('/efb')
 
             @routes.post('/api/efb/toggle')

@@ -234,6 +234,7 @@ Key options:
 --psx-port PORT      PSX server port (default: 10747)
 --web-port PORT      Port for the standalone web UI (default: 9747)
 --no-web-ui          Disable the standalone web UI
+--log-web-requests   Log every web UI request (off by default)
 --config-file PATH   Load/save web-UI settings from this TOML file
                      (default: ~/.frankenweather.toml)
 --save-logs DIR      [DEVELOPMENT] Save enroute wind diff data per flight
@@ -361,8 +362,9 @@ zone's CB is actively changing.
 `--sigmet` (experimental, off by default) turns on frankenweather's
 SIGMET system. Without it, frankenweather doesn't use SIGMETs at all: it
 only has PSX download them regularly, and PSX handles them itself. The
-router's /efb "PSX SIGMETs Off" setting then turns off PSX's "SIGMETs
-embedded in the planet weather model".
+router's /efb SIGMET presets are then Off (turns off PSX's "SIGMETs
+embedded in the planet weather model", so no SIGMETs are used at all)
+and PSX.
 
 With `--sigmet`:
 
@@ -377,11 +379,24 @@ With `--sigmet`:
   itself: thunderstorms (TS), tropical cyclones (TC), turbulence (TURB)
   and mountain wave (MTW), all four by default. The choice can be saved
   in the configuration file (`[sigmet]` `handle`) from the Config page.
+- Three presets, on the SIGMETs page and the router's /efb page:
+  - **Off**: no SIGMETs at all. Neither frankenweather nor PSX uses
+    any: frankenweather's SIGMET system is switched off, and so is PSX's
+    "SIGMETs embedded in the planet weather model".
+  - **Normal**: frankenweather's SIGMET system handles TS, TC, TURB and
+    MTW, PSX gets the rest (VA and ICE). This is the default.
+  - **PSX**: frankenweather's SIGMET system is switched off, as without
+    `--sigmet`: PSX handles every SIGMET itself, and frankenweather only
+    asks it to download fresh ones regularly.
+
+  With Normal, a different choice of types on the SIGMETs page shows as
+  a custom choice (no preset highlighted). Off and PSX keep that choice
+  for when the system is switched back on, and the setting is saved in
+  the configuration file (`[sigmet]` `own`).
 - PSX gets every SIGMET frankenweather could parse of the types it
   doesn't handle, and always the volcanic ash (VA) and icing (ICE) ones.
   If anything else changes PSX's SIGMET data (a situ load, another
-  addon), frankenweather writes its own back. The router's /efb "PSX
-  SIGMETs Off" setting gives PSX no SIGMETs at all.
+  addon), frankenweather writes its own back.
 - TS and TC (when handled) become CBs in frankenweather's weather
   zones, so CB turbulence and MSFS (through PSX.NET.Orchestration) see
   them too. TS/TC areas within 300 nm that aren't behind the aircraft
@@ -401,11 +416,18 @@ With `--sigmet`:
   does this instead.
 - TURB and MTW (when handled) become frankenweather's own turbulence, a
   "SIGMET" source with its own setting on the turbulence page. It
-  applies inside the SIGMET's area and between its base and top, at the
-  same intensity as a severe G-AIRMET (0.75; 0.5 if the SIGMET says
-  MOD), fading in over the first 10 nm inside the area and 1,000 ft
-  inside its base and top. An MTW SIGMET strengthens the terrain model's
-  own mountain wave or rotor to at least that intensity, keeping its
+  applies inside the SIGMET's area and between its base and top, fading
+  in over the first 10 nm inside the area and 1,000 ft inside its base
+  and top. The intensity varies over time between 10% and 75%: it ramps
+  smoothly to a new random level, usually over half a minute to three
+  minutes but sometimes within seconds, stays there for a random time,
+  and then picks the next level. The router's /efb page shows where it
+  is heading ("SIGMET intensity"). It is mostly light: 10-25% about half the time,
+  45% or more about 10 minutes per hour, 70% or more less than a minute
+  per hour. TURB and MTW each have their own varying level, and a SIGMET
+  that says MOD gets two thirds of it. An MTW SIGMET strengthens the
+  terrain model's own mountain wave or rotor to at least that intensity,
+  keeping its
   pattern of up- and downdrafts; where the terrain model finds none, it
   gives mountain wave turbulence of its own.
 
@@ -415,7 +437,11 @@ type and every other one within 320 nm (with the weather zones inside
 TS/TC areas), the SIGMETs that couldn't be parsed, and the raw text and
 the text given to PSX. The weather map shows SIGMET areas of every type
 within 640 nm, one colour per type, and marks each zone's CB at its
-actual position.
+actual position. Areas frankenweather doesn't use with the current
+settings (PSX gets them, or nobody does with the Off preset) are drawn
+with a dashed outline; hovering over an area says which. Without
+`--sigmet`, or with the Off or PSX preset, the map shows the SIGMETs PSX
+downloaded, all dashed.
 
 ### Time sync
 

@@ -665,12 +665,19 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         "var _sigCol={TS:'#ef4444',TC:'#d946ef',VA:'#78716c',TURB:'#f97316',"
         "ICE:'#0ea5e9',MTW:'#16a34a'};\n"
         "function _fl(ft){return ft?'FL'+('00'+Math.round(ft/100)).slice(-3):'SFC';}\n"
-        "var _sigSeen={};\n"
+        "var _sigSeen={},_sigUnused=false;\n"
+        # Areas frankenweather doesn't use (s.used_by: 'PSX', or null when
+        # nobody gets them) are drawn dashed and fainter. Older
+        # frankenweather versions don't send used_by: draw those solid.
         "sigmets.forEach(function(s){\n"
         "  var hz=s.hazard||'TS',col=_sigCol[hz]||'#64748b';_sigSeen[hz]=col;\n"
+        "  var fw=!('used_by' in s)||s.used_by==='frankenweather';if(!fw)_sigUnused=true;\n"
         "  var pts=s.polygon.map(function(p){return[p[0],p[1]];});\n"
-        "  L.polygon(pts,{color:col,weight:2,opacity:0.9,fillColor:col,fillOpacity:0.15})"
-        ".bindTooltip('<b>'+hz+' SIGMET</b><br>'+_fl(s.base_ft)+' – '+_fl(s.top_ft),"
+        "  var who=!('used_by' in s)?'':'<br>'+(fw?'Used by frankenweather':"
+        "s.used_by?'Not used by frankenweather (PSX gets it)':'Not used (SIGMETs off)');\n"
+        "  L.polygon(pts,{color:col,weight:2,opacity:fw?0.9:0.7,dashArray:fw?null:'6 5',"
+        "fillColor:col,fillOpacity:fw?0.15:0.05})"
+        ".bindTooltip('<b>'+hz+' SIGMET</b><br>'+_fl(s.base_ft)+' – '+_fl(s.top_ft)+who,"
         "{sticky:true,className:'sigmet-label'})"
         ".addTo(map);\n"
         "});\n"
@@ -692,7 +699,10 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         "if(Object.keys(_sigSeen).length)h+=(h?'<br>':'')+'<b>SIGMETs</b><br>'"
         "+Object.keys(_sigSeen).map(function(k){"
         "return '<span style=\"display:inline-block;width:10px;height:10px;margin-right:4px;"
-        "background:'+_sigSeen[k]+'\"></span>'+k;}).join('<br>');"
+        "background:'+_sigSeen[k]+'\"></span>'+k;}).join('<br>')"
+        "+(_sigUnused?'<br><span style=\"display:inline-block;width:10px;height:10px;"
+        "margin-right:4px;border:1.5px dashed #475569;box-sizing:border-box\"></span>"
+        "not used by frankenweather':'');"
         "d.innerHTML=h;return d;};\n"
         "  _lg.addTo(map);\n"
         "}\n"
@@ -2252,6 +2262,31 @@ _SIGMET_HANDLE_TYPES = {
 }
 
 
+def _sigmet_preset_html(current) -> str:
+    """Return the SIGMETs page's preset buttons (Off/Normal/PSX, as on the router's /efb).
+
+    current is the preset the settings match (fw_sigmet.current_preset()),
+    or None when the types below are a custom choice.
+    """
+    buttons = ''
+    for preset, label, _hint in fw_sigmet.PRESETS:
+        active = preset == current
+        style = ('background:#2563eb;color:#fff;cursor:default' if active
+                 else 'background:#1c2033;color:#94a3b8;border:1px solid #2a2f45')
+        buttons += (
+            '<form action="/api/weather/sigmets/preset" method="post" style="margin:0">'
+            f'<input type="hidden" name="preset" value="{preset}">'
+            f'<button type="submit" class="btn btn-sm" style="margin:0;width:auto;{style}"'
+            f'{" disabled" if active else ""}>{label}</button></form>')
+    hints = '; '.join(f'<b>{label}</b>: {hint}' for _p, label, hint in fw_sigmet.PRESETS)
+    custom = '' if current else ' The current choice below is custom.'
+    return (
+        '<div class="card"><div style="display:flex;gap:0;align-items:center">'
+        '<b style="color:#e2e8f0;margin-right:0.8em">Preset</b>'
+        f'{buttons}</div>'
+        f'<p class="note" style="margin:0.5em 0 0">{hints}.{custom}</p></div>\n')
+
+
 def _sigmet_handle_html(handle: dict) -> str:
     """Return the SIGMETs page's 'who handles which type' choice and Download now button.
 
@@ -2283,8 +2318,9 @@ def _sigmet_handle_html(handle: dict) -> str:
         '<p class="note">frankenweather downloads SIGMETs from aviationweather.gov itself '
         'instead of letting PSX do it. For each type below, choose who handles it: '
         'frankenweather (PSX doesn\'t get these SIGMETs) or PSX (they are passed on to PSX). '
-        'Volcanic ash (VA) and icing (ICE) always go to PSX. Save the choice to the config '
-        'file on the <a href="/weather/config">Config page</a>.</p>\n'
+        'Volcanic ash (VA) and icing (ICE) always go to PSX, unless the preset is Off. '
+        'Save the choice to the config file on the <a href="/weather/config">Config '
+        'page</a>.</p>\n'
         '<div class="card"><table class="sg"><tr><th>Type</th><th>Handled by</th>'
         f'<th>What that means</th></tr>{rows}</table></div>\n')
 
@@ -2314,7 +2350,10 @@ def _build_weather_sigmets_page(ctx):  # pylint: disable=too-many-locals
     if sigstate:
         config = {**config, 'sigmet_enabled': sigstate.get('enabled'),
                   'sigmet_handle': {h: h in sigstate.get('handled', [])
-                                    for h in fw_sigmet.OWN_HAZARDS}}
+                                    for h in fw_sigmet.OWN_HAZARDS},
+                  'sigmet_own': sigstate.get('own', config.get('sigmet_own', True)),
+                  'disable_psx_sigmets': sigstate.get(
+                      'psx_off', config.get('disable_psx_sigmets', False))}
     elif not state:
         body = ('<div class="card warn"><p style="margin:0">No data from frankenweather '
                 'yet.</p></div>\n')
@@ -2323,7 +2362,23 @@ def _build_weather_sigmets_page(ctx):  # pylint: disable=too-many-locals
         body = ('<div class="card warn"><p style="margin:0">frankenweather\'s SIGMET system is '
                 'off. Start frankenweather with <code>--sigmet</code> to use it.</p></div>\n')
         return _page_shell(color_scheme, 'SIGMETs', nav_html, body, extra_head)
-    toggle_html = _sigmet_handle_html(config.get('sigmet_handle') or {})
+    handle = config.get('sigmet_handle') or {}
+    own = bool(config.get('sigmet_own', True))
+    psx_off = bool(config.get('disable_psx_sigmets'))
+    toggle_html = _sigmet_preset_html(fw_sigmet.current_preset(
+        own, psx_off, {h for h in fw_sigmet.OWN_HAZARDS if handle.get(h, True)}))
+    if own:
+        toggle_html += _sigmet_handle_html(handle)
+    else:
+        toggle_html += (
+            '<div class="card warn"><p style="margin:0">frankenweather\'s SIGMET system is '
+            'switched off: ' + (
+                '<b>no SIGMETs are used at all</b>, neither by frankenweather nor by PSX.'
+                if psx_off else
+                'PSX handles every SIGMET itself, and frankenweather only asks it to '
+                'download fresh ones regularly.') +
+            ' Choose Normal above to switch it back on. The SIGMETs below are from '
+            'frankenweather\'s last own download and may be old.</p></div>\n')
     if not sigstate:
         body = toggle_html + ('<div class="card warn"><p style="margin:0">No SIGMET data from '
                               'frankenweather yet.</p></div>\n')
@@ -2613,6 +2668,14 @@ def register_weather_routes(routes, ctx):  # pylint: disable=too-many-statements
     async def _weather_sigmets_refresh(_):
         await ctx.send_fw_settings_cmd({"sigmet_refresh": True})
         await asyncio.sleep(3)  # usually enough for the download to finish
+        raise web.HTTPFound('/weather/sigmets')
+
+    @routes.post('/api/weather/sigmets/preset')
+    async def _weather_sigmets_preset(request):
+        data = await request.post()
+        cmd = fw_sigmet.preset_command(data.get('preset'), True)
+        if cmd:
+            await ctx.send_fw_settings_cmd(cmd)
         raise web.HTTPFound('/weather/sigmets')
 
     @routes.post('/api/weather/sigmets/handle')

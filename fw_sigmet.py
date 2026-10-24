@@ -26,6 +26,19 @@ TURB_HAZARDS = ("TURB", "MTW")
 OWN_HAZARDS = CB_HAZARDS + TURB_HAZARDS
 UNKNOWN = "unknown"
 
+# SIGMET presets (router /efb and the SIGMETs page): (name, label, hint).
+# OFF: nobody uses SIGMETs, neither frankenweather nor PSX. NORMAL (only
+# with --sigmet): frankenweather's SIGMET system handles all of
+# OWN_HAZARDS, PSX gets the rest (VA, ICE). PSX: frankenweather's SIGMET
+# system is off, as without --sigmet: PSX handles every SIGMET itself, and
+# frankenweather only asks it to download fresh ones regularly. See
+# preset_command()/current_preset().
+PRESETS = (
+    ("off", "Off", "no SIGMETs at all, neither frankenweather nor PSX uses any"),
+    ("normal", "Normal", "frankenweather handles TS, TC, TURB and MTW, PSX gets VA and ICE"),
+    ("psx", "PSX", "frankenweather's SIGMET system is off, PSX handles every SIGMET itself"),
+)
+
 _NM_PER_DEG = 60.0
 
 # CB coverage (oktas) frankenweather gives a zone inside a TS SIGMET, by the
@@ -184,6 +197,36 @@ def sigmet_text(entries: list, fetched_at: float) -> str:
         lines.extend(entry["raw"].splitlines())
         lines.append(_ENTRY_RULE)
     return "\n".join(lines) + "\n"
+
+
+def preset_command(preset: str, sigmet_enabled: bool):
+    """Return the frankenweather settings command for a SIGMET preset, or None.
+
+    Without frankenweather's SIGMET system (--sigmet) there is no NORMAL.
+    Off and PSX leave the types frankenweather handles alone, so NORMAL
+    (or a custom choice on the SIGMETs page) can be restored later.
+    """
+    if preset not in ("off", "normal", "psx") or (preset == "normal" and not sigmet_enabled):
+        return None
+    cmd = {"disable_psx_sigmets": preset == "off"}
+    if sigmet_enabled:
+        cmd["sigmet_own"] = preset == "normal"
+        if preset == "normal":
+            cmd["sigmet_handle"] = {h: True for h in OWN_HAZARDS}
+    return cmd
+
+
+def current_preset(sigmet_active: bool, psx_off: bool, handled) -> str:
+    """Return the SIGMET preset the settings match, or None for a custom choice.
+
+    sigmet_active: frankenweather's SIGMET system is on (--sigmet and not
+    switched off). handled is the set of types it handles itself.
+    """
+    if not sigmet_active:
+        return "off" if psx_off else "psx"
+    if set(handled) == set(OWN_HAZARDS) and not psx_off:
+        return "normal"
+    return None
 
 
 def psx_entries(entries: list, handled=OWN_HAZARDS) -> list:

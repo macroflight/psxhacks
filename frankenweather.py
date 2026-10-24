@@ -52,6 +52,7 @@ from frankenturb.cb import (
 )
 from frankenturb.cb_turbulence import cb_flank_width_nm
 from frankenturb.disk_cache import DiskCache
+from frankenturb.intensity_profile import IntensityProfile
 from fw_cb import (
     WX_DEFAULTS as _WX_DEFAULTS,
     CB_TOP_MAX_FT as _CB_TOP_MAX_FT,
@@ -278,12 +279,13 @@ _SIGMET_ZONES_PER_TC = 3           # zones per TC area, a tight cluster
 _SIGMET_TC_CLUSTER_SEP_NM = 20.0   # separation between zones in a TC cluster
 _SIGMET_PLACE_INTERVAL_S = 60.0    # move at most one zone this often
 # --sigmet: turbulence frankenweather generates itself for TURB/MTW
-# SIGMETs (PSX doesn't get them). SIGMETs are issued for severe turbulence
-# (moderate goes in AIRMETs), same intensity as a SEV G-AIRMET. It fades in
-# over the first _SIGMET_TURB_FADE_NM inside the area and
-# _SIGMET_TURB_FADE_FT inside its base/top. See _sigmet_turbulence().
-_SIGMET_TURB_INTENSITY = {"SEV": 0.75, "MOD": 0.5}
-_SIGMET_TURB_DEFAULT_INTENSITY = 0.75
+# SIGMETs (PSX doesn't get them). The intensity varies over time between
+# 10% and 75%, mostly light (frankenturb/intensity_profile.py), scaled per
+# qualifier: SIGMETs are issued for severe turbulence (moderate goes in
+# AIRMETs). It fades in over the first _SIGMET_TURB_FADE_NM inside the
+# area and _SIGMET_TURB_FADE_FT inside its base/top. See
+# _sigmet_turbulence().
+_SIGMET_TURB_QUALIFIER_SCALE = {"SEV": 1.0, "MOD": 2.0 / 3.0}
 _SIGMET_TURB_FADE_NM = 10.0
 _SIGMET_TURB_FADE_FT = 1000.0
 # SigmetOn (Qi262) is a 0-15 bitmask. Bits 1 and 4 are documented; bit 2
@@ -1462,6 +1464,7 @@ _CONFIG_TIMESYNC_FIELDS = (
 )
 _CONFIG_SIGMET_FIELDS = (
     ("use_sigmets", "_use_sigmets", bool),
+    ("own", "_sigmet_own", bool),
     ("disable_psx_sigmets", "_disable_psx_sigmets", bool),
 )
 _CONFIG_CB_AVOIDANCE_FIELDS = (
@@ -1798,10 +1801,24 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # own_sigmet_coro()) -- normalized entries (fw_sigmet.normalize()),
         # when they were fetched, and the last download error, if any.
         # --sigmet: frankenweather's SIGMET system (see own_sigmet_coro()),
-        # and which SIGMET types it handles itself (the rest go to PSX),
-        # chosen on the SIGMETs page and saved in the config file.
+        # whether it's switched on (off with the "PSX" and "Off" SIGMET
+        # presets: then everything is as without --sigmet, see
+        # _sigmet_active()), and which SIGMET types it handles itself (the
+        # rest go to PSX), chosen on the SIGMETs page and saved in the
+        # config file.
         self._sigmet_enabled: bool = False   # see handle_args()
+        self._sigmet_own: bool = True
         self._sigmet_handle: dict = {h: True for h in _fw_sigmet.OWN_HAZARDS}
+        # The varying intensity of TURB/MTW SIGMET turbulence, one per type
+        # (see _sigmet_turbulence()).
+        self._sigmet_turb_profiles: dict = {
+            h: IntensityProfile() for h in _fw_sigmet.TURB_HAZARDS}
+        # The SIGMET type whose profile drives the turbulence being injected
+        # (None if no SIGMET does), and per type the factor (edge fade x
+        # qualifier) its profile level was scaled by: shown on the router's
+        # /efb page (TURBSTATE "sigmet_ramp").
+        self._turb_sigmet_hazard: Optional[str] = None
+        self._sigmet_turb_scale: dict = {}
         # Whether we currently own PSX's SIGMETs (see _sync_own_sigmets()),
         # PSX's last reported WxSigmet text, and the last text we wrote.
         self._own_sigmets_applied: bool = False
@@ -1865,10 +1882,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # same WxSigmet/Qs499 PSX populates) goes stale for the whole
         # flight. See _write_sigmet_on() for the bitmask this drives.
         self._use_sigmets: bool = True
-        # "PSX SIGMETs off" (/efb). With --sigmet: PSX gets no SIGMETs at all
-        # (its SIGMET data is emptied, "embedded in the planet weather model"
-        # stays on; see _sync_own_sigmets()). Without: PSX's own "embedded"
-        # setting is turned off.
+        # PSX gets no SIGMETs (the "Off" SIGMET preset, which also switches
+        # our SIGMET system off: PSX's own "embedded" setting is turned
+        # off). Set in the config file with our SIGMET system on, PSX's
+        # SIGMET data is emptied instead ("embedded in the planet weather
+        # model" stays on; see _sync_own_sigmets()).
         self._disable_psx_sigmets: bool = False
         # Last-seen SigmetOn (Qi262) value from PSX, tracked via subscription
         # purely so _write_sigmet_on() can read-modify-write without ever
@@ -2471,18 +2489,24 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         except OSError as exc:
             self.logger.warning("Enroute wind: failed to save log: %s", exc)
 
+    def _sigmet_active(self) -> bool:
+        """Return True if frankenweather's SIGMET system is on (--sigmet, not switched off)."""
+        return self._sigmet_enabled and self._sigmet_own
+
     def handle_sigmet_change(self, _key: str, value: str) -> None:
         """Re-parse all SIGMETs when PSX downloads updated SIGMET data.
 
-        Only with --sigmet, and not while we own the SIGMETs: PSX then only
-        has our own filtered text, and our own download is the source of
-        truth.
+        Not while we own the SIGMETs: PSX then only has our own filtered
+        text, and our own download is the source of truth. Without our
+        SIGMET system (no --sigmet, or switched off) they are only shown on
+        the map; frankenweather doesn't use them.
         """
         self._psx_sigmet_raw = value
-        if not self._sigmet_enabled or self._own_sigmets_applied:
-            return  # without --sigmet, frankenweather doesn't use SIGMETs at all
+        if self._own_sigmets_applied:
+            return
         self.sigmets = _parse_sigmets(value)
-        self.ts_sigmets = [s for s in self.sigmets if s['hazard'] == 'TS']
+        self.ts_sigmets = ([s for s in self.sigmets if s['hazard'] == 'TS']
+                           if self._sigmet_active() else [])
         self.logger.info("SIGMETs: %d active areas (%d TS) (raw %d bytes)",
                          len(self.sigmets), len(self.ts_sigmets), len(value))
 
@@ -2921,10 +2945,18 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self._use_sigmets = bool(cmd["use_sigmets"])
             self.logger.info("use_sigmets → %s", self._use_sigmets)
             settings_changed = True
+        if "sigmet_own" in cmd:
+            self._sigmet_own = bool(cmd["sigmet_own"])
+            self.logger.info("sigmet_own → %s", self._sigmet_own)
+            # Applied by own_sigmet_coro()/_sync_own_sigmets()
+            self._own_sigmet_refresh_event.set()
+            if self._web_sigmetstate is not None:
+                self._update_web_sigmetstate()  # the preset is shown on the page
+            settings_changed = True
         if "disable_psx_sigmets" in cmd:
             self._disable_psx_sigmets = bool(cmd["disable_psx_sigmets"])
             self.logger.info("disable_psx_sigmets → %s", self._disable_psx_sigmets)
-            if self._sigmet_enabled:
+            if self._sigmet_active():
                 # Applied by own_sigmet_coro()/_sync_own_sigmets(): PSX
                 # gets no SIGMETs at all.
                 self._own_sigmet_refresh_event.set()
@@ -2932,6 +2964,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 # Without --sigmet: PSX's own "embedded in the planet
                 # weather model" setting.
                 self._write_sigmet_on(embed=not self._disable_psx_sigmets, trigger_download=False)
+            if self._web_sigmetstate is not None:
+                self._update_web_sigmetstate()  # the preset is shown on the page
             settings_changed = True
         if isinstance(cmd.get("sigmet_handle"), dict):
             for hazard, val in cmd["sigmet_handle"].items():
@@ -3251,8 +3285,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 if self._turb_wind_mode == "psx" and self.psx_connected:
                     self._turb_update_psx_wind()
         if self.psx_connected and not self._own_sigmets_applied:
-            self._write_sigmet_on(embed=self._sigmet_enabled or not self._disable_psx_sigmets,
+            self._write_sigmet_on(embed=self._sigmet_active() or not self._disable_psx_sigmets,
                                   trigger_download=False)
+        if self._web_sigmetstate is not None:
+            self._update_web_sigmetstate()  # SIGMET settings shown on the SIGMETs page
         if self._enroute_wind_enabled:
             self._enable_enroute_wind()
         else:
@@ -3507,6 +3543,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     "active_kind": state.kind if state else "none",
                     "active_intensity": round(state.intensity, 3) if state else 0.0,
                     "active_reason": state.reason if state else "",
+                    "sigmet_ramp": self._sigmet_ramp_status(),
                     "source_lat": src_lat,
                     "source_lon": src_lon,
                     "sources": [
@@ -3542,6 +3579,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         myname = inspect.currentframe().f_code.co_name
         last_print = 0.0
         last_quiet_print = 0.0
+        last_ramp_key = None
+        # kind/intensity last announced, see state_changed below
+        announced_kind, announced_intensity = None, 0.0
         try:
             self.logger.debug("Starting %s", myname)
             loop = asyncio.get_running_loop()
@@ -3644,6 +3684,18 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 for sig_s in (mtw_state, sigmet_state):
                     if sig_s is not None and _eff(sig_s) > _eff(state):
                         state = sig_s
+                # An MTW SIGMET only drives the intensity when it's stronger
+                # than the terrain model's own wave (see _sigmet_turbulence())
+                self._turb_sigmet_hazard = (
+                    "TURB" if state is sigmet_state else
+                    "MTW" if (state is mtw_state and
+                              state.intensity > terrain_state.intensity) else None)
+                # Announced when a new ramp starts and when it ends
+                ramp_key = None
+                if self._turb_sigmet_hazard:
+                    profile = self._sigmet_turb_profiles[self._turb_sigmet_hazard]
+                    ramp_key = (self._turb_sigmet_hazard, profile.segment,
+                                profile.status()["ramp_left_s"] > 0)
 
                 cb_active = state.kind == 'cb'
                 msfs_factor = self._compute_msfs_turb_factor(cb_active)
@@ -3677,14 +3729,19 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     all_sources.append((src_eff, src_s))
                 all_sources.sort(key=lambda t: t[0], reverse=True)
 
+                # Compared with what was last announced, not the previous
+                # tick: a gradual change (e.g. a SIGMET intensity ramp) is
+                # far less than 0.05 per tick but must still be announced.
                 state_changed = (
-                    self._turb_state is None or
-                    self._turb_state.kind != state.kind or
-                    abs((self._turb_state.intensity or 0.0) - (state.intensity or 0.0)) > 0.05
+                    ramp_key != last_ramp_key or  # /efb shows the SIGMET ramp
+                    announced_kind != state.kind or
+                    abs(announced_intensity - (state.intensity or 0.0)) > 0.05
                 )
                 self._turb_state = state
                 self._turb_sources = all_sources
+                last_ramp_key = ramp_key
                 if state_changed:
+                    announced_kind, announced_intensity = state.kind, state.intensity or 0.0
                     self._turb_state_changed_event.set()
 
                 now = time.monotonic()
@@ -3961,9 +4018,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
         Either is None when not applicable. Only while we own the SIGMETs:
         PSX then doesn't get TURB/MTW, so frankenweather generates their
-        turbulence itself. Intensity per _SIGMET_TURB_INTENSITY, faded in
-        near the area's edges and its base/top; the strongest SIGMET of
-        each kind wins. A TURB SIGMET gives "sigmet" (random) turbulence.
+        turbulence itself. The intensity varies over time (one
+        IntensityProfile per type), scaled per _SIGMET_TURB_QUALIFIER_SCALE,
+        faded in near the area's edges and its base/top; the strongest
+        SIGMET of each kind wins. A TURB SIGMET gives "sigmet" (random) turbulence.
         An MTW SIGMET strengthens the terrain model's own mountain wave or
         rotor to at least its intensity, keeping the terrain model's
         up/down pattern; where the terrain model finds none, it gives wave
@@ -3972,6 +4030,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if not self._own_sigmets_applied:
             return None, None
         best = {}
+        levels = {h: p.value() for h, p in self._sigmet_turb_profiles.items()}
+        self._sigmet_turb_scale = {}
         for entry in self._own_sigmet_entries:
             if not entry["ok"] or entry["hazard"] not in _fw_sigmet.TURB_HAZARDS:
                 continue
@@ -3980,10 +4040,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             factor = self._sigmet_turb_factor(lat, lon, alt_ft, entry)
             if factor <= 0.0:
                 continue
-            intensity = factor * _SIGMET_TURB_INTENSITY.get(
-                entry["qualifier"], _SIGMET_TURB_DEFAULT_INTENSITY)
+            intensity = (factor * levels[entry["hazard"]] *
+                         _SIGMET_TURB_QUALIFIER_SCALE.get(entry["qualifier"], 1.0))
             if intensity > best.get(entry["hazard"], (0.0, None))[0]:
                 best[entry["hazard"]] = (intensity, entry)
+                self._sigmet_turb_scale[entry["hazard"]] = (
+                    intensity / levels[entry["hazard"]] if levels[entry["hazard"]] else 0.0)
         turb_state = mtw_state = None
         if "TURB" in best:
             intensity, entry = best["TURB"]
@@ -4002,6 +4064,30 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     intensity=intensity, kind="wave",
                     reason=f"{label} (no terrain wave found)")
         return turb_state, mtw_state
+
+    def _sigmet_ramp_status(self) -> Optional[dict]:
+        """Return the varying SIGMET intensity's current ramp for TURBSTATE, or None.
+
+        Levels are scaled like the injected intensity (edge fade, qualifier),
+        so they match active_intensity. ramp_end/hold_end are epoch times,
+        so the router can count down between TURBSTATE messages.
+        """
+        hazard = self._turb_sigmet_hazard
+        if hazard is None:
+            return None
+        st = self._sigmet_turb_profiles[hazard].status()
+        scale = self._sigmet_turb_scale.get(hazard, 1.0)
+        now = time.time()
+        return {
+            "hazard": hazard,
+            "from": round(st["from"] * scale, 3),
+            "target": round(st["target"] * scale, 3),
+            "ramp_s": round(st["ramp_s"]),
+            "hold_s": round(st["hold_s"]),
+            "abrupt": st["abrupt"],
+            "ramp_end": round(now + st["ramp_left_s"], 1),
+            "hold_end": round(now + st["ramp_left_s"] + st["hold_left_s"], 1),
+        }
 
     @staticmethod
     def _sigmet_turb_factor(lat: float, lon: float, alt_ft: float, entry: dict) -> float:
@@ -6464,6 +6550,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "timesync_periodic": self._timesync_periodic,
             "use_sigmets": self._use_sigmets,
             "sigmet_enabled": self._sigmet_enabled,
+            "sigmet_own": self._sigmet_own,
             "sigmet_handle": dict(self._sigmet_handle),
             "disable_psx_sigmets": self._disable_psx_sigmets,
             "avoid_cb_near_airport": self._avoid_cb_near_airport,
@@ -6532,6 +6619,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         _SIGMET_MAX_NM = 100.0
         _SIGMET_MAP_RANGE_NM = 640.0
         sigmets = []
+        # Which areas frankenweather currently uses (the map draws the rest
+        # dashed): TS/TC it depicts as CBs (exactly self.ts_sigmets), and
+        # TURB/MTW while it owns the SIGMETs and handles that type. Those it
+        # doesn't use go to PSX, or nowhere with the "Off" SIGMET preset.
+        cb_used = {id(s) for s in self.ts_sigmets}
+        turb_used = ({h for h in _fw_sigmet.TURB_HAZARDS if self._sigmet_handle.get(h)}
+                     if self._own_sigmets_applied else set())
+        psx_gets = not self._disable_psx_sigmets
         for s in self.sigmets:
             poly = s["polygon"]
             relevant = (
@@ -6551,6 +6646,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     "polygon": [[round(la, 4), round(lo, 4)] for la, lo in poly],
                     "base_ft": s["base_ft"],
                     "top_ft": s["top_ft"],
+                    "used_by": ("frankenweather"
+                                if id(s) in cb_used or s["hazard"] in turb_used
+                                else "PSX" if psx_gets else None),
                 })
         state = {
             "fw_mode": self._fw_mode,
@@ -6649,7 +6747,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         goes stale for the whole flight. Always triggers a download (so our
         own ts_sigmets/CB-override logic keeps working), with "embedded in
         planet weather model" on. Not while we download SIGMETs ourselves
-        (--sigmet or /efb "PSX SIGMETs off", see own_sigmet_coro()).
+        (--sigmet with our SIGMET system on, see own_sigmet_coro()).
         See _write_sigmet_on() for the bitmask
         details. Gated on _use_sigmets and only while frankenweather is
         actively driving the weather zones, matching the D-ATIS/ALTN-
@@ -6670,7 +6768,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 if time.time() - last_refresh < _SIGMET_REFRESH_MAX_S:
                     continue
                 last_refresh = time.time()
-                self._write_sigmet_on(embed=self._sigmet_enabled or not self._disable_psx_sigmets,
+                self._write_sigmet_on(embed=self._sigmet_active() or not self._disable_psx_sigmets,
                                       trigger_download=True)
                 self.logger.info("SIGMET: requested a fresh PSX download")
         except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -6947,7 +7045,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     if self._own_sigmet_download_now:
                         self._own_sigmet_download_now = False
                         last_try = 0.0
-                    wanted = (self._sigmet_enabled and self._use_sigmets and
+                    wanted = (self._sigmet_active() and self._use_sigmets and
                               not self._should_skip_wx_update())
                     if wanted and time.time() - last_try >= _OWN_SIGMET_REFRESH_S:
                         last_try = time.time()
@@ -7004,7 +7102,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         own text (fw_sigmet.psx_text()): every usable SIGMET frankenweather
         doesn't handle itself (fw_sigmet.OWN_HAZARDS: TS/TC as CB weather
         zones, TURB/MTW as its own turbulence) -- or,
-        with "PSX SIGMETs off" (/efb), no SIGMETs at all ("#"). The
+        with disable_psx_sigmets, no SIGMETs at all ("#"). The
         SigmetOn bits and the text are re-checked on every call and
         rewritten if anything (a situ load, another addon) changed them.
         When no longer wanted, PSX's own download is switched back on and
@@ -7016,7 +7114,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             if self._own_sigmets_applied:
                 self._own_sigmets_applied = False
                 self._own_sigmet_written = None
-                self._write_sigmet_on(embed=True, trigger_download=True, auto_download=True)
+                # Our SIGMET system switched off (SIGMET presets): as without
+                # --sigmet, our TS/TC CBs go, and "Off" also means PSX
+                # doesn't use the SIGMETs it downloads.
+                if not self._sigmet_active():
+                    self.ts_sigmets = []
+                self._write_sigmet_on(
+                    embed=self._sigmet_active() or not self._disable_psx_sigmets,
+                    trigger_download=True, auto_download=True)
                 self.logger.info("Own SIGMETs: handing SIGMETs back to PSX (download requested)")
             return
         if self._own_sigmet_fetched_at is None:
@@ -7034,7 +7139,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         bits = self._sigmet_on_bits
         if not bits & _SIGMET_EMBED_BIT or bits & _SIGMET_AUTO_DOWNLOAD_BIT:
             self._write_sigmet_on(embed=True, trigger_download=False, auto_download=False)
-        # "PSX SIGMETs off" (/efb): PSX gets no SIGMETs at all
+        # disable_psx_sigmets: PSX gets no SIGMETs at all
         handled = self._handled_hazards()
         text = ("#" if self._disable_psx_sigmets else
                 _fw_sigmet.psx_text(self._own_sigmet_entries, self._own_sigmet_fetched_at,
@@ -7046,7 +7151,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if self._own_sigmet_written == text:
             self.logger.info("Own SIGMETs: PSX's SIGMET text was changed, writing ours again")
         elif self._disable_psx_sigmets:
-            self.logger.info("Own SIGMETs: PSX SIGMETs off, emptying PSX's SIGMET data")
+            self.logger.info("Own SIGMETs: disable_psx_sigmets, emptying PSX's SIGMET data")
         else:
             kept = len(_fw_sigmet.psx_entries(self._own_sigmet_entries, handled))
             self.logger.info(
@@ -7126,7 +7231,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         """
         self._web_sigmetstate = {
             "enabled": self._sigmet_enabled,
+            "own": self._sigmet_own,
             "handled": sorted(self._handled_hazards()),
+            "psx_off": self._disable_psx_sigmets,
             "source": "aviationweather.gov",
             "fetched_at": self._own_sigmet_fetched_at,
             "next_at": self._own_sigmet_next_at,
@@ -7557,6 +7664,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             '--no-web-ui', action='store_true',
             help="Disable the standalone web UI (enabled by default on --web-port).")
         parser.add_argument(
+            '--log-web-requests', action='store_true',
+            help="Log every request to the standalone web UI (off by default).")
+        parser.add_argument(
             '--no-datis-override', action='store_true',
             help="Disable overriding PSX's own D-ATIS/MetarsUp (Qs464) reply with VATSIM "
                  "data (enabled by default whenever frankenweather is actively controlling "
@@ -7714,7 +7824,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         app.add_routes(routes)
         if static_path.is_dir():
             app.router.add_static('/static', static_path)
-        runner = _web.AppRunner(app)
+        # aiohttp's per-request access log lines are long and many (pages
+        # poll): only with --log-web-requests.
+        runner = (_web.AppRunner(app) if self.args.log_web_requests
+                  else _web.AppRunner(app, access_log=None))
         await runner.setup()
         site = _web.TCPSite(runner, '0.0.0.0', port)
         await site.start()
