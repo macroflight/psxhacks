@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-10-24: version 1.24.0
+
+- **New: SIGMET presets on /efb**, replacing the "PSX SIGMETs On/Off"
+  toggle, for frankenweather 1.11.0's SIGMET system:
+  - **Off**: no SIGMETs at all, neither frankenweather nor PSX uses any.
+  - **Normal** (only with frankenweather's `--sigmet`): frankenweather
+    handles TS, TC, TURB and MTW, PSX gets VA and ICE.
+  - **PSX**: frankenweather's SIGMET system is switched off and PSX
+    handles every SIGMET itself.
+
+  A custom choice made on frankenweather's SIGMETs page highlights no
+  preset. Works with frankenweather 1.10.0 too, except that Off and PSX
+  then don't switch its SIGMET system off.
+- **New: /efb shows where SIGMET turbulence is heading.** While a TURB
+  or MTW SIGMET drives the turbulence, a "SIGMET intensity" row shows the
+  current ramp, e.g. `rising 25% → 70%, 49 s left, then holds 1:01`, or
+  `holding at 56% for 3:50 more, then a new level` (frankenweather 1.11.0
+  or later).
+- **New: the weather pages get frankenweather 1.11.0's changes**: preset
+  buttons on the SIGMETs page, and SIGMET areas on the map drawn dashed
+  when frankenweather doesn't use them (see frankenweather's changelog).
+- **Quieter logging for unknown addons.** The router no longer logs
+  "Non-frankenrouter addon message ... forwarded" for every `addon=`
+  message from an addon it doesn't recognise. These are now logged at
+  debug level only, unless the new `[log]` setting `unknown_addons =
+  true` is set (see [Configuration](Configuration.md)). The messages
+  are forwarded as before.
+- `addon=MSFS.WEATHER` and `addon=PSX.NET.VPILOT.*` (e.g. vPilot's
+  `STATUS` message every 5 seconds) are now known addons, logged at
+  debug level even with `unknown_addons = true`.
+
 ## 2026-10-23: version 1.23.1
 
 - **New: CB turbulence on the weather map**, for frankenweather 1.10.0:
