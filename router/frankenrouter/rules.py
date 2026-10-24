@@ -179,6 +179,12 @@ class RulesAction(enum.Enum):
     _FRANKENWEATHER_CLIENT_ID) so cross-instance conflict detection keeps
     working. Upstream is only sent to if it is itself a frankenrouter.
 
+    - 'frankenrouters_only': True
+
+    Send only to frankenrouters (upstream and downstream). Upstream is
+    only sent to if it is itself a frankenrouter. Used for
+    FRANKENWEATHER:SIGMETJSON, which no other client needs.
+
     - 'ground_handling_forward': list of display_name values
 
     Send only to frankenrouters (upstream and downstream), plus any
@@ -926,7 +932,7 @@ class Rules():  # pylint: disable=too-many-public-methods
                 RulesCode.KEYVALUE_FILTERED_INGRESS_SILENT,
                 message="filtered FRANKENMSFSBRIDGE addon as filter_elevation is set")
 
-        # FRANKENWEATHER addon traffic (STATE/TURBSTATE/WINDSTATE/SIGMETSTATE) can be
+        # FRANKENWEATHER addon traffic (STATE/TURBSTATE/WINDSTATE/SIGMETSTATE...) can be
         # large -- WINDSTATE in particular runs several KB per message --
         # and is only useful to other frankenrouters (to relay state
         # across the mesh) and to other FrankenWeather instances
@@ -937,6 +943,13 @@ class Rules():  # pylint: disable=too-many-public-methods
         if addon == 'FRANKENWEATHER':
             if not self.allow_write():
                 return self.myreturn(RulesAction.DROP, RulesCode.NOWRITE)
+            # SIGMETJSON (the parsed SIGMET download, ~30 KB) is only for
+            # the routers' own /api/sigmet/latest/json, so frankenrouters only.
+            if payload.startswith('SIGMETJSON:'):
+                return self.myreturn(
+                    RulesAction.FILTER,
+                    RulesCode.FRANKENWEATHER_FILTERED,
+                    extra_data={'frankenrouters_only': True})
             return self.myreturn(
                 RulesAction.FILTER,
                 RulesCode.FRANKENWEATHER_FILTERED,
@@ -2711,9 +2724,21 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         self.assertEqual(code, RulesCode.FRANKENWEATHER_FILTERED)
         self.assertEqual(extra_data, {'frankenweather_forward': 'WEATHER'})
 
+        # SIGMETJSON only goes to frankenrouters, from either direction.
+        for sender in (testpeer, router.upstream):
+            (action, code, _, extra_data) = rules.route(
+                "addon=FRANKENWEATHER:SIGMETJSON:someuuid:payload", sender)
+            self.assertEqual(action, RulesAction.FILTER)
+            self.assertEqual(code, RulesCode.FRANKENWEATHER_FILTERED)
+            self.assertEqual(extra_data, {'frankenrouters_only': True})
+
         # A client without write access must still be dropped, same as any
         # other addon message.
         testpeer.access_level = NOACCESS_ACCESS_LEVEL
+        (action, code, _, extra_data) = rules.route(
+            "addon=FRANKENWEATHER:SIGMETJSON:someuuid:payload", testpeer)
+        self.assertEqual(action, RulesAction.DROP)
+        self.assertEqual(code, RulesCode.NOWRITE)
         (action, code, _, extra_data) = rules.route(
             "addon=FRANKENWEATHER:STATE:someuuid:{}", testpeer)
         self.assertEqual(action, RulesAction.DROP)

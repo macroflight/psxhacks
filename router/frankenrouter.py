@@ -436,6 +436,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.frankenweather_windstate_received_at: float = 0.0
         self.frankenweather_sigmetstate: dict = None
         self.frankenweather_sigmetstate_received_at: float = 0.0
+        # Latest parsed SIGMET download (FRANKENWEATHER:SIGMETJSON), served
+        # on /api/sigmet/latest/json
+        self.frankenweather_sigmetjson: dict = None
+        self.frankenweather_sigmetjson_received_at: float = 0.0
         self.frankencontrol_status: dict = None
         self.frankencontrol_status_received_at: float = 0.0
         self.upstream_reconnect_requested = False
@@ -2899,7 +2903,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # End of send_frdp_sharedinfo()
 
     def cache_frankenweather_addon(self, line: str) -> None:
-        """Parse and cache FRANKENWEATHER STATE/TURBSTATE/WINDSTATE/SIGMETSTATE messages for the UI.
+        """Parse and cache FRANKENWEATHER STATE/TURBSTATE/WINDSTATE/SIGMET* messages for the UI.
 
         Assumes only one FRANKENWEATHER instance is ever active on the
         network — frankenweather itself detects and pauses conflicting
@@ -2910,6 +2914,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # line: "addon=FRANKENWEATHER:TURBSTATE:<uuid>:<json>"
         # line: "addon=FRANKENWEATHER:WINDSTATE:<uuid>:<payload>" (gzip+base64, see fw_webui)
         # line: "addon=FRANKENWEATHER:SIGMETSTATE:<uuid>:<payload>" (same encoding)
+        # line: "addon=FRANKENWEATHER:SIGMETJSON:<uuid>:<payload>" (lzma+base64 JSON)
         rest = line[len("addon=FRANKENWEATHER:"):]
         for prefix, data_attr, received_attr, decode in (
                 ("STATE:", "frankenweather_state",
@@ -2920,6 +2925,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                  "frankenweather_windstate_received_at", _fw_webui.decode_windstate_payload),
                 ("SIGMETSTATE:", "frankenweather_sigmetstate",
                  "frankenweather_sigmetstate_received_at", _fw_webui.decode_windstate_payload),
+                ("SIGMETJSON:", "frankenweather_sigmetjson",
+                 "frankenweather_sigmetjson_received_at", _fw_webui.decode_lzma_json_payload),
         ):
             if not rest.startswith(prefix):
                 continue
@@ -4477,6 +4484,16 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         line, exclude=[sender.peername], exclude_non_frankenrouter=True)]
                     if matching_peernames:
                         tasks.append(self.client_broadcast(line, include=matching_peernames))
+                    if self.is_upstream_connected() and self.upstream.is_frankenrouter:
+                        tasks.append(self.send_to_upstream(line, sender.peername))
+                    await asyncio.gather(*tasks)
+            elif 'frankenrouters_only' in extra_data:
+                self.logger.debug("sending with frankenrouters_only: %s", line[:80])
+                if sender.upstream:
+                    await self.client_broadcast(line, exclude_non_frankenrouter=True)
+                else:
+                    tasks = [self.client_broadcast(
+                        line, exclude=[sender.peername], exclude_non_frankenrouter=True)]
                     if self.is_upstream_connected() and self.upstream.is_frankenrouter:
                         tasks.append(self.send_to_upstream(line, sender.peername))
                     await asyncio.gather(*tasks)

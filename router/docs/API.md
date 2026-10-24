@@ -289,6 +289,23 @@ Add an entry to the IP blocklist.
 
 Remove an entry from the IP blocklist.
 
+### GET /api/sigmet/latest/json
+
+Return frankenweather's (`--sigmet`) latest parsed SIGMET download as
+JSON, the same as `/api/sigmet/latest/json` on frankenweather's own web
+port: download status, settings, counts, and every SIGMET with its
+area, levels, validity, raw text, whether it is usable, whether it has
+expired and who uses it. It reaches every frankenrouter as an
+`addon=FRANKENWEATHER:SIGMETJSON:` message (sent after every download
+and setting change and every 5 minutes), so it can be fetched from any
+router in a shared cockpit; `generated_at` says how old it is. Returns
+404 until the first one has arrived.
+
+```text
+$ curl -s http://127.0.0.1:8747/api/sigmet/latest/json | jq .counts.total
+182
+```
+
 ### POST /api/vpilotprint/message
 
 Only used from the vPilot plugin to print messages to PSX printer. Do

@@ -38,6 +38,7 @@ import datetime
 import gzip
 from html import escape as _esc
 import json
+import lzma
 import math
 import os
 import time
@@ -64,6 +65,25 @@ def encode_windstate_payload(state: dict) -> str:
 def decode_windstate_payload(encoded: str) -> dict:
     """Reverse encode_windstate_payload()."""
     return json.loads(gzip.decompress(base64.b64decode(encoded)))
+
+
+def encode_lzma_json_payload(data) -> str:
+    """Lzma-compress and base64-encode compact JSON for the wire (SIGMETJSON).
+
+    A day's parsed SIGMET download is ~125 KB of JSON, ~29 KB encoded
+    (gzip would be ~38 KB). Takes ~80 ms, so run it in an executor.
+    """
+    raw = json.dumps(data, separators=(',', ':')).encode('utf-8')
+    return base64.b64encode(lzma.compress(raw, preset=9 | lzma.PRESET_EXTREME)).decode('ascii')
+
+
+def decode_lzma_json_payload(encoded: str):
+    """Reverse encode_lzma_json_payload(); raises ValueError if malformed."""
+    try:
+        raw = lzma.decompress(base64.b64decode(encoded))
+    except lzma.LZMAError as exc:
+        raise ValueError(f"bad lzma data: {exc}") from exc
+    return json.loads(raw)
 
 
 _COMMON_CSS = '''\

@@ -451,11 +451,19 @@ for download, as text in PSX's own SIGMET layout:
   expired, unknown and unparseable ones
 - `/api/sigmet/latest/sanitized`: only the ones frankenweather could use
 - `/api/sigmet/latest/topsx`: exactly what frankenweather last gave PSX
-- `/api/sigmet/latest/json`: the whole download parsed, as JSON: the
-  download time, the next download, the last error, the current
+- `/api/sigmet/latest/json`: the whole download parsed, as JSON: when
+  it was put together (`generated_at`), the download time, the next download, the last error, the current
   settings, counts per type, and every SIGMET with its area, levels,
   validity and raw text, whether it is usable (and why not), whether it
   has expired, and who uses it (frankenweather, PSX or nobody)
+
+For shared cockpit, frankenweather also sends the JSON to the PSX
+network (`addon=FRANKENWEATHER:SIGMETJSON:`, lzma-compressed and
+base64-encoded, about 30 KB) after every download and setting change and
+every 5 minutes. The routers pass it on only to other frankenrouters,
+and every frankenrouter serves the latest one on its own web port as
+`/api/sigmet/latest/json`, the same as frankenweather's but up to 5
+minutes old (its `generated_at` says when it was put together).
 
 The SIGMETs page also shows the download status, the number of SIGMETs
 of each type that could and couldn't be parsed, the nearest area of each

@@ -2920,6 +2920,19 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 return web.json_response({'html': _efb_pirep_html(_efb_ctx)},
                                          headers={'Cache-Control': 'no-store'})
 
+            @routes.get('/api/sigmet/latest/json')
+            async def handle_sigmet_latest_json_get(_):
+                # The parsed SIGMET download, as frankenweather's own web
+                # port serves it, from its last FRANKENWEATHER:SIGMETJSON
+                if router.frankenweather_sigmetjson is None:
+                    return web.Response(status=404, text=(
+                        "No SIGMETs received from frankenweather yet "
+                        "(it sends them only when started with --sigmet)\n"))
+                return web.json_response(
+                    router.frankenweather_sigmetjson,
+                    headers={'Content-Disposition': 'inline; filename="sigmets.json"',
+                             'Cache-Control': 'no-store'})
+
             @routes.get('/api/efb/status')
             async def handle_efb_status_get(_):
                 status = _efb_status_dict(router, _efb_ctx)

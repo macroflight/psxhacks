@@ -2878,12 +2878,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 "DIAG: qnh_offset_hpa set to %s", self._diag_qnh_offset_hpa)
             self._manual_wx_force_update = True
             return
-        # STATE/TURBSTATE/WINDSTATE/SIGMETSTATE are the self-broadcast message types
+        # STATE/TURBSTATE/WINDSTATE/SIGMETSTATE/SIGMETJSON are the self-broadcast message types
         # that carry a sending instance's UUID — used only for detecting
         # another FRANKENWEATHER instance on the network, the payload itself
         # is otherwise ignored here (frankenweather.py never consumes another
         # instance's data, only the router UI does).
-        for prefix in ("STATE:", "TURBSTATE:", "WINDSTATE:", "SIGMETSTATE:"):
+        for prefix in ("STATE:", "TURBSTATE:", "WINDSTATE:", "SIGMETSTATE:", "SIGMETJSON:"):
             if not rest.startswith(prefix):
                 continue
             body = rest[len(prefix):]
@@ -7593,11 +7593,26 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         payload = _fw_webui.encode_windstate_payload(self._web_sigmetstate)
         return f"FRANKENWEATHER:SIGMETSTATE:{self._instance_uuid}:{payload}"
 
+    async def _build_sigmetjson_message(self) -> str:
+        """Build the FRANKENWEATHER:SIGMETJSON:<uuid>:<payload> addon message.
+
+        <payload> is the lzma+base64-encoded JSON (see
+        fw_webui.encode_lzma_json_payload()) of /api/sigmet/latest/json, so
+        every frankenrouter can serve it too (shared cockpit). The router
+        only forwards it to frankenrouters. Compressed in an executor (it
+        takes ~80 ms).
+        """
+        payload = await asyncio.get_running_loop().run_in_executor(
+            None, _fw_webui.encode_lzma_json_payload, self._sigmet_json())
+        return f"FRANKENWEATHER:SIGMETJSON:{self._instance_uuid}:{payload}"
+
     async def sigmetstate_broadcast_coro(self) -> None:
         """Broadcast SIGMETSTATE when it changes, and every 5 min for routers connecting later.
 
         A change while PSX isn't connected (e.g. the first download, right
-        at startup) is sent as soon as the connection is up.
+        at startup) is sent as soon as the connection is up. SIGMETJSON
+        (/api/sigmet/latest/json, whose "used_by" also changes with the
+        settings) goes along with it, once a download has succeeded.
         """
         myname = inspect.currentframe().f_code.co_name
         pending = False
@@ -7618,6 +7633,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         not self.psx_connected or self._conflict_paused()):
                     continue
                 self._psx_send("addon", self._build_sigmetstate_message())
+                if self._own_sigmet_fetched_at is not None:
+                    self._psx_send("addon", await self._build_sigmetjson_message())
                 pending = False
                 last_sent = time.time()
         except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -8139,6 +8156,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
     def _sigmet_json(self) -> dict:
         """Return /api/sigmet/latest/json: the last download, parsed, with its status.
 
+        "generated_at" says when this was put together ("expired" and
+        "used_by" are as of then): a router serving it from SIGMETJSON
+        may be up to 5 minutes behind.
+
         Every SIGMET of the last download (fw_sigmet.all_entries(): all
         normalized fields, ok/reason), each also with "expired" and
         "used_by": "frankenweather" (a type it handles), "PSX" (given to
@@ -8163,6 +8184,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     if epoch else None)
         return {
             "source": "aviationweather.gov",
+            "generated_at": now,
+            "generated_at_utc": _utc(now),
             "urls": [_fw_sigmet.ISIGMET_URL, _fw_sigmet.AIRSIGMET_URL],
             "fetched_at": self._own_sigmet_fetched_at,
             "fetched_at_utc": _utc(self._own_sigmet_fetched_at),
