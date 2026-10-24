@@ -239,13 +239,27 @@ Features:
   on the settings page. See [Configuration file](#configuration-file)
   below.
 
-- Open-Meteo responses (zone weather, enroute wind, and the terrain
-  turbulence engine's wind/CAPE fetches) are cached on disk under
-  `~/.cache/frankenweather/` and `~/.cache/frankenturb/`, in addition to
-  the existing in-memory caches. Each cache's on-disk lifetime matches
-  its own existing refresh cadence, so this never serves data staler
-  than a continuously-running instance already would — it only avoids
-  re-fetching identical data across a restart (e.g. during development).
+- Open-Meteo usage: the free API allows 10,000 calls a day per internet
+  connection (Open-Meteo counts one call per location per 10 variables),
+  so frankenweather keeps what it downloads on disk under
+  `~/.cache/frankenweather/` and `~/.cache/frankenturb/` and asks again
+  only when it needs to:
+  - Zone weather counts as fresh for 15 minutes (Open-Meteo's current
+    conditions change every 15 minutes), and only the zones without
+    fresh data are fetched.
+  - The turbulence engine's wind and CAPE, and enroute wind, are 2-day
+    hourly forecasts: every hour is served from the download, which is
+    refreshed after 6 hours (newer forecast runs) or for a new 1° square
+    or new waypoints.
+  - While Open-Meteo can't be reached (or refuses, e.g. after the daily
+    limit), older downloads are used instead (zone weather up to 24
+    hours, forecasts as long as they cover the hour), so the zones still
+    get new METARs and setting changes, and turbulence keeps working.
+    The console banner says how old the data is.
+  - After a refusal or failure nothing asks Open-Meteo again for 5
+    minutes (30 seconds after other failures).
+  - The calls made in the last hour and 24 hours are shown on the
+    Weather zones page and logged once an hour (kept across restarts).
 
 Requires `aiohttp`, `pyproj`, `numpy`, `rasterio`, and `requests`:
 

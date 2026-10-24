@@ -1292,7 +1292,8 @@ def _build_weather_settings_page(ctx):  # pylint: disable=too-many-locals,too-ma
         (f'<tr><td></td><td class="note" style="font-size:0.85em">{mode_desc}</td></tr>\n'
          if mode_desc else '') +
         f'<tr><td>Aircraft position</td><td class="val">{pos_str}</td></tr>\n'
-        f'<tr><td>Heading / Altitude</td><td class="val">{hdg_str} / {alt_str}</td></tr>\n'
+        f'<tr><td>Heading / Altitude</td><td class="val">{hdg_str} / {alt_str}</td></tr>\n' +
+        _om_usage_row(state) +
         '</table>\n</div>\n'
     )
 
@@ -2313,6 +2314,22 @@ _SIGMET_HANDLE_TYPES = {
     'MTW': ('Mountain wave (MTW)',
             'frankenweather strengthens its own terrain mountain wave in these areas'),
 }
+
+
+def _om_usage_row(state: dict) -> str:
+    """Return the status card's Open-Meteo usage row ('' for frankenweather before 1.13.0)."""
+    usage = state.get('om_usage')
+    if not usage:
+        return ''
+    text = (f"{usage['last_hour']:,.0f} calls last hour, {usage['last_24h']:,.0f} last 24 h "
+            "(limit 10,000 a day)")
+    if state.get('om_backoff_s'):
+        text += f"; refused or failing, waiting {state['om_backoff_s']} s"
+    elif state.get('last_om_fetch_failed'):
+        text += "; last zone fetch failed"
+    title = ', '.join(f"{k} {v:,.0f}" for k, v in usage.get('by_kind_24h', {}).items())
+    return (f'<tr><td>Open-Meteo</td><td class="val" title="last 24 h: {_esc(title)}">'
+            f'{text}</td></tr>\n')
 
 
 def _cb_airport_mode_html(cfg: dict) -> str:

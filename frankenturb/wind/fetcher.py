@@ -1,48 +1,34 @@
 """Open-Meteo wind profile fetcher with in-memory and on-disk cache.
 
-Fetches multi-level wind (speed, direction, geopotential height) from the
-Open-Meteo free forecast API — no API key required.
+Fetches multi-level wind (speed, direction, geopotential height,
+temperature) from the Open-Meteo free forecast API — no API key required.
 
 Cache strategy
 --------------
-* Position bucket : rounded to CACHE_DEG_GRID degrees.  Wind varies smoothly
-  enough that a 1° grid (~111 km) is adequate for turbulence modelling.
-* Time bucket     : rounded down to CACHE_HOURS hours.  Open-Meteo updates
-  forecasts hourly; there is no benefit refreshing more often.
-
-A cached entry is served as long as both the position bucket and the time
-bucket match the current request.  On a mismatch the full hourly array for
-the new bucket is fetched and parsed once; subsequent calls within the same
-bucket hit the cache. The same (position, time) bucket entries are also
-persisted to disk (see frankenturb.disk_cache), so a process restart within
-the same hour reuses them instead of re-fetching.
+* The whole 2-day hourly download per 1° square (~111 km; wind varies
+  smoothly enough for turbulence modelling) is kept on disk by
+  frankenturb.openmeteo.HourlyForecastCache, and every hour is served from
+  it: at ~10 Open-Meteo calls per download (104 variables), downloading it
+  again every hour for the same data was by far frankenweather's biggest
+  use of the daily quota. It's refetched after 6 h (newer forecast runs).
+* Parsed profiles are kept in memory per (square, hour).
 """
 
 import logging
 import math
 import os
-import time
 from datetime import datetime, timezone
 from typing import Optional
 
 import numpy as np  # pylint: disable=import-error
-import requests  # pylint: disable=import-error
-
-from ..disk_cache import DiskCache
+from ..openmeteo import HourlyForecastCache
 from .profile import WindProfile
 
 log = logging.getLogger(__name__)
 
-# Default on-disk cache location — persists across process restarts so a
-# dev inner loop that restarts frankenturb/frankenweather many times a day
-# doesn't re-fetch identical (position, hour) data every time. The disk
-# entry's own max age (below) is generous purely for disk hygiene: the
-# cache key already encodes the hour bucket, so a stale key is simply
-# never looked up again once the hour rolls over — this never lets served
-# data be any staler than the in-memory cache already allows.
+# Default on-disk cache location (whole hourly downloads, see module docstring)
 _DEFAULT_CACHE_PATH = os.path.join(
-    os.path.expanduser("~"), ".cache", "frankenturb", "om_wind.json")
-_DISK_CACHE_MAX_AGE_S = 6 * 3600.0
+    os.path.expanduser("~"), ".cache", "frankenturb", "om_wind_hourly.json")
 
 # ---------------------------------------------------------------------------
 # Pressure levels to request — covers surface to above typical cruise levels.
@@ -63,19 +49,9 @@ LEVELS_HPA: list[int] = [
     275, 250, 225, 200, 175, 150, 125, 100, 70,
 ]
 
-OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
-REQUEST_TIMEOUT_S = 15
-RATE_LIMIT_BACKOFF_S = 300.0  # pause all fetches after a 429 for this long
-# Pause fetches after any other failure (503, timeout, connection error, bad
-# JSON) for this long. Without this, a fetch failure at a bucket that never
-# got cached leaves the next compute() tick (every 200ms, see turbulence_coro
-# in frankenweather.py) free to retry immediately, hammering Open-Meteo at up
-# to 5Hz until it succeeds -- observed live during a transient OM 503.
-GENERIC_FAILURE_BACKOFF_S = 30.0
-
-# Cache granularity
+# In-memory cache granularity (the on-disk one is HourlyForecastCache's)
 CACHE_DEG_GRID = 1.0    # degrees — position bucket size
-CACHE_HOURS = 1         # re-fetch after this many hours
+CACHE_HOURS = 1         # one parsed profile per this many hours
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -134,50 +110,11 @@ class WindFetcher:  # pylint: disable=too-few-public-methods
         cache_path: Optional[str] = None,
     ):
         """Initialize the wind fetcher with the specified model."""
-        self._models = models
-        self._proxy = proxy
         # Cache: (pos_bucket, time_bucket) → WindProfile
         self._cache: dict[tuple, WindProfile] = {}
-        self._disk_cache = DiskCache(
-            cache_path or _DEFAULT_CACHE_PATH, max_age_s=_DISK_CACHE_MAX_AGE_S)
-        self._backoff_until: float = 0.0
-
-    @staticmethod
-    def _encode(profile: WindProfile) -> dict:
-        """Encode a WindProfile as a JSON-serializable dict."""
-        return {
-            "lat": profile.lat,
-            "lon": profile.lon,
-            "fetched_at": profile.fetched_at.isoformat(),
-            "valid_at": profile.valid_at.isoformat(),
-            "pressures_hpa": profile.pressures_hpa.tolist(),
-            "altitudes_m": profile.altitudes_m.tolist(),
-            "speeds_kt": profile.speeds_kt.tolist(),
-            "directions_deg": profile.directions_deg.tolist(),
-            "temperatures_c": profile.temperatures_c.tolist(),
-        }
-
-    @staticmethod
-    def _decode(data: dict) -> WindProfile:
-        """Decode a WindProfile from its JSON-serializable dict form.
-
-        "temperatures_c" is missing from any disk-cache entry written
-        before that field existed -- WindProfile.__post_init__() fills in
-        an all-NaN array when None is passed, so this just needs to not
-        KeyError on an old entry.
-        """
-        temps = data.get("temperatures_c")
-        return WindProfile(
-            lat=data["lat"],
-            lon=data["lon"],
-            fetched_at=datetime.fromisoformat(data["fetched_at"]),
-            valid_at=datetime.fromisoformat(data["valid_at"]),
-            pressures_hpa=np.array(data["pressures_hpa"], dtype=np.float32),
-            altitudes_m=np.array(data["altitudes_m"], dtype=np.float32),
-            speeds_kt=np.array(data["speeds_kt"], dtype=np.float32),
-            directions_deg=np.array(data["directions_deg"], dtype=np.float32),
-            temperatures_c=np.array(temps, dtype=np.float32) if temps is not None else None,
-        )
+        self._hourly = HourlyForecastCache(
+            "wind", _HOURLY_PARAMS, cache_path or _DEFAULT_CACHE_PATH,
+            models=models, extra_params={"wind_speed_unit": "kn"}, proxy=proxy)
 
     def get(
         self,
@@ -187,8 +124,9 @@ class WindFetcher:  # pylint: disable=too-few-public-methods
     ) -> Optional[WindProfile]:
         """Return a WindProfile for (lat, lon) valid at sim_time_utc.
 
-        Uses cached data when the position and time bucket match.
-        Returns None if the fetch fails (network error, etc.).
+        Served from the cached hourly download of the position's square
+        when there is one (see module docstring). Returns None if there's
+        no data (fetch failed, or backing off after a failure).
 
         Parameters
         ----------
@@ -207,83 +145,17 @@ class WindFetcher:  # pylint: disable=too-few-public-methods
         if sim_time_utc.tzinfo is None:
             sim_time_utc = sim_time_utc.replace(tzinfo=timezone.utc)
 
-        pos_key = _pos_bucket(lat, lon)
-        time_key = _time_bucket(sim_time_utc)
-        cache_key = (pos_key, time_key)
-
+        cache_key = (_pos_bucket(lat, lon), _time_bucket(sim_time_utc))
         if cache_key in self._cache:
-            log.debug("Wind cache hit for %s", cache_key)
             return self._cache[cache_key]
-
-        disk_key = f"{pos_key}|{time_key}"
-        disk_hit = self._disk_cache.get(disk_key)
-        if disk_hit is not None:
-            log.debug("Wind disk-cache hit for %s", cache_key)
-            profile = self._decode(disk_hit)
-            self._cache[cache_key] = profile
-            return profile
-
-        remaining = self._backoff_until - time.monotonic()
-        if remaining > 0:
-            log.debug("Wind fetch skipped — backing off (%.0fs remaining)", remaining)
+        data = self._hourly.get(lat, lon, sim_time_utc)
+        if data is None:
             return None
-
-        log.info(
-            "Fetching wind profile at (%.2f, %.2f) valid %s …",
-            lat, lon, sim_time_utc.strftime("%Y-%m-%dT%H:%M")
-        )
-        profile = self._fetch(lat, lon, sim_time_utc)
+        profile = self._parse(data, lat, lon, sim_time_utc)
         if profile is not None:
             self._cache[cache_key] = profile
-            self._disk_cache.set(disk_key, self._encode(profile))
-            log.info("Wind profile fetched: %s", profile)
-
+            log.info("Wind profile at (%.2f, %.2f): %s", lat, lon, profile)
         return profile
-
-    # ------------------------------------------------------------------
-    # HTTP fetch + parse
-    # ------------------------------------------------------------------
-
-    def _fetch(
-        self, lat: float, lon: float, target_time: datetime
-    ) -> Optional[WindProfile]:
-        params = {
-            "latitude": round(lat, 4),
-            "longitude": round(lon, 4),
-            "hourly": _HOURLY_PARAMS,
-            "wind_speed_unit": "kn",
-            "timeformat": "unixtime",
-            "forecast_days": 2,     # ensure target_time is always covered
-            "models": self._models,
-        }
-
-        proxies = {'http': self._proxy, 'https': self._proxy} if self._proxy else None
-        try:
-            r = requests.get(
-                OPEN_METEO_URL, params=params, timeout=REQUEST_TIMEOUT_S, proxies=proxies
-            )
-            r.raise_for_status()
-            data = r.json()
-        except requests.exceptions.HTTPError as exc:
-            if exc.response is not None and exc.response.status_code == 429:
-                self._backoff_until = time.monotonic() + RATE_LIMIT_BACKOFF_S
-                log.warning("Wind fetch: OM rate limited — backing off %.0fs", RATE_LIMIT_BACKOFF_S)
-            else:
-                self._backoff_until = time.monotonic() + GENERIC_FAILURE_BACKOFF_S
-                log.error("Wind fetch failed: %s — backing off %.0fs",
-                          exc, GENERIC_FAILURE_BACKOFF_S)
-            return None
-        except requests.RequestException as exc:
-            self._backoff_until = time.monotonic() + GENERIC_FAILURE_BACKOFF_S
-            log.error("Wind fetch failed: %s — backing off %.0fs", exc, GENERIC_FAILURE_BACKOFF_S)
-            return None
-        except ValueError as exc:
-            self._backoff_until = time.monotonic() + GENERIC_FAILURE_BACKOFF_S
-            log.error("Wind JSON parse error: %s — backing off %.0fs",
-                      exc, GENERIC_FAILURE_BACKOFF_S)
-            return None
-
-        return self._parse(data, lat, lon, target_time)
 
     def _parse(  # pylint: disable=too-many-locals
         self,

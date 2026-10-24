@@ -28,7 +28,6 @@ from io import BytesIO
 from typing import Optional
 
 import aiohttp
-import requests  # pylint: disable=import-error
 
 try:
     from PIL import Image as _PIL_Image
@@ -53,6 +52,7 @@ from frankenturb.cb import (
 )
 from frankenturb.cb_turbulence import cb_flank_width_nm
 from frankenturb.disk_cache import DiskCache
+from frankenturb.openmeteo import CLIENT as _OM_CLIENT
 from frankenturb.intensity_profile import GustinessProfile, LayeredIntensityProfile
 from fw_cb import (
     WX_DEFAULTS as _WX_DEFAULTS,
@@ -75,18 +75,19 @@ __MY_DISPLAY_NAME__ = 'FrankenWeather'
 __MY_DESCRIPTION__ = 'Dynamic real-world weather zones for PSX using Open-Meteo'
 __version__ = get_version("frankenweather", __file__)
 
-_OM_URL = "https://api.open-meteo.com/v1/forecast"
 _OM_VARS = (
     "temperature_2m,relative_humidity_2m,weather_code,cloud_cover,pressure_msl,"
     "wind_speed_10m,wind_direction_10m,wind_gusts_10m,visibility"
 )
 
 # On-disk caches for zone-weather and enroute-wind Open-Meteo fetches, so
-# restarting frankenweather during development doesn't have to re-fetch
-# data it already had moments ago. Each cache's max age matches the
-# fetch's own existing refresh cadence (_REFRESH_MAX_S / hourly below), so
-# disk persistence never serves data staler than a continuously-running
-# instance already would — it only helps across restarts.
+# restarting frankenweather doesn't have to re-fetch data it already had
+# moments ago. Zone weather counts as fresh for _OM_ZONE_FRESH_S (Open-Meteo's
+# "current" conditions only change every 15 minutes) but is kept for
+# _OM_ZONE_KEEP_S, so the zones can still be updated (new METARs, settings)
+# from older data while Open-Meteo is unreachable.
+_OM_ZONE_FRESH_S = 900.0
+_OM_ZONE_KEEP_S = 24 * 3600.0
 _OM_ZONE_CACHE_PATH = os.path.join(
     os.path.expanduser("~"), ".cache", "frankenweather", "om_zones.json")
 _OM_ENROUTE_CACHE_PATH = os.path.join(
@@ -118,6 +119,15 @@ def _om_pos_key(lat: float, lon: float) -> str:
 # Bucket size for _om_zone_cache_key(), matching CapeFetcher's/WindFetcher's
 # own CACHE_DEG_GRID in frankenturb/ -- see that function's docstring.
 _OM_ZONE_CACHE_DEG_GRID = 1.0
+
+
+def _om_hour_index(data: dict, ts: float) -> Optional[int]:
+    """Return the index of the hour nearest ts in an Open-Meteo reply (unixtime), within 30 min."""
+    times = (data.get("hourly") or {}).get("time") or []
+    if not times or not isinstance(times[0], (int, float)):
+        return None
+    idx = min(range(len(times)), key=lambda i: abs(times[i] - ts))
+    return idx if abs(times[idx] - ts) <= 1800 else None
 
 
 def _om_zone_cache_key(lat: float, lon: float) -> str:
@@ -172,6 +182,12 @@ def _prepare_event_log() -> Optional[str]:
 # fresh Format-A corridor, so PSX's enroute wind keeps drifting with reality
 # even if the crew never requests a new datalink wind uplink.
 _ENROUTE_FETCH_INTERVAL_S = 3600.0     # background refresh cadence ("hourly")
+# Enroute wind downloads cover 2 days (forecast_days=2): served from the
+# on-disk cache for _OM_ENROUTE_FRESH_S (newer forecast runs are out by
+# then), and kept for as long as they cover the current hour, as a fallback
+# while Open-Meteo is unreachable.
+_OM_ENROUTE_FRESH_S = 6 * 3600.0
+_OM_ENROUTE_KEEP_S = 48 * 3600.0
 # Max distance (nm) for matching a live FMC waypoint to a flight-plan snapshot
 # waypoint by coordinates when the names don't match verbatim — e.g. NAT track
 # points, where Format E only carries PSX's own lat/lon-derived name (like
@@ -1833,9 +1849,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
         # On-disk Open-Meteo caches — see _OM_ZONE_CACHE_PATH for why the
         # max age matches each fetch's own existing refresh cadence.
-        self._om_zone_cache = DiskCache(_OM_ZONE_CACHE_PATH, max_age_s=_REFRESH_MAX_S)
-        self._om_enroute_cache = DiskCache(
-            _OM_ENROUTE_CACHE_PATH, max_age_s=_ENROUTE_FETCH_INTERVAL_S)
+        self._om_zone_cache = DiskCache(_OM_ZONE_CACHE_PATH, max_age_s=_OM_ZONE_KEEP_S)
+        self._om_enroute_cache = DiskCache(_OM_ENROUTE_CACHE_PATH, max_age_s=_OM_ENROUTE_KEEP_S)
 
         # Our current desired zone values (zone_num → string)
         self.zone_wx: dict = {}
@@ -2119,6 +2134,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # periodic om_failure_banner_coro() warning so an ongoing outage is
         # never silent, even before/without a full handoff.
         self._last_om_fetch_failed: bool = False
+        # Age of the oldest Open-Meteo zone data used by the last zone update
+        # (cached data while Open-Meteo is unreachable, see _fetch_om_batch())
+        self._om_zone_data_age_s: float = 0.0
+        # True if the last zone update had no Open-Meteo data at all and
+        # used METARs only
+        self._zones_metar_only: bool = False
         # Diagnostic-only: forces _fetch_om_batch() to behave as if every
         # request failed, without touching the network, so the METAR-fallback
         # handoff can be triggered on demand for testing
@@ -3928,11 +3949,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         self._turb_state_changed_event.set()
                     continue
 
-                if self._last_om_fetch_failed:
-                    # Turbulence physics needs real CAPE/OM data regardless of
-                    # whether zone content has a METAR-fallback substitute.
-                    continue
-
                 state, pirep_rec, cape_sample, gairmet_region = await asyncio.gather(
                     loop.run_in_executor(None, self._turb_locked, "engine",
                                          self._turb_engine.compute, lat, lon, alt_ft),
@@ -5371,6 +5387,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self._manual_wx_force_update = True
             self.fmc_changed_event.set()
 
+    def _fake_cb_zone(self, zone_num: int, snap_icao: str) -> bool:
+        """Return True if --fake-cb applies to zone_num (see --fake-cb-only)."""
+        if not self.args.fake_cb_only:
+            return True
+        wanted = {{"DEP": self.fmc_dep_icao, "DST": self.fmc_dst_icao}.get(name, name)
+                  for name in self.args.fake_cb_only}
+        stored_icao = self.zone_positions.get(zone_num, (None, None, None))[2]
+        return bool({stored_icao, snap_icao} & (wanted - {None}))
+
     def _cb_removed_near_airport(self, lat: float, lon: float) -> Optional[str]:
         """Return the dep/dst airport whose CB avoidance removes a CB at (lat, lon), else None.
 
@@ -5985,6 +6010,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         candidates.sort(key=lambda c: c[0])
         return [(icao, alat, alon, dist, raw) for dist, icao, alat, alon, raw in candidates[:n]]
 
+    def _nearest_unused_metar_station(self, lat: float, lon: float,
+                                      used_icaos: set) -> Optional[tuple]:
+        """Return the nearest (icao, lat, lon, dist_nm, raw_metar) not in used_icaos.
+
+        Only stations with a fresh METAR count.
+        """
+        for station in self._nearest_metar_stations(lat, lon, len(used_icaos) + 50):
+            if station[0] not in used_icaos and _metar_is_fresh(station[4]):
+                return station
+        return None
+
     def _apply_metar_to_wxbasic(self, icao: str, raw: str, dist_nm: float) -> None:
         """Ground WxBasic's QNH/temp in the single globally-nearest METAR.
 
@@ -6202,73 +6238,61 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
     # Open-Meteo fetch
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _om_get_sync(url: str, proxies: Optional[dict]) -> tuple:
-        """Run a blocking Open-Meteo GET; intended for run_in_executor.
+    async def _fetch_om_batch(self, positions: list) -> tuple:
+        """Return Open-Meteo weather for each position: (entries, fetch_failed, oldest_s).
 
-        Returns (status_code, json_body_or_None).
+        entries has one dict per position, or None where there's no data at
+        all. Positions with a cache entry younger than _OM_ZONE_FRESH_S are
+        served from the on-disk cache (_OM_ZONE_CACHE_PATH), the rest are
+        fetched in one request. Cache keys are bucketed to a coarse grid
+        (_om_zone_cache_key(), matching frankenturb's CAPE/wind fetcher
+        granularity) rather than exact position, so a relocated zone -- or a
+        different zone landing nearby, common given the ~150-250nm forward
+        placement cone -- also counts as a hit. If the fetch fails, any
+        older cache entry (up to _OM_ZONE_KEEP_S) is used instead, so the
+        zones can still be updated. fetch_failed is True if a fetch was
+        needed and failed; oldest_s is the age of the oldest entry used.
         """
-        r = requests.get(url, proxies=proxies, timeout=30)
-        body = r.json() if r.status_code in (200, 429) else None
-        return r.status_code, body
+        cached = [self._om_zone_cache.get_entry(_om_zone_cache_key(p[0], p[1]))
+                  for p in positions]
+        entries = [c[0] if c else None for c in cached]
+        ages = [c[1] if c else None for c in cached]
+        missing = [i for i, age in enumerate(ages) if age is None or age > _OM_ZONE_FRESH_S]
+        if not missing:
+            return entries, False, max(ages, default=0.0)
+        fetched = await self._fetch_om_positions([positions[i] for i in missing])
+        if fetched is not None:
+            self._om_zone_cache.set_many({
+                _om_zone_cache_key(positions[i][0], positions[i][1]): entry
+                for i, entry in zip(missing, fetched)})
+            for i, entry in zip(missing, fetched):
+                entries[i], ages[i] = entry, 0.0
+        oldest = max((a for a in ages if a is not None), default=0.0)
+        return entries, fetched is None, oldest
 
-    async def _fetch_om_batch(self, positions: list) -> list:  # pylint: disable=too-many-return-statements
-        """Fetch Open-Meteo current weather for all positions. Returns list of dicts.
-
-        Served straight from the on-disk cache when every position already
-        has a still-fresh entry (see _OM_ZONE_CACHE_PATH) — the common case
-        right after a dev restart, when zone positions haven't moved and the
-        cache's max age (matching _REFRESH_MAX_S) hasn't elapsed yet. Cache
-        keys are bucketed to a coarse grid (_om_zone_cache_key(), matching
-        frankenturb's CAPE/wind fetcher granularity) rather than exact
-        position, so a relocated zone -- or a different zone landing nearby,
-        common given the ~150-250nm forward placement cone -- also counts as
-        a hit; this is what lets an Open-Meteo outage keep serving
-        reasonably fresh weather for longer instead of every relocation
-        forcing a fresh (and, during an outage, failing) fetch. Any cache
-        miss falls back to fetching fresh data for the whole batch.
-        """
+    async def _fetch_om_positions(self, positions: list) -> Optional[list]:
+        """Fetch Open-Meteo current weather for positions; a list of dicts, or None if it failed."""
         if self._diag_simulate_om_failure:
             self.logger.warning("Open-Meteo fetch simulated as failed (DIAG)")
-            return []
-        cached = [self._om_zone_cache.get(_om_zone_cache_key(p[0], p[1])) for p in positions]
-        if cached and all(c is not None for c in cached):
-            return cached
-
-        lats = ','.join(f"{p[0]:.4f}" for p in positions)
-        lons = ','.join(
-            f"{max(-180.0, min(180.0, p[1])):.4f}" for p in positions)
-        url = (f"{_OM_URL}?latitude={lats}&longitude={lons}"
-               f"&current={_OM_VARS}&wind_speed_unit=kn&timezone=UTC"
-               f"&hourly=cape,convective_inhibition,temperature_2m,dewpoint_2m,showers"
-               f"&forecast_days=1")
-        proxies = ({'http': self.args.om_proxy, 'https': self.args.om_proxy}
-                   if self.args.om_proxy else None)
-        loop = asyncio.get_running_loop()
-        for attempt in range(2):
-            try:
-                status, body = await loop.run_in_executor(
-                    None, self._om_get_sync, url, proxies)
-            except Exception as exc:  # pylint: disable=broad-exception-caught
-                self.logger.warning("Open-Meteo fetch failed: %s", exc)
-                return []
-            if status == 429:
-                if attempt == 0:
-                    self.logger.warning("Open-Meteo rate limited — sleeping 60s")
-                    await asyncio.sleep(60)
-                    continue
-                self.logger.warning("Open-Meteo still rate limited after retry")
-                return []
-            if status != 200:
-                self.logger.warning("Open-Meteo HTTP %d", status)
-                return []
-            if isinstance(body, dict):
-                body = [body]
-            body = body or []
-            for pos, entry in zip(positions, body):
-                self._om_zone_cache.set(_om_zone_cache_key(pos[0], pos[1]), entry)
-            return body
-        return []
+            return None
+        params = {
+            "latitude": ','.join(f"{p[0]:.4f}" for p in positions),
+            "longitude": ','.join(f"{max(-180.0, min(180.0, p[1])):.4f}" for p in positions),
+            "current": _OM_VARS, "wind_speed_unit": "kn", "timezone": "UTC",
+            "hourly": "cape,convective_inhibition,temperature_2m,dewpoint_2m,showers",
+            "forecast_days": 1,
+        }
+        body = await asyncio.get_running_loop().run_in_executor(
+            None, _OM_CLIENT.get, params, "zones", self.args.om_proxy)
+        if body is None:
+            return None
+        if isinstance(body, dict):
+            body = [body]
+        if len(body) != len(positions):
+            self.logger.warning("Open-Meteo returned %d results for %d positions",
+                                len(body), len(positions))
+            return None
+        return body
 
     @staticmethod
     def _enroute_hpa_levels(fl_list_ft: list) -> list:
@@ -6285,54 +6309,59 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         pinned explicitly (gfs_seamless) since pressure-level fields are not
         guaranteed to be populated under the default best-match model blend.
 
-        Each target's raw response is served from the on-disk cache when
-        still fresh (see _OM_ENROUTE_CACHE_PATH), keyed by position and the
-        current flight-level set (since that determines which pressure
-        levels were requested) — the common case right after a dev restart.
-        Any cache miss falls back to fetching fresh data for the whole batch.
+        Each target's 2-day download is kept in the on-disk cache (see
+        _OM_ENROUTE_CACHE_PATH), keyed by position and the current
+        flight-level set (since that determines which pressure levels were
+        requested), and served from it for _OM_ENROUTE_FRESH_S. Only the
+        targets without fresh data are fetched; if that fails, older data
+        that still covers the current hour is used.
         """
         if not targets:
             return
         fl_list_ft = self._current_fl_list_ft()
         hpa_levels = self._enroute_hpa_levels(fl_list_ft)
         levels_sig = "-".join(str(h) for h in hpa_levels)
+        now_ts = time.time()
 
         def _cache_key(lat: float, lon: float) -> str:
             return f"{_om_pos_key(lat, lon)}|{levels_sig}"
 
-        cached = [self._om_enroute_cache.get(_cache_key(t[2], t[3])) for t in targets]
-        if cached and all(c is not None for c in cached):
-            body = cached
-        else:
-            hourly_vars = ",".join(
-                f"{var}_{hpa}hPa"
-                for hpa in hpa_levels
-                for var in ("temperature", "winddirection", "windspeed"))
-            lats = ','.join(f"{t[2]:.4f}" for t in targets)
-            lons = ','.join(f"{max(-180.0, min(180.0, t[3])):.4f}" for t in targets)
-            url = (f"{_OM_URL}?latitude={lats}&longitude={lons}"
-                   f"&hourly={hourly_vars}&wind_speed_unit=kn&timezone=UTC"
-                   f"&models=gfs_seamless&forecast_days=1")
-            proxies = ({'http': self.args.om_proxy, 'https': self.args.om_proxy}
-                       if self.args.om_proxy else None)
-            loop = asyncio.get_running_loop()
-            try:
-                status, body = await loop.run_in_executor(
-                    None, self._om_get_sync, url, proxies)
-            except Exception as exc:  # pylint: disable=broad-exception-caught
-                self.logger.warning("Enroute wind: Open-Meteo fetch failed: %s", exc)
-                return
-            if status != 200 or not body:
-                self.logger.warning("Enroute wind: Open-Meteo HTTP %s", status)
-                return
-            if isinstance(body, dict):
-                body = [body]
-            for t, loc in zip(targets, body):
-                self._om_enroute_cache.set(_cache_key(t[2], t[3]), loc)
+        cached = [self._om_enroute_cache.get_entry(_cache_key(t[2], t[3])) for t in targets]
+        cached = [c if c and _om_hour_index(c[0], now_ts) is not None else None for c in cached]
+        body = [c[0] if c else None for c in cached]
+        missing = [i for i, c in enumerate(cached) if c is None or c[1] > _OM_ENROUTE_FRESH_S]
+        if missing:
+            params = {
+                "latitude": ','.join(f"{targets[i][2]:.4f}" for i in missing),
+                "longitude": ','.join(
+                    f"{max(-180.0, min(180.0, targets[i][3])):.4f}" for i in missing),
+                "hourly": ",".join(f"{var}_{hpa}hPa" for hpa in hpa_levels
+                                   for var in ("temperature", "winddirection", "windspeed")),
+                "wind_speed_unit": "kn", "timeformat": "unixtime",
+                "models": "gfs_seamless", "forecast_days": 2,
+            }
+            fetched = await asyncio.get_running_loop().run_in_executor(
+                None, _OM_CLIENT.get, params, "enroute", self.args.om_proxy)
+            if isinstance(fetched, dict):
+                fetched = [fetched]
+            if fetched and len(fetched) == len(missing):
+                self._om_enroute_cache.set_many({
+                    _cache_key(targets[i][2], targets[i][3]): loc
+                    for i, loc in zip(missing, fetched)})
+                for i, loc in zip(missing, fetched):
+                    body[i] = loc
+            else:
+                stale = sum(1 for i in missing if body[i] is not None)
+                self.logger.warning(
+                    "Enroute wind: Open-Meteo fetch failed — %d of %d waypoint(s) from "
+                    "older cached data, %d without data", stale, len(missing),
+                    len(missing) - stale)
 
-        hi = datetime.now(timezone.utc).hour
         fl_to_hpa = {fl: _nearest_om_hpa(fl) for fl in fl_list_ft}
         for (idx, name, _lat, _lon), loc in zip(targets, body):
+            hi = _om_hour_index(loc, now_ts) if loc else None
+            if hi is None:
+                continue
             hourly = loc.get("hourly") or {}
             levels = {}
             for fl, hpa in fl_to_hpa.items():
@@ -6643,9 +6672,30 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         raw_metars[i] = fresh
 
         # Fetch Open-Meteo for all 7 zones — CB always comes from OM even for METAR zones
-        om_batch = await self._fetch_om_batch(snap_positions)
-        self._last_om_fetch_failed = not om_batch
-        if not om_batch:
+        om_batch, fetch_failed, oldest_s = await self._fetch_om_batch(snap_positions)
+        self._last_om_fetch_failed = fetch_failed
+        self._om_zone_data_age_s = oldest_s
+        # A zone with neither a METAR nor Open-Meteo data (Open-Meteo
+        # unavailable, nothing cached) goes on the nearest METAR station
+        # instead, chosen again on every update until Open-Meteo is back.
+        for i in range(7):
+            if raw_metars[i] is not None or om_batch[i] is not None:
+                continue
+            station = self._nearest_unused_metar_station(
+                positions[i][0], positions[i][1], used_icaos)
+            if station is None:
+                continue
+            icao, alat, alon, dist_nm, raw = station
+            snap_positions[i] = (alat, alon)
+            snap_icaos[i] = icao
+            raw_metars[i] = raw
+            metar_sources[i] = self._metar_source_label(icao, raw)
+            used_icaos.add(icao)
+            self.logger.info("Zone %d: no Open-Meteo data — using METAR station %s"
+                             " (%.0fnm from the zone's position)", i + 1, icao, dist_nm)
+        no_om_data = all(entry is None for entry in om_batch)
+        self._zones_metar_only = no_om_data and any(raw is not None for raw in raw_metars)
+        if no_om_data and all(raw is None for raw in raw_metars):
             if not self._zones_all_stale():
                 # A temporary outage: the existing (frozen) zone weather is still
                 # geographically relevant, so keep serving it rather than
@@ -6656,7 +6706,25 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 return
             await self._apply_metar_fallback(session)
             return
-        if self._metar_fallback_active:
+        if no_om_data and self._zones_all_stale():
+            await self._apply_metar_fallback(session)
+            return
+        if no_om_data:
+            # METAR zones don't need Open-Meteo (it only refines their CBs),
+            # so keep updating those; any others (no METAR station found)
+            # keep their current weather.
+            self.logger.warning(
+                "Open-Meteo unavailable, nothing cached — updating zones from METARs only%s",
+                "" if all(raw_metars) else
+                f"; no data for zone(s) {[i + 1 for i, r in enumerate(raw_metars) if not r]}")
+        elif fetch_failed:
+            # Still update the zones (new METARs, setting changes) from the
+            # cached data we have
+            self.logger.warning(
+                "Open-Meteo unavailable — updating zones from cached data (oldest %.0f min)%s",
+                oldest_s / 60.0, "" if all(om_batch) else
+                f"; no data at all for zone(s) {[i + 1 for i, e in enumerate(om_batch) if not e]}")
+        elif self._metar_fallback_active:
             self._metar_fallback_active = False
             self.logger.info(
                 "Open-Meteo available again — resuming normal zone placement"
@@ -6670,7 +6738,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             # itself, or the offset gets permanently baked into the cache.
             new_batch = []
             for entry in om_batch:
-                cur = entry.get("current")
+                cur = entry.get("current") if entry else None
                 if cur and "pressure_msl" in cur:
                     entry = dict(entry)
                     entry["current"] = dict(cur)
@@ -6678,7 +6746,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         float(cur["pressure_msl"]) + self._diag_qnh_offset_hpa)
                 new_batch.append(entry)
             om_batch = new_batch
-        om_by_zone: dict = {i: om_batch[i] for i in range(min(len(om_batch), 7))}
+        om_by_zone: dict = {i: entry for i, entry in enumerate(om_batch[:7]) if entry}
 
         # Refresh radar and lightning sources; failures degrade to echo=0 / no lightning
         await self._fetch_rv_frame(session)
@@ -6732,8 +6800,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 elev = float(om.get("elevation", 0)) if om else 0.0
                 new_modes.append(build_wxmode_string(
                     lat, lon, self._stable_zone_elev(i + 1, lat, lon, elev), month, icao))
-                wx = (om_to_wx_string(om, radar_echo=radar_echo, lightning=has_lightning)
-                      if om else ";".join(_WX_DEFAULTS))
+                # No data at all (Open-Meteo unreachable, nothing cached):
+                # keep the zone's current weather rather than defaults
+                if om:
+                    wx = om_to_wx_string(om, radar_echo=radar_echo, lightning=has_lightning)
+                else:
+                    wx = (self.zone_wx.get(i + 1) or
+                          (self.psx.get(f"Wx{i + 1}") if self.psx else None) or
+                          ";".join(_WX_DEFAULTS))
                 new_metars.append(self._station_only_metar(i + 1, icao, now) if om else None)
             if self._own_sigmets_applied:
                 final_wx = self._own_sigmet_cb(wx, (lat, lon), om, f"Zone {i + 1} {icao}")
@@ -6770,7 +6844,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
         if self.args.fake_cb:
             oktas, base_ft, top_ft = self.args.fake_cb
-            new_wxs = [wx if self._is_cb_free_zone(i + 1) or _per_zone[i]['cb_removed_for'] else
+            new_wxs = [wx if (self._is_cb_free_zone(i + 1) or _per_zone[i]['cb_removed_for'] or
+                              not self._fake_cb_zone(i + 1, snap_icaos[i])) else
                        _apply_fake_cb(wx, oktas, base_ft, top_ft)
                        for i, wx in enumerate(new_wxs)]
             self.logger.debug("fake-cb applied: %d oktas, base %dft, top %dft",
@@ -7116,6 +7191,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "fw_mode": self._fw_mode,
             "metar_fallback_active": self._metar_fallback_active,
             "last_om_fetch_failed": self._last_om_fetch_failed,
+            "om_usage": _OM_CLIENT.usage(),
+            "om_backoff_s": round(_OM_CLIENT.backoff_remaining()),
+            "om_zone_data_age_s": round(self._om_zone_data_age_s),
             "vatsim_cache_time": self.vatsim_cache_time or None,
             "noaa_metar_cache_time": self.noaa_metar_cache_time or None,
             "primary_metar_source": self.args.primary_metar_source,
@@ -7241,6 +7319,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
     async def om_failure_banner_coro(self) -> None:
         """Every 30s, print a hard-to-miss banner while the last OM fetch failed.
 
+        Also logs the Open-Meteo usage once an hour.
+
         _last_om_fetch_failed can be True well before (or even without ever
         reaching) the full METAR-fallback handoff -- a fetch can keep failing
         while frankenweather quietly serves frozen zone weather because not
@@ -7249,10 +7329,18 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         ongoing outage impossible to miss on the console.
         """
         myname = inspect.currentframe().f_code.co_name
+        last_usage_log = time.monotonic()
         try:
             self.logger.debug("Starting %s", myname)
             while True:
                 await asyncio.sleep(30.0)
+                if time.monotonic() - last_usage_log >= 3600.0:
+                    last_usage_log = time.monotonic()
+                    usage = _OM_CLIENT.usage()
+                    self.logger.info(
+                        "Open-Meteo usage: %.0f calls last hour, %.0f last 24 h "
+                        "(daily limit 10,000): %s", usage["last_hour"], usage["last_24h"],
+                        ", ".join(f"{k} {v:.0f}" for k, v in usage["by_kind_24h"].items()))
                 if not self._last_om_fetch_failed:
                     continue
                 if self._metar_fallback_active:
@@ -7268,10 +7356,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                             f"{max(remaining, 0.0):.0f}nm short of the "
                             f"{self.args.wxautoset_handoff_dist:.0f}nm METAR-fallback distance"
                         )
+                if self._zones_metar_only:
+                    status = " — zones updated from METARs only" + status
+                elif self._om_zone_data_age_s > 0:
+                    status = (f" — zones updated from cached data "
+                              f"(oldest {self._om_zone_data_age_s / 60.0:.0f} min){status}")
+                else:
+                    status = " — weather not updating" + status
                 self.logger.warning(
                     "\n"
                     "############################################################\n"
-                    "###  OPEN-METEO FETCH FAILING — weather not updating%s\n"
+                    "###  OPEN-METEO FETCH FAILING%s\n"
                     "###  Retrying automatically; this banner repeats every 30s\n"
                     "###  while the outage continues.\n"
                     "############################################################",
@@ -7346,22 +7441,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     # mode only), don't reposition zones — PSX will move them
                     # and we'd overwrite that on recovery. The last known
                     # zone_positions are preserved for STATE broadcasts.
-                    # Also freeze repositioning as soon as the last Open-Meteo
-                    # fetch failed, even before the full METAR-fallback
-                    # handoff: relocating a zone only updates our own internal
-                    # zone_positions bookkeeping (the actual PSX write is
-                    # separately blocked by the failed fetch inside
-                    # _update_zones()), and _zones_all_stale() checks against
-                    # that same bookkeeping -- so an ordinary relocation during
-                    # an outage can silently "un-stale" a zone whose PSX-side
-                    # weather was never actually refreshed, indefinitely
-                    # delaying a handoff that should have happened. Confirmed
-                    # live 2026-09-08. _apply_metar_fallback() itself
-                    # overwrites zone_positions directly once the handoff
-                    # actually fires, bypassing this freeze deliberately.
-                    wx_auto = (self._fw_mode == "disabled" or
-                               self._last_om_fetch_failed)
-                    if wx_auto:
+                    # Zones are still placed while Open-Meteo is unavailable:
+                    # _update_zones() puts a zone it has no data for on the
+                    # nearest METAR station (it used to freeze them, 2026-09-08,
+                    # when relocated zones couldn't be given any weather).
+                    if self._fw_mode == "disabled":
                         any_relocated = False
                     elif not self.zone_positions:
                         self._place_all_zones()
@@ -8110,6 +8194,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             '--fake-cb', type=_parse_cb_arg, default=None, metavar='O:B:T',
             help="Override CB in all zones: O=oktas (0-8), B=base ft, T=top ft "
                  "(e.g. --fake-cb=6:3000:45000).")
+        parser.add_argument(
+            '--fake-cb-only', type=lambda s: [x.strip().upper() for x in s.split(',') if x.strip()],
+            default=None, metavar='ICAO[,ICAO...]',
+            help="With --fake-cb: only fake CBs in the zones of these airports; DEP and DST "
+                 "mean the FMC departure/destination (e.g. --fake-cb-only=DST or "
+                 "--fake-cb-only=EHAM,EHRD).")
         parser.add_argument(
             '--cb-growth', action='store_true',
             help="EXPERIMENTAL: in cruise only, ramp a CB's coverage (oktas) "

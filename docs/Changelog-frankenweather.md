@@ -24,6 +24,31 @@
   codes do: TS, VCTS, recent TS and CB clouds; showers, TCU, trends and
   remarks don't). Config files with the old setting switched on get Move
   zone. Loading a config file now also moves the zone right away.
+- **Change: far fewer Open-Meteo calls, and the zones keep updating
+  while Open-Meteo is unreachable.** On 2026-10-24 testing used up the
+  free API's daily limit (10,000 calls). Reviewed every Open-Meteo request:
+  - The turbulence wind profile (~10 calls per download) downloaded 2
+    days of forecast every hour for the same place and used one hour of
+    it. The whole download is now kept on disk and serves every hour,
+    refreshed after 6 hours; the same for CAPE.
+  - Zone weather was fetched for all 7 zones every 5 minutes and
+    whenever any zone moved. It now counts as fresh for 15 minutes and
+    only zones without fresh data are fetched.
+  - Enroute wind (~70 calls for a long route) was fetched again after
+    every restart and for the whole route when any waypoint changed. It
+    is now kept on disk (2 days) and only new waypoints are fetched.
+  - One shared backoff: after a refusal nobody asks again for 5 minutes.
+  - While Open-Meteo can't be reached, older data is used instead of
+    stopping: zone updates (new METARs, setting changes such as CB near
+    dep/arr) no longer stop, and turbulence no longer switches off.
+    Even with no Open-Meteo data at all, zones keep being placed (including
+    at the departure/destination airport) and are updated from METARs: a
+    zone with no METAR of its own goes on the nearest METAR station.
+  - New: Open-Meteo calls in the last hour/24 hours on the Weather zones
+    page, and in the log once an hour.
+- **New (testing): `--fake-cb-only=ICAO[,ICAO...]`** limits `--fake-cb`
+  to the zones of those airports (`DEP`/`DST` for the FMC departure and
+  destination), e.g. `--fake-cb=6:3000:40000 --fake-cb-only=DST`.
 - **New: METARs given to PSX that aren't real say so** in a remark:
   `RMK FRANKENWX MODEL WX` (Open-Meteo zones, station and time only),
   `RMK FRANKENWX CB REMOVED` (TS/CB removed, see above) and
