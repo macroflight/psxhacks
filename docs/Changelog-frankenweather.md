@@ -24,6 +24,10 @@
   codes do: TS, VCTS, recent TS and CB clouds; showers, TCU, trends and
   remarks don't). Config files with the old setting switched on get Move
   zone. Loading a config file now also moves the zone right away.
+- **Change: wind-shear clear-air turbulence is much less violent.** Its
+  gustiness multiplier is now 0.5-1.2 instead of 0.4-1.6, so it peaks at
+  60% instead of 80% (stronger than a severe TURB SIGMET, which peaks at
+  75%) after a pilot found it far too strong.
 - **Change: far fewer Open-Meteo calls, and the zones keep updating
   while Open-Meteo is unreachable.** On 2026-10-24 testing used up the
   free API's daily limit (10,000 calls). Reviewed every Open-Meteo request:

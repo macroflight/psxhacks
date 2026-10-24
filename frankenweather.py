@@ -311,9 +311,10 @@ _SIGMET_TURB_LAYERS = {"TURB": (2000.0, 300.0), "MTW": (6000.0, 500.0)}
 # 1 (frankenturb/intensity_profile.py GustinessProfile) per family of
 # turbulence kinds (_gust_family()): (low, high, layer_ft, blend_ft).
 # Mountain wave is deep and steady, wind-shear clear-air turbulence thin
-# and variable.
+# and variable. Wind shear was 0.4-1.6 (up to 80% at full shear) until a
+# pilot found it far too strong (2026-10-24); now at most 60%.
 _TURB_GUST = {
-    "shear": (0.4, 1.6, 2000.0, 300.0),
+    "shear": (0.5, 1.2, 2000.0, 300.0),
     "wave": (0.7, 1.3, 6000.0, 500.0),
     "lowlevel": (0.5, 1.5, 2000.0, 300.0),   # rotor, mechanical
     "cape": (0.5, 1.5, 2000.0, 300.0),
