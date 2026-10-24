@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-24: version 1.27.0
+
+- **Change: /efb's "Avoid CB Near Airport" on/off is now "CB Near
+  Dep/Arr": Off / Move zone / Remove CB.** Move zone is the old
+  behaviour; Remove CB (frankenweather 1.14.0 or later, not offered with
+  older ones) removes every CB within 15 nm of the departure or arrival
+  airport.
+
 ## 2026-10-24: version 1.26.0
 
 - **New: `/api/sigmet/latest/json` on the router's web port**: the
@@ -10,12 +18,6 @@
   message (about 30 KB, lzma-compressed), which the router keeps and
   forwards only to other frankenrouters (upstream only when upstream is
   a frankenrouter), never to other clients.
-- **Change: /efb's "Avoid CB Near Airport" on/off is now "CB Near
-  Dep/Arr": Off / Move zone / Remove CB.** Move zone is the old
-  behaviour; Remove CB (frankenweather 1.13.0 or later, not offered with
-  older ones) removes every CB within 15 nm of the departure or arrival
-  airport.
-
 ## 2026-10-24: version 1.25.0
 
 - **New: PIREP button on /efb**, a bit like asking ATC for ride

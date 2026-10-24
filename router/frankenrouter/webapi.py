@@ -1658,7 +1658,7 @@ def _efb_status_dict(router, ctx):  # pylint: disable=too-many-locals
         'fw_mode': (state or {}).get('fw_mode', 'unknown'),
         'enroute_wind_enabled': bool(cfg.get('enroute_wind_enabled', False)),
         # (mode, has_modes): has_modes False for FrankenWeather before
-        # 1.13.0, which can only move the zone
+        # 1.14.0, which can only move the zone
         'cb_airport_mode': _fw_webui.cb_airport_mode(cfg),
         'cb_airport_clearance_nm': cfg.get('cb_airport_clearance_nm', 15),
         'disable_psx_sigmets': bool(cfg.get('disable_psx_sigmets', False)),
@@ -1782,7 +1782,7 @@ def _efb_weather_mode_row(current):
 def _efb_cb_airport_mode_row(w):
     """Render the Off/Move zone/Remove CB chip row (fw_webui.CB_AIRPORT_MODES).
 
-    Remove CB is only offered by FrankenWeather 1.13.0 or later.
+    Remove CB is only offered by FrankenWeather 1.14.0 or later.
     """
     current, has_modes = w['cb_airport_mode']
     chips = ''.join(
