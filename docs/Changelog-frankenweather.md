@@ -1,17 +1,7 @@
 # frankenweather changelog
 
-## 1.13.0 (2026-10-24)
+## 1.14.0 (2026-10-24)
 
-- **New (`--sigmet`): the parsed SIGMETs go to the routers too**, for
-  shared cockpit: after every download and setting change and every 5
-  minutes, frankenweather sends `/api/sigmet/latest/json` to the PSX
-  network as `addon=FRANKENWEATHER:SIGMETJSON:<uuid>:<payload>` (compact
-  JSON, lzma-compressed and base64-encoded, about 30 KB for 180
-  SIGMETs). Every frankenrouter (1.26.0 or later) serves it as
-  `/api/sigmet/latest/json` on its own web port.
-- **Change: `/api/sigmet/latest/json` has `generated_at` and
-  `generated_at_utc`**: when it was put together, so "expired" and
-  "used_by" are as of then.
 - **New: "Avoid CB near departure/destination" is now "CB near dep/arr"
   with three modes: Off, Move zone and Remove CB.** Move zone is the
   old behaviour: the airport's zone moves 23 nm north, so its CB stays
@@ -62,6 +52,18 @@
   `RMK FRANKENWX CB REMOVED` (TS/CB removed, see above) and
   `RMK FRANKENWX QNH SYNC` (QNH changed by MSFS QNH sync).
 
+## 1.13.0 (2026-10-24)
+
+- **New (`--sigmet`): the parsed SIGMETs go to the routers too**, for
+  shared cockpit: after every download and setting change and every 5
+  minutes, frankenweather sends `/api/sigmet/latest/json` to the PSX
+  network as `addon=FRANKENWEATHER:SIGMETJSON:<uuid>:<payload>` (compact
+  JSON, lzma-compressed and base64-encoded, about 30 KB for 180
+  SIGMETs). Every frankenrouter (1.26.0 or later) serves it as
+  `/api/sigmet/latest/json` on its own web port.
+- **Change: `/api/sigmet/latest/json` has `generated_at` and
+  `generated_at_utc`**: when it was put together, so "expired" and
+  "used_by" are as of then.
 ## 1.12.1 (2026-10-24)
 
 - **New (`--sigmet`): the downloaded SIGMETs on frankenweather's own web

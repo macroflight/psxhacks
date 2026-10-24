@@ -3429,7 +3429,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             if key in cb_avoidance:
                 setattr(self, attr, cast(cb_avoidance[key]))
         if "mode" not in cb_avoidance and "avoid_cb_near_airport" in cb_avoidance:
-            # Config files before 1.13.0: on meant moving the airport zone
+            # Config files before 1.14.0: on meant moving the airport zone
             self._cb_airport_mode = "move" if cb_avoidance["avoid_cb_near_airport"] else "off"
         if self._cb_airport_mode not in _CB_AIRPORT_MODES:
             self._cb_airport_mode = "off"

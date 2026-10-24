@@ -93,7 +93,7 @@ CB_AIRPORT_MODES = (
 def cb_airport_mode(cfg: dict):
     """Return frankenweather's cb_airport_mode from its STATE config dict.
 
-    Before 1.13.0 frankenweather only had avoid_cb_near_airport (on meant
+    Before 1.14.0 frankenweather only had avoid_cb_near_airport (on meant
     moving the zone). Returns (mode, has_modes): has_modes False for such
     an older frankenweather, which can't remove CBs.
     """
@@ -106,7 +106,7 @@ def cb_airport_mode_command(mode: str):
     """Return the frankenweather settings command for a cb_airport_mode, or None.
 
     Also carries the on/off avoid_cb_near_airport that frankenweather
-    before 1.13.0 understands (where on means moving the zone).
+    before 1.14.0 understands (where on means moving the zone).
     """
     if mode not in [m for m, _label, _hint in CB_AIRPORT_MODES]:
         return None
@@ -2317,7 +2317,7 @@ _SIGMET_HANDLE_TYPES = {
 
 
 def _om_usage_row(state: dict) -> str:
-    """Return the status card's Open-Meteo usage row ('' for frankenweather before 1.13.0)."""
+    """Return the status card's Open-Meteo usage row ('' for frankenweather before 1.14.0)."""
     usage = state.get('om_usage')
     if not usage:
         return ''
