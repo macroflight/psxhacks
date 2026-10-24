@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-24: version 1.26.0
+
+- **New: `/api/sigmet/latest/json` on the router's web port**: the
+  parsed SIGMET download of frankenweather 1.13.0 (with `--sigmet`), the
+  same JSON frankenweather serves on its own web port (up to 5 minutes
+  old), so it can be fetched from any router in a shared cockpit. It
+  comes from frankenweather's new `addon=FRANKENWEATHER:SIGMETJSON:`
+  message (about 30 KB, lzma-compressed), which the router keeps and
+  forwards only to other frankenrouters (upstream only when upstream is
+  a frankenrouter), never to other clients.
+
 ## 2026-10-24: version 1.25.0
 
 - **New: PIREP button on /efb**, a bit like asking ATC for ride
