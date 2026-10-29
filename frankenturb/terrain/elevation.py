@@ -21,7 +21,14 @@ log = logging.getLogger(__name__)
 
 # Copernicus GLO-30 tiles: 3600×3600 pixels per 1°×1° cell.
 PIXELS_PER_DEGREE = 3600
-NODATA = -32768  # int16 sentinel used in Copernicus tiles
+# Loaded tiles are held as int16 (whole metres), this value for no data.
+# The files themselves are float32 (to fractions of a metre), but float32
+# took 52 MB a tile in memory, 9 tiles about 470 MB; int16 takes half that,
+# and the terrain is only sampled every 400-600 m anyway (upwind profile,
+# roughness), where half a metre makes no difference.
+NODATA = -32768
+# GDAL block cache while reading a tile (MB): a few of its 1024×1024 blocks
+_GDAL_CACHE_MB = 16
 
 # Rough metres per degree of latitude (constant); longitude varies with cos(lat).
 M_PER_DEG_LAT = 111_320.0
@@ -38,7 +45,8 @@ class _Tile:  # pylint: disable=too-few-public-methods
     __slots__ = ("name", "data", "lat0", "lon0")
 
     def __init__(self, name: str, data: np.ndarray, lat0: int, lon0: int):
-        # data shape: (3600, 3600), float32, NaN for no-data.
+        # data shape: (3600, 3600) (fewer columns at high latitudes),
+        # int16 metres, NODATA for no data.
         # lat0/lon0: SW corner (integer degrees).
         self.name = name
         self.data = data
@@ -60,7 +68,7 @@ class ElevationGrid:
     """On-demand terrain elevation backed by a TileCache.
 
     Tiles are loaded into memory on first access and kept in an LRU cache.
-    At ~26 MB each (3600×3600 float32), 9 tiles ≈ 235 MB — enough to cover
+    At ~26 MB each (3600×3600 int16), 9 tiles ≈ 235 MB — enough to cover
     a 3°×3° region centred on the aircraft.
 
     Parameters
@@ -122,11 +130,17 @@ class ElevationGrid:
         except ImportError as exc:
             raise ImportError("rasterio is required: pip install rasterio") from exc
 
-        with rasterio.open(path) as ds:
-            raw = ds.read(1)  # int16
-
-        data = raw.astype(np.float32)
-        data[raw == NODATA] = np.nan
+        # Read block by block straight into the int16 array: reading the
+        # whole float32 tile and converting it briefly needed about 117 MB
+        # (the tile, a copy and a mask) on top of the tiles already loaded.
+        # GDAL's block cache would otherwise keep every block read (the
+        # whole float32 tile) until the file is closed.
+        with rasterio.Env(GDAL_CACHEMAX=_GDAL_CACHE_MB), rasterio.open(path) as ds:
+            data = np.empty((ds.height, ds.width), dtype=np.int16)
+            for _, window in ds.block_windows(1):
+                block = ds.read(1, window=window)
+                rows, cols = window.toslices()
+                data[rows, cols] = np.where(np.isnan(block), NODATA, np.rint(block))
         log.debug("Loaded tile %s (%.1f MB)", name, data.nbytes / 1e6)
         return _Tile(name, data, lat0, lon0)
 
@@ -360,7 +374,7 @@ class ElevationGrid:
 def _bilinear_batch(data: np.ndarray, rows: np.ndarray, cols: np.ndarray) -> np.ndarray:
     """Vectorised bilinear interpolation at multiple (row, col) positions.
 
-    Returns NaN wherever any of the four corner samples is NaN.
+    Returns NaN wherever any of the four corner samples has no data.
     """
     r0 = np.clip(rows.astype(np.intp), 0, data.shape[0] - 1)
     c0 = np.clip(cols.astype(np.intp), 0, data.shape[1] - 1)
@@ -376,14 +390,14 @@ def _bilinear_batch(data: np.ndarray, rows: np.ndarray, cols: np.ndarray) -> np.
               v01 * (1 - dr) * dc +
               v10 * dr * (1 - dc) +
               v11 * dr * dc)
-    result[np.isnan(v00) | np.isnan(v01) | np.isnan(v10) | np.isnan(v11)] = np.nan
+    result[(v00 == NODATA) | (v01 == NODATA) | (v10 == NODATA) | (v11 == NODATA)] = np.nan
     return result.astype(np.float32)
 
 
 def _bilinear(data: np.ndarray, row: float, col: float) -> float:
     """Perform bilinear interpolation on a 2-D array at fractional (row, col).
 
-    Returns NaN if any of the four corner samples are NaN.
+    Returns NaN if any of the four corner samples has no data.
     """
     r0 = max(0, min(int(row), data.shape[0] - 1))
     c0 = max(0, min(int(col), data.shape[1] - 1))
@@ -393,12 +407,12 @@ def _bilinear(data: np.ndarray, row: float, col: float) -> float:
     dr = row - r0
     dc = col - c0
 
-    v00 = data[r0, c0]
-    v01 = data[r0, c1]
-    v10 = data[r1, c0]
-    v11 = data[r1, c1]
+    v00 = float(data[r0, c0])
+    v01 = float(data[r0, c1])
+    v10 = float(data[r1, c0])
+    v11 = float(data[r1, c1])
 
-    if np.isnan(v00) or np.isnan(v01) or np.isnan(v10) or np.isnan(v11):
+    if NODATA in (v00, v01, v10, v11):
         return np.nan
 
     return float(

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Change: terrain uses half the memory.** Terrain tiles are held in
+  memory as whole metres (int16) instead of float32: 26 MB a tile instead
+  of 52, up to about 235 MB instead of 470 for the 9 tiles kept. Loading a
+  tile no longer briefly needs about 110 MB extra. Elevations differ by at
+  most half a metre; the terrain is sampled every 400-600 m. Tiles already
+  downloaded are used as they are.
 - **Testing profile: realistic turbulence, with rare events.** The
   continuous turbulence is now at most light chop; in a SEV TURB SIGMET
   it is mostly light chop (about 0.1 g), smooth about a fifth of the
