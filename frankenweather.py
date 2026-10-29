@@ -4098,16 +4098,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 for sig_s in (mtw_state, sigmet_state):
                     if sig_s is not None and _eff(sig_s) > _eff(state):
                         state = sig_s
-                # What drives the chosen state's intensity over time. An
-                # MTW SIGMET only does when it's stronger than the terrain
-                # model's own (gusty) wave (see _sigmet_turbulence()).
+                # What drives the chosen state's intensity over time (an
+                # MTW state only exists when it outweighs the terrain
+                # model's own wave, see _sigmet_turbulence())
                 for sig_s, hazard in ((sigmet_state, "TURB"), (mtw_state, "MTW")):
                     if sig_s is not None:
-                        drivers[id(sig_s)] = (
-                            (f"{hazard} SIGMET", self._sigmet_turb_profiles[hazard],
-                             self._sigmet_turb_scale.get(hazard, 1.0))
-                            if hazard == "TURB" or sig_s.intensity > terrain_state.intensity
-                            else terrain_driver)
+                        drivers[id(sig_s)] = (f"{hazard} SIGMET",
+                                              self._sigmet_turb_profiles[hazard],
+                                              self._sigmet_turb_scale.get(hazard, 1.0))
                 self._turb_driver = drivers.get(id(state))
                 self._turb_driver_alt_ft = alt_ft
                 # Announced when a new ramp starts, when it ends and on a
@@ -4497,17 +4495,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 reason=f"{entry['qualifier']} TURB SIGMET {entry['fir']} {entry['series']}")
         if "MTW" in best:
             intensity, entry = best["MTW"]
-            label = f"{entry['qualifier']} MTW SIGMET {entry['fir']} {entry['series']}"
-            # Kind "mtw": wave-like bursts, but the SIGMET settings apply
-            # (they used to be the mountain wave's)
-            if terrain_state.kind in ("wave", "rotor"):
-                mtw_state = dataclasses.replace(
-                    terrain_state, intensity=max(terrain_state.intensity, intensity),
-                    kind="mtw", reason=f"{terrain_state.reason} + {label}")
-            else:
-                mtw_state = TurbulenceState(
-                    intensity=intensity, kind="mtw",
-                    reason=f"{label} (no terrain wave found)")
+            mtw_state = self._mtw_state(
+                terrain_state, intensity,
+                f"{entry['qualifier']} MTW SIGMET {entry['fir']} {entry['series']}")
         return turb_state, mtw_state
 
     def _turb_ramp_status(self) -> Optional[dict]:
@@ -4519,6 +4509,25 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         so they match active_intensity. ramp_end/hold_end are epoch times,
         so the router can count down between TURBSTATE messages.
         """
+    def _mtw_state(self, terrain_state: TurbulenceState, intensity: float,
+                   label: str) -> Optional[TurbulenceState]:
+        """Return an MTW SIGMET's turbulence, or None if the terrain's own outweighs it.
+
+        Kind "mtw": wave-like bursts, but the SIGMET settings apply. Over the
+        terrain model's own wave/rotor the stronger of the two (after their
+        settings) wins and keeps its own kind and settings: taking the
+        terrain's turbulence over as "mtw" made the SIGMET settings control
+        it, and gave a rotor wave bursts.
+        """
+        if terrain_state.kind not in ("wave", "rotor"):
+            return TurbulenceState(intensity=intensity, kind="mtw",
+                                   reason=f"{label} (no terrain wave found)")
+        if (terrain_state.intensity * self._turb_type_effective_bias(terrain_state.kind) >=
+                intensity * self._turb_type_effective_bias("mtw")):
+            return None
+        return dataclasses.replace(terrain_state, intensity=intensity, kind="mtw",
+                                   reason=f"{label} (over {terrain_state.reason})")
+
         if self._turb_driver is None:
             return None
         name, profile, scale = self._turb_driver
