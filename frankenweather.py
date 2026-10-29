@@ -973,8 +973,8 @@ def _without_cb(wx_str: str) -> str:
     on the radar while the aircraft is in the planet zone (test sim
     2026-10-28: not at all while it's in one of our 7 zones). CBs there would
     be unintended ones the moment the aircraft leaves our zones, so the
-    planet zone never gets any from us (a copy of zone 1, manual weather,
-    MSFS cloud sync).
+    planet zone never gets any from us (a copy of zone 1, manual weather;
+    MSFS sync doesn't write it at all).
     """
     fields = wx_str.split(";")
     if len(fields) > 9 and fields[9] not in ("0", ""):
@@ -5763,7 +5763,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         return max(1, round(8 * time_frac))
 
     def _apply_msfs_sync(self) -> None:  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
-        """Apply MSFS→PSX sync for the focused zone: clouds and/or QNH."""
+        """Apply MSFS→PSX sync for the focused zone: clouds and/or QNH.
+
+        Only one of our 7 zones, never the planet zone (WxBasic).
+        """
         need_cloud = self._msfs_in_cloud_sync and self.msfs_in_cloud is not None
         need_qnh = True
         if not need_cloud and not need_qnh:
@@ -5775,8 +5778,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             if bridge_age > _MSFS_BRIDGE_TIMEOUT_S:
                 self.logger.debug("MSFS bridge data stale (%.0fs), skipping sync", bridge_age)
                 return
-        zone_key = "WxBasic" if self.focused_zone == 0 else f"Wx{self.focused_zone}"
-        metar_zone_num = max(self.focused_zone, 1)
+        if self.focused_zone == 0:
+            # Only our 7 zones: the planet zone (WxBasic) is outside them and
+            # gets nothing from MSFS (see _without_cb() for why it stays quiet)
+            self.logger.debug("MSFS sync skipped: the aircraft is in the planet zone")
+            return
+        zone_key = f"Wx{self.focused_zone}"
+        metar_zone_num = self.focused_zone
         wx = self.psx.get(zone_key) if self.psx else None
         if not wx:
             return
@@ -5864,8 +5872,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.cloud_sync_last_alt_ft = self.ac_alt_ft
             self.last_write_time = time.time()
             new_wx = ";".join(data)
-            if zone_key == "WxBasic":
-                new_wx = _without_cb(new_wx)
             self.psx_send_and_set(zone_key, new_wx)
             self.zone_wx[self.focused_zone] = new_wx
 

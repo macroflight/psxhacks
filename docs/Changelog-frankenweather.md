@@ -17,6 +17,8 @@
   is always 0: frankenweather never writes CBs there, and sets the
   coverage back to 0 whenever anything else does (only that field changes,
   also in flight).
+  MSFS sync (clouds, QNH) no longer writes the planet zone at all, only
+  frankenweather's 7 weather zones.
 - **New: `--turb-profile stable|testing`** chooses the turbulence profile
   from the command line (e.g. in a start script). It overrides the
   configuration file's `[turbulence] profile`; the file only changes if
