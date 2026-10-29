@@ -173,6 +173,26 @@ pedal axis, produce a large sustained acceleration on the takeoff roll
 - **Workaround:** fix the client's axis config.
 - **Request:** clamp or reject negative brake values.
 
+### The autopilot holds full nose-up through a stall, all the way down
+
+*Suspected (2026-10-28).* In strong turbulence at FL350 (60% mountain
+wave, test sim, frankenweather off, recorded burst sequence replayed),
+the autopilot in ALT HOLD pitched up to hold altitude while the thrust
+was at its limit, the speed bled away and the aircraft stalled. From
+then on the autopilot stayed engaged and commanded full nose-up
+(ApServo elevator +999) for over three minutes, at about 47° pitch and
+up to ~60° bank, until the aircraft reached the sea. No disconnect, no
+warning that ended it. Reproduced twice with different burst sequences.
+
+- **Cost:** a turbulence encounter the crew doesn't react to ends in the
+  ocean with the autopilot still on.
+- **Workaround:** frankenweather's testing profile keeps wave turbulence
+  below 50% and has no bank/gust bursts in wave.
+- **To check first:** what a real 747-400 autopilot does in a stall (it
+  has no envelope protection; does it disconnect, and when?).
+- **Request:** if the real one disconnects (stall warning, attitude or
+  servo limits), PSX should too.
+
 ### Momentary switches stay held if the release is lost
 
 *Confirmed (2026-08-09).* PSX treats momentary switches (e.g. `Qh147`/
