@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-24: version 1.28.0
+
+- **Change: /efb shows the turbulence intensity that's actually
+  injected**, with FrankenWeather's intensity settings and MSFS in-cloud
+  factor applied (from frankenweather 1.16.0; the computed intensity
+  with older versions).
+
 ## 2026-10-24: version 1.27.0
 
 - **Change: /efb's "Avoid CB Near Airport" on/off is now "CB Near
