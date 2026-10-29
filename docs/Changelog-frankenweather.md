@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Fix: frankenweather's wind corridor came back late after a situation
+  load.** When another client or a situ replaced it, frankenweather
+  rebuilt the same corridor but didn't resend it until the wind data
+  changed (up to an hour). Now it's back within seconds.
 - **New: the log shows PSX's own turbulence.** Once a minute, next to
   frankenweather's burst summary, a line counts the turbulence bursts
   frankenweather didn't send (normally PSX's own, in and near CBs, in

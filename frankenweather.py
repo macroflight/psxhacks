@@ -4753,6 +4753,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._waypoint_passed = set()
         self._waypoint_om_wind = {}
         self._enroute_next_fetch_time = 0.0
+        # PSX no longer has our corridor: send the next one even if it's
+        # the same as our last (it used to stay the situ's until the wind
+        # data changed)
+        self._enroute_last_corridor_txt = None
         self._enroute_wind_changed_event.set()
 
     def _apply_wind_injection(self) -> None:
