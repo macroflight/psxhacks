@@ -79,6 +79,21 @@ yet isolated).
 - **Request:** keep the random deviation stable (or drift it smoothly)
   across corridor updates.
 
+### Malformed corridor text can be adopted, with the error shown only in PSX's UI
+
+*Confirmed (2026-10-17).* A `WxCorridorTxt` write with a malformed record
+was sometimes discarded (the previous corridor kept) and sometimes
+adopted as the live value while PSX's UI showed a parse error. No network
+variable reports the error (`DispatchError`, Qs455, didn't change).
+
+- **Cost:** an addon can't tell that PSX is flying with a bad corridor,
+  i.e. silently wrong winds and fuel predictions.
+- **Workaround:** frankenweather builds Format-A records with fixed-width
+  encoders (`wind_corridor.encode_wind_a()`); waypoint names are not yet
+  validated.
+- **Request:** reject a malformed corridor consistently, and expose
+  corridor parse errors as a network variable.
+
 ### Adding or removing corridor points makes a wind spike
 
 *Confirmed (2026-10-27, 10,000 ft).* Adding or removing waypoints near the
