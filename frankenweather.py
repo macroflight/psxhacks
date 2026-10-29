@@ -311,6 +311,21 @@ _SIGMET_TURB_QUALIFIER_SCALE = {"SEV": 1.0, "MOD": 2.0 / 3.0}
 # side of a boundary), per type: TURB is mostly thin clear-air turbulence
 # layers, a mountain wave is much deeper, so a level change helps less.
 _SIGMET_TURB_LAYERS = {"TURB": (2000.0, 300.0), "MTW": (6000.0, 500.0)}
+# Testing profile: turbulence everywhere inside a TS/TC SIGMET area, below
+# its top, between the zones' CBs (see _sigmet_convective_turbulence()):
+# the zones' CB turbulence only reaches half way to the next zone, so a
+# whole FRQ TS area at FL350 was smooth (flight test 2026-10-25). Varies like
+# a TURB SIGMET's (TURB layers), scaled by the SIGMET's wording, on top of
+# a floor: the TURB levels alone left a FRQ TS area at FL350 at 0-2 % for
+# minutes (flight test 2026-10-25). It's the air between the cells (the
+# zones' CB turbulence is the cells): mostly light, a FRQ area 10-36 %;
+# 15 % + 70 % of the level gave a sustained 45 %, too much for a large area
+# (user). Qualifier -> (floor, scale).
+_SIGMET_CONV = {"ISOL": (0.03, 0.15), "OCNL": (0.06, 0.25), "FRQ": (0.10, 0.35),
+                "EMBD": (0.10, 0.35), "OBSC": (0.08, 0.30), "SQL": (0.12, 0.45),
+                "CONVECTIVE": (0.08, 0.30)}
+_SIGMET_CONV_DEFAULT = (0.06, 0.25)
+_SIGMET_CONV_TC = (0.12, 0.45)
 # Gustiness of physically computed turbulence: a layered multiplier around
 # 1 (frankenturb/intensity_profile.py GustinessProfile) per family of
 # turbulence kinds (_gust_family()): (low, high, layer_ft, blend_ft).
@@ -2089,6 +2104,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                                        blend_ft=_SIGMET_TURB_LAYERS[h][1])
             for h in _fw_sigmet.TURB_HAZARDS}
         self._sigmet_turb_alt_ft: float = 0.0
+        # Testing profile: the varying level of TS/TC area turbulence
+        self._sigmet_conv_profile = LayeredIntensityProfile(
+            layer_ft=_SIGMET_TURB_LAYERS["TURB"][0], blend_ft=_SIGMET_TURB_LAYERS["TURB"][1])
         # The TURB/MTW SIGMET areas at the aircraft's position, for PIREPs:
         # [(hazard, lateral factor, entry)], see _sigmet_turbulence()
         self._sigmet_turb_areas: list = []
@@ -4224,6 +4242,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 for sig_s in (mtw_state, sigmet_state):
                     if sig_s is not None and _eff(sig_s) > _eff(state):
                         state = sig_s
+                conv_state = None
+                conv = self._sigmet_convective_turbulence(lat, lon, alt_ft)
+                if conv is not None:
+                    conv_state = conv[0]
+                    drivers[id(conv_state)] = ("TS SIGMET", self._sigmet_conv_profile, conv[1])
+                    if _eff(conv_state) > _eff(state):
+                        state = conv_state
                 # What drives the chosen state's intensity over time (an
                 # MTW state only exists when it outweighs the terrain
                 # model's own wave, see _sigmet_turbulence())
@@ -4266,7 +4291,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
                 all_sources = []
                 for src_s in [terrain_state, cb_state, pirep_state, cape_state, bl_state,
-                              gairmet_state, sigmet_state, mtw_state]:
+                              gairmet_state, sigmet_state, mtw_state, conv_state]:
                     if src_s is None or src_s.intensity < 0.01:
                         continue
                     src_eff = min(1.0, src_s.intensity * self._turb_intensity_bias *
@@ -4628,6 +4653,44 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 terrain_state, intensity,
                 f"{entry['qualifier']} MTW SIGMET {entry['fir']} {entry['series']}")
         return turb_state, mtw_state
+
+    def _sigmet_convective_turbulence(self, lat: float, lon: float,
+                                      alt_ft: float) -> Optional[tuple]:
+        """Return (state, scale) for the TS/TC SIGMET area at the aircraft, or None (testing).
+
+        Only in the testing profile, while frankenweather handles the TS/TC
+        SIGMETs (--sigmet): their CBs are in at most a few zones, whose CB
+        turbulence reaches only half way to the next zone, so flying
+        through a big FRQ TS area was mostly smooth. Inside the area,
+        below its top, faded in near its edges like a TURB SIGMET, a
+        floor plus a varying level (_sigmet_conv_profile) scaled, both by
+        the SIGMET's wording (_SIGMET_CONV, TC: _SIGMET_CONV_TC); the
+        strongest area wins. Kind
+        "sigmet": the SIGMET turbulence settings apply. The zones' own CB
+        turbulence still applies where it's stronger.
+        """
+        if not (self._turb_testing() and self._own_sigmets_applied):
+            return None
+        level = self._sigmet_conv_profile.value(alt_ft)
+        best, entry, scale = 0.0, None, 0.0
+        for candidate in self._own_sigmet_entries:
+            if (not candidate["ok"] or candidate["hazard"] not in _fw_sigmet.CB_HAZARDS or
+                    not self._sigmet_handle.get(candidate["hazard"])):
+                continue
+            factor = (self._sigmet_turb_lateral(lat, lon, candidate) *
+                      self._sigmet_turb_vertical(alt_ft, candidate))
+            floor, cand_scale = (_SIGMET_CONV_TC if candidate["hazard"] == "TC" else
+                                 _SIGMET_CONV.get(candidate["qualifier"], _SIGMET_CONV_DEFAULT))
+            intensity = factor * (floor + cand_scale * level)
+            if intensity > best:
+                best, entry, scale = intensity, candidate, factor * cand_scale
+        if entry is None:
+            return None
+        label = f"{entry['qualifier']} {entry['hazard']}".strip()
+        return (TurbulenceState(
+            intensity=best, kind="sigmet",
+            reason=f"{label} SIGMET {entry['fir']} {entry['series']} (convective, testing)"),
+            scale)
 
     def _mtw_state(self, terrain_state: TurbulenceState, intensity: float,
                    label: str) -> Optional[TurbulenceState]:

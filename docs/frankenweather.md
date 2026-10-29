@@ -554,6 +554,16 @@ normal turbulence. What testing changes:
   out above it. At most 20%, light bumps: PSX's own gusts (from the
   METAR) already shake the aircraft on a windy day.
   The console's reason says "Boundary layer: ... (testing)".
+- **Turbulence inside TS/TC SIGMET areas** (with `--sigmet`, TS/TC
+  handled): the zones' CBs only cover part of a big thunderstorm area,
+  so flying through one was mostly smooth. Now, everywhere inside the
+  area below its top, faded in near its edges, a minimum plus a level
+  that varies like a TURB SIGMET's, both by the SIGMET's wording:
+  ISOL 3% + 15% of it, OCNL 6% + 25%, FRQ/EMBD 10% + 35% (10-36%), SQL
+  and TC 12% + 45%: the air between the cells, mostly light and never
+  smooth. The cells themselves are the zones' CBs, whose own turbulence still applies
+  where it's stronger. It uses the SIGMET turbulence settings; the reason
+  says "... SIGMET ... (convective, testing)".
 
 ### Turbulence gustiness and PIREPs
 
