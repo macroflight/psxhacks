@@ -1,5 +1,13 @@
 # start_scripts changelog
 
+## 1.10.1 (2026-10-29)
+
+- **Docs: choosing FrankenWeather's turbulence profile.**
+  `psxhacks-start-override-EXAMPLE.ps1` shows how to add
+  `--turb-profile=testing` (or `stable`) to `$FrankenweatherOptions`,
+  which overrides the profile saved in FrankenWeather's config file.
+  Needs FrankenWeather 2.0.0 or later.
+
 ## 1.10.0 (2026-10-16)
 
 - **New addon: PSX-WINCTRL-PFPx** (a third-party bridge between a
