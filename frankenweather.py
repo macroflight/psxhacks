@@ -6479,7 +6479,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "latitude": ','.join(f"{p[0]:.4f}" for p in positions),
             "longitude": ','.join(f"{max(-180.0, min(180.0, p[1])):.4f}" for p in positions),
             "current": _OM_VARS, "wind_speed_unit": "kn", "timezone": "UTC",
-            "hourly": "cape,convective_inhibition,temperature_2m,dewpoint_2m,showers",
+            # precipitation: om_cb_fields()'s fallback for WMO thunderstorms
+            "hourly": "cape,convective_inhibition,temperature_2m,dewpoint_2m,showers,precipitation",
             "forecast_days": 1,
         }
         body = await asyncio.get_running_loop().run_in_executor(
