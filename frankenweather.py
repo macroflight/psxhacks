@@ -955,8 +955,6 @@ def _metar_age_text(age_h: Optional[float]) -> str:
     return "undated" if age_h is None else f"{age_h:.0f}h old"
 
 
-_WIND_UPDATE_INTERVAL_S = 60.0
-
 _SIGMET_HAZARDS = frozenset({'TS', 'TURB', 'ICE', 'VA', 'TC', 'MTW'})
 _SIGMET_COORD_RE = re.compile(r'([NS])(\d{2})(\d{2})\s*([EW])(\d{3})(\d{2})')
 _SIGMET_COORD_GAP_MAX = 12            # max chars between coords still one polygon
@@ -1779,7 +1777,6 @@ _TURB_TYPES = ('wave', 'rotor', 'mechanical', 'shear', 'cb', 'pirep', 'cape', 'g
 _CONFIG_MSFS_FIELDS = (
     ("in_cloud_sync", "_msfs_in_cloud_sync", bool),
     ("qnh_check", "_msfs_qnh_check", str),
-    ("wind_sync", "_msfs_wind_sync", bool),
 )
 _CONFIG_ENROUTE_WIND_FIELDS = (
     ("enabled", "_enroute_wind_enabled", bool),
@@ -2166,8 +2163,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._enroute_waypoints: list = []        # persistent per-flight superset, same shape
         self._enroute_wind_enabled: bool = True    # on by default; can be disabled from the web UI
         self._enroute_wind_deviation: int = 30     # Qs497 Random slider position x 10, 0-80
-        # Exact text of the last corridor we ourselves sent (MSFS wind sync or
-        # the enroute wind importer) — compared by value, not time, in
+        # Exact text of the last corridor we ourselves sent (the enroute
+        # wind importer) — compared by value, not time, in
         # _handle_corridor to tell our own echo apart from an external load.
         self._corridor_last_own_value: Optional[str] = None
         self._corridor_snapshot_txt: Optional[str] = None
@@ -2284,7 +2281,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # Runtime toggles for MSFS sync features
         self._msfs_in_cloud_sync: bool = True
         self._msfs_qnh_check: str = "CHECK"   # "CHECK" or "SYNC"
-        self._msfs_wind_sync: bool = False
         # Runtime toggles for PSX clock sync (see _sync_psx_clock/time_sync_coro)
         self._timesync_on_startup: bool = True    # on every PSX connect/reconnect
         self._timesync_on_situ_load: bool = True  # on every PSX situ load (load1..load3)
@@ -2348,15 +2344,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # Blitzortung lightning strikes — list of (lat, lon) from last _BZ_LOOKBACK_MIN minutes
         self._bz_strikes: list = []
         self._bz_fetch_time: float = 0.0
-
-        # MSFS wind state (--msfs-wind-sync via PSX.NET.MSFS.Client's
-        # addon=FRANKENMSFSBRIDGE: messages)
-        self.msfs_wind_dir: Optional[float] = None
-        self.msfs_wind_spd: Optional[float] = None
-        self.msfs_oat_c: Optional[float] = None
-        self._wind_last_encoded: Optional[str] = None
-        self._wind_last_updated: float = 0.0
-        self._corridor_txt: Optional[str] = None
 
         # API state broadcast
         self._instance_uuid: str = str(uuid.uuid4())
@@ -3319,9 +3306,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             if prev is None or abs(new_qnh - prev) > 0.5:
                 changed = True
         for _key, _attr, _cast in (
-                ("oat_c", "msfs_oat_c", float),
-                ("wind_dir", "msfs_wind_dir", float),
-                ("wind_spd", "msfs_wind_spd", float),
                 ("cloud_density", "msfs_cloud_density", float),
                 ("wind_vert", "msfs_wind_vert", float),
                 ("precip_state", "msfs_precip_state", int),
@@ -3332,8 +3316,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._msfs_bridge_last_seen_epoch = time.time()
         if changed:
             self._apply_msfs_sync()
-        if self._msfs_wind_sync:
-            self._apply_wind_injection()
 
     def _handle_fw_addon(self, value: str) -> None:  # pylint: disable=too-many-return-statements
         """Dispatch FRANKENWEATHER addon messages: commands, or a STATE/TURBSTATE/WINDSTATE msg."""
@@ -3488,15 +3470,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 self._msfs_qnh_check = val
                 self.logger.info("msfs_qnh_check → %s", val)
                 settings_changed = True
-        if "msfs_wind_sync" in cmd:
-            self._msfs_wind_sync = bool(cmd["msfs_wind_sync"])
-            self.logger.info("msfs_wind_sync → %s", self._msfs_wind_sync)
-            if self._msfs_wind_sync and self._enroute_wind_enabled:
-                # The two features both write WxCorridorTxt — mutually exclusive.
-                self._enroute_wind_enabled = False
-                self.logger.info("enroute_wind_enabled → False (disabled by msfs_wind_sync)")
-                self._restore_corridor_snapshot()
-            settings_changed = True
         if "timesync_on_startup" in cmd:
             self._timesync_on_startup = bool(cmd["timesync_on_startup"])
             self.logger.info("timesync_on_startup → %s", self._timesync_on_startup)
@@ -3569,9 +3542,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self._enroute_wind_enabled = bool(cmd["enroute_wind_enabled"])
             self.logger.info("enroute_wind_enabled → %s", self._enroute_wind_enabled)
             if self._enroute_wind_enabled:
-                if self._msfs_wind_sync:
-                    self._msfs_wind_sync = False
-                    self.logger.info("msfs_wind_sync → False (disabled by enroute_wind_enabled)")
                 self._enable_enroute_wind()
                 self._enroute_wind_changed_event.set()
             else:
@@ -3916,6 +3886,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         for key, attr, cast in _CONFIG_MSFS_FIELDS:
             if key in msfs:
                 setattr(self, attr, cast(msfs[key]))
+        if msfs.get("wind_sync"):
+            self.logger.info("Config file: [msfs] wind_sync is no longer supported (MSFS wind "
+                             "sync was removed); the enroute wind importer gives forecast winds")
         if self._msfs_qnh_check not in ("CHECK", "SYNC"):
             self._msfs_qnh_check = "CHECK"
 
@@ -4735,14 +4708,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         active Open-Meteo fetch/write (enroute_wind_coro) requires opt-in.
 
         A change is "ours" iff its value exactly matches the last corridor we
-        sent (from MSFS wind sync or the enroute wind importer) — compared by
+        sent (from the enroute wind importer) — compared by
         value, not by a time window, since PSX can re-broadcast an unchanged
         variable well after we sent it (e.g. a periodic full resync), and a
         short cooldown would then misread our own old write as a fresh
         flight-plan load. Anything else is treated as external (a situ load
         or flight-plan import) and captured as the flight-plan snapshot.
         """
-        self._corridor_txt = value
         if value == self._corridor_last_own_value:
             return
         self.logger.info(
@@ -4759,45 +4731,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._enroute_last_corridor_txt = None
         self._enroute_wind_changed_event.set()
 
-    def _apply_wind_injection(self) -> None:
-        """Inject MSFS wind into the PSX wind corridor as a FWIND waypoint."""
-        if not self._msfs_wind_sync or self._enroute_wind_enabled:
-            return
-        corridor = getattr(self, '_corridor_txt', None)
-        if not corridor:
-            return
-        if (self.msfs_wind_dir is None or self.msfs_wind_spd is None or
-                self.msfs_oat_c is None):
-            return
-        if self.ac_lat is None:
-            return
-
-        encoded = (f"{self.msfs_wind_dir:.0f}/{self.msfs_wind_spd:.0f}"
-                   f"/{self.msfs_oat_c:.0f}")
-        now = time.monotonic()
-        if (encoded == self._wind_last_encoded and
-                now - self._wind_last_updated < _WIND_UPDATE_INTERVAL_S):
-            return
-
-        new_corridor, msg = wind_corridor.update_corridor(
-            corridor,
-            self.ac_lat, self.ac_lon, self.ac_alt_ft,
-            self.msfs_wind_dir, self.msfs_wind_spd, self.msfs_oat_c)
-        if new_corridor is None:
-            self.logger.debug("Wind corridor: %s", msg)
-            return
-        self.logger.info("Wind corridor: %s", msg)
-        self._corridor_last_own_value = new_corridor
-        self._inject_wx_slow_transit()
-        self.psx_send_and_set("WxCorridorTxt", new_corridor)
-        self._wind_last_encoded = encoded
-        self._wind_last_updated = now
-
     def _restore_corridor_snapshot(self) -> None:
         """Send the captured flight-plan wind corridor back to PSX.
 
-        Called whenever the enroute wind importer turns off (explicitly, or
-        because msfs_wind_sync was re-enabled), so PSX reverts to the
+        Called whenever the enroute wind importer turns off, so PSX reverts to the
         original flight-plan data instead of being left with our last
         generated corridor. The restored value is remembered as our own
         write so the echoed change isn't mistaken for a fresh external load.
@@ -4807,7 +4744,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._corridor_last_own_value = self._corridor_snapshot_txt
         self._inject_wx_slow_transit()
         self.psx_send_and_set("WxCorridorTxt", self._corridor_snapshot_txt)
-        self._corridor_txt = self._corridor_snapshot_txt
         self.logger.info("Enroute wind: restored original flight-plan wind corridor")
 
     def _enable_enroute_wind(self) -> None:
@@ -8036,7 +7972,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "fake_cb": list(cfg.fake_cb) if cfg.fake_cb else None,
             "msfs_in_cloud_sync": self._msfs_in_cloud_sync,
             "msfs_qnh_check": self._msfs_qnh_check,
-            "msfs_wind_sync": self._msfs_wind_sync,
             "enroute_wind_enabled": self._enroute_wind_enabled,
             "enroute_wind_deviation": self._enroute_wind_deviation,
             "timesync_on_startup": self._timesync_on_startup,
@@ -8865,8 +8800,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         unchanged, so PSX's corridor is simply left in place rather than
         making PSX recalculate for nothing (_apply_enroute_wind_injection also
         skips the resend on its own if a refetch happens to return identical
-        data). Opt-in via _enroute_wind_enabled, and mutually exclusive with MSFS
-        wind sync.
+        data). On by default; _enroute_wind_enabled.
         """
         myname = inspect.currentframe().f_code.co_name
         try:

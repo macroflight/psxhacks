@@ -73,7 +73,7 @@ by hand.
 - **MSFS sync requires PSX.NET.MSFS.Client version 10.5.1 or later** —
   download it from <https://planning.simfest.co.uk/downloads>. Without it,
   everything else in FrankenWeather still works; you just won't get the
-  in-cloud/QNH/wind sync described above.
+  in-cloud/QNH sync described above.
 - **Recommended: the "Mawea Design - Storm Package" addon for MSFS**, also
   from <https://planning.simfest.co.uk/downloads>. FrankenWeather generally
   places more CBs, and in locations (e.g. over the ocean) where PSX's own
@@ -196,14 +196,6 @@ Features:
   `RMK FRANKENWX QNH SYNC`). QNH is never updated for zones
   whose weather comes from a real METAR (the METAR is authoritative for
   those zones). Toggleable between CHECK and SYNC from the web UI.
-
-- MSFS wind corridor sync: reads the MSFS wind direction, speed and OAT
-  at the current aircraft altitude and injects them into the PSX wind
-  corridor as a synthetic `FWIND` waypoint near the aircraft position.
-  Supports PSX wind corridor Formats A and E; Formats B, C and D are
-  left unchanged. Off by default; toggleable from the web UI. Mutually
-  exclusive with the enroute wind importer below (both write PSX's
-  wind corridor).
 
 - Enroute wind importer: simulates requesting an updated enroute wind
   forecast via datalink mid-flight, using Open-Meteo instead of a real
@@ -927,10 +919,9 @@ mode = "enabled"          # enabled | paused | disabled | manual
 [msfs]
 in_cloud_sync = true
 qnh_check = "CHECK"       # CHECK | SYNC
-wind_sync = false
 
 [enroute_wind]
-enabled = false
+enabled = true
 deviation = 30            # 0-80, in steps of 10 (0: no deviation)
 
 [timesync]

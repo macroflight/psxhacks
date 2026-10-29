@@ -1501,7 +1501,6 @@ def _build_weather_settings_page(ctx):  # pylint: disable=too-many-locals,too-ma
     _PRECIP_LABEL = {2: 'None', 4: 'Rain', 8: 'Snow'}
     in_cloud_sync = cfg.get('msfs_in_cloud_sync', True)
     qnh_check_mode = cfg.get('msfs_qnh_check', 'CHECK')
-    wind_sync = cfg.get('msfs_wind_sync', False)
 
     def _settings_toggle(field, val, label, active, color='btn-green'):
         inactive_color = 'btn-gray'
@@ -1554,13 +1553,6 @@ def _build_weather_settings_page(ctx):  # pylint: disable=too-many-locals,too-ma
         _settings_toggle('msfs_qnh_check', 'SYNC', 'SYNC',
                          qnh_check_mode == 'SYNC', 'btn-green') +
         '</div></td></tr>\n'
-        '<tr><td style="padding-right:0.8em">Wind sync<br>'
-        '<span style="font-size:0.82em;color:#64748b">Inject MSFS wind at current '
-        'altitude into the PSX wind corridor</span></td><td>' +
-        _settings_toggle('msfs_wind_sync', 'false' if wind_sync else 'true',
-                         'ON' if wind_sync else 'OFF',
-                         wind_sync) +
-        '</td></tr>\n'
         '</table>\n</div>\n'
         '</div>\n'
     )
@@ -2653,8 +2645,7 @@ def _build_weather_enroute_wind_page(ctx):  # pylint: disable=too-many-locals,to
         '<p class="note">Periodically fetches Open-Meteo pressure-level wind for each '
         "upcoming route waypoint and refreshes PSX's enroute wind corridor, so cruise winds "
         'keep drifting with reality even if the crew never requests a new datalink wind '
-        'uplink. Opt-in, and mutually exclusive with MSFS wind sync (enabling one disables '
-        'the other).</p>\n'
+        'uplink. On by default.</p>\n'
         '<div class="card" style="display:flex;align-items:center;gap:1.5em;flex-wrap:wrap">'
         f'<div><span style="color:#94a3b8;font-size:0.85em">Importer</span><br>'
         f'<b style="color:{"#4ade80" if enabled else "#64748b"}">'
@@ -2940,8 +2931,6 @@ def register_weather_routes(routes, ctx):  # pylint: disable=too-many-statements
             val = str(data['msfs_qnh_check'])
             if val in ('CHECK', 'SYNC'):
                 cmd['msfs_qnh_check'] = val
-        if 'msfs_wind_sync' in data:
-            cmd['msfs_wind_sync'] = data['msfs_wind_sync'].lower() == 'true'
         if cmd:
             await ctx.send_fw_settings_cmd(cmd)
         raise web.HTTPFound('/weather/settings')

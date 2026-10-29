@@ -1,4 +1,4 @@
-"""PSX wind corridor format detection, parsing, and FWIND waypoint injection.
+"""PSX wind corridor format detection, parsing, and Format-A generation.
 
 PSX WxCorridorTxt is a caret-delimited (^) string; each section is one row.
 Five standard formats are defined in the PSX documentation:
@@ -19,10 +19,9 @@ Five standard formats are defined in the PSX documentation:
             Wind: 5-char {dir/10:02d}{spd:03d}.  OAT: separate {M/P}{oat:02d} field.
             Also carries ITT and DIS fields (unused by the corridor system).
 
-FWIND injection is implemented for Formats A and E.  Formats B, C and D are
-detected and left unchanged (the caller receives a log message explaining why).
+All five formats are parsed (extract_waypoint_data()); corridors are
+generated in Format A (build_corridor_a()).
 """
-import math
 import re
 from typing import Optional
 
@@ -48,8 +47,6 @@ def _strip_corridor_prefix(corridor_txt: str) -> str:
         return corridor_txt[len(_CORRIDOR_PREFIX):]
     return corridor_txt
 
-
-_FWIND_NAME = 'FWIND'
 
 # ---------------------------------------------------------------------------
 # Compiled regular expressions
@@ -154,47 +151,9 @@ def _dms_component_to_dec(tok: str, is_lat: bool) -> Optional[float]:
     return -val if tok[0] in ('S', 'W') else val
 
 
-def _dec_to_dms(lat: float, lon: float) -> str:
-    """Convert decimal degrees to a Format-E combined lat/lon string (e.g. S3356.8E15110.6).
-
-    Uses zero-padded minutes ("06.5") to avoid an embedded space that would
-    split the coordinate into two tokens when the section is split on whitespace.
-    """
-    def _half(deg: float, is_lon: bool) -> str:
-        neg = deg < 0
-        deg = abs(deg)
-        d = int(deg)
-        m = round((deg - d) * 60.0, 1)
-        if m >= 60.0:
-            m -= 60.0
-            d += 1
-        hem = ('W' if neg else 'E') if is_lon else ('S' if neg else 'N')
-        mins = f"{m:.1f}".zfill(4)          # "06.5" not " 6.5"
-        return f"{hem}{d:03d}{mins}" if is_lon else f"{hem}{d:02d}{mins}"
-    return _half(lat, False) + _half(lon, True)
-
-
 # ---------------------------------------------------------------------------
 # Wind / temperature encoding
 # ---------------------------------------------------------------------------
-
-def encode_wind_e(wind_dir: float, wind_spd: float) -> str:
-    """Encode wind as a Format-E 5-char string, e.g. '26026' for 260°/26 kt.
-
-    Speed is clamped to what the fixed-width field can hold (0-999kt) so the
-    output is always exactly 5 chars, even given an extreme/glitched value —
-    PSX rejects the whole corridor if a single record breaks the fixed width.
-    """
-    dir_tens = int(round(wind_dir / 10)) % 36
-    spd = max(0, min(999, int(round(wind_spd))))
-    return f"{dir_tens:02d}{spd:03d}"
-
-
-def encode_temp_e(oat_c: float) -> str:
-    """Encode OAT as a Format-E 3-char string, e.g. 'P13' or 'M26' (|OAT| clamped to 99C)."""
-    t = max(-99, min(99, int(round(oat_c))))
-    return f"M{-t:02d}" if t < 0 else f"P{t:02d}"
-
 
 def encode_wind_a(wind_dir: float, wind_spd: float, oat_c: float) -> str:
     """Format-A compact wind/OAT encoding: 8 chars, e.g. '28031M17' for 280°/31kt/−17°C.
@@ -268,49 +227,8 @@ def _decode_temp_only_e(temp_str: str) -> Optional[float]:
 
 
 # ---------------------------------------------------------------------------
-# FWIND removal
-# ---------------------------------------------------------------------------
-
-def _remove_fwind_e(secs: list) -> tuple:
-    """Remove Format-E FWIND sections.  Returns (new_secs, removed_flag)."""
-    out, removed = [], False
-    for sec in secs:
-        m = _E_WAYPT_RE.match(sec.strip())
-        if m and m.group(2).upper() == _FWIND_NAME:
-            removed = True
-        else:
-            out.append(sec)
-    return out, removed
-
-
-def _remove_fwind_a(secs: list) -> tuple:
-    """Remove Format-A FWIND sections.  Returns (new_secs, removed_flag)."""
-    out, removed = [], False
-    for sec in secs:
-        m = _A_WAYPT_RE.match(sec.strip())
-        if m and m.group(1).upper() == _FWIND_NAME:
-            removed = True
-        else:
-            out.append(sec)
-    return out, removed
-
-
-# ---------------------------------------------------------------------------
 # Waypoint list extraction
 # ---------------------------------------------------------------------------
-
-def _waypoints_e(secs: list) -> list:
-    """Return [(section_idx, lat, lon, name)] for every Format-E waypoint section."""
-    result = []
-    for i, sec in enumerate(secs):
-        m = _E_WAYPT_RE.match(sec.strip())
-        if not m:
-            continue
-        coords = _dms_to_dec(m.group(1))
-        if coords:
-            result.append((i, coords[0], coords[1], m.group(2)))
-    return result
-
 
 def _waypoints_a(secs: list) -> list:
     """Return [(section_idx, name)] for every Format-A waypoint section."""
@@ -331,135 +249,6 @@ def _fl_header_a(secs: list) -> Optional[list]:
     return None
 
 
-# ---------------------------------------------------------------------------
-# Insertion position (Format E uses lat/lon; Format A inserts at position 0)
-# ---------------------------------------------------------------------------
-
-def _find_insert_pos_e(waypoints: list, ac_lat: float, ac_lon: float) -> tuple:
-    """Return (insert_after_sec_idx, prev_name, next_name) for Format-E FWIND insertion.
-
-    Chooses the leg whose midpoint is closest to the aircraft position.
-    """
-    if len(waypoints) == 1:
-        return waypoints[0][0] - 1, None, waypoints[0][3]
-
-    best_leg, best_dist = 0, float('inf')
-    for leg in range(len(waypoints) - 1):
-        a_lat, a_lon = waypoints[leg][1], waypoints[leg][2]
-        b_lat, b_lon = waypoints[leg + 1][1], waypoints[leg + 1][2]
-        mid_lat = (a_lat + b_lat) / 2
-        mid_lon = (a_lon + b_lon) / 2
-        dist = ((ac_lat - mid_lat) ** 2 +
-                ((ac_lon - mid_lon) * math.cos(math.radians(mid_lat))) ** 2)
-        if dist < best_dist:
-            best_dist = dist
-            best_leg = leg
-
-    return (waypoints[best_leg][0],
-            waypoints[best_leg][3],
-            waypoints[best_leg + 1][3])
-
-
-# ---------------------------------------------------------------------------
-# Format-specific update functions
-# ---------------------------------------------------------------------------
-
-def _count_wv_cols(sec: str) -> int:
-    """Return the number of W/V columns in a Format-E waypoint section."""
-    m = _E_LATLON_RE.match(sec.strip())
-    if not m:
-        return 1
-    # Fields after coord: name, ITT, DIS, FL, TMP, then W/V columns
-    return max(1, len(sec.strip()[m.end():].strip().split()) - 5)
-
-
-def _update_e(secs: list, ac_lat: float, ac_lon: float, ac_alt_ft: float,  # pylint: disable=too-many-arguments,too-many-positional-arguments
-              wind_dir: float, wind_spd: float, oat_c: float) -> tuple:
-    """Insert FWIND into a Format-E corridor.  Returns (new_secs, log_msg)."""
-    secs = _remove_fwind_e(secs)[0]
-    waypoints = _waypoints_e(secs)
-    if not waypoints:
-        return None, "no waypoints found in Format-E corridor"
-
-    insert_after, prev_name, next_name = _find_insert_pos_e(waypoints, ac_lat, ac_lon)
-    wind_str = encode_wind_e(wind_dir, wind_spd)
-    temp_str = encode_temp_e(oat_c)
-    fl = int(ac_alt_ft / 100)
-    secs.insert(insert_after + 1,
-                f"{_dec_to_dms(ac_lat, ac_lon)} {_FWIND_NAME} 000 000 "
-                f"{fl:03d} {temp_str} " +
-                " ".join([wind_str] * _count_wv_cols(secs[waypoints[0][0]])))
-    msg = (f"Format E: inserted {_FWIND_NAME} "
-           f"(wind {wind_str} OAT {temp_str} FL{fl:03d}) " +
-           (f"between {prev_name} and {next_name}" if prev_name and next_name
-            else f"before {next_name}" if next_name
-            else f"after {prev_name}"))
-    return secs, msg
-
-
-def _update_a(secs: list, ac_alt_ft: float,  # pylint: disable=unused-argument
-              wind_dir: float, wind_spd: float, oat_c: float) -> tuple:
-    """Insert FWIND into a Format-A corridor.  Returns (new_secs, log_msg)."""
-    secs, _ = _remove_fwind_a(secs)
-    waypoints = _waypoints_a(secs)
-    if not waypoints:
-        return None, "no waypoints found in Format-A corridor"
-
-    # Count wind records from the first existing waypoint
-    sample = secs[waypoints[0][0]].strip().split()
-    num_wv = max(1, len(sample) - 1)       # subtract the waypoint name field
-
-    wind_rec = encode_wind_a(wind_dir, wind_spd, oat_c)
-    fwind = f"{_FWIND_NAME} " + " ".join([wind_rec] * num_wv)
-
-    # Insert before the first existing waypoint
-    first_waypt_idx = waypoints[0][0]
-    secs.insert(first_waypt_idx, fwind)
-
-    first_name = waypoints[0][1]
-    wind_str = encode_wind_e(wind_dir, wind_spd)
-    temp_str = encode_temp_e(oat_c)
-    msg = (f"Format A: inserted {_FWIND_NAME} "
-           f"(wind {wind_str} OAT {temp_str}) before {first_name}")
-    return secs, msg
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-def update_corridor(corridor_txt: str,  # pylint: disable=too-many-arguments,too-many-positional-arguments
-                    ac_lat: float,
-                    ac_lon: float,
-                    ac_alt_ft: float,
-                    wind_dir: float,
-                    wind_spd: float,
-                    oat_c: float) -> tuple:
-    """Remove any existing FWIND waypoint and insert an updated one.
-
-    Returns ``(new_corridor_txt, log_message)``.  If injection is skipped,
-    ``new_corridor_txt`` is ``None`` and ``log_message`` explains why.
-    """
-    has_prefix = corridor_txt.startswith(_CORRIDOR_PREFIX)
-    fmt = detect_format(corridor_txt)
-    secs = _strip_corridor_prefix(corridor_txt).split('^')
-
-    if fmt == FORMAT_E:
-        new_secs, msg = _update_e(secs, ac_lat, ac_lon, ac_alt_ft,
-                                  wind_dir, wind_spd, oat_c)
-    elif fmt == FORMAT_A:
-        new_secs, msg = _update_a(secs, ac_alt_ft, wind_dir, wind_spd, oat_c)
-    elif fmt in (FORMAT_B, FORMAT_C, FORMAT_D):
-        return None, f"FWIND injection not supported for corridor Format {fmt}"
-    else:
-        return None, "FWIND injection skipped: unrecognised corridor format"
-
-    if new_secs is None:
-        return None, msg
-    prefix = _CORRIDOR_PREFIX if has_prefix else ""
-    return prefix + "^".join(new_secs), msg
-
-
 def _extract_e_section(  # pylint: disable=too-many-locals
         stripped: str, current_header_ft: Optional[list]) -> Optional[tuple]:
     """Return (name, {fl_ft: (dir_deg, spd_kt, oat_c)}, lat_deg, lon_deg) for one Format-E section.
@@ -476,7 +265,7 @@ def _extract_e_section(  # pylint: disable=too-many-locals
     coord = _dms_to_dec(stripped[:lm.end()])
     # Fields after coord: name, ITT, DIS, FL, TMP, then W/V column(s).
     fields = stripped[lm.end():].strip().split()
-    if len(fields) < 6 or fields[0].upper() == _FWIND_NAME:
+    if len(fields) < 6:
         return None
     try:
         own_fl_ft = int(fields[3]) * 100
@@ -558,8 +347,6 @@ def _extract_bcd(secs: list) -> dict:  # pylint: disable=too-many-locals
             if len(groups) != len(names):
                 continue
             for name, (fl_tok, dir_tok, spd_tok, oat_tok) in zip(names, groups):
-                if name.upper() == _FWIND_NAME:
-                    continue
                 fl_ft = int(fl_tok) if len(fl_tok) >= 4 else int(fl_tok) * 100
                 entry = result.setdefault(name, {"levels": {}, "lat": None, "lon": None})
                 entry["levels"][fl_ft] = (
@@ -597,8 +384,6 @@ def extract_waypoint_data(corridor_txt: str) -> dict:  # pylint: disable=too-man
         if not fl_header:
             return {}
         for i, name in _waypoints_a(secs):
-            if name.upper() == _FWIND_NAME:
-                continue
             fields = secs[i].strip().split()[1:]
             levels = {}
             for fl, rec in zip(fl_header, fields):

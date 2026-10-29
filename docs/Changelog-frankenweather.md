@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Removed: MSFS wind sync.** It put MSFS's wind at the aircraft into
+  PSX's wind corridor as an extra `FWIND` waypoint, rewriting the corridor
+  up to once a minute. Each corridor rewrite can make PSX pick new random
+  wind deviations, so instead of matching MSFS it could add sudden wind
+  shifts, and hardly anyone used it. The enroute wind importer (on by
+  default) gives forecast winds instead. A config file with `[msfs]
+  wind_sync = true` is ignored with a note in the log; if you used wind
+  sync, check that `[enroute_wind] enabled` is true.
 - **Fix: the wind corridor settings were resent on every refresh.** With
   the enroute wind importer on, frankenweather sent PSX's Corridor page
   selections (`Qs497`: embedded, random deviation) with every corridor
