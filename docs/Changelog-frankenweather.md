@@ -1,5 +1,26 @@
 # frankenweather changelog
 
+## 1.19.0 (2026-10-24)
+
+- **Change: no sudden steps between rotor, mountain wave and mechanical
+  turbulence.** The rotor now fades out smoothly towards 15 km from the
+  ridge, towards its ceiling and for low barriers, and the strongest of
+  the three is used. E.g. climbing through the rotor ceiling it jumped
+  from 30% (rotor) to 45% (wave) at once.
+- **Change: stricter low-level jet detection.** Almost any wind profile
+  counted as a low-level jet, which makes rotor turbulence up to about
+  1.5-1.8 times stronger. Now the wind must drop by 8 kt within 1,500 m
+  above the maximum, and levels below the ground don't count.
+- **Change: mountain wave SIGMET turbulence follows the SIGMET settings**
+  (on/off and intensity) instead of the mountain wave ones. It shows as
+  "Mountain wave SIGMET".
+- **Change (`--cb-growth`): CBs also grow and decay gradually in
+  maneuvering mode** (holds, vectoring), where e.g. a destination METAR's
+  TEMPO CB used to appear and vanish at once.
+- **New: the weather map shows each CB's anvil turbulence zone** above
+  its top as a dashed outline: reaching furthest downwind, a third as far
+  upwind (all round when the wind isn't known).
+
 ## 1.18.0 (2026-10-24)
 
 - **Change: mountain wave turbulence moves the aircraft in real waves.**
