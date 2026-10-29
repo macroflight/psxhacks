@@ -6604,11 +6604,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self.logger.info("Updating zone weather — ac=%.2f/%.2f hdg=%.0f° [%s]",
                          self.ac_lat, self.ac_lon, self.ac_hdg,
                          "MANEUVERING" if self._maneuvering else "CRUISE")
-        # --cb-growth is active in cruise and inactive in maneuvering mode,
-        # using frankenweather's own mode flag (see _update_maneuvering_mode()
-        # and the log line above) -- deliberately independent of altitude,
-        # unlike _check_and_relocate()'s own separate in_cruise concept.
-        in_cruise = not self._maneuvering
 
         # Refresh --primary-metar-source's cache if stale; fails over to the
         # other source as a stand-in on failure (see _refresh_primary_metar_cache()).
@@ -6929,7 +6924,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.zone_cb_target[zone_num] = (
                 {'oktas': target_oktas_val, 'base': int(target_parts[11]),
                  'top': int(target_parts[10])} if target_oktas_val > 0 else None)
-            if self.args.cb_growth and in_cruise and not cb_removed_for:
+            # In every flight phase: it used to be off in maneuvering mode
+            # (holds, vectoring), where CBs then popped in and out at once
+            if self.args.cb_growth and not cb_removed_for:
                 cape_here = _om_hval(om.get("hourly", {}), "cape", now.hour, 0) if om else 0.0
                 final_wx = self._ramp_cb_wx(zone_num, final_wx, cape_here)
             else:
@@ -8305,7 +8302,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "--fake-cb-only=EHAM,EHRD).")
         parser.add_argument(
             '--cb-growth', action='store_true',
-            help="EXPERIMENTAL: in cruise only, ramp a CB's coverage (oktas) "
+            help="EXPERIMENTAL: ramp a CB's coverage (oktas) "
                  "and top height gradually toward its forecast target instead "
                  "of snapping instantly, so new CBs don't appear to pop into "
                  "view and don't finish growing before the aircraft reaches "

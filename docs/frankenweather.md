@@ -112,8 +112,8 @@ Features:
   CBs, since TS SIGMETs report observed thunderstorms. METAR convective indicators (TS, TSRA,
   SHRA, GR, LTG, FC, CB sky groups) are also used and can override or
   refine the Open-Meteo prediction. See [CB growth and
-  decay](#cb-growth-and-decay) below for `--cb-growth`, an opt-in,
-  cruise-only ramp of a CB's coverage/top instead of an instant snap to
+  decay](#cb-growth-and-decay) below for `--cb-growth`, an opt-in
+  ramp of a CB's coverage/top instead of an instant snap to
   its forecast value.
 
 - METAR TEMPO/BECMG/PROBnn trend groups are parsed out and excluded from
@@ -333,7 +333,7 @@ doesn't move any zone, the ordinary relocation rules take over.
 
 ### CB growth and decay
 
-`--cb-growth` (experimental, off by default) is a cruise-only option that
+`--cb-growth` (experimental, off by default) is an option that
 ramps a CB's coverage (oktas) and top height gradually toward its forecast
 target instead of snapping to it the instant a zone is placed ahead of the
 aircraft or a new CB appears in an existing zone. Base height is never
@@ -383,13 +383,10 @@ then comes back doesn't flicker in and out at the boundary.
 Ramping state is per-zone and resets whenever a zone is (re)placed
 (relocation, a new dep/dst airport zone, or the CB-near-airport-avoidance
 offset) — any CB in the newly-assigned zone starts fresh from its own
-distance at that moment. The feature is active whenever frankenweather is
-*not* in maneuvering mode (see "Entering/exiting maneuvering mode" above)
-— this is independent of altitude, unlike [Zone placement and
-relocation](#zone-placement-and-relocation)'s own separate cruise/
-maneuvering distinction, so a climb or descent still ramps CBs as long as
-it isn't also a hold/vectoring pattern. In maneuvering mode, or with the
-flag off, CBs snap to forecast instantly, as before.
+distance at that moment. The feature is active in every flight phase,
+including maneuvering mode (holds, vectoring; it used to be off there, so
+CBs, e.g. a destination METAR's TEMPO CB, popped in and out at once).
+With the flag off, CBs snap to forecast instantly.
 
 Both the forecast target and the live ramp rate are visible, not just the
 current (ramped) value: the web UI's weather map popup and the
