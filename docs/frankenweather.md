@@ -169,7 +169,10 @@ Features:
 - Terrain turbulence (from the `frankenturb` engine, now integrated):
   fetches real-time wind from Open-Meteo and terrain elevation from
   Copernicus GLO-30 DEMs, then injects `WxBurst` events into PSX at up
-  to 5 Hz. Turbulence kinds modelled: terrain wave, rotor, mechanical,
+  to 5 Hz. Once a minute the log sums up the bursts (also without
+  `--debug`): how many per kind and in which direction (e.g. `SPD 8
+  +3/-5`: eight speed bursts, three faster), how big, and from which
+  turbulence source. Turbulence kinds modelled: terrain wave, rotor, mechanical,
   wind-shear CAT, CB, CAPE-driven convective, PIREPs, and G-AIRMET
   regions. The MCDU C (observer panel CDU) shows a live status display
   and allows tuning of intensity per turbulence type. CB turbulence is
@@ -339,6 +342,15 @@ is deliberate hysteresis so the mode doesn't flap back and forth near the
 boundary. Entering maneuvering mode re-places all zones around the
 aircraft, except those whose CB turbulence can still reach it; leaving it
 doesn't move any zone, the ordinary relocation rules take over.
+
+**Keeping the zones:** frankenweather watches every weather variable it
+sets (the zones' positions, weather and METARs, `WxBasic`, `WxAutoSet`).
+If something else changes one, it writes its own value back about 2
+seconds later and logs it: a situation load (expected, it brings the
+situation's own zones) as one line, any other client as a warning with
+the value it wrote. If the same variable has to be restored more than 5
+times within 2 minutes, someone keeps changing it: frankenweather logs
+an error and leaves that variable alone until the changes stop.
 
 ### CB growth and decay
 
@@ -564,6 +576,26 @@ normal turbulence. What testing changes:
   smooth. The cells themselves are the zones' CBs, whose own turbulence still applies
   where it's stronger. It uses the SIGMET turbulence settings; the reason
   says "... SIGMET ... (convective, testing)".
+- **Mountain wave that doesn't drive the autopilot into oscillation**
+  (the terrain model's wave and MTW SIGMETs). In the stable profile the
+  wave's bursts push one way for long stretches: up or down with the
+  wave, faster or slower with its gust. On a descent in FLCH (speed held
+  with pitch) through a SEV MTW SIGMET that swung the descent rate
+  between a few hundred and over 4,000 ft/min (EGPF, 2026-10-25). Testing:
+  - Up/down bursts follow how fast the wave is changing, not which way
+    it goes, so they don't add up to a long push.
+  - No speed or gust bursts in a wave. Even a quarter of them kept
+    FLCH swinging, because it answers every speed kick with pitch. A
+    real wave changes the airspeed slowly, over its cycle. A light wave
+    (under 25%), whose bursts were only speed and gust ones, gets
+    up/down bursts in their place, so it isn't glassy smooth.
+  - An MTW SIGMET lifts the terrain model's own wave to at most twice it
+    plus 20%, instead of up to the SIGMET's full severity.
+
+  It's still rough: in the same FLCH descent, without the speed kicks,
+  the descent rate reached 2,400 ft/min, but didn't swing. V/S copes
+  better than FLCH with any turbulence that changes the airspeed, since
+  the autothrottle takes the speed. In severe wave, fly by hand.
 
 ### Turbulence gustiness and PIREPs
 
