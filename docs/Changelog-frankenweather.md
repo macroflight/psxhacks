@@ -1,5 +1,27 @@
 # frankenweather changelog
 
+## 1.18.0 (2026-10-24)
+
+- **Change: mountain wave turbulence moves the aircraft in real waves.**
+  Its up/down motion is now measured from the ridge: sinking just
+  downwind of it, then rising and sinking again every wavelength (about
+  16 km in a 45 kt wind). It used to come from the absolute position, so
+  a 1° wind change moved it by several wavelengths: noise, not waves.
+- **Change: mountain waves need a real cross-ridge wind.** Only the wind
+  blowing across the ridge counts, ramping in from about 20 kt to full
+  at about 43 kt, and from a 200 m to a 1,500 m barrier. They used to
+  switch on at 15 kt and a 500 m barrier, straight to about moderate.
+- **Change: mechanical (low-level) turbulence comes from the wind, also
+  over flat land and the sea.** Light from about 30 kt (wind 300 m above
+  the ground), moderate from about 50 kt, more over rough terrain, fading
+  with height above the ground. It used to be at most about 4% over flat
+  land even in a 46 kt wind, and none at all over the sea.
+- **Change: PIREP turbulence.** A MOD PIREP is now moderate (37%) and a
+  SEV one severe (60%); they were one category higher. A PIREP's
+  turbulence now fades out within 40 nm (was 150 nm, and from a distance
+  up to 30 minutes old) and varies over time like a SIGMET's, instead of
+  being steady.
+
 ## 1.17.0 (2026-10-24)
 
 - **Change: wind-shear clear-air turbulence at cruise.** Above FL200 it
