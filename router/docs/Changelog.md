@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Change: `addon=GEOVR.PSX` messages are no longer forwarded between
+  sims.** PSX.NET.VATSIM's voice client messages (`CONTROL`, `STATUS`,
+  `STATUS.REQUEST`) from another sim's frankenrouter are dropped, like
+  PTT presses and `PSXNETVATSIM:SELECT_ACP`; with `--debug` each drop is
+  logged. Both sims' routers need this version to filter both directions.
 - **Change: the weather map shows every valid SIGMET area** frankenweather
   downloaded (zoom out to see the far ones), and the legend lists only
   the types in view. Needs FrankenWeather with `--sigmet`.

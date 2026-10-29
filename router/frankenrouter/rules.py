@@ -1002,6 +1002,19 @@ class Rules():  # pylint: disable=too-many-public-methods
                         self.sender.simulator_name, self.line)
                     return self.myreturn(RulesAction.DROP, RulesCode.PSXNETVATSIM)
 
+        # Drop addon=GEOVR.PSX.* (PSX.NET.VATSIM's voice client: CONTROL
+        # discover/state/connect/result/disconnect, STATUS, STATUS.REQUEST)
+        # from other sims: it's for each sim's own clients. Like
+        # GROUND.HANDLING it has no NAME:payload colon, so it's matched on
+        # the rest-of-line. Frequent, so logged at debug only.
+        if rest.startswith('GEOVR.PSX.'):
+            if self.sender.is_frankenrouter:
+                if self.router.config.identity.simulator != self.sender.simulator_name:
+                    self.logger.debug(
+                        "Dropping addon=GEOVR.PSX from other sim %s: %s",
+                        self.sender.simulator_name, self.line)
+                    return self.myreturn(RulesAction.DROP, RulesCode.PSXNETVATSIM)
+
         # Unhandled addon messages should be forwarded, but only from
         # clients that are allowed to write.
         if not self.allow_write():
@@ -2782,6 +2795,42 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         (action, code, _, extra_data) = rules.route(line, testpeer)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.NOWRITE)
+
+    def test_addon_geovr_filter(self):
+        """addon=GEOVR.PSX.* must be dropped from other sims only."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+
+        router.upstream = self.DummyUpstreamConnection()
+        router.clients = {
+            ('127.0.0.1', 12345): self.DummyClientConnection(('127.0.0.1', 12345)),
+        }
+        testpeer = router.clients[('127.0.0.1', 12345)]
+        lines = (
+            "addon=GEOVR.PSX.CONTROL;;;;1|state|214912d611174bafb483799dbffc7eb2|"
+            "5453e4d4967b449e888725b60cf7ff40|89ca91869db74025aba04ef00cddc9bd|"
+            "flightdeck|connected|GTI577|",
+            "addon=GEOVR.PSX.STATUS;;;;1|daad49988b454407bfeddecdfd99ff01|1|1|Disconnected|"
+            "0:0:0,1:0:0,2:0:0,3:0:0,4:0:0",
+            "addon=GEOVR.PSX.STATUS.REQUEST;;;;1",
+        )
+        for line in lines:
+            # From a regular (non-frankenrouter) client: forwarded
+            testpeer.is_frankenrouter = False
+            (action, *_) = rules.route(line, testpeer)
+            self.assertEqual(action, RulesAction.NORMAL, msg=line)
+
+            # From a frankenrouter on the same sim: forwarded
+            testpeer.is_frankenrouter = True
+            testpeer.simulator_name = router.config.identity.simulator
+            (action, *_) = rules.route(line, testpeer)
+            self.assertEqual(action, RulesAction.NORMAL, msg=line)
+
+            # From a frankenrouter on another sim: dropped
+            testpeer.simulator_name = 'OtherSim'
+            (action, code, *_) = rules.route(line, testpeer)
+            self.assertEqual(action, RulesAction.DROP, msg=line)
+            self.assertEqual(code, RulesCode.PSXNETVATSIM, msg=line)
 
     def test_route(self):
         """Test routing."""
