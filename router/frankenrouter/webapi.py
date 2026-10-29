@@ -3063,6 +3063,7 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
             async def handle_efb_turb_profile_post(request):
                 data = await request.post()
                 if data.get('profile') in dict(_EFB_TURB_PROFILES):
+                    router.logger.info("API: EFB turbulence profile -> %s", data.get('profile'))
                     await _efb_ctx.send_turb_cmd({'profile': data.get('profile')})
                 raise web.HTTPFound('/efb')
 

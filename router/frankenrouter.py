@@ -2935,12 +2935,26 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 return
             payload_str = rest[colon + 1:]
             try:
-                setattr(self, data_attr, decode(payload_str))
+                data = decode(payload_str)
+                if prefix == "TURBSTATE:":
+                    self._log_turb_profile(data)
+                setattr(self, data_attr, data)
                 setattr(self, received_attr, time.time())
             except (ValueError, OSError, EOFError) as exc:
                 self.logger.warning(
                     "Malformed FRANKENWEATHER %s addon: %s (%s)", prefix[:-1], line[:80], exc)
             return
+
+    def _log_turb_profile(self, turbstate: dict) -> None:
+        """Log FrankenWeather's turbulence profile (stable/testing) when first seen or changed.
+
+        At info level, so any log tells which profile was in use
+        (FrankenWeather 1.26.0 and later send it in TURBSTATE).
+        """
+        new = turbstate.get("profile") if isinstance(turbstate, dict) else None
+        old = (self.frankenweather_turbstate or {}).get("profile")
+        if new is not None and (new != old or self.frankenweather_turbstate is None):
+            self.logger.info("FrankenWeather turbulence profile: %s", new)
 
     def cache_frankencontrol_addon(self, line: str) -> None:
         """Parse and cache a FRANKENCONTROL STATUS addon message for the UI."""
