@@ -1,5 +1,25 @@
 # frankenweather changelog
 
+## 1.25.0 (2026-10-25)
+
+Found by more automated test flights around the world.
+
+- **Change: inside a TS or TC SIGMET area the track ahead has CBs**
+  (`--sigmet`). One zone used to be kept CB-free 40-50 nm ahead on track,
+  so flying into a cyclone's thunderstorm area gave no CB and no
+  turbulence. Now that "anchor" zone is only used when every zone is
+  more than 150 nm away, in every mode: one zone goes 50 nm behind the
+  aircraft, CB-free, so the local weather (QNH, wind) comes from a zone
+  nearby.
+- **Change: a CB appearing close to the aircraft is small.** A zone
+  within 100 nm that gets a CB (a new or moved TS SIGMET, CAPE, a METAR)
+  gets at most 2 oktas and 15,000 ft until it's moved, instead of e.g.
+  a 45,000 ft CB appearing 10 nm ahead. A CB it already had doesn't grow.
+  The departure and destination airports keep their METAR's CB.
+- **Fix: after a reposition or situation load, turbulence starts
+  afresh** at the new position. The old position's turbulence used to
+  fade out over about a minute.
+
 ## 1.24.0 (2026-10-25)
 
 Found by automated test flights near EGLL, EGPH and EINN in the stormy
