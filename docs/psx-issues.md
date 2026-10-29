@@ -123,12 +123,24 @@ or relocation can swing the wind at altitude (100° within a minute at
 positions. A client can set them, and placed cells are real CBs (radar,
 lightning, turbulence), but:
 
+- **they're only drawn on the weather radar while the aircraft is in the
+  planet zone.** With the aircraft in one of the 7 weather zones
+  (FocussedWxZone 1-7), none showed, at 24 to 245 nm, though WxBasic's CB
+  coverage was 4 oktas; the same cells showed while the aircraft was in
+  the planet zone. An addon that places zones around the aircraft (as
+  frankenweather does) therefore can't use them to add CBs;
 - all 4 share one CB profile (WxBasic's coverage, base, top);
 - if any cell is more than about 250-300 nm from the aircraft, PSX
   replaces the whole set within 15 s;
-- PSX recomputes the cells after a reposition.
+- PSX recomputes the cells after a reposition;
+- moving a cell makes its echo jump, even with `WxSlowTransit` armed;
+  changing the coverage fades all 4 in or out over about 10 s (no PFD
+  movement, FL350 and FL100).
 
-- **Request:** more cells, a profile per cell, and a documented range
+- **Workaround:** frankenweather keeps the planet zone's CB coverage at 0,
+  so PSX's own cells (placed wherever PSX likes) never become CBs.
+- **Request:** draw the planet cells wherever they are, whichever zone the
+  aircraft is in; more cells, a profile per cell, and a documented range
   limit (or no replacement of client-set cells).
 
 ### Zone names PSX rewrites
