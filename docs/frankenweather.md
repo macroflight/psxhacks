@@ -549,7 +549,8 @@ gave any turbulence at cruise. It is computed over the sea too.
 Wind shear near the ground (on a windy day the wind normally increases
 steeply in the lowest few thousand feet) is not clear-air turbulence:
 below 3,000 ft above the ground it gives at most 30%, rising to no limit
-at 5,000 ft. The turbulence reason then says "Low-level wind shear".
+at 5,000 ft, and its gustiness varies it below that (about 15-30%).
+The turbulence reason then says "Low-level wind shear".
 The limit also holds while it fades into another kind of turbulence,
 e.g. mechanical turbulence where the terrain gets rougher.
 

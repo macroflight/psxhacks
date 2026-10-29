@@ -364,9 +364,13 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
         # Near the ground (cap < 1) the boost may not lift the other above
         # the cap either: it used to jump from the capped 0.30 to 0.40 x
         # gust (up to 0.60) as soon as mechanical turbulence outweighed
-        # the shear.
+        # the shear. The shear's own turbulence is capped there too, so
+        # the caller's gustiness varies it below the cap: it used to stay
+        # uncapped (e.g. 0.53) with only max_intensity capping it after
+        # the gust, so it was a flat 0.30 nearly all the time (flight
+        # test 2026-10-25).
         cap = _low_level_shear_cap(agl_m / FT_TO_M)
-        shear_int = shear_factor * 0.5
+        shear_int = min(shear_factor * 0.5, cap)
         boost = shear_factor * 0.15 * (min(1.0, state.intensity / shear_int)
                                        if shear_int > 0.0 else 0.0)
         if shear_factor > 0.05 and state.intensity < shear_int:
@@ -376,7 +380,7 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
                 reason = (f"Low-level wind shear: {shear:.1f}kt/1000ft vertical shear "
                           f"(at most {cap:.0%})")
             return TurbulenceState(
-                intensity=min(1.0, shear_int + boost),
+                intensity=min(1.0, cap, shear_int + boost),
                 kind=f"{state.kind}+shear" if state.kind != "none" else "shear",
                 reason=reason,
                 # The other mechanism keeps its own gusts' headroom
