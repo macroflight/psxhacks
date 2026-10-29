@@ -1,6 +1,6 @@
 # frankenweather changelog
 
-## Unreleased
+## 2.0.0 (2026-10-29)
 
 - **Fix: with `--sigmet`, no SIGMETs at all when the US had none.**
   aviationweather.gov answers "no content" (HTTP 204) when a list is
