@@ -554,6 +554,11 @@ The turbulence reason then says "Low-level wind shear".
 The limit also holds while it fades into another kind of turbulence,
 e.g. mechanical turbulence where the terrain gets rougher.
 
+Terrain and wind shear turbulence changes over about 30 seconds where the
+wind data changes (each 1° square and forecast hour). After a
+reposition or a situation load it starts afresh at the new position
+instead of fading out the old position's turbulence.
+
 On the ground (takeoff and landing roll, from 30 kt) turbulence is at
 most 30% and only yaws and rolls the aircraft: PSX makes a yaw jolt grow
 with airspeed, from about 0.2° of heading at 80 kt to about 0.6° near
