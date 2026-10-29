@@ -5133,10 +5133,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             if _turb_events.AREA_RATES[area][1] > best[2]:
                 best = (area, src.reason or src.kind, _turb_events.AREA_RATES[area][1])
 
+        # Inside the CB's cloud is "in a CB", whatever its level: CB interior
+        # turbulence is 0.38-0.66, and a 0.6 threshold left the aircraft
+        # "near a CB" most of the time it was inside one (thunderstorm
+        # transits 2026-10-26, PAIB 17-14)
         cb = sources.get("cb")
         if cb is not None:
-            consider("cb_core" if cb.intensity >= 0.6 else "cb_near" if cb.intensity >= 0.2
-                     else "clean", cb)
+            consider("cb_core" if (cb.reason or "").startswith("CB interior")
+                     else "cb_near" if cb.intensity >= 0.2 else "clean", cb)
         consider("cb_near", sources.get("conv"))
         sigmet = sources.get("sigmet")
         if sigmet is not None:

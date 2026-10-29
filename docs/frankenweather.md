@@ -658,7 +658,7 @@ How often each happens depends on the kind of area the aircraft is in
 | SEV TURB SIGMET, SEV PIREP | 5 | 0.5 | 1 in 1,000 |
 | MTW SIGMET | 3 | 0.2 | 1 in 2,000 |
 | Near a CB, TS/TC SIGMET area | 7 | 0.75 | 1 in 500 |
-| In a CB | 20 | 8 | 1 in 20 |
+| In a CB (inside its cloud) | 20 | 8 | 1 in 20 |
 | Strong low-level wind, rotor | 7 | 0.1 | 1 in 10,000 |
 
 So a 30-minute transit through a SEV TURB SIGMET is mostly light chop

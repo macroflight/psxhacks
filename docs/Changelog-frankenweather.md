@@ -21,6 +21,9 @@
   A background burst sent in the same 0.2 s as one replaced it (PSX
   keeps only the last WxBurst of several sent at once): about a third
   gave a fraction of their effect, e.g. 0.45 g instead of 1.3 g.
+- **Testing profile: fix: inside a CB's cloud the aircraft counts as "in a
+  CB"** (8 severe clusters an hour instead of 0.75). It used to need 60%
+  CB turbulence, which the CB interior (38-66%) mostly didn't reach.
 - **Testing profile: a situation load ends a running turbulence event**,
   which used to carry on at the new place.
 - **New: a once-a-minute `Flight:` line in the log**, also without
