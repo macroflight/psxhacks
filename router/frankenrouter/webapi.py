@@ -1881,15 +1881,27 @@ def _efb_src_row(label, color, text):
             f'</span>{text}</span></div>\n')
 
 
+# FrankenWeather turbulence kinds as fw_webui.py's _TURB_KIND_LABELS shows them
+_EFB_TURB_KIND_LABELS = {
+    'wave': 'mountain wave', 'rotor': 'lee rotor', 'mechanical': 'mechanical',
+    'shear': 'wind shear CAT', 'cb': 'CB', 'pirep': 'PIREP', 'cape': 'CAPE',
+    'gairmet': 'G-AIRMET', 'sigmet': 'SIGMET', 'mtw': 'mountain wave SIGMET',
+}
+
+
 def _efb_turb_text(w):
     """Return a short human-readable description of the currently-injected turbulence."""
     if not w['turb_available']:
         return 'no data'
     if not w['turb_enabled']:
         return 'OFF'
-    if w['turb_kind'] in (None, 'none'):
+    kind = w['turb_kind']
+    if kind in (None, 'none'):
         return 'none active'
-    return f"{w['turb_kind']}, {w['turb_intensity_pct']}%"
+    # "X+shear": wind shear outweighing X
+    label = (_EFB_TURB_KIND_LABELS['shear'] if kind.endswith('+shear')
+             else _EFB_TURB_KIND_LABELS.get(kind, kind))
+    return f"{label}, {w['turb_intensity_pct']}%"
 
 
 def _efb_turb_color(w):
