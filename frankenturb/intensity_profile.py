@@ -74,6 +74,15 @@ REALISTIC_BANDS = (
     IntensityBand(0.12, 0.22, 0.35, 0.40, 120.0, 420.0),
     IntensityBand(0.22, 0.30, 0.15, 0.35, 60.0, 300.0),
 )
+# ... and a SEV TURB SIGMET's: mostly light chop, so the crew notices it
+# without its being severe. At FL350 (sweep 2026-10-26) 15-20 % gave p95
+# 0.02-0.03 g, barely anything, 22-32 % 0.06-0.09 g, 35 % and up 0.11 g
+# and more (docs/turbulence-research/event-shape-calibration.md).
+REALISTIC_SEV_BANDS = (
+    IntensityBand(0.00, 0.05, 0.30, 0.10, 90.0, 300.0),   # smooth air
+    IntensityBand(0.22, 0.28, 0.50, 0.45, 120.0, 420.0),
+    IntensityBand(0.28, 0.34, 0.20, 0.45, 60.0, 300.0),
+)
 ABRUPT_PROBABILITY = 0.2      # share of ramps that are abrupt
 ABRUPT_RAMP_S = (2.0, 10.0)   # abrupt ramp time range
 SLOW_RAMP_S = (30.0, 180.0)   # normal ramp time range

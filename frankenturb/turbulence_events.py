@@ -49,7 +49,7 @@ AREA_RATES = {
     "bl_strong": (7.0, 0.1, 1 / 10000),        # strong low-level wind, rotor
 }
 
-MODERATE_LEVEL = (0.35, 0.50)       # continuous level during a moderate patch
+MODERATE_LEVEL = (0.38, 0.50)       # continuous level during a moderate patch
 MODERATE_MEDIAN_S = 90.0            # log-normal patch length ...
 MODERATE_SIGMA = 0.8
 MODERATE_S = (20.0, 600.0)          # ... clamped to this

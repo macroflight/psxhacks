@@ -560,7 +560,7 @@ normal turbulence. What testing changes:
 
 - **Realistic turbulence: light chop, with moderate, severe and extreme
   as rare events** (see [Turbulence events](#turbulence-events-testing-profile)
-  below). The continuous turbulence is at most light chop (30%).
+  below). The continuous turbulence is at most light chop (34%).
   Moderate patches, severe clusters and extreme encounters happen at
   random, at about real-world odds for the kind of area the aircraft is
   in, and crews can make each kind more likely.
@@ -623,11 +623,13 @@ time.
 
 In the testing profile:
 
-- **The continuous turbulence is at most light chop** (30%, about
-  0.07 g). The SIGMET, G-AIRMET, PIREP and TS-area levels vary between
-  smooth and light; physically computed turbulence (terrain, CB, CAPE,
-  boundary layer, wind shear) is capped at light.
-- **Moderate patches**: the turbulence level goes up to 35-50% for 20
+- **The continuous turbulence is at most light chop** (34%, about
+  0.09 g at cruise). A TURB SIGMET is mostly light chop (22-34%, about
+  0.06-0.09 g), smooth about a fifth of the time; the G-AIRMET, PIREP
+  and TS-area levels vary between smooth and light; physically computed
+  turbulence (terrain, CB, CAPE, boundary layer, wind shear) is capped
+  at light.
+- **Moderate patches**: the turbulence level goes up to 38-50% for 20
   seconds to 10 minutes (typically a minute and a half).
 - **Severe clusters**: 5-30 seconds of moderate chop with one to four
   big up/down jolts of 0.5-1.2 g, at least 6 seconds apart. In PSX one

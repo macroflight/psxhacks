@@ -57,7 +57,8 @@ from frankenturb.disk_cache import DiskCache
 from frankenturb.openmeteo import CLIENT as _OM_CLIENT
 from frankenturb import turbulence_events as _turb_events
 from frankenturb.intensity_profile import (
-    DEFAULT_BANDS, REALISTIC_BANDS, GustinessProfile, LayeredIntensityProfile)
+    DEFAULT_BANDS, REALISTIC_BANDS, REALISTIC_SEV_BANDS, GustinessProfile,
+    LayeredIntensityProfile)
 from fw_cb import (
     WX_DEFAULTS as _WX_DEFAULTS,
     CB_TOP_MAX_FT as _CB_TOP_MAX_FT,
@@ -1856,11 +1857,11 @@ def _sign(v):
 _TURB_MIN_TAS_KT = 30.0
 _GROUND_TURB_CAP = 0.30
 # Testing profile: the continuous turbulence is at most light chop (p95
-# about 0.07 g); moderate and stronger come as events
+# about 0.09 g at FL350); moderate and stronger come as events
 # (frankenturb/turbulence_events.py, _turb_event_step()), at real-world
 # odds times the crew's multipliers (0 turns a kind off, at most
 # _TURB_EVENT_MULT_MAX).
-_TURB_BG_MAX = 0.30
+_TURB_BG_MAX = 0.34
 _TURB_EVENT_MULT_MAX = {"moderate": 10.0, "severe": 100.0, "extreme": 1000.0}
 # Every this many seconds a line about the flight, the weather and the
 # turbulence goes to the log, so a pilot's report (too rough, too
@@ -5097,13 +5098,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
     def _apply_turb_profile_bands(self) -> None:
         """Give the varying SIGMET/G-AIRMET/PIREP levels the profile's bands.
 
-        Testing: smooth and light only (REALISTIC_BANDS); moderate and
-        stronger come as events (_turb_event_step()).
+        Testing: smooth and light only (REALISTIC_BANDS; TURB SIGMETs mostly
+        light chop, REALISTIC_SEV_BANDS); moderate and stronger come as
+        events (_turb_event_step()).
         """
-        bands = REALISTIC_BANDS if self._turb_testing() else DEFAULT_BANDS
-        for profile in (*self._sigmet_turb_profiles.values(), self._sigmet_conv_profile,
-                        self._gairmet_turb_profile, self._pirep_turb_profile):
-            profile.set_bands(bands)
+        testing = self._turb_testing()
+        for hazard, profile in self._sigmet_turb_profiles.items():
+            profile.set_bands(DEFAULT_BANDS if not testing else
+                              REALISTIC_SEV_BANDS if hazard == "TURB" else REALISTIC_BANDS)
+        for profile in (self._sigmet_conv_profile, self._gairmet_turb_profile,
+                        self._pirep_turb_profile):
+            profile.set_bands(REALISTIC_BANDS if testing else DEFAULT_BANDS)
 
     def _turb_area_class(self, sources: dict) -> tuple:
         """Return (area, reason): the kind of area (_turb_events.AREA_RATES) the aircraft is in.

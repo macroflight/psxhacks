@@ -3,7 +3,9 @@
 ## Unreleased
 
 - **Testing profile: realistic turbulence, with rare events.** The
-  continuous turbulence is now at most light chop. Moderate patches,
+  continuous turbulence is now at most light chop; in a SEV TURB SIGMET
+  it is mostly light chop (about 0.1 g), smooth about a fifth of the
+  time. Moderate patches,
   severe clusters (5-30 s, 0.5-1.2 g jolts) and extreme encounters
   (a drop below zero g, like SQ321) happen at random, at about
   real-world odds for the kind of area (clean air, G-AIRMET, SEV TURB
