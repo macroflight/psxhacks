@@ -1262,6 +1262,14 @@ def _parse_metar(raw: str) -> dict:  # pylint: disable=too-many-branches,too-man
     return out
 
 
+def _max_cb(wx: str, other: str) -> str:
+    """Return wx with the larger CB coverage and higher top of wx and other (base from wx)."""
+    a, b = wx.split(';'), other.split(';')
+    a[9] = str(max(int(a[9]), int(b[9])))
+    a[10] = str(max(int(a[10]), int(b[10])))
+    return ';'.join(a)
+
+
 def metar_to_wx_string(parsed: dict, lat: Optional[float] = None,
                        month: Optional[int] = None) -> str:
     """Convert a parsed METAR dict to a PSX Wx semicolon string.
@@ -6891,12 +6899,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         metar_ts=ts_oktas > 0,
                         radar_echo=radar_echo,
                         lightning=has_lightning)
-                    if refined.split(';')[9] != '0':
+                    if ts_oktas > 0:
+                        # The METAR observes a thunderstorm: Open-Meteo (CAPE,
+                        # often lagging real convection) may make it bigger,
+                        # never smaller. It used to replace it, e.g. WSSS
+                        # +TSRA (8 oktas, 44999 ft) became 2 oktas at 24500 ft.
+                        wx = _max_cb(wx, refined)
+                    elif refined.split(';')[9] != '0':
                         wx = refined
-                    elif ts_oktas > 0:
-                        # OM suppressed CBs but METAR directly observes TS/GR — keep
-                        # METAR-derived coverage; OM is lagging the actual observation.
-                        pass
                 new_metars.append(_strip_convective_metar(raw_metars[i]) if cb_removed_for
                                   else raw_metars[i])
             else:
