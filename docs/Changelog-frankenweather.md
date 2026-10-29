@@ -1,5 +1,18 @@
 # frankenweather changelog
 
+## 1.16.0 (2026-10-24)
+
+- **Change: being in MSFS cloud makes turbulence at most 1.3 times
+  stronger** (1.6 with the MSFS influence at 200%). It was up to about
+  2.8 times in any cloud, stratus and cirrus too, on top of everything
+  else. Out of cloud turbulence is no longer reduced (it was 0.8 times),
+  and being near a PSX CB no longer counts as being in cloud (a sudden
+  jump when the CB took over from another source).
+- **Change: the turbulence intensity shown is what's injected**, with
+  the intensity settings and the MSFS factor applied, on the status and
+  turbulence pages and (frankenrouter 1.28.0 or later) /efb. The
+  turbulence state message has a new `effective_intensity` for it.
+
 ## 1.15.0 (2026-10-24)
 
 - **Fix: airports with "TS" in their code no longer have a permanent
