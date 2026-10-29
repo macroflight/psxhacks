@@ -4787,11 +4787,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.logger.debug("Wind corridor: %s", msg)
             return
         self.logger.info("Wind corridor: %s", msg)
+        self._corridor_last_own_value = new_corridor
         self._inject_wx_slow_transit()
-        self._psx_send("WxCorridorTxt", new_corridor)
+        self.psx_send_and_set("WxCorridorTxt", new_corridor)
         self._wind_last_encoded = encoded
         self._wind_last_updated = now
-        self._corridor_last_own_value = new_corridor
 
     def _restore_corridor_snapshot(self) -> None:
         """Send the captured flight-plan wind corridor back to PSX.
@@ -4804,9 +4804,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         """
         if not self._corridor_snapshot_txt:
             return
-        self._inject_wx_slow_transit()
-        self._psx_send("WxCorridorTxt", self._corridor_snapshot_txt)
         self._corridor_last_own_value = self._corridor_snapshot_txt
+        self._inject_wx_slow_transit()
+        self.psx_send_and_set("WxCorridorTxt", self._corridor_snapshot_txt)
         self._corridor_txt = self._corridor_snapshot_txt
         self.logger.info("Enroute wind: restored original flight-plan wind corridor")
 
@@ -4873,9 +4873,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         new_corridor = wind_corridor.build_corridor_a(
             self.route_waypoints, self._current_fl_list_ft(), wind_by_live_index)
         if new_corridor != self._enroute_last_corridor_txt:
-            self._inject_wx_slow_transit()
-            self._psx_send("WxCorridorTxt", new_corridor)
             self._corridor_last_own_value = new_corridor
+            self._inject_wx_slow_transit()
+            self.psx_send_and_set("WxCorridorTxt", new_corridor)
             self._enroute_last_corridor_txt = new_corridor
             self.logger.info(
                 "Enroute wind: refreshed WxCorridor for %d waypoint(s) (%d passed)",
