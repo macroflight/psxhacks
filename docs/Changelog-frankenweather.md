@@ -1,5 +1,34 @@
 # frankenweather changelog
 
+## 1.15.0 (2026-10-24)
+
+- **Fix: airports with "TS" in their code no longer have a permanent
+  thunderstorm.** The station code was read as weather, so e.g. VTSP
+  (Phuket), VTSS, VTSM, UTSS (Samarkand) and KTSP always got a 4-okta CB
+  topping at 40,000 ft. Only real weather groups count now. Also:
+  lightning only from remarks starting with LTG (not e.g. ALTG), a
+  thunderstorm that has ended (RETS) counts as one nearby (2 oktas
+  instead of 4), and GS (small hail/snow pellets) as showers, not hail.
+- **Fix: strong convective inhibition (CIN over 200 J/kg) now suppresses
+  CBs.** Open-Meteo gives CIN as a positive number, and the check never
+  fired.
+- **Fix: the wind shear on/off switch and bias now also apply when wind
+  shear outweighs terrain turbulence** ("mechanical+shear", "wave+shear",
+  "rotor+shear" in the log). Switching wind shear CAT off didn't stop
+  those, and they also got yaw and speed bursts.
+- **Fix: wind-shear clear-air turbulence over the open sea and in light
+  low-level wind.** There was none at all when there was no terrain
+  upwind or the wind near the ground was under 6 kt, e.g. jet-stream CAT
+  over the North Atlantic.
+- **Fix: missing showers data no longer makes CAPE turbulence full
+  strength**; it counts as no showers (CAPE alone in clear air is
+  smooth).
+- **Change: turbulence on the takeoff and landing roll is at most 30%
+  and only yaws and rolls the aircraft** (no sink or speed bursts). A CB
+  overhead gave "severe" bursts during the roll. Live-tested on a heavy
+  747: PSX makes a yaw jolt grow with airspeed, from about 0.2° of
+  heading at 80 kt to about 0.6° near rotation.
+
 ## 1.14.0 (2026-10-24)
 
 - **New: "Avoid CB near departure/destination" is now "CB near dep/arr"
@@ -16,7 +45,7 @@
   zone. Loading a config file now also moves the zone right away.
 - **Change: wind-shear clear-air turbulence is much less violent.** Its
   gustiness multiplier is now 0.5-1.2 instead of 0.4-1.6, so it peaks at
-  60% instead of 80% (stronger than a severe TURB SIGMET, which peaks at
+  60% instead of 80% (more than a severe TURB SIGMET, which peaks at
   75%) after a pilot found it far too strong.
 - **Change: wind shear near the ground is capped at 30%.** Below 3,000 ft
   above the ground, rising to no limit at 5,000 ft. A windy departure
