@@ -1858,6 +1858,10 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         # Needed for autothrottle
         self.psx.subscribe("Afds", self.print_psx_variable)
 
+        # Read by the autothrottle and thrust/reverse lever handling whatever
+        # the config lists (psx.get() is only kept for subscribed variables)
+        self.psx.subscribe("Tla")
+
         # So we can shut down cleanly when asked to
         self.psx.subscribe("pleaseBeSoKindAndQuit", shutdown)
         self.psx.subscribe("exit", shutdown)

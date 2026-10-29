@@ -1,5 +1,13 @@
 # frankenusb changelog
 
+## Unreleased
+
+- **Fix: thrust lever handling depended on the config listing `Tla`.**
+  The autothrottle and thrust/reverse lever code reads the thrust lever
+  angles (`Tla`), but frankenusb only subscribed to it when a config
+  action named it, so with other configs the reads came back empty and
+  failed. It's now always subscribed.
+
 ## 1.4.2 (2026-10-18)
 
 - **Fix: the 3 call sites that fire a flight-phase setup or
