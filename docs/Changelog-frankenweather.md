@@ -1,5 +1,23 @@
 # frankenweather changelog
 
+## 1.26.0 (2026-10-25)
+
+- **New: a turbulence profile, "stable" or "testing"**, chosen on the
+  router's /efb page (frankenrouter 1.30.0), in the configuration file
+  (`[turbulence]` `profile`) or on the turbulence API. Stable (the
+  default) is the turbulence as before. Testing also turns on changes
+  being tried out before they may become the default, so they can be
+  compared in the sim (also with seat shakers) without changing anyone's
+  normal turbulence. Testing now adds:
+  - **Boundary-layer turbulence**: light bumps on an ordinary breezy or
+    sunny day below the boundary layer's top (often 3,000-5,000 ft by
+    day), from the wind (up to 15%) and the sunshine (up to 20%), at
+    most 20%. The stable profile is smooth there.
+  - **Turbulence inside TS and TC SIGMET areas** (`--sigmet`): the air
+    between the cells, which the stable profile leaves smooth between
+    the zones' CBs. Mostly light and never smooth: ISOL 3-14%, OCNL
+    6-25%, FRQ/EMBD 10-36%, SQL and TC 12-46%.
+
 ## 1.25.0 (2026-10-25)
 
 Found by more automated test flights around the world.
