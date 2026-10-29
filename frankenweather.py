@@ -1736,6 +1736,9 @@ _BURST_BANK = 100
 _BURST_YAW = 200
 _BURST_SPD = 300
 _BURST_GUST = 400
+_BURST_NAMES = {_BURST_SINK: "SINK", _BURST_BANK: "BANK", _BURST_YAW: "YAW",
+                _BURST_SPD: "SPD", _BURST_GUST: "GUST"}
+_BURST_SUMMARY_S = 60.0               # the burst summary log line's period (_log_burst_summary())
 
 # Turbulence profile (TURBCOMMAND "profile", /efb): "stable" is the
 # released behaviour; "testing" also turns on changes being evaluated
@@ -2427,6 +2430,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # (monotonic time, vertical) of the last wave/MTW burst decision,
         # see _pick_wave_burst_testing()
         self._wave_vert_prev: Optional[tuple] = None
+        # Bursts since the last summary line (_log_burst_summary())
+        self._burst_summary_start = time.monotonic()
+        self._burst_summary: list = []
         self._turb_type_enabled: dict = {k: True for k in _TURB_TYPES}
         self._turb_type_biases: dict = {k: 100 for k in _TURB_TYPES}
         self._turb_msfs_magnitude: int = 100  # 0-200%; scales MSFS turbulence influence
@@ -3679,9 +3685,39 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         magnitude = min(99, random.randint(1, max(1, int(intensity * 99))))
         psx_value = direction * (base + magnitude)
         self.psx_send_and_set("WxBurst", str(psx_value), force=True)
+        self._burst_summary.append((base, direction, magnitude, state.kind, intensity))
         self.logger.debug("Injected WxBurst=%d (%s%s%02d)%s", psx_value, label,
                           '+' if direction > 0 else '-', magnitude,
                           f" on the ground at {tas_kt:.0f} kt" if on_ground else "")
+
+    def _log_burst_summary(self) -> None:
+        """Log one line about the bursts of the last _BURST_SUMMARY_S, if there were any.
+
+        Without --debug the individual bursts aren't logged, so this is what
+        tells afterwards how hard and in which direction the aircraft was
+        being pushed (e.g. "SPD 8 +3/-5": eight speed bursts, three of them
+        faster), and by what.
+        """
+        now = time.monotonic()
+        if now - self._burst_summary_start < _BURST_SUMMARY_S:
+            return
+        bursts, self._burst_summary = self._burst_summary, []
+        self._burst_summary_start = now
+        if not bursts:
+            return
+        channels = []
+        for base, name in _BURST_NAMES.items():
+            dirs = [d for b, d, _, _, _ in bursts if b == base]
+            if dirs:
+                channels.append(f"{name} {len(dirs)} +{dirs.count(1)}/-{dirs.count(-1)}")
+        sizes = [m for _, _, m, _, _ in bursts]
+        kinds = []
+        for kind in dict.fromkeys(k for _, _, _, k, _ in bursts):
+            levels = [i for _, _, _, k, i in bursts if k == kind]
+            kinds.append(f"{kind} {min(levels) * 100:.0f}-{max(levels) * 100:.0f}%")
+        self.logger.info("Bursts in the last %.0f s: %d (%s), size avg %.0f max %d, %s",
+                         _BURST_SUMMARY_S, len(bursts), ", ".join(channels),
+                         sum(sizes) / len(sizes), max(sizes), ", ".join(kinds))
 
     def _smooth_terrain(self, state: TurbulenceState, lat: float, lon: float) -> TurbulenceState:
         """Return the terrain model's state with its intensity smoothed (_TERRAIN_SMOOTH_S).
@@ -4465,6 +4501,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 self._turb_effective_intensity = self._shown_intensity(effective_intensity)
                 if self._turb_enabled and not low_speed:
                     self._maybe_inject_burst(state, effective_intensity, tas_kt)
+                self._log_burst_summary()
 
                 all_sources = []
                 for src_s in [terrain_state, cb_state, pirep_state, cape_state, bl_state,
