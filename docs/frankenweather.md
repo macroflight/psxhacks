@@ -402,6 +402,14 @@ to about 15 minutes for a big one. "Remove CB near dep/arr" and
 CB-free zones remove CBs at once, and a zone that's moved starts fresh,
 so this never holds a zone back.
 
+New zones are never placed within 100 nm of the aircraft, but a zone the
+aircraft flies towards can still get a CB there: a new or moved TS
+SIGMET, CAPE, or a METAR. Such a CB is small, at most 2 oktas and 15,000
+ft, until the zone is moved (usually once it's behind the aircraft), so
+no 45,000 ft CB appears out of nowhere 10 nm ahead. A CB the zone already
+had when it came within 100 nm stays, but doesn't grow. The departure
+and destination airport zones keep their METAR's CB.
+
 Both the forecast target and the live ramp rate are visible, not just the
 current (ramped) value: the web UI's weather map popup and the
 Weather zones page's zone cards show the CB's current oktas/top next to

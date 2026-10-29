@@ -558,6 +558,12 @@ _RV_DENSITY_THRESHOLD = 0.25  # echo≥2 fraction triggering full CB squeeze
 # of nowhere. Also keeps squeezed zones from being relocated again within
 # minutes (2026-10-21 DNMM-VVDN: squeezed to 50nm, zones lived 3-11min).
 _CB_SQUEEZE_MIN_FWD_NM = 100.0
+# A zone already within _CB_SQUEEZE_MIN_FWD_NM that gets a CB (a new or
+# moved TS SIGMET, CAPE, METAR...) only gets a small one, kept until the
+# zone is moved: a 45,000 ft CB appearing 10 nm away is startling. A CB it
+# already had there may not grow. See Script._limit_close_cb().
+_CB_CLOSE_MAX_OKTAS = 2
+_CB_CLOSE_MAX_TOP_FT = 15000.0
 
 _BZ_URL = "https://data.blitzortung.org/Data_1/strikes"
 _BZ_LOOKBACK_MIN = 20  # fetch this many recent minute-files of strike data
@@ -2002,6 +2008,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # current_oktas/current_top_ft/growth_rate_*_per_min/last_update_ts,
         # present only while that zone's CB is actively growing/decaying.
         self.zone_cb_ramp: dict = {}
+        # zone_num → (zone position, max oktas, max top ft) for a zone within
+        # _CB_SQUEEZE_MIN_FWD_NM, see _limit_close_cb(); and the zone
+        # position each zone_wx was sent for
+        self.zone_cb_close_cap: dict = {}
+        self._zone_wx_pos: dict = {}
         # zone_num → distance (nm) to the aircraft captured at the moment the
         # zone was last (re)placed; consumed (popped) by _ramp_cb_wx() the
         # first time it sees a CB there, so it only ever reflects placement,
@@ -4810,6 +4821,49 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         return min(_CB_GROWTH_MAX_TOP_FT_PER_MIN_CEILING,
                    max(_CB_GROWTH_MAX_TOP_FT_PER_MIN, scaled))
 
+    def _limit_close_cb(self, zone_num: int, wx: str, pos: tuple) -> str:
+        """Return wx with the CB of a zone near the aircraft limited (_CB_CLOSE_*).
+
+        The first time the zone (at pos) is within _CB_SQUEEZE_MIN_FWD_NM,
+        its CB from then on may be no bigger than the one it had then, or
+        than _CB_CLOSE_MAX_OKTAS/_CB_CLOSE_MAX_TOP_FT (at least
+        _CB_MIN_DEPTH_FT deep) if it had none, until the zone is moved:
+        new zones are never placed this close, but a zone the aircraft
+        flies towards can still get a CB (a new or moved TS SIGMET, CAPE,
+        a METAR), which used to appear at full size, e.g. 45,000 ft
+        within 10 nm. Not for the dep/dst airport zones (their METAR).
+        """
+        cap = self.zone_cb_close_cap.get(zone_num)
+        if cap is not None and cap[0] != pos:
+            del self.zone_cb_close_cap[zone_num]   # moved: starts afresh
+            cap = None
+        if self.ac_lat is None or pos[2] in {self.fmc_dep_icao, self.fmc_dst_icao}:
+            return wx
+        if cap is None:
+            if self._dist_nm(self.ac_lat, self.ac_lon, pos[0], pos[1]) > _CB_SQUEEZE_MIN_FWD_NM:
+                return wx
+            prev = (self.zone_wx.get(zone_num) or "").split(';')
+            same_zone = self._zone_wx_pos.get(zone_num) == pos and len(prev) > 11
+            had = int(prev[9]) if same_zone and prev[9].isdigit() else 0
+            cap = ((pos, had, float(prev[10])) if had > 0 else
+                   (pos, _CB_CLOSE_MAX_OKTAS, _CB_CLOSE_MAX_TOP_FT))
+            self.zone_cb_close_cap[zone_num] = cap
+            self.logger.info("Zone %d within %.0fnm: CB at most %d oktas, %.0fft from now on",
+                             zone_num, _CB_SQUEEZE_MIN_FWD_NM, cap[1], cap[2])
+        parts = wx.split(';')
+        oktas = int(parts[9]) if parts[9].isdigit() else 0
+        if oktas <= 0:
+            return wx
+        base = float(parts[11])
+        new_oktas = min(oktas, cap[1])
+        new_top = min(float(parts[10]), max(cap[2], base + _CB_MIN_DEPTH_FT))
+        if new_oktas == oktas and new_top == float(parts[10]):
+            return wx
+        self.logger.debug("Zone %d: CB %d oktas %sft limited to %d oktas %.0fft"
+                          " (near the aircraft)", zone_num, oktas, parts[10], new_oktas, new_top)
+        parts[9], parts[10] = str(new_oktas), str(round(new_top))
+        return ';'.join(parts)
+
     def _fade_cb_wx(self, zone_num: int, target_wx: str) -> str:
         """Let zone_num's CB fade instead of vanishing (without --cb-growth).
 
@@ -7050,6 +7104,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             if self._is_cb_free_zone(zone_num) or cb_removed_for:
                 final_wx = _strip_cb(final_wx)
                 sigmet_label = None
+            final_wx = self._limit_close_cb(zone_num, final_wx, positions[i])
             self.zone_cb_sigmet[zone_num] = sigmet_label
             target_parts = final_wx.split(';')
             target_oktas_val = int(target_parts[9]) if len(target_parts) > 11 else 0
@@ -7245,6 +7300,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 except (ValueError, IndexError):
                     pass
             self.zone_wx[zone_num] = wx
+            self._zone_wx_pos[zone_num] = self.zone_positions.get(zone_num)
             self.psx_send_and_set(f"Wx{zone_num}", wx)
 
         for i, metar in enumerate(new_metars):
