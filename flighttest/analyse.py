@@ -10,7 +10,8 @@ surface angles (SurfAilEleRud, whole degrees); thrust the mean thrust
 lever angle (Tla). Also the autopilot servo commands (ApServo, three
 values -999..999 at ~10 Hz, undocumented: taken to be elevator;aileron;
 rudder like FltControls) in servo units instead of degrees, and the
-turbulence bursts injected (WxBurst) per minute.
+turbulence bursts injected (WxBurst) per minute; values above 900 are PSX's
+lightning flashes, not turbulence, and aren't counted.
 """
 import dataclasses
 import statistics
@@ -104,7 +105,7 @@ def _read(path: str, start: float, end: float) -> tuple:  # pylint: disable=too-
             elif key == servo_q:
                 for name, units in zip(SERVOS, value.split(";")):
                     series[name].append((now, float(units)))
-            elif key == burst_q:
+            elif key == burst_q and value.lstrip("-").isdigit() and 0 < abs(int(value)) <= 900:
                 bursts += 1
     minutes = (times[-1] - times[0]) / 60.0 if len(times) > 1 else 0.0
     return series, bursts, minutes
