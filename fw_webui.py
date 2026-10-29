@@ -223,6 +223,7 @@ _TURB_KIND_LABELS = {
     'wave': 'Mountain wave', 'rotor': 'Lee rotor', 'mechanical': 'Mechanical',
     'shear': 'Wind shear CAT', 'cb': 'CB proximity', 'pirep': 'PIREP',
     'cape': 'CAPE convective', 'gairmet': 'G-AIRMET', 'sigmet': 'SIGMET',
+    'mtw': 'Mountain wave SIGMET',
 }
 
 # ---------------------------------------------------------------------------
@@ -633,7 +634,7 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
             for s in turb_sources
         ],
     })
-    _WIND_TURB_KINDS = {'wave', 'rotor', 'mechanical'}
+    _WIND_TURB_KINDS = {'wave', 'rotor', 'mechanical', 'mtw'}
     turb_js = 'null'
     if (turb_src_lat is not None and turb_src_lon is not None and
             turb_kind in _WIND_TURB_KINDS and turb_intensity >= 0.01):

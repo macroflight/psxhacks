@@ -1710,15 +1710,18 @@ def _turb_type(kind: str) -> str:
     """Return the turbulence type (_TURB_TYPES) a kind's settings come from.
 
     "X+shear" is wind shear outweighing X (frankenturb/turbulence.py), so
-    the wind shear settings apply; they used to be ignored for it.
+    the wind shear settings apply; they used to be ignored for it. "mtw"
+    (a mountain wave SIGMET, _sigmet_turbulence()) is a SIGMET.
     """
-    return "shear" if kind.endswith("+shear") else kind
+    if kind.endswith("+shear"):
+        return "shear"
+    return "sigmet" if kind == "mtw" else kind
 
 
 def _pick_burst(state, intensity):
     """Choose (base_offset, direction, label) for one WxBurst event."""
     r = random.choice
-    if state.kind == 'wave':
+    if state.kind in ('wave', 'mtw'):
         vert_dir = _sign(state.vertical) if not _isnan(state.vertical) else r([-1, 1])
         roll_dir = _sign(state.roll) if not _isnan(state.roll) else r([-1, 1])
         spd_dir = _sign(state.gust) if not _isnan(state.gust) else r([-1, 1])
@@ -4481,13 +4484,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if "MTW" in best:
             intensity, entry = best["MTW"]
             label = f"{entry['qualifier']} MTW SIGMET {entry['fir']} {entry['series']}"
+            # Kind "mtw": wave-like bursts, but the SIGMET settings apply
+            # (they used to be the mountain wave's)
             if terrain_state.kind in ("wave", "rotor"):
                 mtw_state = dataclasses.replace(
                     terrain_state, intensity=max(terrain_state.intensity, intensity),
-                    reason=f"{terrain_state.reason} + {label}")
+                    kind="mtw", reason=f"{terrain_state.reason} + {label}")
             else:
                 mtw_state = TurbulenceState(
-                    intensity=intensity, kind="wave",
+                    intensity=intensity, kind="mtw",
                     reason=f"{label} (no terrain wave found)")
         return turb_state, mtw_state
 
