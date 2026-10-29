@@ -540,6 +540,11 @@ steeply in the lowest few thousand feet) is not clear-air turbulence:
 below 3,000 ft above the ground it gives at most 30%, rising to no limit
 at 5,000 ft. The turbulence reason then says "Low-level wind shear".
 
+On the ground (takeoff and landing roll, from 30 kt) turbulence is at
+most 30% and only yaws and rolls the aircraft: PSX makes a yaw jolt grow
+with airspeed, from about 0.2° of heading at 80 kt to about 0.6° near
+rotation, which has to be steered out.
+
 G-AIRMET turbulence areas (US) vary like a TURB SIGMET instead: the
 same varying level in 2,000 ft layers, scaled by the area's severity (a
 MOD area gets two thirds of it, like a MOD SIGMET), so a moderate

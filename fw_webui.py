@@ -1095,9 +1095,9 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
     if turb_label and turb_label != '—' and turb_pct > 0:
         turb_summary = f'{turb_label} · {turb_pct}%'
         if turb_low_speed:
-            turb_summary += ' (low speed — not injected)'
+            turb_summary += ' (below 30 kt — not injected)'
     else:
-        turb_summary = 'low speed — not injected' if turb_low_speed and turb_enabled else ''
+        turb_summary = 'below 30 kt — not injected' if turb_low_speed and turb_enabled else ''
 
     _sub = 'font-size:0.78em;color:#64748b;padding:0 0 0.3em 0'
 
@@ -2012,7 +2012,7 @@ def _build_weather_turb_page(ctx):  # pylint: disable=too-many-locals,too-many-b
     if low_speed and enabled:
         status_html += (
             '<div style="font-size:0.82em;color:#f59e0b;margin-top:0.5em">'
-            'Ground speed below 30 kt — turbulence computed but not injected. '
+            'Below 30 kt — turbulence computed but not injected. '
             'Values shown are what would be active in flight.</div>'
         )
     status_html += (

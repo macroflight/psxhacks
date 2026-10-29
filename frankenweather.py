@@ -1674,6 +1674,27 @@ def _sign(v):
     return 1 if v >= 0.0 else -1
 
 
+# On the ground (takeoff/landing roll, from _TURB_MIN_TAS_KT) gusts still
+# yaw and roll the aircraft but can't move it up or down. Bursts there are
+# capped at _GROUND_TURB_CAP and limited to YAW/BANK. Live-tested on a
+# heavy 747 (2026-10-24): PSX itself scales a yaw burst with airspeed
+# squared (heading change about 1.1e-6 x strength x kt^2 degrees, i.e.
+# ~0.2 deg at 80 kt and ~0.6 deg at 140 kt for strength 29, held until
+# steered out); bank is proportional to strength (back to level in ~0.8 s);
+# SPD bursts had no visible effect on the ground.
+_TURB_MIN_TAS_KT = 30.0
+_GROUND_TURB_CAP = 0.30
+
+
+def _pick_ground_burst():
+    """Choose (base_offset, direction, label) for one WxBurst on the ground."""
+    r = random.choice
+    return r([
+        (_BURST_YAW, r([-1, 1]), 'yaw'),
+        (_BURST_BANK, r([-1, 1]), 'bank'),
+    ])
+
+
 def _turb_type(kind: str) -> str:
     """Return the turbulence type (_TURB_TYPES) a kind's settings come from.
 
@@ -3338,8 +3359,35 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
     # Turbulence subsystem
     # ------------------------------------------------------------------
 
+    def _maybe_inject_burst(self, state: TurbulenceState, intensity: float,
+                            tas_kt: float) -> None:
+        """Inject one WxBurst with probability intensity**1.5 (scaled by the rate setting).
+
+        On the ground only a weaker yaw/roll burst (_GROUND_TURB_CAP).
+        """
+        on_ground = self._on_ground()
+        if on_ground:
+            intensity = min(intensity, _GROUND_TURB_CAP)
+        if intensity < 0.01:
+            return
+        if random.random() >= (intensity ** 1.5) * (self._turb_rate / 100.0):
+            return
+        base, direction, label = (_pick_ground_burst() if on_ground
+                                  else _pick_burst(state, intensity))
+        magnitude = min(99, random.randint(1, max(1, int(intensity * 99))))
+        psx_value = direction * (base + magnitude)
+        self.psx_send_and_set("WxBurst", str(psx_value), force=True)
+        self.logger.debug("Injected WxBurst=%d (%s%s%02d)%s", psx_value, label,
+                          '+' if direction > 0 else '-', magnitude,
+                          f" on the ground at {tas_kt:.0f} kt" if on_ground else "")
+
+    def _on_ground(self) -> bool:
+        """Return True if PSX says the aircraft is on the ground (OnGround)."""
+        return (self.psx.get("OnGround") if self.psx else None) == "1"
+
     def _turb_type_effective_bias(self, kind: str) -> int:
         """Return combined bias for a turbulence type: 0 when disabled."""
+        kind = _turb_type(kind)
         if not self._turb_type_enabled.get(kind, True):
             return 0
         return self._turb_type_biases.get(kind, 100)
@@ -3387,7 +3435,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
     # ------------------------------------------------------------------
     # --config-file (TOML): load/save every setting the web GUI can change
-        kind = _turb_type(kind)
     # ------------------------------------------------------------------
 
     def _build_config_dict(self) -> dict:
@@ -3941,7 +3988,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     self.logger.warning("Bad PiBaHeAlTas: %s", exc)
                     continue
 
-                low_speed = tas_kt < 30.0
+                low_speed = tas_kt < _TURB_MIN_TAS_KT
                 if low_speed != self._turb_low_speed:
                     self._turb_low_speed = low_speed
                     self._turb_state_changed_event.set()
@@ -3956,13 +4003,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         reason="Manual",
                     )
                     eff = self._turb_manual_turb_intensity
-                    if eff >= 0.01 and not low_speed:
-                        inject_prob = (eff ** 1.5) * (self._turb_rate / 100.0)
-                        if random.random() < inject_prob:
-                            base, direction, _ = _pick_burst(manual_state, eff)
-                            magnitude = min(99, random.randint(1, max(1, int(eff * 99))))
-                            self.psx_send_and_set(
-                                "WxBurst", str(direction * (base + magnitude)), force=True)
+                    if not low_speed:
+                        self._maybe_inject_burst(manual_state, eff, tas_kt)
                     state_changed = (
                         self._turb_state is None or
                         self._turb_state.kind != manual_state.kind or
@@ -4068,17 +4110,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     state.intensity * self._turb_intensity_bias *
                     self._turb_type_effective_bias(state.kind) / 10000.0 * msfs_factor,
                 )
-                if self._turb_enabled and effective_intensity >= 0.01 and not low_speed:
-                    inject_prob = (effective_intensity ** 1.5) * (self._turb_rate / 100.0)
-                    if random.random() < inject_prob:
-                        base, direction, label = _pick_burst(state, effective_intensity)
-                        magnitude = min(99, random.randint(1, max(1,
-                                        int(effective_intensity * 99))))
-                        psx_value = direction * (base + magnitude)
-                        self.psx_send_and_set("WxBurst", str(psx_value), force=True)
-                        self.logger.debug("Injected WxBurst=%d (%s%s%02d)",
-                                          psx_value, label,
-                                          '+' if direction > 0 else '-', magnitude)
+                if self._turb_enabled and not low_speed:
+                    self._maybe_inject_burst(state, effective_intensity, tas_kt)
 
                 all_sources = []
                 for src_s in [terrain_state, cb_state, pirep_state, cape_state, gairmet_state,
@@ -8054,6 +8087,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.psx.subscribe("TimeEarth")
             self.psx.subscribe("WxClust")
             self.psx.subscribe("AcftHeight")
+            self.psx.subscribe("OnGround")
 
             await self.psx.connect(self.args.psx_host, self.args.psx_port)
             self.logger.warning("psx.connect() returned — this should not happen")
