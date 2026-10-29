@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Fix: with `--sigmet`, no SIGMETs at all when the US had none.**
+  aviationweather.gov answers "no content" (HTTP 204) when a list is
+  empty, and frankenweather took that for a failed download of both
+  lists, keeping no SIGMETs, international ones included. An empty list
+  is now just empty.
 - **Fix: no CBs in the planet zone.** PSX gives the planet zone (the
   weather outside the 7 weather zones) 4 CB cells of its own, placed
   wherever PSX likes, with the planet zone's CB coverage. frankenweather

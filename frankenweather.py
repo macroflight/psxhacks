@@ -8632,6 +8632,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             lists = []
             for url in (_fw_sigmet.ISIGMET_URL, _fw_sigmet.AIRSIGMET_URL):
                 async with session.get(url) as resp:
+                    if resp.status == 204:
+                        # "No Content": none right now (seen for the US
+                        # list, 2026-10-28), not a failure
+                        lists.append([])
+                        continue
                     if resp.status != 200:
                         raise RuntimeError(f"HTTP {resp.status} from {url}")
                     lists.append(await resp.json(content_type=None))
