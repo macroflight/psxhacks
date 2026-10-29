@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026-10-29: version 1.31.0
 
 - **Change: `addon=GEOVR.PSX` messages are no longer forwarded between
   sims.** PSX.NET.VATSIM's voice client messages (`CONTROL`, `STATUS`,
