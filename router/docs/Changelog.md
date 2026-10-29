@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026-10-29: version 1.31.1
 
 - **Change: `addon=PSXNETVATSIM` messages are no longer logged as an
   unknown addon.** With `unknown_addons = true` every PSX.NET.VATSIM
