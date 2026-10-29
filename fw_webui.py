@@ -71,10 +71,15 @@ def encode_lzma_json_payload(data) -> str:
     """Lzma-compress and base64-encode compact JSON for the wire (SIGMETJSON).
 
     A day's parsed SIGMET download is ~125 KB of JSON, ~29 KB encoded
-    (gzip would be ~38 KB). Takes ~80 ms, so run it in an executor.
+    (gzip would be ~38 KB). Takes ~35 ms, so run it in an executor. The
+    dictionary is only as large as the input: preset 9's 64 MiB gains
+    nothing on 125 KB, but made each call allocate ~700 MB (committed at
+    once on Windows), and each receiver reserve 64 MiB to decompress.
     """
     raw = json.dumps(data, separators=(',', ':')).encode('utf-8')
-    return base64.b64encode(lzma.compress(raw, preset=9 | lzma.PRESET_EXTREME)).decode('ascii')
+    filters = [{"id": lzma.FILTER_LZMA2, "preset": 9 | lzma.PRESET_EXTREME,
+                "dict_size": max(1 << 16, len(raw))}]
+    return base64.b64encode(lzma.compress(raw, filters=filters)).decode('ascii')
 
 
 # CB avoidance near the departure/arrival airport (frankenweather's

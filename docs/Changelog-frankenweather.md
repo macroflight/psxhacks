@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Fix: memory peaks of about 700 MB.** Compressing the SIGMET data
+  frankenweather broadcasts to the router and the web pages used LZMA's
+  strongest preset, whose 64 MB dictionary made every broadcast allocate
+  about 700 MB (on Windows committed straight away). The dictionary is
+  now only as large as the data (~125 KB): the same compressed size, in
+  half the time, and receivers no longer reserve 64 MB to decompress it.
+  Older receivers read the new messages unchanged.
 - **New: the random wind/OAT deviation can be set to 0.** The enroute
   wind importer's deviation (PSX's Random slider on the Corridor page)
   now goes from 0 to 80; at 0, PSX's winds are exactly the injected
