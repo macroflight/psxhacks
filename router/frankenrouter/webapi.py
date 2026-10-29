@@ -1680,7 +1680,10 @@ def _efb_status_dict(router, ctx):  # pylint: disable=too-many-locals
         'turb_available': turb_available,
         'turb_enabled': bool((turbstate or {}).get('enabled', True)),
         'turb_kind': (turbstate or {}).get('active_kind', 'none'),
-        'turb_intensity_pct': round((turbstate or {}).get('active_intensity', 0.0) * 100),
+        # What's injected (biases and MSFS factor applied); FrankenWeather
+        # before 1.16.0 only sends the computed intensity
+        'turb_intensity_pct': round((turbstate or {}).get(
+            'effective_intensity', (turbstate or {}).get('active_intensity', 0.0)) * 100),
         'turb_age': turb_age,
         'turb_reason': (turbstate or {}).get('active_reason') or '—',
         # "sigmet_ramp" is FrankenWeather 1.11.0's name for it
