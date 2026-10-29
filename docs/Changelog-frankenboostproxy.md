@@ -1,6 +1,6 @@
 # frankenboostproxy changelog
 
-## Unreleased
+## 2.0.1 (2026-10-29)
 
 - **Fix: short jolts are no longer averaged away.** The accelerations
   (and show_boost_gauges) came from about the last 5 seconds of the boost
