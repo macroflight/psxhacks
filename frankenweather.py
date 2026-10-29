@@ -340,6 +340,12 @@ _WAVE_SPD_KEEP = 0.0
 # (_pick_burst()); without them it would be glassy smooth, so the testing
 # profile makes them up/down bursts there instead (rate-gated like the rest)
 _WAVE_LIGHT_BELOW = 0.25
+# ... and their up/down bursts one way within this many seconds add up to
+# at most the largest single burst (_wave_sink_budget()): a run of sinks
+# 1-3 s apart pumped the autopilot's ~8 s pitch oscillation in ALT HOLD
+# to +-0.6 g, pitch 0-6.6 deg, from bursts of ~0.2 g each (NZZC MTW
+# FL250, 2026-10-26 night campaign).
+_WAVE_SINK_WINDOW_S = 8.0
 # Testing profile: an MTW SIGMET lifts the terrain model's own wave to at
 # most this factor times it plus this much (_mtw_state()).
 _MTW_LIFT_FACTOR = 2.0
@@ -2430,6 +2436,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # (monotonic time, vertical) of the last wave/MTW burst decision,
         # see _pick_wave_burst_testing()
         self._wave_vert_prev: Optional[tuple] = None
+        # (monotonic time, direction, size) of the recent wave/MTW up/down
+        # bursts, see _wave_sink_budget()
+        self._wave_sinks: collections.deque = collections.deque()
         # Bursts since the last summary line (_log_burst_summary())
         self._burst_summary_start = time.monotonic()
         self._burst_summary: list = []
@@ -3683,6 +3692,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         else:
             base, direction, label = _pick_burst(state, intensity)
         magnitude = min(99, random.randint(1, max(1, int(intensity * 99))))
+        if (base == _BURST_SINK and not on_ground and self._turb_testing() and
+                state.kind in ('wave', 'mtw')):
+            magnitude = self._wave_sink_budget(direction, magnitude, intensity)
+            if magnitude < 1:
+                return
         psx_value = direction * (base + magnitude)
         self.psx_send_and_set("WxBurst", str(psx_value), force=True)
         self._burst_summary.append((base, direction, magnitude, state.kind, intensity))
@@ -4899,6 +4913,22 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if rate == 0.0 or random.random() >= min(1.0, abs(rate) / _WAVE_PHASE_RATE_FULL):
             return None
         return base, _sign(rate), label
+
+    def _wave_sink_budget(self, direction: int, magnitude: int, intensity: float) -> int:
+        """Return how much of a wave/MTW up/down burst to send (testing profile; 0: none).
+
+        Bursts one way within _WAVE_SINK_WINDOW_S add up to at most the
+        largest single burst at this intensity, so a run of them can't
+        build up the autopilot's pitch oscillation.
+        """
+        now = time.monotonic()
+        while self._wave_sinks and now - self._wave_sinks[0][0] > _WAVE_SINK_WINDOW_S:
+            self._wave_sinks.popleft()
+        used = sum(size for _, d, size in self._wave_sinks if d == direction)
+        magnitude = min(magnitude, max(1, int(intensity * 99)) - used)
+        if magnitude >= 1:
+            self._wave_sinks.append((now, direction, magnitude))
+        return magnitude
 
     def _sigmet_convective_turbulence(self, lat: float, lon: float,
                                       alt_ft: float) -> Optional[tuple]:

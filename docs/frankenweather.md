@@ -589,6 +589,11 @@ normal turbulence. What testing changes:
     real wave changes the airspeed slowly, over its cycle. A light wave
     (under 25%), whose bursts were only speed and gust ones, gets
     up/down bursts in their place, so it isn't glassy smooth.
+  - Up/down bursts one way within 8 seconds add up to at most the
+    largest single one. A run of them a second or two apart pumped the
+    autopilot's pitch oscillation in ALT HOLD (about 8 seconds a cycle)
+    to over 1.5 g, from bursts of about 0.2 g each (NZ MTW SIGMET,
+    FL250).
   - An MTW SIGMET lifts the terrain model's own wave to at most twice it
     plus 20%, instead of up to the SIGMET's full severity.
 
