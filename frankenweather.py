@@ -1752,6 +1752,17 @@ _BURST_NAMES = {_BURST_SINK: "SINK", _BURST_BANK: "BANK", _BURST_YAW: "YAW",
                 _BURST_SPD: "SPD", _BURST_GUST: "GUST"}
 _BURST_SUMMARY_S = 60.0               # the burst summary log line's period (_log_burst_summary())
 
+
+def _burst_channels_text(bursts: list) -> str:
+    """Return e.g. "SINK 3 +2/-1, SPD 8 +3/-5" for (base, direction, size) bursts."""
+    channels = []
+    for base, name in _BURST_NAMES.items():
+        dirs = [d for b, d, _ in bursts if b == base]
+        if dirs:
+            channels.append(f"{name} {len(dirs)} +{dirs.count(1)}/-{dirs.count(-1)}")
+    return ", ".join(channels)
+
+
 # Turbulence profile (TURBCOMMAND "profile", /efb): "stable" is the
 # released behaviour; "testing" also turns on changes being evaluated
 # before they become the default (see _turb_testing()).
@@ -2470,6 +2481,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # Bursts since the last summary line (_log_burst_summary())
         self._burst_summary_start = time.monotonic()
         self._burst_summary: list = []
+        # Other clients' WxBursts since then (handle_other_wxburst()): (base,
+        # direction, size), and lightning flashes
+        self._other_burst_summary: list = []
+        self._other_lightning = 0
+        self._own_write: Optional[str] = None   # key psx_send_and_set() is echoing locally
         self._turb_type_enabled: dict = {k: True for k in _TURB_TYPES}
         self._turb_type_biases: dict = {k: 100 for k in _TURB_TYPES}
         self._turb_msfs_magnitude: int = 100  # 0-200%; scales MSFS turbulence influence
@@ -2561,7 +2577,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return
         if not self._psx_send(key, value):
             return
-        self.psx._set(key, value)  # pylint: disable=protected-access
+        self._own_write = key
+        try:
+            self.psx._set(key, value)  # pylint: disable=protected-access
+        finally:
+            self._own_write = None
 
     def _station_only_metar(self, zone_num: int, icao: str, now: datetime) -> str:
         """Return the METAR for a zone whose weather we build ourselves.
@@ -3733,6 +3753,28 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                           '+' if direction > 0 else '-', magnitude,
                           f" on the ground at {tas_kt:.0f} kt" if on_ground else "")
 
+    def handle_other_wxburst(self, _key: str, value: str) -> None:
+        """Count a WxBurst we didn't send ourselves, for the burst summary.
+
+        Normally PSX's own: it makes its own turbulence (CBs, gusts, wind
+        shear, CAT) on the same channels, and lightning flashes as codes
+        above 900. Whoever sends it, it adds to ours. Neither PSX nor the
+        router sends a client's own writes back to it, so only psx.py's
+        local echo of ours (psx_send_and_set()) needs skipping.
+        """
+        if self._own_write == "WxBurst":
+            return
+        try:
+            burst = int(value)
+        except ValueError:
+            return
+        code = abs(burst)
+        if code > 900:
+            self._other_lightning += 1
+        elif code > 0:
+            base = min(_BURST_GUST, (code - 1) // 100 * 100)
+            self._other_burst_summary.append((base, _sign(burst), code % 100))
+
     def _log_burst_summary(self) -> None:
         """Log one line about the bursts of the last _BURST_SUMMARY_S, if there were any.
 
@@ -3745,21 +3787,26 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if now - self._burst_summary_start < _BURST_SUMMARY_S:
             return
         bursts, self._burst_summary = self._burst_summary, []
+        other, self._other_burst_summary = self._other_burst_summary, []
+        lightning, self._other_lightning = self._other_lightning, 0
         self._burst_summary_start = now
+        if other or lightning:
+            self.logger.info("Other bursts (PSX's own) in the last %.0f s: %d (%s)%s%s",
+                             _BURST_SUMMARY_S, len(other),
+                             _burst_channels_text(other) or "none",
+                             f", size avg {sum(m for _, _, m in other) / len(other):.0f} "
+                             f"max {max(m for _, _, m in other)}" if other else "",
+                             f", lightning {lightning}" if lightning else "")
         if not bursts:
             return
-        channels = []
-        for base, name in _BURST_NAMES.items():
-            dirs = [d for b, d, _, _, _ in bursts if b == base]
-            if dirs:
-                channels.append(f"{name} {len(dirs)} +{dirs.count(1)}/-{dirs.count(-1)}")
+        channels = _burst_channels_text([(b, d, m) for b, d, m, _, _ in bursts])
         sizes = [m for _, _, m, _, _ in bursts]
         kinds = []
         for kind in dict.fromkeys(k for _, _, _, k, _ in bursts):
             levels = [i for _, _, _, k, i in bursts if k == kind]
             kinds.append(f"{kind} {min(levels) * 100:.0f}-{max(levels) * 100:.0f}%")
         self.logger.info("Bursts in the last %.0f s: %d (%s), size avg %.0f max %d, %s",
-                         _BURST_SUMMARY_S, len(bursts), ", ".join(channels),
+                         _BURST_SUMMARY_S, len(bursts), channels,
                          sum(sizes) / len(sizes), max(sizes), ", ".join(kinds))
 
     def _smooth_terrain(self, state: TurbulenceState, lat: float, lon: float) -> TurbulenceState:
@@ -8948,6 +8995,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 self.psx.subscribe(f"Metar{i}", self.handle_owned_change)
 
             # Turbulence subsystem subscriptions
+            self.psx.subscribe("WxBurst", self.handle_other_wxburst)
             self.psx.subscribe("TimeEarth")
             self.psx.subscribe("WxClust")
             self.psx.subscribe("AcftHeight")

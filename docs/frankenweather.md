@@ -698,6 +698,11 @@ too much, too little or just right weather or turbulence afterwards:
   checked too.
 - Once a minute (when there were bursts) the burst summary: how many of
   each kind, direction and size, and from which source.
+- Once a minute (when there were any) the other bursts: turbulence
+  bursts frankenweather didn't send, normally PSX's own (it makes its own
+  in and near CBs, in gusts, wind shear and CAT) and its lightning
+  flashes. They add to frankenweather's, so the turbulence felt is the
+  two together.
 - Every 10 seconds while there is turbulence, the level and its sources.
 - Every turbulence event, every change of a turbulence setting (with its
   value) and every zone update, SIGMET download and reposition.

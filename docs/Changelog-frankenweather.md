@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **New: the log shows PSX's own turbulence.** Once a minute, next to
+  frankenweather's burst summary, a line counts the turbulence bursts
+  frankenweather didn't send (normally PSX's own, in and near CBs, in
+  gusts, wind shear and CAT) and lightning flashes, e.g. `Other bursts
+  (PSX's own) in the last 60 s: 6 (SINK 1 +0/-1, GUST 4 +3/-1), size avg
+  22 max 50, lightning 2`. The turbulence felt is both together.
 - **Change: terrain uses half the memory.** Terrain tiles are held in
   memory as whole metres (int16) instead of float32: 26 MB a tile instead
   of 52, up to about 235 MB instead of 470 for the 9 tiles kept. Loading a
