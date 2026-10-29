@@ -1,0 +1,98 @@
+# Low-level turbulence near EGLL, EGPH and EINN in the stormy weather of
+# 2026-10-24 evening (a pilot's "tuning down below 3000 ft" report), with
+# frankenweather run through flighttest/fw_replay.py. Flown 2026-10-25.
+# Each leg flies along the landing runway's line from 10 nm before the
+# airport, or the reverse line if the terrain is too high.
+situ = "~/autotest-cruise.situ"
+registration = "G-PING"
+callsign = "BAN{n}T"
+route_airport = "EGLF"
+record_s = 150
+replay_file = "replay_time.txt"
+output_dir = "."
+tas_kt = 270
+before_nm = 10
+check_nm = 15
+min_clearance_ft = 300
+reverse_if_terrain = true
+
+[[leg]]
+name = "EGLL_1000"
+lat = 51.4700
+lon = -0.4543
+track = 270
+magvar = 0.5
+alt_ft = 1000
+replay_time = "2026-10-24T17:50:00+00:00"
+
+[[leg]]
+name = "EGLL_2500"
+lat = 51.4700
+lon = -0.4543
+track = 270
+magvar = 0.5
+alt_ft = 2500
+replay_time = "2026-10-24T17:50:00+00:00"
+
+[[leg]]
+name = "EGLL_4000"
+lat = 51.4700
+lon = -0.4543
+track = 270
+magvar = 0.5
+alt_ft = 4000
+replay_time = "2026-10-24T17:50:00+00:00"
+
+[[leg]]
+name = "EGPH_1000"
+lat = 55.9500
+lon = -3.3725
+track = 236
+magvar = -1.0
+alt_ft = 1000
+replay_time = "2026-10-24T19:20:00+00:00"
+
+[[leg]]
+name = "EGPH_2500"
+lat = 55.9500
+lon = -3.3725
+track = 236
+magvar = -1.0
+alt_ft = 2500
+replay_time = "2026-10-24T19:20:00+00:00"
+
+[[leg]]
+name = "EGPH_4000"
+lat = 55.9500
+lon = -3.3725
+track = 236
+magvar = -1.0
+alt_ft = 4000
+replay_time = "2026-10-24T19:20:00+00:00"
+
+[[leg]]
+name = "EINN_1000"
+lat = 52.7020
+lon = -8.9248
+track = 237
+magvar = -3.0
+alt_ft = 1000
+replay_time = "2026-10-24T21:00:00+00:00"
+
+[[leg]]
+name = "EINN_2500"
+lat = 52.7020
+lon = -8.9248
+track = 237
+magvar = -3.0
+alt_ft = 2500
+replay_time = "2026-10-24T21:00:00+00:00"
+
+[[leg]]
+name = "EINN_4000"
+lat = 52.7020
+lon = -8.9248
+track = 237
+magvar = -3.0
+alt_ft = 4000
+replay_time = "2026-10-24T21:00:00+00:00"
