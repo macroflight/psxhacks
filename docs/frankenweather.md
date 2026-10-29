@@ -298,6 +298,15 @@ whose CB turbulence can still reach the aircraft (its core plus flank
 zone, or plus the anvil zone above the cloud top), for any reason: the
 turbulence would stop at once.
 
+PSX takes the local weather (QNH, wind) from the nearest zone. When every
+zone is more than 150 nm away (zones placed far ahead, or in TS/TC SIGMET
+areas), one zone becomes an "anchor" 50 nm behind the aircraft, without
+any CB: out of sight of the radar, and too far from the zones ahead to
+shrink their CBs. It moves back to 50 nm behind once it's 100 nm behind,
+and is an ordinary zone again as soon as another zone (e.g. the
+departure or destination airport's) is within 150 nm, or in maneuvering
+mode, where the zones are all around the aircraft anyway.
+
 Everything else follows the current flight phase:
 
 - **Cruise** (aircraft at or above 18 000 ft, and not maneuvering): new or
@@ -451,14 +460,10 @@ With `--sigmet`:
   SQL 7/8, TC 6-8/8. The top comes from the SIGMET, the base from the
   zone's own surface temperature and dew point. CAPE can only make a CB
   bigger.
-- While TS or TC is handled, one "anchor" zone is always kept near the
-  aircraft without any CB, so the zone PSX uses for the local weather
-  (QNH) is close by and no CB can appear right next to the aircraft.
-  A new anchor goes 40-50 nm ahead, within 20 nm of track, as far from
-  the other zones as it can (a zone close to a CB would shrink that CB's
-  radar return and turbulence).
-  Near the departure or destination airport, the airport's own zone
-  does this instead.
+- The track ahead is never kept free of CBs: inside a TS or TC area
+  the aircraft flies into the SIGMET's CBs, which were on the radar
+  long before. (The "anchor" zone that keeps the local weather nearby
+  is behind the aircraft, see Zone placement and relocation.)
 - TURB and MTW (when handled) become frankenweather's own turbulence, a
   "SIGMET" source with its own setting on the turbulence page. It
   applies inside the SIGMET's area and between its base and top, fading

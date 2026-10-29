@@ -282,13 +282,14 @@ _METAR_FALLBACK_ZONE_COUNT = 7
 _SIGMET_REFRESH_MAX_S = 1800           # re-request PSX's own SIGMET download every 30 minutes
 _OWN_SIGMET_REFRESH_S = 600            # --sigmet: own SIGMET download every 10 minutes
 _OWN_SIGMET_TIMEOUT = aiohttp.ClientTimeout(total=30)
-# --sigmet "anchor" zone: one CB-free zone always kept near the
-# aircraft, so the zone PSX uses for the local weather (QNH) is close by and
-# no CB can ever appear right next to the aircraft. See _maintain_anchor_zone().
-_ANCHOR_MAX_NM = 50.0              # a dep/dst airport zone this close does the job instead
-_ANCHOR_AHEAD_NM = (40.0, 50.0)    # how far away a new anchor goes, ahead
-_ANCHOR_LATERAL_NM = 20.0          # ... and at most this far either side of track
-_ANCHOR_HANDOVER_BEHIND_NM = 25.0  # new anchor once the aircraft is this far past the old one
+# "Anchor" zone: when every zone would be more than _ANCHOR_TRIGGER_NM
+# away, one is kept _ANCHOR_BEHIND_NM behind the aircraft (CB-free, out of
+# sight of the radar and too far from the zones ahead to shrink their CBs),
+# so PSX's local weather (from the nearest zone) doesn't come from far
+# away. Moved back once _ANCHOR_RELOCATE_NM behind. See _maintain_anchor_zone().
+_ANCHOR_TRIGGER_NM = 150.0
+_ANCHOR_BEHIND_NM = 50.0
+_ANCHOR_RELOCATE_NM = 100.0
 # --sigmet: weather zones placed inside TS/TC SIGMET areas, so the CBs
 # frankenweather depicts there (instead of PSX) show up on the radar. See
 # _place_sigmet_zones().
@@ -2100,10 +2101,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # Whether we currently own PSX's SIGMETs (see _sync_own_sigmets()),
         # PSX's last reported WxSigmet text, and the last text we wrote.
         self._own_sigmets_applied: bool = False
-        # The current anchor zone (see _maintain_anchor_zone()), and every
+        # The current anchor zone (see _maintain_anchor_zone()), and the
         # zone kept CB-free: zone -> (lat, lon) it was at when made CB-free.
-        # A zone stays CB-free (an earlier anchor, now behind the aircraft)
-        # until it is moved anywhere else.
+        # It stops being CB-free when released or moved anywhere else.
         self._anchor_zone: Optional[int] = None
         self._cb_free_zones: dict = {}
         self._sigmet_place_last: float = 0.0  # see _place_sigmet_zones()
@@ -5691,48 +5691,52 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return False
         return True
 
-    def _maintain_anchor_zone(self) -> bool:  # pylint: disable=too-many-return-statements
-        """--sigmet: keep a CB-free "anchor" zone near the aircraft; True if a zone moved.
+    def _maintain_anchor_zone(self) -> bool:
+        """Keep a CB-free "anchor" zone behind the aircraft when needed; True if a zone moved.
 
-        Zones placed in TS/TC SIGMET areas get CBs, so one zone is kept near
-        the aircraft without any CB: PSX uses the nearest zone for the local
-        weather, so the local QNH stays right, and no CB can ever appear
-        right next to the aircraft. Not needed while a dep/dst airport zone
-        is within _ANCHOR_MAX_NM. The anchor itself is never moved: once
-        the aircraft is _ANCHOR_HANDOVER_BEHIND_NM past it (or it's more
-        than _ANCHOR_MAX_NM away), another zone becomes the anchor,
-        _ANCHOR_AHEAD_NM ahead on track. The old anchor stays CB-free (a
-        CB popping up just behind the aircraft is no better) until the
-        normal relocation rules move it. Only while we own the SIGMETs.
+        PSX takes the local weather (QNH, wind) from the nearest zone. When
+        every zone is more than _ANCHOR_TRIGGER_NM away (e.g. zones moved far
+        ahead or into TS/TC SIGMET areas), one becomes the anchor,
+        _ANCHOR_BEHIND_NM behind the aircraft: CB-free, out of sight of the
+        radar, and too far from the zones ahead to shrink their CBs. It
+        moves back there once it's _ANCHOR_RELOCATE_NM behind, and is an
+        ordinary zone again as soon as another zone is within
+        _ANCHOR_TRIGGER_NM (e.g. the departure or destination airport's), or
+        in maneuvering mode, where the zones are all around the aircraft.
+        It used to be kept 40-50 nm ahead on track (with --sigmet only),
+        which kept the track ahead CB-free even inside a TS/TC area
+        (flight test 2026-10-25, TC VANCE).
         """
-        if not self._own_sigmets_applied or not self._handles_cb_sigmets():
-            if self._anchor_zone is not None:
-                self.logger.info("Anchor zone: TS/TC SIGMETs not handled, Zone %d is an ordinary"
-                                 " zone again", self._anchor_zone)
-            self._anchor_zone = None
-            self._cb_free_zones.clear()
-            return False
-        if self.ac_lat is None or self.ac_hdg is None or not self.zone_positions:
-            return False
-        arpt_icaos = {icao for icao, _, _ in self._arpt_coverage_needed()}
-        for lat, lon, icao in self.zone_positions.values():
-            if (icao in arpt_icaos and
-                    self._dist_nm(self.ac_lat, self.ac_lon, lat, lon) <= _ANCHOR_MAX_NM):
-                return False
         anchor = self._anchor_zone
         if anchor is not None and not self._is_cb_free_zone(anchor):
-            anchor = None  # moved by something else
-        if anchor is not None and not self._anchor_due(anchor):
+            anchor = self._anchor_zone = None  # moved by something else
+        if self.ac_lat is None or self.ac_hdg is None or not self.zone_positions:
             return False
-        if anchor is None:
-            nearest = self._nearest_zone_num()
-            if nearest is not None and not self._anchor_due(nearest):
-                self._make_anchor(nearest, "nearest zone")
+        others = [self._dist_nm(self.ac_lat, self.ac_lon, lat, lon)
+                  for zn, (lat, lon, _) in self.zone_positions.items() if zn != anchor]
+        if self._maneuvering or (others and min(others) <= _ANCHOR_TRIGGER_NM):
+            if anchor is not None:
+                self._release_anchor("maneuvering" if self._maneuvering else
+                                     f"another zone within {_ANCHOR_TRIGGER_NM:.0f}nm")
+            return False
+        if anchor is not None:
+            lat, lon, _ = self.zone_positions[anchor]
+            if self._dist_nm(self.ac_lat, self.ac_lon, lat, lon) <= _ANCHOR_RELOCATE_NM:
                 return False
-        zone_num = self._expendable_for_anchor()
-        if zone_num is None:
-            return False
-        lat, lon, dist_m = self._pick_anchor_position(zone_num)
+            zone_num = anchor
+        else:
+            zone_num = self._expendable_for_anchor()
+            if zone_num is None:
+                return False
+        self._move_anchor(zone_num)
+        return True
+
+    def _move_anchor(self, zone_num: int) -> None:
+        """Move zone_num _ANCHOR_BEHIND_NM behind the aircraft and make it the anchor."""
+        dist_m = _ANCHOR_BEHIND_NM * _NM_TO_M
+        lon, lat, _ = self.geod.fwd(lons=self.ac_lon, lats=self.ac_lat,
+                                    az=(self.ac_hdg + 180.0) % 360.0, dist=dist_m)
+        lon = ((lon + 180.0) % 360.0) - 180.0
         old = self.zone_positions[zone_num]
         other_icaos = {icao for zn, (_, _, icao) in self.zone_positions.items() if zn != zone_num}
         icao = next(name for name in (f"X{random.randint(100, 999):03d}" for _ in iter(int, 1))
@@ -5741,58 +5745,21 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self.zone_placement_reason[zone_num] = self._placement_desc(lat, lon, icao)
         self.zone_relocated_time[zone_num] = time.time()
         self.zone_cb_ramp.pop(zone_num, None)
-        self.zone_cb_create_dist_nm[zone_num] = dist_m / _NM_TO_M
+        self.zone_cb_create_dist_nm[zone_num] = _ANCHOR_BEHIND_NM
         self.logger.info("Zone %d: relocated from %s @ %.3f/%.3f → %s @ %.3f/%.3f"
-                         " [%.0fnm] (new anchor zone)",
-                         zone_num, old[2], old[0], old[1], icao, lat, lon,
-                         dist_m / _NM_TO_M)
-        self._make_anchor(zone_num, "placed ahead")
-        return True
-
-    def _pick_anchor_position(self, zone_num: int) -> tuple[float, float, float]:
-        """Return (lat, lon, dist_m) for a new anchor zone ahead of the aircraft.
-
-        Like _pick_position(), but _ANCHOR_AHEAD_NM away (never beyond
-        _ANCHOR_MAX_NM, or it'd be due for replacing at once) and at most
-        _ANCHOR_LATERAL_NM either side of track: of 10 random candidates, the
-        first one at least new_zone_notnear from every other zone, else the
-        one farthest from them. A zone too close would also shrink a nearby
-        CB's turbulence radius (half the distance to the nearest zone, see
-        frankenturb/cb.py) -- live 2026-10-23, an anchor 8.9nm from a SIGMET
-        CB zone left that CB a 2.2nm core.
-        """
-        others = [(lat, lon) for zn, (lat, lon, _) in self.zone_positions.items()
-                  if zn != zone_num]
-        best, best_sep = None, -1.0
-        for _ in range(10):
-            dist_nm = random.uniform(*_ANCHOR_AHEAD_NM)
-            max_off = math.degrees(math.asin(min(1.0, _ANCHOR_LATERAL_NM / dist_nm)))
-            bearing = (self.ac_hdg + random.uniform(-max_off, max_off)) % 360.0
-            dist_m = dist_nm * _NM_TO_M
-            lon, lat, _ = self.geod.fwd(lons=self.ac_lon, lats=self.ac_lat,
-                                        az=bearing, dist=dist_m)
-            lon = ((lon + 180.0) % 360.0) - 180.0
-            sep = min((self._dist_nm(lat, lon, o[0], o[1]) for o in others),
-                      default=float('inf'))
-            if sep > best_sep:
-                best, best_sep = (lat, lon, dist_m), sep
-            if sep >= self.args.new_zone_notnear:
-                break
-        return best
-
-    def _anchor_due(self, zone_num: int) -> bool:
-        """Return True if zone_num is no use as an anchor (too far away, or passed)."""
-        lat, lon, _ = self.zone_positions[zone_num]
-        az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
-        dist_nm = dist_m / _NM_TO_M
-        behind = abs((az - self.ac_hdg + 180) % 360 - 180) > 90.0
-        return dist_nm > _ANCHOR_MAX_NM or (behind and dist_nm >= _ANCHOR_HANDOVER_BEHIND_NM)
-
-    def _make_anchor(self, zone_num: int, how: str) -> None:
-        """Make zone_num the (CB-free) anchor zone."""
+                         " [%.0fnm behind] (anchor zone)",
+                         zone_num, old[2], old[0], old[1], icao, lat, lon, _ANCHOR_BEHIND_NM)
         self._anchor_zone = zone_num
-        self._cb_free_zones[zone_num] = tuple(self.zone_positions[zone_num][:2])
-        self.logger.info("Anchor zone: Zone %d (%s), kept free of CBs", zone_num, how)
+        self._cb_free_zones = {zone_num: (lat, lon)}
+        self.logger.info("Anchor zone: Zone %d, %.0fnm behind, CB-free (no zone within %.0fnm)",
+                         zone_num, _ANCHOR_BEHIND_NM, _ANCHOR_TRIGGER_NM)
+
+    def _release_anchor(self, why: str) -> None:
+        """Make the anchor zone an ordinary zone again (it may get a CB)."""
+        self.logger.info("Anchor zone: Zone %d is an ordinary zone again (%s)",
+                         self._anchor_zone, why)
+        self._anchor_zone = None
+        self._cb_free_zones.clear()
 
     def _expendable_for_anchor(self) -> Optional[int]:
         """Return the zone to turn into a new anchor zone, or None.
@@ -7068,11 +7035,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                           (self.psx.get(f"Wx{i + 1}") if self.psx else None) or
                           ";".join(_WX_DEFAULTS))
                 new_metars.append(self._station_only_metar(i + 1, icao, now) if om else None)
-            if self._own_sigmets_applied:
+            zone_num = i + 1
+            if self._is_cb_free_zone(zone_num):
+                final_wx = wx   # the anchor zone gets no CB at all (stripped below too)
+            elif self._own_sigmets_applied:
                 final_wx = self._own_sigmet_cb(wx, (lat, lon), om, f"Zone {i + 1} {icao}")
             else:
                 final_wx = self._sigmet_cb_override(wx, (lat, lon), om, f"Zone {i + 1} {icao}")
-            zone_num = i + 1
             sigmet_label = None
             if final_wx != wx:  # a SIGMET gave (or enlarged) this zone's CB
                 best = self._sigmet_cb_at((lat, lon)) if self._own_sigmets_applied else None

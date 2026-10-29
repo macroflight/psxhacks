@@ -884,7 +884,7 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         "  var pop='<div style=\"min-width:220px\">'"
         "    +'<b>WX'+z.zone+' — '+z.icao+'</b>'"
         "    +(z.anchor?'<br><span style=\"color:#60a5fa;font-size:11px\">⚓ Anchor zone: "
-        "kept free of CBs</span>':'')"
+        "behind the aircraft, CB-free</span>':'')"
         "    +(z.cb_sigmet?'<br><span style=\"color:#f87171;font-size:11px\">⛈ CB from '"
         "+z.cb_sigmet+'</span>':'')"
         "    +'<br><span style=\"color:#94a3b8;font-size:11px\">'+z.source_label+'</span>'"
@@ -1364,7 +1364,8 @@ def _build_weather_settings_page(ctx):  # pylint: disable=too-many-locals,too-ma
         )
         if zone.get('anchor'):
             focused_badge += (' <span style="font-size:0.75em;color:#60a5fa" '
-                              'title="Kept free of CBs, near the aircraft">⚓ anchor</span>')
+                              'title="Behind the aircraft, CB-free: no other zone is near">'
+                              '⚓ anchor</span>')
         if zone.get('cb_sigmet'):
             focused_badge += (' <span style="font-size:0.75em;color:#fecaca;background:#7f1d1d;'
                               'border-radius:3px;padding:0 4px" '
