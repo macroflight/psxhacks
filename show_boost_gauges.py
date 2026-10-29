@@ -36,6 +36,8 @@ Each gauge also shades an arc between the min/max values it has seen
 since the window opened (or since the "Reset Min/Max" button was last
 pressed), and shows those two numbers as text underneath - except the
 heading compass, where "min/max heading" isn't a meaningful concept.
+With --minmax-window=<seconds> the min/max cover only that many seconds
+back instead (a moving window), so old extremes drop out on their own.
 
 --single-instrument=<key> shows just one named gauge instead (see
 --help for the valid keys), with none of the above buttons and no fixed
@@ -153,10 +155,17 @@ _GAUGES = (
 class AnalogGauge(tk.Frame):  # pylint: disable=too-many-instance-attributes
     """A speedometer- or compass-style analogue gauge (dial, ticks, needle) on a Canvas."""
 
-    def __init__(self, parent: tk.Widget, spec: GaugeSpec, size: int = _GAUGE_SIZE):
-        """Build the static gauge face for `spec` and leave the needle at rest."""
+    def __init__(self, parent: tk.Widget, spec: GaugeSpec, size: int = _GAUGE_SIZE,
+                 minmax_window_s: Optional[float] = None):
+        """Build the static gauge face for `spec` and leave the needle at rest.
+
+        With `minmax_window_s` set, the observed min/max cover only the
+        last that many seconds rather than everything since the start
+        (or the last reset).
+        """
         super().__init__(parent)
         self.spec = spec
+        self._minmax_window_s = minmax_window_s
         self._cx = size / 2
         self._cy = size / 2 + 10
         self._radius = size / 2 - 30
@@ -178,6 +187,8 @@ class AnalogGauge(tk.Frame):  # pylint: disable=too-many-instance-attributes
         self._hub_id: Optional[int] = None
         self._min_seen: Optional[float] = None
         self._max_seen: Optional[float] = None
+        # (monotonic time, value) within the moving min/max window
+        self._minmax_samples: "deque[tuple[float, float]]" = deque()
         self._last_value: Optional[float] = None
         self._history: "deque[tuple[float, float]]" = deque()
         self._draw_face()
@@ -326,6 +337,23 @@ class AnalogGauge(tk.Frame):  # pylint: disable=too-many-instance-attributes
         self.minmax_label.config(
             text=f"min {self._min_seen:.{decimals}f} / max {self._max_seen:.{decimals}f}")
 
+    def _track_minmax(self, value: Optional[float]) -> None:
+        """Fold `value` (None: no data) into the observed min/max."""
+        if self._minmax_window_s is None:
+            if value is not None:
+                self._min_seen = value if self._min_seen is None else min(self._min_seen, value)
+                self._max_seen = value if self._max_seen is None else max(self._max_seen, value)
+            return
+        # Moving window: samples older than it drop out, also while there's no data
+        now = time.monotonic()
+        samples = self._minmax_samples
+        if value is not None:
+            samples.append((now, value))
+        while samples and now - samples[0][0] > self._minmax_window_s:
+            samples.popleft()
+        self._min_seen = min(v for _, v in samples) if samples else None
+        self._max_seen = max(v for _, v in samples) if samples else None
+
     def _refresh_minmax(self) -> None:
         self._draw_band()
         self._update_minmax_label()
@@ -334,6 +362,7 @@ class AnalogGauge(tk.Frame):  # pylint: disable=too-many-instance-attributes
         """Clear this gauge's observed min/max band."""
         self._min_seen = None
         self._max_seen = None
+        self._minmax_samples.clear()
         self._refresh_minmax()
 
     # ── trend arc ─────────────────────────────────────────────────────
@@ -400,9 +429,8 @@ class AnalogGauge(tk.Frame):  # pylint: disable=too-many-instance-attributes
         if self._needle_id is not None:
             canvas.delete(self._needle_id)
             self._needle_id = None
-        if value is not None and self.spec.track_minmax:
-            self._min_seen = value if self._min_seen is None else min(self._min_seen, value)
-            self._max_seen = value if self._max_seen is None else max(self._max_seen, value)
+        if self.spec.track_minmax:
+            self._track_minmax(value)
         self._refresh_minmax()
         if value is None:
             if self._trend_arc_id is not None:
@@ -579,17 +607,19 @@ class AddonReader(threading.Thread):  # pylint: disable=too-many-instance-attrib
 class GaugeApp:  # pylint: disable=too-few-public-methods,too-many-instance-attributes
     """Top-level window: instrument toggles, a status line, and a scrollable gauge grid."""
 
-    def __init__(self, root: tk.Tk, reader: AccelReader, single_instrument: Optional[str] = None):
+    def __init__(self, root: tk.Tk, reader: AccelReader, single_instrument: Optional[str] = None,
+                 minmax_window_s: Optional[float] = None):
         """Build the window's widgets and start the periodic refresh loop.
 
         With `single_instrument` set to one of _GAUGES' keys, the window
         shows only that one gauge - no toggle bar, no Select/Deselect
         All, no Reset Min/Max button, and no fixed window size (it
         shrinks to fit the one gauge rather than the normal multi-gauge
-        default size).
+        default size). `minmax_window_s`: see AnalogGauge.
         """
         self.root = root
         self.reader = reader
+        self._minmax_window_s = minmax_window_s
         self._gauges: dict[str, AnalogGauge] = {}
         self._toggle_buttons: dict[str, tk.Checkbutton] = {}
         root.title("FrankenBoostProxy Gauges")
@@ -618,7 +648,7 @@ class GaugeApp:  # pylint: disable=too-few-public-methods,too-many-instance-attr
         spec = next(s for s in _GAUGES if s.key == key)
         self.status_label = tk.Label(root, text="Connecting...", anchor="w")
         self.status_label.pack(fill="x", padx=4, pady=(4, 0))
-        gauge = AnalogGauge(root, spec)
+        gauge = AnalogGauge(root, spec, minmax_window_s=self._minmax_window_s)
         gauge.pack(padx=8, pady=8)
         self._gauges[spec.key] = gauge
 
@@ -666,7 +696,9 @@ class GaugeApp:  # pylint: disable=too-few-public-methods,too-many-instance-attr
 
         self.inner = tk.Frame(self.canvas)
         self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
-        self._gauges = {spec.key: AnalogGauge(self.inner, spec) for spec in _GAUGES}
+        self._gauges = {
+            spec.key: AnalogGauge(self.inner, spec, minmax_window_s=self._minmax_window_s)
+            for spec in _GAUGES}
 
         self.canvas.bind("<Configure>", lambda _e: self._relayout())
         self.inner.bind(
@@ -771,7 +803,15 @@ def main() -> None:
              'passed straight through to Tk (default: let the window manager place it, '
              'and auto-size to fit).',
     )
+    parser.add_argument(
+        '--minmax-window', type=float, default=None, metavar='SECONDS',
+        help="Show the min/max values (text and shaded arc) of only the last SECONDS "
+             "seconds, a moving window, instead of everything since the start or the "
+             "last \"Reset Min/Max\" (default: since the start).",
+    )
     args = parser.parse_args()
+    if args.minmax_window is not None and args.minmax_window <= 0:
+        parser.error("--minmax-window must be more than 0 seconds")
 
     if args.psx_port is not None:
         reader = AddonReader(args.psx_host, args.psx_port)
@@ -780,7 +820,8 @@ def main() -> None:
     reader.start()
 
     root = tk.Tk()
-    GaugeApp(root, reader, single_instrument=args.single_instrument)
+    GaugeApp(root, reader, single_instrument=args.single_instrument,
+             minmax_window_s=args.minmax_window)
     if args.geometry is not None:
         root.geometry(args.geometry)
 
