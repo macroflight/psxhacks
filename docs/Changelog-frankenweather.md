@@ -1,5 +1,29 @@
 # frankenweather changelog
 
+## 1.20.0 (2026-10-24)
+
+- **Fix: Gazipaşa (LTGP) no longer has a permanent thunderstorm**, and
+  no station code is read as weather any more (LTGP starts with "LTG",
+  lightning; codes like SHTS look like showers plus thunderstorm).
+- **Fix: a thunderstorm the METAR reports is never made smaller by the
+  Open-Meteo forecast**, only bigger. E.g. Singapore's `+TSRA` (8 oktas,
+  44,999 ft) became 2 oktas topping at about 24,500 ft when the model had
+  little CAPE.
+- **Fix: low-level wind shear stays capped where mechanical turbulence
+  takes over.** It could jump from 30% to 60% there.
+- **Fix: mountain waves stay smooth** when the wind data changes (each
+  1° square, each forecast hour) or another peak takes over: their phase
+  now advances with the aircraft. It could still jump from an up- to a
+  downdraft there.
+- **Fix: a mountain wave SIGMET no longer takes over the terrain model's
+  own mountain wave or rotor** (since 1.19.0): the stronger of the two,
+  after their intensity settings, is used with its own settings.
+- **Fix: the turbulence intensity shown follows what's injected**: also
+  when only the settings or MSFS cloud change it, at once when manual
+  turbulence is switched off, and capped on the ground like the
+  turbulence there. "mechanical+shear" and the like show as wind shear
+  CAT.
+
 ## 1.19.0 (2026-10-24)
 
 - **Change: no sudden steps between rotor, mountain wave and mechanical
