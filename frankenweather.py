@@ -647,6 +647,16 @@ _CB_CLOSE_MAX_TOP_FT = 15000.0
 # 2026-10-29) limited the zones near the aircraft while their TC CBs
 # weren't applied yet, cutting 44,999 ft CBs to 15,000 ft.
 _CB_CLOSE_START_GRACE_S = 120.0
+# Inside a TS/TC SIGMET area (frankenweather handling them, --sigmet) zones
+# are placed further from the aircraft and from each other: PSX draws a
+# CB's echo, and frankenweather sizes its turbulence, by the distance to
+# the nearest other zone, and the all-around placement (startup,
+# reposition, maneuvering) could put zones anywhere from 0 nm, packed 50 nm
+# apart. In Typhoon IN-FA (frankensim 2026-10-29) that gave small echoes,
+# small cores, and new zones 70 nm away capped at 15,000 ft. Spreading the
+# 7 zones also covers more of the area ahead with CBs.
+_CB_AREA_MIN_DIST_NM = 60.0
+_CB_AREA_ZONE_SEP_NM = 90.0
 
 _BZ_URL = "https://data.blitzortung.org/Data_1/strikes"
 _BZ_LOOKBACK_MIN = 20  # fetch this many recent minute-files of strike data
@@ -5120,6 +5130,19 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self._updown_bursts.append((now, direction, magnitude))
         return magnitude
 
+    def _in_cb_sigmet_area(self, lat: float, lon: float) -> bool:
+        """Return True if lat/lon is in a TS/TC SIGMET area frankenweather handles (--sigmet)."""
+        if lat is None or lon is None or not self._own_sigmets_applied:
+            return False
+        for entry in self._own_sigmet_entries:
+            if not (entry["ok"] and entry["hazard"] in _fw_sigmet.CB_HAZARDS and
+                    self._sigmet_handle.get(entry["hazard"])):
+                continue
+            if any(_fw_sigmet.inside_depth(lat, lon, poly) is not None
+                   for poly in entry["polygons"]):
+                return True
+        return False
+
     def _sigmet_convective_turbulence(self, lat: float, lon: float,
                                       alt_ft: float) -> Optional[tuple]:
         """Return (state, scale, floor) for the TS/TC SIGMET area here, or None (testing).
@@ -6105,6 +6128,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         new_zone_infront_range, lateral offset within new_zone_leftright_range.
         Both modes retry up to 10 times to maintain new_zone_notnear clearance
         from other zones, and snap to a nearby airport if within _AIRPORT_SNAP_NM.
+        Inside a TS/TC SIGMET area (_in_cb_sigmet_area()) the clearance is at
+        least _CB_AREA_ZONE_SEP_NM and the all-around placement keeps
+        _CB_AREA_MIN_DIST_NM from the aircraft.
         """
         configured_fwd_min, configured_fwd_max = self.args.new_zone_infront_range
         fwd_max = self._effective_fwd_max()
@@ -6117,6 +6143,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                              configured_fwd_min, configured_fwd_max, fwd_min, fwd_max)
         lat_min, lat_max = self.args.new_zone_leftright_range
         min_sep = self.args.new_zone_notnear
+        cb_area = self._in_cb_sigmet_area(self.ac_lat, self.ac_lon)
+        if cb_area:
+            min_sep = max(min_sep, _CB_AREA_ZONE_SEP_NM)
         others = [(lat, lon) for zn, (lat, lon, _) in self.zone_positions.items()
                   if zn != exclude_zone]
         other_icaos = {icao for zn, (_, _, icao) in self.zone_positions.items()
@@ -6130,7 +6159,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         for _ in range(10):
             if initial or self._maneuvering:
                 bearing = random.uniform(0.0, 360.0)
-                dist_m = random.uniform(0.0, fwd_max) * _NM_TO_M
+                nearest = min(_CB_AREA_MIN_DIST_NM, fwd_max) if cb_area else 0.0
+                dist_m = random.uniform(nearest, fwd_max) * _NM_TO_M
             else:
                 fwd_nm = random.uniform(fwd_min, fwd_max)
                 lat_nm = random.uniform(lat_min, lat_max) * random.choice([-1, 1])

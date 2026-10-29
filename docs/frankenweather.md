@@ -406,6 +406,13 @@ to about 15 minutes for a big one. "Remove CB near dep/arr" and
 CB-free zones remove CBs at once, and a zone that's moved starts fresh,
 so this never holds a zone back.
 
+Inside a TS or TC SIGMET area (with `--sigmet`), zones are kept at least
+90 nm apart, and the all-around placement at startup, after a
+reposition and while maneuvering keeps them at least 60 nm from the
+aircraft. PSX draws a CB's echo by the distance to the nearest other
+zone, so packed zones looked like small, harmless cells; spread out,
+the CBs are bigger and cover more of the area ahead.
+
 New zones are never placed within 100 nm of the aircraft, but a zone the
 aircraft flies towards can still get a CB there: a new or moved TS
 SIGMET, CAPE, or a METAR. Such a CB is small, at most 2 oktas and 15,000

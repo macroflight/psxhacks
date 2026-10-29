@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Change: zones are spread out inside TS and TC SIGMET areas.** With
+  `--sigmet`, inside a TS/TC SIGMET area the zones are now at least 90
+  nm apart (otherwise 50), and the all-around placement (startup,
+  reposition, maneuvering) keeps them at least 60 nm from the aircraft
+  (otherwise anywhere from 0 nm). PSX draws a CB's echo, and
+  frankenweather sizes its turbulence, by the distance to the nearest
+  other zone: in a typhoon, packed zones gave small echoes and cores,
+  and new zones 70 nm away got the small-CB limit. Spread out, the CBs
+  are bigger and cover more of the area ahead.
+
 - **Change (testing profile): inside a CB's cloud the turbulence is
   severe all the time.** The testing profile capped all continuous
   turbulence at light chop (34%) and left moderate and worse to events,
