@@ -18,7 +18,9 @@ Three mechanisms are modelled:
    Low-level chaotic turbulence caused by airflow over rough terrain.
    - Wind used: profile interpolated to the lowest 500 m above terrain
      (captures the actual surface flow, not the aircraft's cruise level wind).
-   - Intensity ∝ terrain roughness × surface wind speed × AGL proximity factor.
+   - Intensity from the wind (light from ~25-30 kt at 300 m above the
+     ground, moderate from ~50 kt, also over flat land and the sea), more
+     over rough terrain, decaying with height above the ground.
    - No deterministic direction: all components are NaN (pure random noise).
 
 2. Mountain wave turbulence
@@ -62,8 +64,21 @@ KT_TO_MS = 0.514444
 MIN_WIND_MS = 3.0
 
 # Scale heights for AGL intensity decay (metres).
-MECHANICAL_SCALE_M = 1_500.0
+MECHANICAL_SCALE_M = 1_000.0
 WAVE_SCALE_M = 12_000.0
+
+# Mechanical turbulence (_mechanical_state()): the wind 300 m above the
+# ground ramps it in from MECH_WIND_MIN_KT to MECH_MAX at MECH_WIND_FULL_KT
+# over very rough terrain, half that over flat land (log-scaled roughness:
+# std-dev of elevation from MECH_ROUGHNESS_REF_M up to
+# ROUGHNESS_SATURATION_M), MECH_SEA_FACTOR of that over the sea. It used to
+# be roughness/800 m x wind/58 kt, so ~4% at most over flat land even in a
+# 46 kt wind (EGLL, 2026-10-24), and none at all over the sea.
+MECH_WIND_MIN_KT = 20.0
+MECH_WIND_FULL_KT = 55.0
+MECH_MAX = 0.5
+MECH_ROUGHNESS_REF_M = 30.0
+MECH_SEA_FACTOR = 0.6
 
 # Terrain roughness (std-dev of elevation, m) that saturates mechanical turb.
 ROUGHNESS_SATURATION_M = 800.0
@@ -263,7 +278,11 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
             lat, lon, surface_dir_deg, self._upwind_km
         )
         if barrier_result is None:
-            return self._blend_shear(_CALM, wind_profile, alt_m, agl_m)
+            # Open sea: no terrain, but the wind still makes it bumpy low down
+            state = self._mechanical_state(None, surface_spd_kt, agl_m)
+            state.reason = (f"Mechanical: wind {surface_dir_deg:.0f}° {surface_spd_kt:.0f}kt "
+                            "over the sea")
+            return self._blend_shear(state, wind_profile, alt_m, agl_m)
 
         max_upwind_m, ridge_dist_km, ridge_bearing_deg = barrier_result
         peak_lat, peak_lon = _dest_point(lat, lon, ridge_bearing_deg, ridge_dist_km)
@@ -309,7 +328,7 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
             state.source_lat = peak_lat
             state.source_lon = peak_lon
         else:
-            state = self._mechanical_state(roughness_m, surface_wind_ms, agl_m)
+            state = self._mechanical_state(roughness_m, surface_spd_kt, agl_m)
             state.reason = (
                 f"Mechanical: wind {surface_dir_deg:.0f}° {surface_spd_kt:.0f}kt "
                 f"over rough terrain (roughness {roughness_m:.0f}m)"
@@ -482,13 +501,20 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
             kind="wave",
         )
 
+    @staticmethod
     def _mechanical_state(
-        self, roughness_m: float, surface_wind_ms: float, agl_m: float
+        roughness_m: Optional[float], surface_wind_kt: float, agl_m: float
     ) -> TurbulenceState:
-        roughness_factor = min(1.0, roughness_m / ROUGHNESS_SATURATION_M)
-        wind_factor = min(1.0, surface_wind_ms / WIND_NORM_MS)
+        """Return low-level mechanical turbulence (see MECH_MAX); roughness_m None: over the sea."""
+        if roughness_m is None:
+            terrain_factor = 0.5 * MECH_SEA_FACTOR
+        else:
+            rough = min(1.0, max(0.0, math.log1p(roughness_m / MECH_ROUGHNESS_REF_M) /
+                                 math.log1p(ROUGHNESS_SATURATION_M / MECH_ROUGHNESS_REF_M)))
+            terrain_factor = 0.5 + 0.5 * rough
+        wind_factor = _normalise(surface_wind_kt, MECH_WIND_MIN_KT, MECH_WIND_FULL_KT)
         agl_factor = math.exp(-agl_m / MECHANICAL_SCALE_M)
-        intensity = roughness_factor * wind_factor * agl_factor
+        intensity = MECH_MAX * wind_factor * terrain_factor * agl_factor
 
         if intensity < 0.01:
             return TurbulenceState()
