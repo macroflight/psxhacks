@@ -26,7 +26,11 @@ CACHE_HOURS = 1
 
 # Default on-disk cache location (whole hourly downloads, see module docstring)
 _DEFAULT_CACHE_PATH = os.path.join(
-    os.path.expanduser("~"), ".cache", "frankenturb", "om_cape_hourly.json")
+    os.path.expanduser("~"), ".cache", "frankenturb", "om_cape_bl_hourly.json")
+# Also the boundary-layer turbulence's data (boundary_layer.py); a new
+# cache file, since the old one's downloads lack these
+_HOURLY = ("cape,lifted_index,showers,wind_speed_10m,wind_gusts_10m,shortwave_radiation,"
+           "boundary_layer_height")
 
 # CAPE (J/kg) thresholds for turbulence intensity segments.
 # Raised to avoid over-triggering in regions with moderate convective
@@ -44,7 +48,7 @@ _CAPE_ALT_SCALE_FT = 7_000.0    # e-folding scale above FL150
 
 
 @dataclass
-class CapeSample:
+class CapeSample:  # pylint: disable=too-many-instance-attributes
     """CAPE and Lifted Index snapshot from Open-Meteo."""
 
     lat: float
@@ -53,6 +57,11 @@ class CapeSample:
     lifted_index_c: float
     showers_mm_h: float
     valid_at: datetime
+    # For boundary_layer.py (NaN without data)
+    wind_10m_kt: float = float("nan")
+    gust_10m_kt: float = float("nan")
+    sun_wm2: float = float("nan")
+    bl_height_m: float = float("nan")
 
 
 def _pos_bucket(lat: float, lon: float) -> tuple[int, int]:
@@ -79,8 +88,8 @@ class CapeFetcher:
         """Initialise with an empty cache."""
         self._cache: dict[tuple, CapeSample] = {}
         self._hourly = HourlyForecastCache(
-            "cape", "cape,lifted_index,showers", cache_path or _DEFAULT_CACHE_PATH,
-            models=models, proxy=proxy)
+            "cape", _HOURLY, cache_path or _DEFAULT_CACHE_PATH,
+            models=models, extra_params={"wind_speed_unit": "kn"}, proxy=proxy)
 
     def get(
         self,
@@ -147,6 +156,10 @@ class CapeFetcher:
             lifted_index_c=li,
             showers_mm_h=showers,
             valid_at=valid_at,
+            wind_10m_kt=_scalar(hourly.get("wind_speed_10m", []), hour_idx),
+            gust_10m_kt=_scalar(hourly.get("wind_gusts_10m", []), hour_idx),
+            sun_wm2=_scalar(hourly.get("shortwave_radiation", []), hour_idx),
+            bl_height_m=_scalar(hourly.get("boundary_layer_height", []), hour_idx),
         )
 
 

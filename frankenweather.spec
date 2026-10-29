@@ -11,6 +11,7 @@ a = Analysis(
         # frankenturb/ package: name collision with frankenturb.py may prevent recursive scan
         'frankenturb',
         'frankenturb.boost',
+        'frankenturb.boundary_layer',
         'frankenturb.cape',
         'frankenturb.cb',
         'frankenturb.cb_turbulence',

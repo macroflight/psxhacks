@@ -46,6 +46,7 @@ from frankenturb import (
     CapeFetcher, compute_cape_turbulence,
     GairmetFetcher, compute_gairmet_turbulence,
 )
+from frankenturb.boundary_layer import compute_boundary_layer_turbulence
 from frankenturb.pirep import SEV_INTENSITY as _PIREP_SEV_INTENSITY
 from frankenturb.cb import (
     find_nearest_cb, parse_wx_zone_basic, parse_wx_zone_position, parse_wx_clust,
@@ -4199,6 +4200,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     if _eff(cape_state) > _eff(state):
                         state = cape_state
 
+                # Testing profile: the light bumps of an ordinary breezy or
+                # sunny day (frankenturb/boundary_layer.py)
+                bl_state = None
+                if self._turb_testing() and cape_sample is not None:
+                    terrain_m = self._turb_engine.grid.elevation_at(lat, lon) or 0.0
+                    bl_state, drivers_bl = self._apply_gust(compute_boundary_layer_turbulence(
+                        max(0.0, alt_ft - terrain_m / 0.3048), cape_sample), alt_ft)
+                    drivers[id(bl_state)] = drivers_bl
+                    if _eff(bl_state) > _eff(state):
+                        state = bl_state
+
                 gairmet_state = None
                 if gairmet_region is not None:
                     gairmet_state, drivers_gairmet = self._gairmet_vary(
@@ -4253,8 +4265,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     self._maybe_inject_burst(state, effective_intensity, tas_kt)
 
                 all_sources = []
-                for src_s in [terrain_state, cb_state, pirep_state, cape_state, gairmet_state,
-                              sigmet_state, mtw_state]:
+                for src_s in [terrain_state, cb_state, pirep_state, cape_state, bl_state,
+                              gairmet_state, sigmet_state, mtw_state]:
                     if src_s is None or src_s.intensity < 0.01:
                         continue
                     src_eff = min(1.0, src_s.intensity * self._turb_intensity_bias *

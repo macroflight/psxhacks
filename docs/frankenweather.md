@@ -543,8 +543,17 @@ The turbulence has a profile, chosen on the router's /efb page
 "Stable" is the released turbulence. "Testing" also turns on changes
 being tried out before they may become the default, so they can be
 compared in the sim (also with seat shakers) without changing anyone's
-normal turbulence. What testing changes is listed below, and on the
-console when it's in use.
+normal turbulence. What testing changes:
+
+- **Boundary-layer turbulence**: the light bumps of an ordinary breezy
+  or sunny day, which the stable profile doesn't have (its mechanical
+  turbulence starts at a 20 kt wind and stays near nothing over flat
+  land). From Open-Meteo's 10 m wind (up to 15%) and the sunshine (up
+  to 20%), within the boundary layer (Open-Meteo's boundary layer
+  height: by day often 3,000-5,000 ft, at night 1,000 ft or less), fading
+  out above it. At most 20%, light bumps: PSX's own gusts (from the
+  METAR) already shake the aircraft on a windy day.
+  The console's reason says "Boundary layer: ... (testing)".
 
 ### Turbulence gustiness and PIREPs
 
