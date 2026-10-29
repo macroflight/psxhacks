@@ -769,6 +769,14 @@ refreshed every minute, when the flight level changes and when entering
 or leaving a turbulence area. The popup closes by itself after a few
 seconds.
 
+In the testing profile the continuous turbulence is at most light chop
+and moderate or worse comes as events, so the rating follows that: a
+level is smooth when it's at light chop (22%) or more less than a
+quarter of the time, otherwise light; moderate near a CB and rough
+inside one, where the events are most frequent. A SEV TURB SIGMET's
+levels are light chop most of the time, so they read light. The log's
+turbulence labels use the same calibration: up to 34% is light.
+
 ### Time sync
 
 Keeps PSX's clocks (`TimeEarth`, and both cockpit clocks `TimeClockL`/

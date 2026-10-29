@@ -1,5 +1,19 @@
 # frankenweather changelog
 
+## Unreleased
+
+- **Fix: in the testing profile, the PIREP button said "rough" at every
+  level of a TURB SIGMET.** The ride rating counted 25% as moderate,
+  but in the testing profile a SEV TURB SIGMET's continuous turbulence
+  is light chop at 22-34%, with moderate and worse coming as events. So
+  every level came out rough while the aircraft flew through light chop
+  and smooth spells. In the testing profile a level is now smooth or
+  light by how often it's at light chop, moderate near a CB and rough
+  inside one; a SEV TURB SIGMET's levels read light. The log's
+  turbulence labels follow the same calibration (up to 34% is light, not
+  moderate). The stable profile is unchanged, and so is the turbulence
+  itself.
+
 ## 2.0.0 (2026-10-29)
 
 - **Fix: with `--sigmet`, no SIGMETs at all when the US had none.**

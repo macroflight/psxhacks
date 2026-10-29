@@ -395,6 +395,18 @@ _PIREP_RANGE_FT = 4000
 _PIREP_INTERVAL_S = 60.0
 _PIREP_MODERATE = 0.25
 _PIREP_RIDES = ((0.10, "smooth"), (0.20, "light"), (0.35, "moderate"), (math.inf, "rough"))
+# Testing profile: the continuous turbulence is at most light chop
+# (_TURB_BG_MAX; a SEV TURB SIGMET's REALISTIC_SEV_BANDS sit at 22-34 %),
+# and moderate and worse come as events. Rated against 25 % every TURB
+# SIGMET level came out "rough" (frankensim 2026-10-29, FAJO E01 at
+# FL270-350, while FL310 had smooth spells). So a level is smooth when
+# it's at light chop or more less than a quarter of the time, else light;
+# moderate near a CB and rough inside one, where moderate and severe
+# events are most frequent (_turb_events.AREA_RATES "cb_near"/"cb_core").
+# A SEV TURB SIGMET's levels are light chop 75-91 % of the time whatever
+# their roughness, so they all read light.
+_PIREP_LIGHT_CHOP = 0.22
+_PIREP_RIDES_TESTING = ((0.25, "smooth"), (math.inf, "light"))
 _SIGMET_TURB_FADE_NM = 10.0
 _SIGMET_TURB_FADE_FT = 1000.0
 # SigmetOn (Qi262) is a 0-15 bitmask. Bits 1 and 4 are documented; bit 2
@@ -1759,11 +1771,16 @@ def _parse_psx_wind(wx_str):
         return None
 
 
-def _intensity_label(intensity):
-    """Map 0–1 intensity to a human-readable severity label."""
+def _intensity_label(intensity, testing=False):
+    """Map 0–1 intensity to a human-readable severity label.
+
+    testing: the testing profile's calibration, where the continuous
+    turbulence up to 0.34 is light chop (REALISTIC_SEV_BANDS) and
+    moderate patches (0.38-0.50, _turb_events.MODERATE_LEVEL) are moderate.
+    """
     if intensity < 0.10:
         return "none"
-    if intensity < 0.25:
+    if intensity < (0.35 if testing else 0.25):
         return "light"
     if intensity < 0.50:
         return "moderate"
@@ -4377,10 +4394,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         """Return the raw intensity of a kind that is _PIREP_MODERATE effective, or None.
 
         Effective means after the intensity biases from the turbulence
-        page; None when the kind is switched off.
+        page; None when the kind is switched off. In the testing profile
+        _PIREP_LIGHT_CHOP instead (_PIREP_RIDES_TESTING).
         """
         bias = self._turb_intensity_bias * self._turb_type_effective_bias(kind) / 10000.0
-        return _PIREP_MODERATE / bias if bias > 0 else None
+        level = _PIREP_LIGHT_CHOP if self._turb_testing() else _PIREP_MODERATE
+        return level / bias if bias > 0 else None
 
     def _pirep_share(self, state: Optional[TurbulenceState], level_ft: float) -> float:
         """Return the long-run share of time a source is moderate or worse at level_ft (PIREPs).
@@ -4408,8 +4427,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         fls are flight levels in thousands of feet, here the current one.
         Each level's ride is rated by _PIREP_RIDES from the largest long-run
         share of time any source there is moderate or worse
-        (_pirep_share(), _gairmet_share() and _sigmet_share_at()).
+        (_pirep_share(), _gairmet_share() and _sigmet_share_at()). In the
+        testing profile by _PIREP_RIDES_TESTING from the share at light chop
+        or more; moderate near a CB, rough inside its cloud.
         """
+        testing = self._turb_testing()
+        rides = _PIREP_RIDES_TESTING if testing else _PIREP_RIDES
         cape_sample, per_level = physics
         cb = self._get_nearest_cb(lat, lon)
         top_wind_dir = (self._turb_engine.wind_dir_at(cb.cloud_top_ft_msl)
@@ -4427,7 +4450,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         self._pirep_rec_share(pirep_rec, level_ft),
                         self._gairmet_share(gairmet, level_ft),
                         self._sigmet_share_at(level_ft))
-            ride = next(label for limit, label in _PIREP_RIDES if share < limit)
+            ride = next(label for limit, label in rides if share < limit)
+            cb_here = sources[1]
+            if testing and cb_here is not None:
+                if (cb_here.reason or "").startswith("CB interior"):
+                    ride = "rough"
+                elif cb_here.intensity >= 0.2:
+                    ride = "moderate"
             reports.append({"fl": fl_k * 10, "ride": ride, "share": round(share, 3),
                             "current": fl_k == here})
         return reports
@@ -4727,7 +4756,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     continue
                 last_print = now
 
-                intensity_label = _intensity_label(effective_intensity)
+                intensity_label = _intensity_label(effective_intensity, self._turb_testing())
                 enabled_str = "ON " if self._turb_enabled else "OFF"
                 kind_str = state.kind
                 vert_str = f"{state.vertical:+.2f}" if not _isnan(state.vertical) else "rand"
@@ -5334,7 +5363,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             " on ground" if self._on_ground() else "",
             datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ"), psx_utc, wind,
             " in MSFS cloud" if self.msfs_in_cloud else "",
-            effective_intensity * 100, _intensity_label(effective_intensity),
+            effective_intensity * 100, _intensity_label(effective_intensity, self._turb_testing()),
             state.kind, state.reason or "-",
             "" if self._turb_enabled else " (OFF)",
             self._turb_profile,
