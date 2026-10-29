@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-25: version 1.30.0
+
+- **New: /efb has a Turbulence Profile selector** (Stable/Testing) for
+  FrankenWeather 1.26.0 and later: Stable is the released turbulence,
+  Testing also turns on changes being tried out. The router logs which
+  profile is in use (also without `--debug`) and when it changes.
+
 ## 2026-10-24: version 1.29.0
 
 - **Change: /efb shows the kind of turbulence readably**: "wind shear
