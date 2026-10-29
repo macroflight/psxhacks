@@ -1,5 +1,37 @@
 # frankenweather changelog
 
+## 1.27.0 (2026-10-25)
+
+- **Fix: frankenweather keeps its weather when something else changes
+  it.** A situation load brings the situation's own weather zones (from
+  wherever it was saved), and frankenweather didn't notice: the zones
+  stayed there, often far away, until a zone happened to be relocated.
+  Now every weather variable frankenweather sets (the zones' positions,
+  weather and METARs, `WxBasic`, `WxAutoSet`) is watched, and its own
+  value is written back about 2 seconds after a change. A situation
+  load is logged as one line, any other client as a warning with the
+  value it wrote. A variable that has to be restored more than 5 times
+  in 2 minutes is left alone (error logged) until the changes stop.
+- **New: a once-a-minute burst summary in the log**, also without
+  `--debug`: how many turbulence bursts of each kind and direction (e.g.
+  `SPD 8 +3/-5`), how big, and from which source, so a turbulence event
+  can be understood from a normal log afterwards.
+- **Testing profile: mountain wave that doesn't drive the autopilot into
+  oscillation** (terrain wave and MTW SIGMETs). In a FLCH descent through
+  a SEV MTW SIGMET near Glasgow, the wave's one-way bursts swung the
+  descent rate between a few hundred and over 4,000 ft/min. Testing
+  gives no speed/gust bursts in a wave (even a quarter of them kept FLCH
+  swinging; a light wave under 25% gets up/down bursts in their place),
+  up/down bursts that follow how fast the wave changes rather than its
+  direction, and lets an MTW SIGMET lift the terrain model's own wave to
+  at most twice it plus 20%. Same descent: up to 2,400
+  ft/min, no swings. The stable profile is unchanged.
+- **Testing profile: the turbulence level shown for a TS/TC SIGMET area**
+  (console, router /efb) now includes its minimum, not just the part
+  that varies.
+- Zone weather PSX already has is no longer sent again just because PSX
+  writes the wind speed without a leading zero (winds under 10 kt).
+
 ## 1.26.0 (2026-10-25)
 
 - **New: a turbulence profile, "stable" or "testing"**, chosen on the
