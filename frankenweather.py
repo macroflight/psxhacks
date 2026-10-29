@@ -46,6 +46,7 @@ from frankenturb import (
     CapeFetcher, compute_cape_turbulence,
     GairmetFetcher, compute_gairmet_turbulence,
 )
+from frankenturb.pirep import SEV_INTENSITY as _PIREP_SEV_INTENSITY
 from frankenturb.cb import (
     find_nearest_cb, parse_wx_zone_basic, parse_wx_zone_position, parse_wx_clust,
     zone_cb_radius_nm,
@@ -2013,6 +2014,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # The varying level of G-AIRMET turbulence (_gairmet_vary())
         self._gairmet_turb_profile = LayeredIntensityProfile(
             layer_ft=_GAIRMET_LAYERS[0], blend_ft=_GAIRMET_LAYERS[1])
+        # The varying level of PIREP turbulence (_pirep_vary()), same layers
+        self._pirep_turb_profile = LayeredIntensityProfile(
+            layer_ft=_GAIRMET_LAYERS[0], blend_ft=_GAIRMET_LAYERS[1])
         # What drives the injected turbulence's intensity over time, for the
         # ramp shown on the console and the router's /efb page (TURBSTATE
         # "intensity_ramp"): (name, layered profile, scale to intensity) and
@@ -3897,10 +3901,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 terrain,
                 (compute_cb_turbulence(level_ft, cb, top_wind_dir)
                  if cb is not None else None),
-                compute_pirep_turbulence(level_ft, pirep_rec) if pirep_rec is not None else None,
                 compute_cape_turbulence(level_ft, cape_sample) if cape_sample is not None else None,
             ]
             share = max(max(self._pirep_share(src, level_ft) for src in sources),
+                        self._pirep_rec_share(pirep_rec, level_ft),
                         self._gairmet_share(gairmet, level_ft),
                         self._sigmet_share_at(level_ft))
             ride = next(label for limit, label in _PIREP_RIDES if share < limit)
@@ -4050,7 +4054,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
                 pirep_state = None
                 if pirep_rec is not None:
-                    pirep_state = compute_pirep_turbulence(alt_ft, pirep_rec)
+                    pirep_state, drivers_pirep = self._pirep_vary(
+                        compute_pirep_turbulence(alt_ft, pirep_rec), alt_ft)
+                    drivers[id(pirep_state)] = drivers_pirep
                     if _eff(pirep_state) > _eff(state):
                         state = pirep_state
 
@@ -4547,6 +4553,32 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         return (dataclasses.replace(state, intensity=intensity,
                                     reason=f"{state.reason} (gust x{mult:.2f})"),
                 (f"{family} gust", gust, state.intensity))
+
+    def _pirep_vary(self, state: TurbulenceState, alt_ft: float) -> tuple:
+        """Return (state, driver): PIREP turbulence with a varying level at alt_ft.
+
+        Like G-AIRMET turbulence (_gairmet_vary()): the layered level
+        (_pirep_turb_profile) times the PIREP's own intensity relative to
+        SEV (distance, altitude and age fade, frankenturb/pirep.py). It used
+        to be steady. driver is for _turb_ramp_status().
+        """
+        if state.intensity <= 0.0:
+            return state, None
+        scale = state.intensity / _PIREP_SEV_INTENSITY
+        level = self._pirep_turb_profile.value(alt_ft)
+        return (dataclasses.replace(state, intensity=min(1.0, scale * level),
+                                    reason=f"{state.reason} (level {level:.0%})"),
+                ("PIREP", self._pirep_turb_profile, scale))
+
+    def _pirep_rec_share(self, rec, level_ft: float) -> float:
+        """Return the long-run share of time a PIREP's turbulence is moderate+ at level_ft."""
+        minimum = self._pirep_minimum("pirep")
+        if rec is None or minimum is None:
+            return 0.0
+        scale = compute_pirep_turbulence(level_ft, rec).intensity / _PIREP_SEV_INTENSITY
+        if scale <= 0.0:
+            return 0.0
+        return self._pirep_turb_profile.share_at_least(level_ft, minimum / scale)
 
     def _gairmet_vary(self, state: TurbulenceState, alt_ft: float) -> tuple:
         """Return (state, driver): G-AIRMET turbulence with its varying level at alt_ft.

@@ -13,6 +13,7 @@ Usage::
         state = compute_pirep_turbulence(alt_ft, rec)
 """
 
+import dataclasses
 import datetime
 import logging
 import math
@@ -28,8 +29,14 @@ log = logging.getLogger(__name__)
 
 AWC_PIREP_URL = "https://aviationweather.gov/api/data/pirep"
 
-# Search radius around the aircraft.
+# Search radius around the aircraft (what's fetched).
 SEARCH_RADIUS_NM = 150
+
+# How far a PIREP's turbulence reaches from where it was reported, fading
+# out linearly. A PIREP is one aircraft's experience at one point; it used
+# to count (fading) out to SEARCH_RADIUS_NM, and from the distance at fetch
+# time, not the aircraft's current one.
+INFLUENCE_NM = 40.0
 
 # Maximum PIREP age to consider.
 MAX_AGE_H = 2
@@ -43,20 +50,23 @@ BUCKET_DEG = 1.0
 # Altitude half-window for PIREP altitude matching (ft).
 ALT_WINDOW_FT = 3_000.0
 
-# AWC turbulence intensity string → 0–1
+# AWC turbulence intensity string → 0–1, matching frankenweather's labels
+# (light from 0.10, moderate from 0.25, severe from 0.50, extreme from
+# 0.75). MOD used to be 0.50 ("severe") and SEV 0.75 ("extreme").
 _INTENSITY_MAP = {
     "NEG": 0.0,
     "SMTH": 0.0,
-    "SMTH-LGHT": 0.10,
-    "LGHT": 0.20,
-    "LGHT-MOD": 0.35,
-    "MOD": 0.50,
-    "MOD-SEV": 0.65,
-    "SEV": 0.75,
-    "SEV-EXTM": 0.875,
-    "EXTM": 1.0,
-    "EXTRM": 1.0,
+    "SMTH-LGHT": 0.08,
+    "LGHT": 0.17,
+    "LGHT-MOD": 0.25,
+    "MOD": 0.37,
+    "MOD-SEV": 0.50,
+    "SEV": 0.60,
+    "SEV-EXTM": 0.75,
+    "EXTM": 0.85,
+    "EXTRM": 0.85,
 }
+SEV_INTENSITY = _INTENSITY_MAP["SEV"]
 
 
 @dataclass
@@ -70,7 +80,7 @@ class PirepRecord:  # pylint: disable=too-many-instance-attributes
     alt_base_ft: float
     intensity: float     # 0–1
     age_min: float       # minutes since observation
-    distance_nm: float   # distance from query point when fetched
+    distance_nm: float   # distance from the aircraft (find_relevant() updates it)
     raw_int: str         # original AWC intensity code (e.g. "MOD-SEV")
 
 
@@ -205,7 +215,8 @@ class PirepFetcher:
                 continue
             if alt_ft < rec.alt_base_ft - ALT_WINDOW_FT:
                 continue
-            dist_f = max(0.0, 1.0 - rec.distance_nm / SEARCH_RADIUS_NM)
+            rec = dataclasses.replace(rec, distance_nm=_approx_nm(lat, lon, rec.lat, rec.lon))
+            dist_f = max(0.0, 1.0 - rec.distance_nm / INFLUENCE_NM)
             age_f = max(0.0, 1.0 - rec.age_min / (MAX_AGE_H * 60.0))
             score = rec.intensity * dist_f * age_f
             if score > best_score:
@@ -222,7 +233,7 @@ def compute_pirep_turbulence(alt_ft: float, rec: PirepRecord) -> TurbulenceState
     and age.  All directional components are NaN — PIREP reports do not carry
     directional information useful at this spatial scale.
     """
-    dist_f = max(0.0, 1.0 - rec.distance_nm / SEARCH_RADIUS_NM)
+    dist_f = max(0.0, 1.0 - rec.distance_nm / INFLUENCE_NM)
 
     if rec.alt_base_ft <= alt_ft <= rec.alt_top_ft:
         alt_f = 1.0
