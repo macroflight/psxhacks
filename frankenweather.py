@@ -5203,9 +5203,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "duration_s": round(event.duration_s), "peak_g": round(event.peak_g, 1),
             "position": self._flight_position_text()})
 
-    def _log_turb_event_end(self) -> None:
+    def _log_turb_event_end(self, why: str = "") -> None:
         """Log the end of the event last started."""
-        self.logger.info("Turbulence event: %s over", self._turb_event_shown.kind)
+        if self._turb_event_shown is not None:
+            self.logger.info("Turbulence event: %s over%s", self._turb_event_shown.kind, why)
         self._turb_event_shown = None
 
     def _flight_position_text(self) -> str:
@@ -8873,6 +8874,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 self.psx_connected = True
                 if self.psx_paused:
                     self._last_situ_load_mono = time.monotonic()
+                    # A situ load is a new place: a turbulence event doesn't
+                    # carry over (one ran on 10 minutes into the next test leg)
+                    if self._turb_events.cancel() is not None:
+                        self._log_turb_event_end(" (situ loaded)")
                 self.psx_paused = False
                 self._turb_state_changed_event.set()
                 # PSX's load1 (pause) / load3 (resume) pair brackets every full

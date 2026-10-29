@@ -17,6 +17,8 @@
   likely, never stronger, and a trigger starts one right away. Based
   on the research in docs/turbulence-research. The stable profile is
   unchanged.
+- **Testing profile: a situation load ends a running turbulence event**,
+  which used to carry on at the new place.
 - **New: a once-a-minute `Flight:` line in the log**, also without
   `--debug` and also when it's smooth: position, altitude, heading,
   TAS, attitude, UTC and PSX time, wind, MSFS cloud, the turbulence

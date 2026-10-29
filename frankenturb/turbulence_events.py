@@ -178,6 +178,11 @@ class EventScheduler:
                 return self.event
         return None
 
+    def cancel(self) -> Optional[TurbulenceEvent]:
+        """End the event in progress now (e.g. after a reposition); return it, or None."""
+        event, self.event = self.current(), None
+        return event
+
     def trigger(self, kind: str, area: str = "") -> TurbulenceEvent:
         """Start an event of this kind now, replacing any in progress (testing, training)."""
         self.event = make_event(kind, self._clock(), self._rng, area, triggered=True)
