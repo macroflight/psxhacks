@@ -1275,6 +1275,30 @@ def _parse_metar(raw: str) -> dict:  # pylint: disable=too-many-branches,too-man
     return out
 
 
+_CB_MIN_DEPTH_FT = 5000   # see _cb_top_above_zone()
+
+
+def _cb_top_above_zone(wx: str, elev_ft: int) -> str:
+    """Return wx with its CB top as a height above the zone, and above the base.
+
+    The top ends up at least _CB_MIN_DEPTH_FT above the base.
+
+    CB tops are worked out above sea level (the tropopause, SIGMET flight
+    levels), but PSX's Wx heights are above the zone's elevation (live at
+    SKBO: METAR FEW030 -> cloud base 3000, zone elevation 8360 ft), so a
+    CB there topped out 8360 ft too high. A CB forced (TS METAR/SIGMET)
+    with a high base and little CAPE could also end up with its base
+    above its top, leaving no CB turbulence at all.
+    """
+    parts = wx.split(';')
+    if len(parts) < 12 or parts[9] in ('', '0'):
+        return wx
+    base = int(parts[11])
+    top = int(parts[10]) - max(0, elev_ft)
+    parts[10] = str(min(_CB_TOP_MAX_FT, max(top, base + _CB_MIN_DEPTH_FT)))
+    return ';'.join(parts)
+
+
 def _max_cb(wx: str, other: str) -> str:
     """Return wx with the larger CB coverage and higher top of wx and other (base from wx)."""
     a, b = wx.split(';'), other.split(';')
@@ -6969,6 +6993,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             if final_wx != wx:  # a SIGMET gave (or enlarged) this zone's CB
                 best = self._sigmet_cb_at((lat, lon)) if self._own_sigmets_applied else None
                 sigmet_label = best[1].get('label', 'TS SIGMET') if best else 'TS SIGMET'
+            final_wx = _cb_top_above_zone(final_wx, int(new_modes[-1].split(';')[3]))
             if self._is_cb_free_zone(zone_num) or cb_removed_for:
                 final_wx = _strip_cb(final_wx)
                 sigmet_label = None
