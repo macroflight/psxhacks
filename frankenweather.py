@@ -432,6 +432,19 @@ _REPOSITION_DIST_NM = 500.0           # zone this far away → aircraft was repo
 _REFRESH_MAX_S = 300                  # always refresh weather after this many seconds
 _ZONE_PROTECTED_LOG_INTERVAL_S = 300   # throttle for the "due but protected" log line
 _PUSH_COOLDOWN_S = 5.0                # ignore Wx echo-backs for this long after our write
+# Weather variables frankenweather keeps at its own value: if another client
+# (or a situ load) changes one, handle_owned_change() logs it and
+# _restore_owned() writes ours back, _OWNED_RESTORE_DELAY_S after the last
+# such change (a situ load changes them all in one burst).
+_OWNED_KEYS = ("WxAutoSet", "WxBasic") + tuple(
+    f"{prefix}{i}" for prefix in ("WxMode", "Wx", "Metar") for i in range(1, 8))
+_OWNED_RESTORE_DELAY_S = 2.0
+_SITU_LOAD_GRACE_S = 5.0              # changes this long after a situ load (load3) are from it
+# Safety valve: a variable restored more than _OWNED_RESTORE_MAX times within
+# _OWNED_RESTORE_WINDOW_S is fighting someone; stop restoring it (error logged)
+# until the window has passed
+_OWNED_RESTORE_MAX = 5
+_OWNED_RESTORE_WINDOW_S = 120.0
 # METAR TEMPO/PROBnn trend-group CB modulation (see Script._trend_cb_contribution):
 # how long a TEMPO segment's "on"/"off" state is held before randomly toggling again.
 # Deliberately not tied to the ~5-minute weather refresh cadence, so the on/off
@@ -1474,9 +1487,11 @@ def build_wxmode_string(lat_deg: float, lon_deg: float,
 # the last digit, name suffix "00n" -> "01p"), so an exact-string compare
 # against PSX's value never matches and every zone position was being
 # re-sent on every update (2026-10-21 DNMM-VVDN: ~1700 redundant WxMode
-# writes vs 321 real moves). Positions closer than this (radians, ~0.2m)
-# count as unchanged.
-_WXMODE_POS_EPS_RAD = 1e-7
+# writes vs 321 real moves). PSX keeps ~8 significant digits, so a
+# longitude near pi comes back up to ~1.6e-7 rad off (2026-10-26 night
+# campaign: own placements logged as "changed by another client").
+# Positions closer than this (radians, ~6 m) count as unchanged.
+_WXMODE_POS_EPS_RAD = 1e-6
 
 
 def _wxmode_equivalent(a: Optional[str], b: Optional[str]) -> bool:
@@ -1497,6 +1512,25 @@ def _wxmode_equivalent(a: Optional[str], b: Optional[str]) -> bool:
     except ValueError:
         return a == b
     return pa[2:5] == pb[2:5] and pa[5][:-3] == pb[5][:-3]
+
+
+def _wx_equivalent(a: Optional[str], b: Optional[str]) -> bool:
+    """Return True if Wx strings a and b are the same zone weather.
+
+    Ignores PSX's own rewriting of what we sent: it drops the zero padding
+    of the wind speed in field 18 ("00024008" comes back as "0002408").
+    """
+    if a is None or b is None:
+        return False
+    pa, pb = a.split(';'), b.split(';')
+    if len(pa) != len(pb) or len(pa) <= 18:
+        return a == b
+    wa, wb = pa[18], pb[18]
+    if wa != wb:
+        if not (wa.isdigit() and wb.isdigit() and len(wa) > 6 and len(wb) > 6 and
+                wa[:6] == wb[:6] and int(wa[6:]) == int(wb[6:])):
+            return False
+    return pa[:18] == pb[:18] and pa[19:] == pb[19:]
 
 
 def _strip_cb(wx: str) -> str:
@@ -2044,6 +2078,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # zone -> station-only METAR last given to PSX, see _station_only_metar()
         self._zone_station_metar: dict = {}
         self.last_write_time = 0.0
+        # _OWNED_KEYS: key -> the value we last gave PSX (see handle_owned_change())
+        self._owned_values: dict[str, str] = {}
+        self._owned_restore_due = 0.0
+        self._owned_restore_task: Optional[asyncio.Task] = None
+        self._owned_restore_times: dict[str, collections.deque] = {}
+        self._owned_restore_blocked: set = set()
+        self._last_situ_load_mono = 0.0
+        self._owned_restore_situ = False  # the pending restore follows a situ load
 
         # --cb-growth ramp state (see _ramp_cb_wx()): zone_num → dict of
         # current_oktas/current_top_ft/growth_rate_*_per_min/last_update_ts,
@@ -2458,6 +2500,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         regardless of the cache, such as Qi243 (a one-shot mode-gate pulse,
         not a persistent state value PSX "already has").
         """
+        if key in _OWNED_KEYS:
+            self._owned_values[key] = value
         current = self.psx.get(key)
         if not force and (current == value or
                           (key.startswith("WxMode") and _wxmode_equivalent(current, value))):
@@ -2573,42 +2617,140 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.cloud_sync_last_alt_ft = self.ac_alt_ft
             self._apply_msfs_sync()
 
-    def handle_wx_change(self, key: str, value: str) -> None:
-        """Re-apply our weather if PSX overwrites a zone we've set.
+    @staticmethod
+    def _is_wx_key(key: str) -> bool:
+        """Return True for a zone's weather content: WxBasic or Wx1..Wx7."""
+        return key == "WxBasic" or (key.startswith("Wx") and key[2:].isdigit())
 
-        No-ops entirely while PSX itself is in charge of weather (WxAutoSet=1,
-        set only when _fw_mode is "disabled") or while the METAR-fallback path
-        is active: fallback zones get their content from PSX's own METAR
-        parser (via Metar<N>), not from anything we compute ourselves, so
-        self.zone_wx has nothing valid to compare against for them — treating
-        PSX's own recompute as an "overwrite" to stomp back would just fight
-        it indefinitely.
+    def _owned_restore_wanted(self, key: str) -> bool:
+        """Return True if an _OWNED_KEYS variable should be kept at our value right now.
+
+        Not while PSX itself is in charge of weather (WxAutoSet=1, set only
+        when _fw_mode is "disabled"). Not zone weather content while the
+        METAR-fallback path is active: fallback zones get their content from
+        PSX's own METAR parser (via Metar<N>), so what we last wrote there is
+        stale -- stomping PSX's recompute back would fight it indefinitely.
+        WxBasic only when _wxbasic_writable().
         """
-        if self._fw_mode == "disabled" or self._metar_fallback_active:
+        if self._fw_mode == "disabled":
+            return False
+        if self._is_wx_key(key) and self._metar_fallback_active:
+            return False
+        if key == "WxBasic" and not self._wxbasic_writable():
+            return False
+        return key in self._owned_values
+
+    def _owned_matches(self, key: str, value: Optional[str]) -> bool:
+        """Return True if PSX's value for an _OWNED_KEYS variable is (equivalent to) ours."""
+        desired = self._owned_values.get(key)
+        if key.startswith("WxMode"):
+            return _wxmode_equivalent(value, desired)
+        if self._is_wx_key(key):
+            return _wx_equivalent(value, desired)
+        return value == desired
+
+    def handle_owned_change(self, key: str, value: str) -> None:
+        """Restore a weather variable we control if someone else changed it.
+
+        Called for every update of an _OWNED_KEYS variable, our own writes
+        too (psx.py's local cache update), which match and are ignored. A
+        situ load is expected to change them (logged as such); any other
+        change during normal operation is another client overriding us and
+        is logged as a warning. Either way our value is written back by
+        _restore_owned(), shortly after the last change.
+
+        Zone weather content changing within _PUSH_COOLDOWN_S of our own
+        last write is PSX rebuilding a zone from the METAR we just gave it,
+        not another client, and is left alone (as before) -- except while a
+        situ is loading (between load1 and load3), whose burst would
+        otherwise hide behind the first restore.
+        """
+        if self._owned_matches(key, value) or not self._owned_restore_wanted(key):
+            focused_key = "WxBasic" if self.focused_zone == 0 else f"Wx{self.focused_zone}"
+            if key == focused_key and self._fw_mode != "disabled":
+                self._apply_msfs_sync()
             return
         elapsed = time.time() - self.last_write_time
-        self.logger.debug("← PSX %s changed (%.1fs since last write)", key, elapsed)
-        if elapsed < _PUSH_COOLDOWN_S:
-            self.logger.debug("  within cooldown — ignoring echo")
+        if self._is_wx_key(key) and not self.psx_paused and elapsed < _PUSH_COOLDOWN_S:
+            self.logger.debug("← PSX %s changed %.1fs after our last write — ignoring echo",
+                              key, elapsed)
             return
-        if key == "WxBasic":
-            if not self._wxbasic_writable():
-                return
-            zone_num = 0
-        elif key.startswith("Wx") and key[2:].isdigit():
-            zone_num = int(key[2:])
+        if (self.psx_paused or
+                time.monotonic() - self._last_situ_load_mono < _SITU_LOAD_GRACE_S):
+            self.logger.debug("Situ load changed %s — restoring ours", key)
+            self._owned_restore_situ = True
+        elif key in self._owned_restore_blocked:
+            self.logger.warning("%s changed by another client — not restoring ours, "
+                                "it keeps being changed (theirs: %s)", key, value)
         else:
+            self.logger.warning("%s changed by another client — restoring ours (theirs: %s)",
+                                key, value)
+        self._owned_restore_due = time.monotonic() + _OWNED_RESTORE_DELAY_S
+        if self._owned_restore_task is None or self._owned_restore_task.done():
+            self._owned_restore_task = asyncio.get_running_loop().create_task(
+                self._restore_owned(), name="RestoreOwnedWx")
+
+    def _owned_restore_allowed(self, key: str) -> bool:
+        """Return False (error logged once) if key was restored too often lately (safety valve)."""
+        now = time.monotonic()
+        times = self._owned_restore_times.setdefault(key, collections.deque())
+        while times and now - times[0] > _OWNED_RESTORE_WINDOW_S:
+            times.popleft()
+        if len(times) >= _OWNED_RESTORE_MAX:
+            if key not in self._owned_restore_blocked:
+                self._owned_restore_blocked.add(key)
+                self.logger.error(
+                    "%s restored %d times in %.0f s — someone keeps changing it; "
+                    "no longer restoring it until that stops",
+                    key, len(times), _OWNED_RESTORE_WINDOW_S)
+            return False
+        if key in self._owned_restore_blocked:
+            self._owned_restore_blocked.discard(key)
+            self.logger.info("%s: restoring it again", key)
+        times.append(now)
+        return True
+
+    async def _restore_owned(self) -> None:
+        """Write our value back to every _OWNED_KEYS variable someone else changed.
+
+        Waits until _OWNED_RESTORE_DELAY_S after the last change and until a
+        situ load has finished, then writes in _update_zones()' order: zone
+        positions (WxMode) first, a second for PSX to move the zones, then
+        their weather (Wx, WxBasic) and METARs.
+        """
+        while True:
+            wait = self._owned_restore_due - time.monotonic()
+            if self.psx_paused:
+                wait = max(wait, 0.5)
+            if wait <= 0:
+                break
+            await asyncio.sleep(wait)
+        situ_load, self._owned_restore_situ = self._owned_restore_situ, False
+        if not self.psx_connected:
             return
-        desired = self.zone_wx.get(zone_num)
-        if desired and value != desired:
-            self.logger.info("PSX overwrite detected on %s — re-applying", key)
-            self.last_write_time = time.time()
-            self._inject_wx_slow_transit()
-            self.psx_send_and_set(key, desired)
-            return
-        focused_key = "WxBasic" if self.focused_zone == 0 else f"Wx{self.focused_zone}"
-        if key == focused_key:
-            self._apply_msfs_sync()
+        first = [key for key in _OWNED_KEYS if not self._is_wx_key(key) and
+                 not key.startswith("Metar")]
+        later = ([key for key in _OWNED_KEYS if self._is_wx_key(key)] +
+                 [key for key in _OWNED_KEYS if key.startswith("Metar")])
+        restored = []
+        for group in (first, later):
+            if group is later and restored:
+                await asyncio.sleep(1.0)
+            for key in group:
+                if (not self._owned_restore_wanted(key) or
+                        self._owned_matches(key, self.psx.get(key)) or
+                        not self._owned_restore_allowed(key)):
+                    continue
+                if not restored:
+                    self._inject_wx_slow_transit()
+                if group is later:
+                    self.last_write_time = time.time()
+                self.psx_send_and_set(key, self._owned_values[key])
+                restored.append(key)
+        if restored:
+            self.logger.info("Restored our %s%s", " ".join(restored),
+                             " (changed by a situ load)" if situ_load else "")
+            self._state_changed_event.set()
 
     def handle_focused_zone(self, _key: str, value: str) -> None:
         """Track the PSX focused weather zone and re-apply MSFS sync."""
@@ -8420,6 +8562,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             def onresume():
                 self.logger.info("PSX RESUMED")
                 self.psx_connected = True
+                if self.psx_paused:
+                    self._last_situ_load_mono = time.monotonic()
                 self.psx_paused = False
                 self._turb_state_changed_event.set()
                 # PSX's load1 (pause) / load3 (resume) pair brackets every full
@@ -8454,7 +8598,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.psx.subscribe("id")
             self.psx.subscribe("version", connected)
             self.psx.subscribe("PiBaHeAlTas", self.handle_piba)
-            self.psx.subscribe("WxBasic", self.handle_wx_change)
+            self.psx.subscribe("WxBasic", self.handle_owned_change)
             self.psx.subscribe("FocussedWxZone", self.handle_focused_zone)
             self.psx.subscribe("FmcRteViAcMo", self.handle_fmc_change)
             self.psx.subscribe("FmcRte1", self.handle_fmc_change)
@@ -8467,16 +8611,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.psx.subscribe("WxCorridorTxt", self._handle_corridor)
             self.psx.subscribe("MetarsUp", self._handle_metars_up)
             self.psx.subscribe("PrinterText", self._handle_printer_text)
-            # No callback needed on these two -- subscribing is enough to
-            # make psx.get() a reliable local cache of PSX's actual current
+            # The weather variables we control (_OWNED_KEYS): subscribing
+            # makes psx.get() a reliable local cache of PSX's actual current
             # value, which psx_send_and_set() relies on to avoid re-sending
-            # weather data PSX already has (see psx_send_and_set()).
-            self.psx.subscribe("WxAutoSet")
+            # weather data PSX already has, and handle_owned_change() writes
+            # ours back if anyone else (or a situ load) changes them.
+            self.psx.subscribe("WxAutoSet", self.handle_owned_change)
 
             for i in range(1, 8):
-                self.psx.subscribe(f"Wx{i}", self.handle_wx_change)
-                self.psx.subscribe(f"WxMode{i}")
-                self.psx.subscribe(f"Metar{i}")
+                self.psx.subscribe(f"Wx{i}", self.handle_owned_change)
+                self.psx.subscribe(f"WxMode{i}", self.handle_owned_change)
+                self.psx.subscribe(f"Metar{i}", self.handle_owned_change)
 
             # Turbulence subsystem subscriptions
             self.psx.subscribe("TimeEarth")
