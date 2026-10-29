@@ -4422,7 +4422,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 conv = self._sigmet_convective_turbulence(lat, lon, alt_ft)
                 if conv is not None:
                     conv_state = conv[0]
-                    drivers[id(conv_state)] = ("TS SIGMET", self._sigmet_conv_profile, conv[1])
+                    drivers[id(conv_state)] = ("TS SIGMET", self._sigmet_conv_profile,
+                                               conv[1], conv[2])
                     if _eff(conv_state) > _eff(state):
                         state = conv_state
                 # What drives the chosen state's intensity over time (an
@@ -4864,7 +4865,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
     def _sigmet_convective_turbulence(self, lat: float, lon: float,
                                       alt_ft: float) -> Optional[tuple]:
-        """Return (state, scale) for the TS/TC SIGMET area at the aircraft, or None (testing).
+        """Return (state, scale, floor) for the TS/TC SIGMET area here, or None (testing).
 
         Only in the testing profile, while frankenweather handles the TS/TC
         SIGMETs (--sigmet): their CBs are in at most a few zones, whose CB
@@ -4873,14 +4874,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         below its top, faded in near its edges like a TURB SIGMET, a
         floor plus a varying level (_sigmet_conv_profile) scaled, both by
         the SIGMET's wording (_SIGMET_CONV, TC: _SIGMET_CONV_TC); the
-        strongest area wins. Kind
+        strongest area wins; scale and floor are its edge-faded ones (for
+        _turb_ramp_status()). Kind
         "sigmet": the SIGMET turbulence settings apply. The zones' own CB
         turbulence still applies where it's stronger.
         """
         if not (self._turb_testing() and self._own_sigmets_applied):
             return None
         level = self._sigmet_conv_profile.value(alt_ft)
-        best, entry, scale = 0.0, None, 0.0
+        best, entry, scale, best_floor = 0.0, None, 0.0, 0.0
         for candidate in self._own_sigmet_entries:
             if (not candidate["ok"] or candidate["hazard"] not in _fw_sigmet.CB_HAZARDS or
                     not self._sigmet_handle.get(candidate["hazard"])):
@@ -4891,14 +4893,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                                  _SIGMET_CONV.get(candidate["qualifier"], _SIGMET_CONV_DEFAULT))
             intensity = factor * (floor + cand_scale * level)
             if intensity > best:
-                best, entry, scale = intensity, candidate, factor * cand_scale
+                best, entry, scale, best_floor = (intensity, candidate, factor * cand_scale,
+                                                  factor * floor)
         if entry is None:
             return None
         label = f"{entry['qualifier']} {entry['hazard']}".strip()
         return (TurbulenceState(
             intensity=best, kind="sigmet",
             reason=f"{label} SIGMET {entry['fir']} {entry['series']} (convective, testing)"),
-            scale)
+            scale, best_floor)
 
     def _mtw_state(self, terrain_state: TurbulenceState, intensity: float,
                    label: str) -> Optional[TurbulenceState]:
@@ -4929,20 +4932,24 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         For TURBSTATE "intensity_ramp" and the console (fw_sigmet.ramp_text()).
         Levels are scaled like the injected intensity (a SIGMET's edge fade
         and qualifier, or the physical intensity a gustiness multiplies),
-        so they match active_intensity. ramp_end/hold_end are epoch times,
+        so they match active_intensity; a driver's optional fourth element
+        is a floor added to them (a TS/TC SIGMET area's), so the levels
+        shown are the whole intensity, not just its varying part.
+        ramp_end/hold_end are epoch times,
         so the router can count down between TURBSTATE messages.
         """
         if self._turb_driver is None:
             return None
-        name, profile, scale = self._turb_driver
+        name, profile, scale = self._turb_driver[:3]
+        floor = self._turb_driver[3] if len(self._turb_driver) > 3 else 0.0
         st = profile.status(self._turb_driver_alt_ft)
         now = time.time()
         return {
             "source": name,
             "layer_base_ft": st["layer_base_ft"],
             "layer_top_ft": st["layer_top_ft"],
-            "from": round(min(1.0, st["from"] * scale), 3),
-            "target": round(min(1.0, st["target"] * scale), 3),
+            "from": round(min(1.0, floor + st["from"] * scale), 3),
+            "target": round(min(1.0, floor + st["target"] * scale), 3),
             "ramp_s": round(st["ramp_s"]),
             "hold_s": round(st["hold_s"]),
             "abrupt": st["abrupt"],
