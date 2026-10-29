@@ -37,8 +37,9 @@ Three mechanisms are modelled:
 
 3. Lee rotor
    Violent recirculation immediately downwind and below ridge top.
-   - Detected when aircraft is within ROTOR_DISTANCE_KM of the ridge and
-     below ridge top + margin.
+   - Within ROTOR_DISTANCE_KM of the ridge and below ridge top + margin,
+     fading out smoothly towards those limits.
+   The strongest of the three mechanisms is used.
    - All components are NaN (chaotic), intensity boosted by low-level jet if present.
 
 Wind shear CAT contribution
@@ -307,6 +308,12 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
 
         ridge_top_m_ft = max_upwind_m * 3.28084
 
+        # The strongest of the three. Each fades in and out smoothly, so the
+        # turbulence doesn't jump when another takes over (it used to be
+        # rotor, else wave, else mechanical, each switching on at hard
+        # thresholds: e.g. a 0.30 rotor just below the rotor ceiling, a
+        # 0.45 wave just above it).
+        candidates = []
         if rotor["active"]:
             state = self._rotor_state(rotor, surface_wind_ms, wind_profile, terrain_m)
             state.reason = (
@@ -314,9 +321,8 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
                 f"hitting {ridge_top_m_ft:.0f}ft terrain bearing "
                 f"{ridge_bearing_deg:.0f}° distance {ridge_dist_km:.0f}km"
             )
-            state.source_lat = peak_lat
-            state.source_lon = peak_lon
-        elif wave["active"]:
+            candidates.append(state)
+        if wave["active"]:
             state = self._wave_state(
                 wave, self._wave_downwind_m(lat, lon, (peak_lat, peak_lon, max_upwind_m),
                                             ridge_top_dir_deg))
@@ -325,16 +331,16 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
                 f"hitting {ridge_top_m_ft:.0f}ft terrain bearing "
                 f"{ridge_bearing_deg:.0f}° distance {ridge_dist_km:.0f}km"
             )
-            state.source_lat = peak_lat
-            state.source_lon = peak_lon
-        else:
-            state = self._mechanical_state(roughness_m, surface_spd_kt, agl_m)
-            state.reason = (
-                f"Mechanical: wind {surface_dir_deg:.0f}° {surface_spd_kt:.0f}kt "
-                f"over rough terrain (roughness {roughness_m:.0f}m)"
-            )
-            state.source_lat = peak_lat
-            state.source_lon = peak_lon
+            candidates.append(state)
+        state = self._mechanical_state(roughness_m, surface_spd_kt, agl_m)
+        state.reason = (
+            f"Mechanical: wind {surface_dir_deg:.0f}° {surface_spd_kt:.0f}kt "
+            f"over rough terrain (roughness {roughness_m:.0f}m)"
+        )
+        candidates.append(state)
+        state = max(candidates, key=lambda c: c.intensity)
+        state.source_lat = peak_lat
+        state.source_lon = peak_lon
 
         return self._blend_shear(state, wind_profile, alt_m, agl_m)
 
@@ -372,21 +378,25 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
         max_upwind_m: float,
         ridge_dist_km: float,
     ) -> dict:
+        """Return the rotor conditions; "fade" (0-1) ramps it out smoothly.
+
+        Out towards ROTOR_DISTANCE_KM from the ridge (from 5 km before it),
+        up towards the rotor ceiling (from 3/4 of it), and down to a barrier
+        200 m below BARRIER_THRESHOLD_M. These used to be hard cut-offs.
+        """
         barrier_height_m = max(0.0, max_upwind_m - terrain_m)
-        if barrier_height_m < BARRIER_THRESHOLD_M:
-            return {"active": False}
-
-        if ridge_dist_km > ROTOR_DISTANCE_KM:
-            return {"active": False}
-
         rotor_ceiling_agl_m = barrier_height_m * ROTOR_HEIGHT_FRACTION
-        if agl_m > rotor_ceiling_agl_m:
+        fade = (_normalise(barrier_height_m, BARRIER_THRESHOLD_M - 200.0,
+                           BARRIER_THRESHOLD_M + 100.0) *
+                (1.0 - _normalise(ridge_dist_km, ROTOR_DISTANCE_KM - 5.0, ROTOR_DISTANCE_KM)) *
+                (1.0 - _normalise(agl_m, 0.75 * rotor_ceiling_agl_m, rotor_ceiling_agl_m)))
+        if fade <= 0.0:
             return {"active": False}
-
         return {
             "active": True,
             "barrier_height_m": barrier_height_m,
             "ridge_dist_km": ridge_dist_km,
+            "fade": fade,
         }
 
     def _wave_conditions(
@@ -443,7 +453,7 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
     ) -> TurbulenceState:
         wind_factor = min(1.0, surface_wind_ms / WIND_NORM_MS)
         barrier_factor = min(1.0, rotor["barrier_height_m"] / 2000.0)
-        intensity = 0.6 * wind_factor * barrier_factor
+        intensity = 0.6 * wind_factor * barrier_factor * rotor["fade"]
 
         # Low-level jet amplifies rotor violence.
         jet = wind_profile.low_level_jet(search_top_m=terrain_m + 3000.0, bottom_m=terrain_m)
