@@ -15,6 +15,11 @@ import numpy as np  # pylint: disable=import-error
 KT_TO_MS = 0.514444
 MS_TO_KT = 1.0 / KT_TO_MS
 
+# Low-level jet (WindProfile.low_level_jet()): the speed must drop by at
+# least this much within this height above the maximum.
+LLJ_DROP_KT = 8.0
+LLJ_DROP_WITHIN_M = 1500.0
+
 
 # ---------------------------------------------------------------------------
 # Helpers for circular wind-direction arithmetic
@@ -226,18 +231,22 @@ class WindProfile:  # pylint: disable=too-many-instance-attributes
         return diff
 
     def low_level_jet(
-        self, search_top_m: float = 3000.0
+        self, search_top_m: float = 3000.0, bottom_m: float = -math.inf
     ) -> Optional[tuple[float, float, float]]:
         """Detect a low-level jet in the lower troposphere.
 
-        A low-level jet is a wind-speed maximum with decreasing speed above it.
-        Returns (jet_alt_m, jet_speed_kt, jet_dir_deg) or None.
+        A low-level jet is a wind-speed maximum with the speed dropping by
+        at least LLJ_DROP_KT within LLJ_DROP_WITHIN_M above it. Levels below
+        bottom_m (the ground: pressure levels below it are extrapolated)
+        don't count. Returns (jet_alt_m, jet_speed_kt, jet_dir_deg) or None.
         A low-level jet amplifies both rotor and mountain-wave turbulence.
+        It used to compare against the slowest level anywhere above,
+        stratosphere included, so almost any profile had a "jet".
         """
         if not np.any(self._valid):
             return None
         alts = self.altitudes_m[self._valid]
-        mask = alts <= search_top_m
+        mask = (alts <= search_top_m) & (alts >= bottom_m)
         if np.sum(mask) < 2:
             return None
 
@@ -253,9 +262,9 @@ class WindProfile:  # pylint: disable=too-many-instance-attributes
         jet_alt = float(sub_alts[peak_idx])
         _, jet_dir = self.wind_at(jet_alt)
 
-        # Require the jet to be at least 5 kt faster than levels above it.
-        above_jet = speeds[~mask]
-        if len(above_jet) == 0 or jet_spd - float(np.min(above_jet)) < 5.0:
+        above = np.interp(jet_alt + np.arange(250.0, LLJ_DROP_WITHIN_M + 1.0, 250.0),
+                          alts, speeds)
+        if jet_spd - float(np.min(above)) < LLJ_DROP_KT:
             return None
 
         return jet_alt, jet_spd, jet_dir

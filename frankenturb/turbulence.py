@@ -446,7 +446,7 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
         intensity = 0.6 * wind_factor * barrier_factor
 
         # Low-level jet amplifies rotor violence.
-        jet = wind_profile.low_level_jet(search_top_m=terrain_m + 3000.0)
+        jet = wind_profile.low_level_jet(search_top_m=terrain_m + 3000.0, bottom_m=terrain_m)
         if jet is not None:
             _, jet_spd_kt, _ = jet
             intensity = min(1.0, intensity * (1.0 + jet_spd_kt / 60.0))
