@@ -588,6 +588,15 @@ def _parse_ucar_lon(s: str) -> Optional[float]:
         return None
 
 
+# ICAO -> elevation (m) from stations.txt, filled by _parse_airports_lines()
+_AIRPORT_ELEV_M: dict = {}
+
+
+def _airport_elev_m(icao: str, default: float) -> float:
+    """Return an airport's elevation in metres (stations.txt), or default if unknown."""
+    return _AIRPORT_ELEV_M.get(icao, default)
+
+
 def _parse_airports_lines(lines) -> dict:
     airports: dict = {}
     for line in lines:
@@ -601,6 +610,10 @@ def _parse_airports_lines(lines) -> dict:
         if lat is None or lon is None:
             continue
         airports[icao] = (lat, lon)
+        try:
+            _AIRPORT_ELEV_M[icao] = float(line[55:59])
+        except ValueError:
+            pass
     return airports
 
 
@@ -1369,10 +1382,16 @@ def om_to_wx_string(om: dict, radar_echo: int = 0,  # pylint: disable=too-many-l
 
 def build_wxmode_string(lat_deg: float, lon_deg: float,
                         elevation_m: float, month: int, icao: str) -> str:
-    """Build PSX WxMode string: lat_rad;lon_rad;320;elev_m;MM;ICAOrwy."""
+    """Build PSX WxMode string: lat_rad;lon_rad;320;elev_ft;MM;ICAOrwy.
+
+    The elevation field is in feet: PSX's own zones (WxAutoSet=1) give
+    SKBO 8360, SVBM 2044 (live, 2026-10-24). It used to be written in
+    metres (and 0 for METAR zones).
+    """
     lat_rad = math.radians(lat_deg)
     lon_rad = math.radians(lon_deg)
-    return f"{lat_rad:.8f};{lon_rad:.8f};320;{int(round(elevation_m))};{month:02d};{icao}00n"
+    elev_ft = int(round(elevation_m / 0.3048))
+    return f"{lat_rad:.8f};{lon_rad:.8f};320;{elev_ft};{month:02d};{icao}00n"
 
 
 # PSX echoes every WxMode write back slightly rewritten (lat/lon rounded in
@@ -2378,7 +2397,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
         The first elevation used at a position sticks until the zone moves.
         Open-Meteo's reported elevation for the same point varies between
-        fetches, and METAR zones send 0, so a zone switching between METAR
+        fetches, and differs from the airport's, so a zone switching between METAR
         and Open-Meteo data would otherwise get its WxMode rewritten with a
         new elevation at an unchanged position (2026-10-21 DNMM-VVDN: 61 such
         rewrites). Any WxMode rewrite is something PSX may treat as a zone
@@ -3374,7 +3393,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._inject_wx_slow_transit()
         self.psx_send_and_set("WxAutoSet", "0")
         for zone_num, (lat, lon, icao) in self.zone_positions.items():
-            wxmode = build_wxmode_string(lat, lon, 0.0, now.month, icao)
+            wxmode = build_wxmode_string(lat, lon, _airport_elev_m(icao, 0.0), now.month, icao)
             self.zone_mode[zone_num] = wxmode
             self.zone_is_metar[zone_num] = False
             self.zone_reason[zone_num] = "Manual"
@@ -6216,7 +6235,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.zone_positions[zone_num] = (lat, lon, icao)
             self.zone_placement_reason[zone_num] = f"METAR fallback: {icao} ({dist_nm:.0f}nm)"
             self.zone_relocated_time[zone_num] = now
-            wxmode = build_wxmode_string(lat, lon, 0.0, month, icao)
+            wxmode = build_wxmode_string(lat, lon, _airport_elev_m(icao, 0.0), month, icao)
             self.zone_mode[zone_num] = wxmode
             self.psx_send_and_set(f"WxMode{zone_num}", wxmode)
             self.psx_send_and_set(f"Metar{zone_num}", raw)
@@ -6905,7 +6924,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 parsed['ts_oktas'] = max(parsed['ts_oktas'], trend_ts_oktas)
                 parsed['showers'] = parsed['showers'] or trend_showers
                 new_modes.append(build_wxmode_string(
-                    lat, lon, self._stable_zone_elev(i + 1, lat, lon, 0.0), month, icao))
+                    lat, lon, self._stable_zone_elev(i + 1, lat, lon, _airport_elev_m(icao, 0.0)),
+                    month, icao))
                 wx = metar_to_wx_string(parsed, lat, month)
                 ts_oktas = parsed.get('ts_oktas', 0)
                 has_showers_metar = parsed.get('showers', False)
@@ -6928,7 +6948,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 new_metars.append(_strip_convective_metar(raw_metars[i]) if cb_removed_for
                                   else raw_metars[i])
             else:
-                elev = float(om.get("elevation", 0)) if om else 0.0
+                elev = _airport_elev_m(icao, float(om.get("elevation", 0)) if om else 0.0)
                 new_modes.append(build_wxmode_string(
                     lat, lon, self._stable_zone_elev(i + 1, lat, lon, elev), month, icao))
                 # No data at all (Open-Meteo unreachable, nothing cached):
