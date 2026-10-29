@@ -1,5 +1,20 @@
 # frankenweather changelog
 
+## 1.24.0 (2026-10-25)
+
+Found by automated test flights near EGLL, EGPH and EINN in the stormy
+weather of 2026-10-24 (a pilot's "needs tuning down below 3000 ft").
+
+- **Fix: low-level wind shear's 30% limit no longer leaks into other
+  turbulence.** Where mechanical turbulence took over from it near the
+  ground, it could briefly reach 70% (severe), fading over about a
+  minute: 900 ft near Shannon in a 49 kt wind.
+- **Change: low-level wind shear varies below its 30% limit** (about
+  15-30%) instead of sitting at 30% nearly all the time on a windy day.
+- **Change: rotor and mechanical turbulence vary less** (gustiness
+  0.5-1.2 like wind shear, was 0.5-1.5): mechanical turbulence in a
+  strong wind could reach 75% on an approach, now at most 60%.
+
 ## 1.23.0 (2026-10-24)
 
 - **Change: CBs fade away instead of vanishing**, also without
