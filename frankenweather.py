@@ -3888,12 +3888,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         """
         cape_sample, per_level = physics
         cb = self._get_nearest_cb(lat, lon)
+        top_wind_dir = (self._turb_engine.wind_dir_at(cb.cloud_top_ft_msl)
+                        if cb is not None and self._turb_engine is not None else None)
         reports = []
         for fl_k, (terrain, pirep_rec, gairmet) in zip(fls, per_level):
             level_ft = fl_k * 1000.0
             sources = [
                 terrain,
-                compute_cb_turbulence(level_ft, cb) if cb is not None else None,
+                (compute_cb_turbulence(level_ft, cb, top_wind_dir)
+                 if cb is not None else None),
                 compute_pirep_turbulence(level_ft, pirep_rec) if pirep_rec is not None else None,
                 compute_cape_turbulence(level_ft, cape_sample) if cape_sample is not None else None,
             ]
@@ -4040,7 +4043,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 cb = self._get_nearest_cb(lat, lon)
                 cb_state = None
                 if cb is not None:
-                    cb_state = compute_cb_turbulence(alt_ft, cb)
+                    cb_state = compute_cb_turbulence(
+                        alt_ft, cb, self._turb_engine.wind_dir_at(cb.cloud_top_ft_msl))
                     if _eff(cb_state) > _eff(state):
                         state = cb_state
 

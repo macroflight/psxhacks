@@ -121,6 +121,16 @@ class TurbulenceEngine:
     # Fixed wind override
     # ------------------------------------------------------------------
 
+    def wind_dir_at(self, alt_ft: float) -> Optional[float]:
+        """Return the direction (deg) the wind blows from at alt_ft, or None.
+
+        From the last wind profile (or the fixed wind).
+        """
+        profile = self._fixed_profile or self._last_profile
+        if profile is None:
+            return None
+        return profile.wind_at(alt_ft * 0.3048)[1]
+
     def set_fixed_wind(self, dir_deg: float, speed_kt: float) -> None:
         """Override live weather with a fixed surface wind extrapolated by altitude."""
         self._fixed_profile = make_fixed_wind_profile(dir_deg, speed_kt)
