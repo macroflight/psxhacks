@@ -1,6 +1,6 @@
 # frankenusb changelog
 
-## Unreleased
+## 1.4.3 (2026-10-29)
 
 - **Fix: thrust lever handling depended on the config listing `Tla`.**
   The autothrottle and thrust/reverse lever code reads the thrust lever
