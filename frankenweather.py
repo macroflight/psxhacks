@@ -2480,6 +2480,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self.psx.send(key, value)
         return True
 
+    def _psx_has(self, key: str, current: Optional[str], value: str) -> bool:
+        """Return True if PSX's current value of key is value, or PSX's rewriting of it."""
+        if current == value:
+            return True
+        if key.startswith("WxMode"):
+            return _wxmode_equivalent(current, value)
+        return self._is_wx_key(key) and _wx_equivalent(current, value)
+
     def psx_send_and_set(self, key: str, value: str, force: bool = False) -> None:
         """Send a PSX key=value and update the local variable cache.
 
@@ -2496,6 +2504,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         a reconnect (PSX resends current values on connect), or PSX's own
         GUI/manual weather controls being used while FrankenWeather was in
         "disabled" mode -- without needing any explicit cache-clear logic.
+        PSX's own rewriting of what we sent (WxMode lat/lon rounding and
+        suffix, Wx wind speed padding) counts as the same value.
         Pass force=True for values that must always be transmitted
         regardless of the cache, such as Qi243 (a one-shot mode-gate pulse,
         not a persistent state value PSX "already has").
@@ -2503,8 +2513,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if key in _OWNED_KEYS:
             self._owned_values[key] = value
         current = self.psx.get(key)
-        if not force and (current == value or
-                          (key.startswith("WxMode") and _wxmode_equivalent(current, value))):
+        if not force and self._psx_has(key, current, value):
             self.logger.debug("→ PSX %s = %s SKIPPED (unchanged)", key, value)
             return
         if not self._psx_send(key, value):
@@ -2643,11 +2652,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
     def _owned_matches(self, key: str, value: Optional[str]) -> bool:
         """Return True if PSX's value for an _OWNED_KEYS variable is (equivalent to) ours."""
         desired = self._owned_values.get(key)
-        if key.startswith("WxMode"):
-            return _wxmode_equivalent(value, desired)
-        if self._is_wx_key(key):
-            return _wx_equivalent(value, desired)
-        return value == desired
+        return desired is not None and self._psx_has(key, value, desired)
 
     def handle_owned_change(self, key: str, value: str) -> None:
         """Restore a weather variable we control if someone else changed it.
