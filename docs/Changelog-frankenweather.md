@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Fix: alongside a TS SIGMET area, a zone could hop in and out every
+  minute.** With `--sigmet` a zone is moved into a nearby TS/TC area so
+  its CBs show on the radar, but the spot chosen could be behind the
+  aircraft, and a zone that far behind is moved away again at once: 3
+  seconds later it was gone, and a minute later it was put back, for as
+  long as the aircraft flew past the area. A zone is now only moved into
+  the part of the area that isn't behind the aircraft.
+
 - **Removed: the Feedback button on the weather map page.** The page
   reloads every 30 seconds, which closed the form and lost what had
   been typed, and its copy button didn't work when the page was opened

@@ -6777,7 +6777,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         for poly in entry["polygons"]:
             points += _fw_sigmet.points_in_polygon(
                 self.ac_lat, self.ac_lon, poly, _SIGMET_ZONE_RANGE_NM)
-        points = [p for p in points if p[2] >= _CB_SQUEEZE_MIN_FWD_NM]
+        # never behind the aircraft: the relocation moved such a zone away 3 s later,
+        # and the next placement put one back, every minute for 7 minutes alongside a
+        # TS area the aircraft had nearly passed (test sim 2026-10-29, OOMM A2)
+        points = [p for p in points if p[2] >= _CB_SQUEEZE_MIN_FWD_NM and
+                  abs((p[3] - self.ac_hdg + 180) % 360 - 180) <= 90.0]
         if not points:
             return None
         others = [(lat, lon) for zn, (lat, lon, _) in self.zone_positions.items()
