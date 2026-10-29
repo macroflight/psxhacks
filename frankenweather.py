@@ -2206,6 +2206,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # position each zone_wx was sent for
         self.zone_cb_close_cap: dict = {}
         self._cb_close_grace_until = time.monotonic() + _CB_CLOSE_START_GRACE_S
+        self._zones_placed_before_sigmets = False   # see the zone update loop
         self._zone_wx_pos: dict = {}
         # zone_num → distance (nm) to the aircraft captured at the moment the
         # zone was last (re)placed; consumed (popped) by _ramp_cb_wx() the
@@ -6215,12 +6216,31 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return None
         return f"CB turbulence reaches {reach_nm:.0f}nm, aircraft {dist_nm:.0f}nm away"
 
+    def _replace_zones_for_cb_area(self) -> bool:
+        """Re-place the zones placed before the SIGMETs were applied, if in a TS/TC area.
+
+        At startup the zones are placed before the SIGMETs are applied, so
+        without the TS/TC area's spacing (_CB_AREA_*): the first placement
+        put a zone 22 nm from the aircraft (frankensim 2026-10-29). Once the
+        SIGMETs are in, within _CB_CLOSE_START_GRACE_S of the start, the
+        zones are placed once more if the aircraft is in such an area.
+        Returns True if they were.
+        """
+        self._zones_placed_before_sigmets = False
+        if (time.monotonic() >= self._cb_close_grace_until or
+                not self._in_cb_sigmet_area(self.ac_lat, self.ac_lon)):
+            return False
+        self.logger.info("Inside a TS/TC SIGMET area: re-placing the zones with the area's spacing")
+        self._place_all_zones()
+        return True
+
     def _place_all_zones(self, keep_cb_turb: bool = False) -> None:
         """Place all 7 zones randomly around the aircraft (startup, reposition, maneuvering).
 
         With keep_cb_turb, zones whose CB turbulence can reach the aircraft
         stay where they are (see _cb_turb_in_reach()).
         """
+        self._zones_placed_before_sigmets = not self._own_sigmets_applied
         kept = {}
         if keep_cb_turb:
             for zone_num, pos in self.zone_positions.items():
@@ -8570,6 +8590,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     elif entered_maneuvering:
                         self._place_all_zones(keep_cb_turb=True)
                         any_relocated = True
+                    elif self._zones_placed_before_sigmets and self._own_sigmets_applied:
+                        any_relocated = self._replace_zones_for_cb_area()
                     else:
                         any_relocated = self._check_and_relocate()
                         any_relocated = self._ensure_arpt_zones() or any_relocated

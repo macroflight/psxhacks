@@ -10,7 +10,10 @@
   frankenweather sizes its turbulence, by the distance to the nearest
   other zone: in a typhoon, packed zones gave small echoes and cores,
   and new zones 70 nm away got the small-CB limit. Spread out, the CBs
-  are bigger and cover more of the area ahead.
+  are bigger and cover more of the area ahead. At startup the zones are
+  placed before the SIGMETs are in, so if the aircraft turns out to be
+  inside a TS/TC area within the first 2 minutes, they are placed once
+  more with these rules.
 
 - **Change (testing profile): inside a CB's cloud the turbulence is
   severe all the time.** The testing profile capped all continuous
