@@ -1,5 +1,24 @@
 # frankenweather changelog
 
+## 1.22.0 (2026-10-24)
+
+- **Change: mountain waves weaken downwind of the ridge**, to about a
+  third every 50 km. They used to be just as strong 80 km downwind (e.g.
+  moderate at FL370 over the plains east of the Rockies).
+- **Change: no more sudden steps in terrain and wind shear turbulence**
+  where the wind data changes (each 1° square, about every 7 minutes at
+  cruise, and each hour): its intensity changes over about 30 seconds.
+  Wind and CAPE data now come from the nearest forecast hour (it could be
+  up to an hour old).
+- **Change: no step in low-level turbulence at a coast.** It rises with
+  the roughness of the terrain, from the sea's level over water and flat
+  land.
+- **Change: over high ground, wind shear and the low-level wind no
+  longer come from pressure levels well below the ground** (extrapolated
+  by the weather model).
+- **Fix: a thunderstorm the Open-Meteo forecast itself predicts falls back
+  to its total precipitation** as intended (it was never downloaded).
+
 ## 1.21.0 (2026-10-24)
 
 - **Fix: weather zones at high airports are at the right elevation.**
