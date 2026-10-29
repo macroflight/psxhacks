@@ -535,6 +535,12 @@ average:
 | Rotor and mechanical | 2,000 ft | 0.5-1.5 |
 | CAPE | 2,000 ft | 0.5-1.5 |
 
+Wind shear clear-air turbulence starts at a vertical wind shear of 5
+kt/1000 ft and is at its strongest from 12 kt/1000 ft above FL200 (8 and
+14 below FL100, blended in between): shear from forecast data is
+smoothed, and with the higher figures a strong jet stream hardly ever
+gave any turbulence at cruise. It is computed over the sea too.
+
 Wind shear near the ground (on a windy day the wind normally increases
 steeply in the lowest few thousand feet) is not clear-air turbulence:
 below 3,000 ft above the ground it gives at most 30%, rising to no limit

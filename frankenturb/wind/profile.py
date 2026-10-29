@@ -168,8 +168,8 @@ class WindProfile:  # pylint: disable=too-many-instance-attributes
         """Return vertical wind shear magnitude at a given altitude (kt / 1000 ft).
 
         Computed as |Δv⃗| / Δz over a layer of ±dz_m centred on alt_m.
-        Moderate turbulence threshold ≈ 6 kt/1000 ft.
-        Severe threshold ≈ 10 kt/1000 ft.
+        See frankenturb/turbulence.py (SHEAR_MODERATE, SHEAR_ALOFT_MODERATE)
+        for how it's turned into turbulence.
         """
         if not np.any(self._valid):
             return 0.0

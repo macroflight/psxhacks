@@ -82,6 +82,15 @@ ROTOR_DISTANCE_KM = 15.0      # max distance downwind for active rotor
 # 14 kt → moderate, matching real-world reports.
 SHEAR_MODERATE = 8.0
 SHEAR_SEVERE = 14.0
+# Aloft, shear from pressure-level forecast data is smoothed out: on a day
+# with a 163 kt jet over the UK (2026-10-24) shear at FL250-410 was 6.5
+# kt/1000ft or less 90% of the time, 8.5 or less 98%, so 8/14 left cruise
+# almost always smooth. From SHEAR_ALOFT_FT (blended in from
+# SHEAR_LOW_FT) these give ~10% light or more and ~2% moderate that day.
+SHEAR_ALOFT_MODERATE = 5.0
+SHEAR_ALOFT_SEVERE = 12.0
+SHEAR_LOW_FT = 10000.0
+SHEAR_ALOFT_FT = 20000.0
 
 # Near the ground the wind normally increases steeply with height on a windy
 # day; that shear isn't clear-air turbulence. It's capped at
@@ -298,7 +307,8 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
                      alt_m: float, agl_m: float) -> TurbulenceState:
         """Return state with vertical wind shear (CAT) blended in."""
         shear = wind_profile.vertical_wind_shear(alt_m)
-        shear_factor = _normalise(shear, SHEAR_MODERATE, SHEAR_SEVERE)
+        low, high = _shear_thresholds(alt_m / FT_TO_M)
+        shear_factor = _normalise(shear, low, high)
         if shear_factor > 0.05 and state.intensity < shear_factor * 0.5:
             # Shear CAT dominates — pure random
             cap = _low_level_shear_cap(agl_m / FT_TO_M)
@@ -462,6 +472,13 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+def _shear_thresholds(alt_ft: float) -> tuple:
+    """Return the (onset, full) wind shear in kt/1000ft at alt_ft (see SHEAR_ALOFT_MODERATE)."""
+    frac = min(1.0, max(0.0, (alt_ft - SHEAR_LOW_FT) / (SHEAR_ALOFT_FT - SHEAR_LOW_FT)))
+    return (SHEAR_MODERATE + (SHEAR_ALOFT_MODERATE - SHEAR_MODERATE) * frac,
+            SHEAR_SEVERE + (SHEAR_ALOFT_SEVERE - SHEAR_SEVERE) * frac)
+
 
 def _low_level_shear_cap(agl_ft: float) -> float:
     """Return the most wind-shear turbulence there may be at agl_ft (see LOW_LEVEL_SHEAR_CAP)."""
