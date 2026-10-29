@@ -1668,6 +1668,11 @@ _BURST_YAW = 200
 _BURST_SPD = 300
 _BURST_GUST = 400
 
+# Turbulence profile (TURBCOMMAND "profile", /efb): "stable" is the
+# released behaviour; "testing" also turns on changes being evaluated
+# before they become the default (see _turb_testing()).
+_TURB_PROFILES = ("stable", "testing")
+
 _TURB_TYPES = ('wave', 'rotor', 'mechanical', 'shear', 'cb', 'pirep', 'cape', 'gairmet',
                'sigmet')
 
@@ -1716,6 +1721,7 @@ _CONFIG_TURB_FIELDS = (
     ("manual_wind_dir", "_turb_manual_wind_dir", int),
     ("manual_wind_spd", "_turb_manual_wind_spd", int),
     ("msfs_turb_magnitude", "_turb_msfs_magnitude", int),
+    ("profile", "_turb_profile", str),
 )
 
 
@@ -2337,6 +2343,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._turb_psx_wind = None             # (dir_deg, speed_kt) or None
         self._turb_lateral_size_bias: int = 50
         self._turb_rate: int = 100             # 0-100, injection rate scale
+        self._turb_profile: str = "stable"     # _TURB_PROFILES
         self._turb_type_enabled: dict = {k: True for k in _TURB_TYPES}
         self._turb_type_biases: dict = {k: 100 for k in _TURB_TYPES}
         self._turb_msfs_magnitude: int = 100  # 0-200%; scales MSFS turbulence influence
@@ -3824,6 +3831,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             if 0 <= v <= 200:
                 self._turb_msfs_magnitude = v
                 changed = True
+        if cmd.get("profile") in _TURB_PROFILES:
+            self._turb_profile = cmd["profile"]
+            self.logger.info("Turbulence profile → %s", self._turb_profile)
+            changed = True
         if changed:
             self._turb_state_changed_event.set()
 
@@ -3904,6 +3915,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     "manual_turb_kind": self._turb_manual_turb_kind,
                     "manual_turb_intensity": self._turb_manual_turb_intensity,
                     "intensity_bias": self._turb_intensity_bias,
+                    "profile": self._turb_profile,
                     "lateral_size_bias": self._turb_lateral_size_bias,
                     "wind_mode": self._turb_wind_mode,
                     "manual_wind_dir": self._turb_manual_wind_dir,
@@ -4653,6 +4665,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "ramp_end": math.floor((now + st["ramp_left_s"]) * 10) / 10,
             "hold_end": math.floor((now + st["ramp_left_s"] + st["hold_left_s"]) * 10) / 10,
         }
+
+    def _turb_testing(self) -> bool:
+        """Return True if the "testing" turbulence profile is on (see _TURB_PROFILES)."""
+        return self._turb_profile == "testing"
 
     @staticmethod
     def _gust_family(kind: str) -> Optional[str]:

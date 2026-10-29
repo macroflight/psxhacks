@@ -535,6 +535,17 @@ with a dashed outline; hovering over an area says which. Without
 `--sigmet`, or with the Off or PSX preset, the map shows the SIGMETs PSX
 downloaded, all dashed.
 
+### Turbulence profile: stable and testing
+
+The turbulence has a profile, chosen on the router's /efb page
+(Turbulence Profile: Stable/Testing), in the configuration file
+(`[turbulence]` `profile`) or with `profile` on the turbulence API.
+"Stable" is the released turbulence. "Testing" also turns on changes
+being tried out before they may become the default, so they can be
+compared in the sim (also with seat shakers) without changing anyone's
+normal turbulence. What testing changes is listed below, and on the
+console when it's in use.
+
 ### Turbulence gustiness and PIREPs
 
 The turbulence frankenweather works out itself from physics (the

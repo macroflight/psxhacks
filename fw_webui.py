@@ -2924,6 +2924,8 @@ def register_weather_routes(routes, ctx):  # pylint: disable=too-many-statements
             cmd['manual_turb_kind'] = str(data['manual_turb_kind'])
         if 'manual_turb_intensity_pct' in data:
             cmd['manual_turb_intensity'] = int(data['manual_turb_intensity_pct']) / 100.0
+        if 'profile' in data:
+            cmd['profile'] = str(data['profile'])
         if 'intensity_bias' in data:
             cmd['intensity_bias'] = int(data['intensity_bias'])
         if 'lateral_size_bias' in data:

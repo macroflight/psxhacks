@@ -1679,6 +1679,8 @@ def _efb_status_dict(router, ctx):  # pylint: disable=too-many-locals
         'src_vatsim_age': vatsim_age, 'src_vatsim_source_name': metar_src_name,
         'turb_available': turb_available,
         'turb_enabled': bool((turbstate or {}).get('enabled', True)),
+        # "stable"/"testing"; None from a FrankenWeather without profiles
+        'turb_profile': (turbstate or {}).get('profile'),
         'turb_kind': (turbstate or {}).get('active_kind', 'none'),
         # What's injected (biases and MSFS factor applied); FrankenWeather
         # before 1.16.0 only sends the computed intensity
@@ -1831,6 +1833,27 @@ def _efb_sigmet_hint(w):
     return hint + '.'
 
 
+# FrankenWeather turbulence profiles (TURBCOMMAND "profile")
+_EFB_TURB_PROFILES = (('stable', 'Stable'), ('testing', 'Testing'))
+
+
+def _efb_turb_profile_html(w):
+    """Render the Stable/Testing turbulence profile chips, or '' for an older FrankenWeather."""
+    if w['turb_profile'] is None:
+        return ''
+    chips = ''.join(
+        f'<form class="efb-inline" method="post" action="/api/efb/turb-profile">'
+        f'<input type="hidden" name="profile" value="{profile}">'
+        f'<button type="submit" '
+        f'class="efb-chip efb-chip-sm{" active" if w["turb_profile"] == profile else ""}">'
+        f'{label}</button></form>\n'
+        for profile, label in _EFB_TURB_PROFILES)
+    return ('<div class="efb-eyebrow" style="margin-top:0.6rem">Turbulence Profile</div>\n'
+            f'<div class="efb-chip-row">{chips}</div>\n'
+            '<p class="efb-hint">Stable: the released turbulence. Testing: also the '
+            'changes being tried out before they become the default.</p>\n')
+
+
 def _efb_controls_card(w):
     """Render the weather-mode, turbulence, and CB-avoidance control card.
 
@@ -1862,7 +1885,8 @@ def _efb_controls_card(w):
         '<div class="efb-eyebrow" style="margin-top:0.6rem">Extra Turbulence</div>\n' +
         _efb_bool_chip_row(
             '/api/efb/turb-toggle', 'enabled', w['turb_enabled'], small=True) +
-        '<p class="efb-hint">Wind, terrain, convection, CB proximity, etc.</p>\n'
+        '<p class="efb-hint">Wind, terrain, convection, CB proximity, etc.</p>\n' +
+        _efb_turb_profile_html(w) +
         '<div class="efb-eyebrow" style="margin-top:0.6rem">CB Near Dep/Arr</div>\n' +
         _efb_cb_airport_mode_row(w) +
         '<p class="efb-hint">Move zone: moves the airport\'s weather zone so its CB stays '
@@ -3033,6 +3057,13 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 data = await request.post()
                 if data.get('field') == 'enabled':
                     await _efb_ctx.send_turb_cmd({'enabled': data.get('value') == '1'})
+                raise web.HTTPFound('/efb')
+
+            @routes.post('/api/efb/turb-profile')
+            async def handle_efb_turb_profile_post(request):
+                data = await request.post()
+                if data.get('profile') in dict(_EFB_TURB_PROFILES):
+                    await _efb_ctx.send_turb_cmd({'profile': data.get('profile')})
                 raise web.HTTPFound('/efb')
 
             @routes.post('/api/efb/claim-sources')
