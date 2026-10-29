@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Removed: the Feedback button on the weather map page.** The page
+  reloads every 30 seconds, which closed the form and lost what had
+  been typed, and its copy button didn't work when the page was opened
+  from another computer. The `Flight:` lines in the log now show what
+  was injected and why: to report a problem, send the log and the time
+  (UTC).
+
 - **Change: inside a TS or TC SIGMET area a new CB is only kept small
   within 40 nm.** Elsewhere a zone within 100 nm of the aircraft that gets
   a CB still only gets a small one (2 oktas, 15,000 ft), so that none pops

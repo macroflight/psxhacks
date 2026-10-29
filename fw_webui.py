@@ -624,7 +624,6 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
     zones_js = json.dumps(zone_data)
     sigmets_js = json.dumps(state.get('sigmets', []))
     gairmets_js = json.dumps(state.get('gairmets', []))
-    ac_alt_ft = state.get('ac_alt_ft') or 0
     turbstate = ctx.fw_turbstate or {}
     turb_src_lat = turbstate.get('source_lat')
     turb_src_lon = turbstate.get('source_lon')
@@ -633,28 +632,6 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
     turb_pct = int(turb_intensity * 100)
     turb_label = _turb_kind_label(turb_kind) if turbstate else '—'
 
-    turb_intensity_label = (
-        'none' if turb_intensity < 0.10 else
-        'light' if turb_intensity < 0.25 else
-        'moderate' if turb_intensity < 0.50 else
-        'severe' if turb_intensity < 0.75 else
-        'extreme'
-    )
-    turb_sources = turbstate.get('sources', [])
-    turb_summary_js = json.dumps({
-        'kind': turb_kind,
-        'pct': turb_pct,
-        'label': turb_label,
-        'intensity_label': turb_intensity_label,
-        'reason': turbstate.get('active_reason', ''),
-        'sources': [
-            {'kind': _turb_kind_label(s['kind']),
-             'pct': int(s['intensity'] * 100),
-             'reason': s['reason'],
-             'active': s['kind'] == turb_kind}
-            for s in turb_sources
-        ],
-    })
     _WIND_TURB_KINDS = {'wave', 'rotor', 'mechanical', 'mtw'}
     turb_js = 'null'
     if (turb_src_lat is not None and turb_src_lon is not None and
@@ -679,12 +656,6 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         'var a=Math.sin(dla/2)*Math.sin(dla/2)+'
         'Math.cos(la1*r)*Math.cos(la2*r)*Math.sin(dlo/2)*Math.sin(dlo/2);'
         'return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));}\n'
-        'function pointInPoly(lat,lon,poly){'
-        'var inside=false,n=poly.length;'
-        'for(var i=0,j=n-1;i<n;j=i++){'
-        'var xi=poly[i][0],yi=poly[i][1],xj=poly[j][0],yj=poly[j][1];'
-        'if(((yi>lon)!==(yj>lon))&&(lat<(xj-xi)*(lon-yi)/(yj-yi)+xi))inside=!inside;}'
-        'return inside;}\n'
         # The view (lat,lon,zoom) survives the periodic reload, along with
         # when the user last panned/zoomed; 2 minutes after that it's
         # dropped, so the map refits to the aircraft and zones again
@@ -697,11 +668,9 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         'if(!isNaN(la)&&!isNaN(lo)&&!isNaN(z)&&!isNaN(t)&&Date.now()-t<_VIEW_KEEP_MS)'
         'return{lat:la,lon:lo,zoom:z,t:t};}'
         'return null;}\n'
-        f'var acLat={ac_lat},acLon={ac_lon},acHdg={ac_hdg:.0f},acAlt={ac_alt_ft};\n'
-        f'var fwMode={json.dumps(fw_mode)},navMode={json.dumps(nav_mode)};\n'
+        f'var acLat={ac_lat},acLon={ac_lon},acHdg={ac_hdg:.0f};\n'
         f'var zones={zones_js};\n'
         f'var turbInfo={turb_js};\n'
-        f'var turbSummary={turb_summary_js};\n'
         f'var sigmets={sigmets_js};\n'
         f'var gairmets={gairmets_js};\n'
         "var _sv=parseSavedView();\n"
@@ -1027,118 +996,6 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         "location.hash=c.lat.toFixed(5)+','+c.lng.toFixed(5)+','+z.toFixed(2)"
         "+','+_lastUserView;"
         "location.reload();},30000);\n"
-        "function openFeedback(){\n"
-        "  document.getElementById('fb-overlay').style.display='flex';\n"
-        "  document.getElementById('fb-desc').value='';\n"
-        "  document.getElementById('fb-step1').style.display='';\n"
-        "  document.getElementById('fb-step2').style.display='none';\n"
-        "  document.getElementById('fb-copy-btn').textContent='Copy to clipboard';\n"
-        "}\n"
-        "function closeFeedback(){"
-        "document.getElementById('fb-overlay').style.display='none';}\n"
-        "function generateReport(){\n"
-        "  var desc=document.getElementById('fb-desc').value.trim();\n"
-        "  if(!desc){alert('Please describe your experience first.');return;}\n"
-        "  document.getElementById('fb-report').value=buildReport(desc);\n"
-        "  document.getElementById('fb-step1').style.display='none';\n"
-        "  document.getElementById('fb-step2').style.display='';\n"
-        "}\n"
-        "function buildReport(desc){\n"
-        "  var d=new Date();\n"
-        "  var L=['=== FrankenWeather Feedback Report ===',\n"
-        "    'Generated: '+d.toISOString(),'',\n"
-        "    'POSITION',\n"
-        "    '  Lat '+acLat.toFixed(3)+'° Lon '+acLon.toFixed(3)+'°"
-        " | Alt '+acAlt+' ft | Hdg '+acHdg+'°','',\n"
-        "    'FW MODE: '+fwMode+' | NAV MODE: '+navMode,'',\n"
-        "    'WEATHER ZONES'];\n"
-        "  zones.forEach(function(z){\n"
-        "    var zDist=Math.round(gcdNm(acLat,acLon,z.lat,z.lon));\n"
-        "    L.push('  WX'+z.zone+' '+z.icao+' ['+z.source_label+']'"
-        "+'  ('+zDist+' nm)');\n"
-        "    L.push('    Location: '+z.lat.toFixed(3)+'° '+z.lon.toFixed(3)+'°');\n"
-        "    if(z.reason)L.push('    Reason: '+z.reason);\n"
-        "    var wx=z.wx,p=[];\n"
-        "    if(wx.wind)p.push('Wind: '+wx.wind);\n"
-        "    if(wx.lo_cloud)p.push('Lo cloud: '+wx.lo_cloud);\n"
-        "    if(wx.hi_cloud)p.push('Hi cloud: '+wx.hi_cloud);\n"
-        "    if(wx.cb_raw)p.push('CB: '+wx.cb_raw.oktas+\"/8 \""
-        "+wx.cb_raw.base+\"'-\"+wx.cb_raw.top+\"'\");\n"
-        "    if(wx.vis)p.push('Vis: '+wx.vis);\n"
-        "    if(wx.temp)p.push('Temp/QNH: '+wx.temp+'/'+wx.qnh);\n"
-        "    if(p.length)L.push('    '+p.join('  '));\n"
-        "    if(z.metar)L.push('    METAR: '+z.metar);\n"
-        "    if(z.wx_raw)L.push('    PSX Wx: '+z.wx_raw);\n"
-        "    L.push('');\n"
-        "  });\n"
-        "  L.push('TURBULENCE');\n"
-        "  if(turbSummary.pct>0){\n"
-        "    L.push('  '+turbSummary.label+' '+turbSummary.pct"
-        "+'% ('+turbSummary.intensity_label+')');\n"
-        "    if(turbSummary.reason)L.push('  Reason: '+turbSummary.reason);\n"
-        "    if(turbInfo)L.push('  Terrain peak: '+turbInfo.src_lat.toFixed(4)+'°"
-        " '+turbInfo.src_lon.toFixed(4)+'°');\n"
-        "    if(turbSummary.sources&&turbSummary.sources.length>1){\n"
-        "      L.push('  Sources:');\n"
-        "      turbSummary.sources.forEach(function(s){\n"
-        "        var marker=s.active?'  ▶ ':'     ';\n"
-        "        L.push(marker+s.kind+' '+s.pct+'%'+(s.reason?' — '+s.reason:''));\n"
-        "      });\n"
-        "    }\n"
-        "  }else{L.push('  None active');}\n"
-        "  L.push('');\n"
-        "  L.push('ACTIVE SIGMETs');\n"
-        "  if(sigmets.length===0){L.push('  None');}else{\n"
-        "    var inside=[],nearby=[];\n"
-        "    sigmets.forEach(function(s,i){\n"
-        "      if(pointInPoly(acLat,acLon,s.polygon)){\n"
-        "        inside.push({idx:i+1,s:s});\n"
-        "      } else {\n"
-        "        var cx=0,cy=0,n=s.polygon.length;\n"
-        "        for(var k=0;k<n;k++){cx+=s.polygon[k][0];cy+=s.polygon[k][1];}\n"
-        "        var d=gcdNm(acLat,acLon,cx/n,cy/n);\n"
-        "        if(d<200)nearby.push({idx:i+1,s:s,dist:Math.round(d)});\n"
-        "      }\n"
-        "    });\n"
-        "    L.push('  Total in region: '+sigmets.length);\n"
-        "    if(inside.length===0&&nearby.length===0){\n"
-        "      L.push('  None within 200 nm of aircraft');\n"
-        "    }\n"
-        "    if(inside.length>0){\n"
-        "      L.push('  AIRCRAFT INSIDE '+inside.length+' SIGMET(S):');\n"
-        "      inside.forEach(function(x){\n"
-        "        L.push('    SIGMET '+x.idx+' ('+(x.s.hazard||'TS')+'): Top FL'"
-        "+Math.round(x.s.top_ft/100)+'  ('+x.s.polygon.length+' pts)');\n"
-        "      });\n"
-        "    }\n"
-        "    if(nearby.length>0){\n"
-        "      nearby.sort(function(a,b){return a.dist-b.dist;});\n"
-        "      L.push('  Nearby (<200 nm):');\n"
-        "      nearby.forEach(function(x){\n"
-        "        L.push('    SIGMET '+x.idx+' ('+(x.s.hazard||'TS')+'): Top FL'"
-        "+Math.round(x.s.top_ft/100)+'  '+x.dist+' nm  ('+x.s.polygon.length+' pts)');\n"
-        "      });\n"
-        "    }\n"
-        "  }\n"
-        "  L.push('');\n"
-        "  L.push('PILOT DESCRIPTION');\n"
-        "  L.push('  '+desc.split('\\n').join('\\n  '));\n"
-        "  return L.join('\\n');\n"
-        "}\n"
-        "function copyReport(){\n"
-        "  var el=document.getElementById('fb-report');\n"
-        "  navigator.clipboard.writeText(el.value).catch(function(){"
-        "el.select();document.execCommand('copy');});\n"
-        "  document.getElementById('fb-copy-btn').textContent='Copied!';\n"
-        "  setTimeout(function(){"
-        "document.getElementById('fb-copy-btn').textContent='Copy to clipboard';},2000);\n"
-        "}\n"
-        "function sendFeedbackEmail(){\n"
-        "  var body=document.getElementById('fb-report').value;\n"
-        "  window.location.href='mailto:mats.kronberg.game+fwfeedback@gmail.com"
-        "?subject=FrankenWeather%20feedback"
-        "&body='+encodeURIComponent(body);\n"
-        "}\n"
         '</script>\n'
     )
 
@@ -1234,60 +1091,14 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
          '<td style="text-align:right">'
          f'<b style="color:{enroute_wind_color}">{enroute_wind_label}</b></td></tr>\n') +
         '</table>\n</div>\n'
-        '<div style="display:flex;flex-direction:column;gap:0.5em">\n'
-        '<button class="btn btn-blue btn-sm" onclick="openFeedback()">Feedback</button>\n'
-        '</div>\n'
     )
 
-    modal = (
-        '<div id="fb-overlay" style="display:none;position:fixed;top:0;left:0;'
-        'width:100%;height:100%;background:rgba(0,0,0,0.75);z-index:9999;'
-        'align-items:center;justify-content:center">\n'
-        '<div style="background:#1c2033;border:1px solid #2a2f45;border-radius:8px;'
-        'padding:1.5em;width:min(90vw,640px);max-height:90vh;overflow-y:auto">\n'
-        '<h2 style="margin:0 0 0.75em;color:#f1f5f9">FrankenWeather Feedback</h2>\n'
-        '<div id="fb-step1">\n'
-        '<p style="font-size:0.85em;color:#94a3b8;margin-top:0">'
-        'Submitting a snapshot of current position, weather zones, and turbulence state. '
-        'Please describe what you experienced.</p>\n'
-        '<label style="display:block;font-size:0.85em;color:#94a3b8;margin-bottom:0.4em">'
-        'Your experience</label>\n'
-        '<textarea id="fb-desc" rows="5" style="width:100%;box-sizing:border-box;'
-        'background:#0f1120;border:1px solid #2a2f45;border-radius:4px;'
-        'color:#f1f5f9;padding:0.5em;font-size:0.9em;resize:vertical" '
-        'placeholder="E.g.: Mountain wave turbulence was much stronger than expected '
-        'for 33kt winds, or: Perfect match with real-world weather radar"></textarea>\n'
-        '<div style="display:flex;gap:0.5em;justify-content:flex-end;margin-top:0.75em">\n'
-        '<button class="btn btn-gray" onclick="closeFeedback()">Cancel</button>\n'
-        '<button class="btn btn-blue" onclick="generateReport()">Generate report</button>\n'
-        '</div>\n</div>\n'
-        '<div id="fb-step2" style="display:none">\n'
-        '<p style="font-size:0.85em;color:#94a3b8;margin-top:0">'
-        'Copy this report and post it to the '
-        '<strong style="color:#f1f5f9">PSCC Discord server</strong>, '
-        'or use the button below to send it by email:</p>\n'
-        '<textarea id="fb-report" rows="18" readonly style="width:100%;box-sizing:border-box;'
-        'background:#0f1120;border:1px solid #2a2f45;border-radius:4px;'
-        'color:#94a3b8;padding:0.5em;font-family:monospace;font-size:0.8em;'
-        'resize:vertical"></textarea>\n'
-        '<div style="display:flex;gap:0.5em;justify-content:flex-end;margin-top:0.75em">\n'
-        '<button class="btn btn-gray" onclick="'
-        'document.getElementById(\'fb-step1\').style.display=\'\';'
-        'document.getElementById(\'fb-step2\').style.display=\'none\'">Back</button>\n'
-        '<button id="fb-copy-btn" class="btn btn-blue" '
-        'onclick="copyReport()">Copy to clipboard</button>\n'
-        '<button class="btn btn-green" '
-        'onclick="sendFeedbackEmail()">Send feedback via email</button>\n'
-        '</div>\n</div>\n'
-        '</div>\n</div>\n'
-    )
     body = (
         '<div class="wx-map-wrap">\n'
         '<div id="map"></div>\n' +
         script +
         '<div class="wx-map-side">\n' + side_panel + '</div>\n'
-        '</div>\n' +
-        modal
+        '</div>\n'
     )
     return _page(body)
 
