@@ -227,15 +227,18 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
         surface_spd_kt, surface_dir_deg = wind_profile.wind_at(surface_alt_m)
         surface_wind_ms = surface_spd_kt * KT_TO_MS
 
+        # No terrain turbulence in light low-level wind or with no terrain
+        # upwind (open sea), but there can still be wind-shear CAT aloft
+        # (it used to return calm before looking at the shear).
         if surface_wind_ms < MIN_WIND_MS:
-            return _CALM
+            return self._blend_shear(_CALM, wind_profile, alt_m, agl_m)
 
         # ---- 1. Upwind terrain scan (fan ±30° to catch off-bearing peaks) ---
         barrier_result = self._grid.max_upwind_barrier(
             lat, lon, surface_dir_deg, self._upwind_km
         )
         if barrier_result is None:
-            return _CALM
+            return self._blend_shear(_CALM, wind_profile, alt_m, agl_m)
 
         max_upwind_m, ridge_dist_km, ridge_bearing_deg = barrier_result
         peak_lat, peak_lon = _dest_point(lat, lon, ridge_bearing_deg, ridge_dist_km)
@@ -249,11 +252,7 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
         # ---- 2. Terrain roughness ------------------------------------------
         roughness_m = self._grid.terrain_roughness(lat, lon, self._roughness_km)
 
-        # ---- 3. Vertical wind shear (CAT contribution) ---------------------
-        shear = wind_profile.vertical_wind_shear(alt_m)
-        shear_factor = _normalise(shear, SHEAR_MODERATE, SHEAR_SEVERE)
-
-        # ---- 4. Dominant mechanism -----------------------------------------
+        # ---- 3. Dominant mechanism -----------------------------------------
         rotor = self._rotor_conditions(agl_m, terrain_m, max_upwind_m, ridge_dist_km)
         ridge_top_spd_kt, ridge_top_dir_deg = wind_profile.wind_at_ridge_top(max_upwind_m)
         wave = self._wave_conditions(
@@ -292,7 +291,14 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
             state.source_lat = peak_lat
             state.source_lon = peak_lon
 
-        # ---- 5. Blend in wind-shear CAT ------------------------------------
+        return self._blend_shear(state, wind_profile, alt_m, agl_m)
+
+    @staticmethod
+    def _blend_shear(state: TurbulenceState, wind_profile: WindProfile,
+                     alt_m: float, agl_m: float) -> TurbulenceState:
+        """Return state with vertical wind shear (CAT) blended in."""
+        shear = wind_profile.vertical_wind_shear(alt_m)
+        shear_factor = _normalise(shear, SHEAR_MODERATE, SHEAR_SEVERE)
         if shear_factor > 0.05 and state.intensity < shear_factor * 0.5:
             # Shear CAT dominates — pure random
             cap = _low_level_shear_cap(agl_m / FT_TO_M)
