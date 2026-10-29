@@ -48,6 +48,7 @@ Wind shear CAT contribution
 """
 
 import math
+import time
 from typing import Optional
 from dataclasses import dataclass, field, replace
 
@@ -117,10 +118,10 @@ SHEAR_ALOFT_FT = 20000.0
 # cap rising linearly to none at LOW_LEVEL_SHEAR_BLEND_FT. A pilot departing
 # EGLL on a windy day got 100% (2026-10-24).
 LOW_LEVEL_SHEAR_CAP = 0.30
-LOW_LEVEL_SHEAR_AGL_FT = 3000.0
 # Most the caller's gust multiplier raises terrain turbulence (frankenweather
 # _TURB_GUST "lowlevel" 0.5-1.5)
 TERRAIN_GUST_MAX = 1.5
+LOW_LEVEL_SHEAR_AGL_FT = 3000.0
 LOW_LEVEL_SHEAR_BLEND_FT = 5000.0
 
 # Maximum wind speed (m/s) used for normalisation.
@@ -134,7 +135,8 @@ WIND_NORM_MS = 30.0        # rotor: normalise at 58 kt (high threshold OK for ro
 # WAVE_WIND_NORM_MS (~43 kt), and the barrier from WAVE_BARRIER_MIN_M to
 # WAVE_BARRIER_NORM_M. It used to switch on at 8 m/s (15 kt) and a 500 m
 # barrier, as a step to ~moderate (2026-10-24 review).
-WAVE_PEAK_CHANGE_M = 150.0   # see TerrainTurbulenceModel._wave_downwind_m()
+WAVE_RESET_S = 120.0     # see TerrainTurbulenceModel._wave_phase_at()
+WAVE_RESET_KM = 20.0
 WAVE_WIND_MIN_MS = 10.0
 WAVE_WIND_NORM_MS = 22.0
 WAVE_BARRIER_MIN_M = 200.0
@@ -226,11 +228,10 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
         self._grid = grid
         self._upwind_km = upwind_km
         self._roughness_km = roughness_radius_km
-        # (lat, lon, elevation_m) of the peak the mountain wave phase is
-        # measured from, and an offset keeping the phase continuous when it
-        # changes (see _wave_downwind_m())
-        self._wave_peak: Optional[tuple] = None
-        self._wave_offset_m = 0.0
+        # Mountain wave phase (radians) and where/when it was last advanced
+        # (lat, lon, monotonic time), see _wave_phase_at()
+        self._wave_phase: Optional[float] = None
+        self._wave_last: Optional[tuple] = None
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -327,8 +328,8 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
             candidates.append(state)
         if wave["active"]:
             state = self._wave_state(
-                wave, self._wave_downwind_m(lat, lon, (peak_lat, peak_lon, max_upwind_m),
-                                            ridge_top_dir_deg))
+                wave, self._wave_phase_at(lat, lon, (peak_lat, peak_lon), ridge_top_dir_deg,
+                                          2.0 * wave["half_lambda_m"]))
             state.reason = (
                 f"Mountain wave: wind {ridge_top_dir_deg:.0f}° {ridge_top_spd_kt:.0f}kt "
                 f"hitting {ridge_top_m_ft:.0f}ft terrain bearing "
@@ -481,39 +482,46 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
             kind="rotor",
         )
 
-    def _wave_downwind_m(self, lat: float, lon: float, peak: tuple,
-                         wind_dir_deg: float) -> float:
-        """Return how far (m) the aircraft is downwind of the wave's peak, for the wave phase.
+    def _wave_phase_at(self, lat: float, lon: float, peak: tuple, wind_dir_deg: float,
+                       wavelength_m: float) -> float:
+        """Return the mountain wave phase (radians) at lat/lon.
 
-        The detected peak jumps by 0.4-3 km as the aircraft moves (sampling
-        along the upwind fan), which would jump the wave phase. So the peak
-        is kept until one at least WAVE_PEAK_CHANGE_M higher or lower is
-        detected, or it's no longer upwind within the scan distance; and
-        when it does change, an offset keeps the distance (the phase)
-        continuous, so the aircraft doesn't jump from a down- to an updraft.
+        On entering a wave (or after WAVE_RESET_S without one, or a jump of
+        more than WAVE_RESET_KM) it's anchored to the peak: sinking just
+        downwind of it. From then on it only advances with the aircraft's
+        downwind movement divided by the current wavelength, so it stays
+        continuous when the detected peak (which jumps as the aircraft
+        moves), the wind or the wavelength changes -- e.g. at each 1-degree
+        wind square or hourly forecast. Computing it from the distance to
+        the peak each time made it jump from an up- to a downdraft there.
         """
-        old = self._wave_peak
-        if old is not None:
-            along = _downwind_m(old[0], old[1], lat, lon, wind_dir_deg)
-            if (abs(peak[2] - old[2]) <= WAVE_PEAK_CHANGE_M and
-                    0.0 <= along <= self._upwind_km * 1000.0):
-                return along + self._wave_offset_m
-            self._wave_offset_m += along - _downwind_m(peak[0], peak[1], lat, lon, wind_dir_deg)
-        self._wave_peak = peak
-        return _downwind_m(peak[0], peak[1], lat, lon, wind_dir_deg) + self._wave_offset_m
+        now = time.monotonic()
+        last = self._wave_last
+        moved_m = (math.hypot(_downwind_m(last[0], last[1], lat, lon, 0.0),
+                              _downwind_m(last[0], last[1], lat, lon, 90.0))
+                   if last is not None else math.inf)
+        if (self._wave_phase is None or now - last[2] > WAVE_RESET_S or
+                moved_m > WAVE_RESET_KM * 1000.0):
+            phase = 2.0 * math.pi * _downwind_m(peak[0], peak[1], lat, lon,
+                                                wind_dir_deg) / wavelength_m
+        else:
+            phase = self._wave_phase + 2.0 * math.pi * _downwind_m(
+                last[0], last[1], lat, lon, wind_dir_deg) / wavelength_m
+        self._wave_phase = phase % (2.0 * math.pi)
+        self._wave_last = (lat, lon, now)
+        return self._wave_phase
 
     @staticmethod
-    def _wave_state(wave: dict, downwind_m: float) -> TurbulenceState:
-        """Return the mountain wave state downwind_m downwind of the ridge.
+    def _wave_state(wave: dict, phase: float) -> TurbulenceState:
+        """Return the mountain wave state at a phase (see _wave_phase_at()).
 
-        The up/down phase is anchored to the ridge: just downwind of it the
-        air sinks, then rises and sinks again every wavelength. It used to
-        be the absolute position modulo the wavelength, so a 1° wind
-        change moved it by several wavelengths: noise, not waves.
+        Just downwind of the ridge the air sinks, then rises and sinks
+        again every wavelength. It used to be the absolute position modulo
+        the wavelength, so a 1° wind change moved it by several
+        wavelengths: noise, not waves.
         """
         intensity = 0.7 * wave["wind_factor"] * wave["barrier_factor"] * wave["alt_factor"]
 
-        phase = 2.0 * math.pi * downwind_m / (2.0 * wave["half_lambda_m"])
         vertical = -math.sin(phase)
         roll = 0.2 * math.cos(phase)
         gust = 0.15 * math.sin(phase)
