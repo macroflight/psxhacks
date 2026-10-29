@@ -18,6 +18,8 @@ MS_TO_KT = 1.0 / KT_TO_MS
 # Low-level jet (WindProfile.low_level_jet()): the speed must drop by at
 # least this much within this height above the maximum.
 LLJ_DROP_KT = 8.0
+# WindProfile._levels(): pressure levels this far below the ground still count
+BELOW_GROUND_TOLERANCE_M = 250.0
 LLJ_DROP_WITHIN_M = 1500.0
 
 
@@ -133,8 +135,22 @@ class WindProfile:  # pylint: disable=too-many-instance-attributes
     # Core interpolation
     # ------------------------------------------------------------------
 
-    def wind_at(self, alt_m: float) -> tuple[float, float]:
-        """Interpolate wind to a geometric altitude.
+    def _levels(self, bottom_m: float) -> tuple:
+        """Return (alts, u, v) of the valid levels not well below bottom_m (the ground).
+
+        Levels more than BELOW_GROUND_TOLERANCE_M below the ground are model
+        extrapolations, e.g. 925 hPa at Denver; one just below it (850 hPa
+        there) is about the surface wind. All valid levels if fewer than 2
+        are left.
+        """
+        alts = self.altitudes_m[self._valid]
+        keep = alts >= bottom_m - BELOW_GROUND_TOLERANCE_M
+        if np.sum(keep) < 2:
+            return alts, self._u_ms, self._v_ms
+        return alts[keep], self._u_ms[keep], self._v_ms[keep]
+
+    def wind_at(self, alt_m: float, bottom_m: float = -math.inf) -> tuple[float, float]:
+        """Interpolate wind to a geometric altitude, ignoring levels below bottom_m.
 
         Returns
         -------
@@ -145,9 +161,9 @@ class WindProfile:  # pylint: disable=too-many-instance-attributes
         if not np.any(self._valid):
             return 0.0, 0.0
 
-        alts = self.altitudes_m[self._valid]
-        u = float(np.interp(alt_m, alts, self._u_ms))
-        v = float(np.interp(alt_m, alts, self._v_ms))
+        alts, us, vs = self._levels(bottom_m)
+        u = float(np.interp(alt_m, alts, us))
+        v = float(np.interp(alt_m, alts, vs))
         return _from_uv(u, v)
 
     def wind_at_pressure(self, hpa: float) -> tuple[float, float]:
@@ -169,7 +185,8 @@ class WindProfile:  # pylint: disable=too-many-instance-attributes
     # Derived quantities used by the turbulence model
     # ------------------------------------------------------------------
 
-    def vertical_wind_shear(self, alt_m: float, dz_m: float = 500.0) -> float:
+    def vertical_wind_shear(self, alt_m: float, dz_m: float = 500.0,
+                            bottom_m: float = -math.inf) -> float:
         """Return vertical wind shear magnitude at a given altitude (kt / 1000 ft).
 
         Computed as |Δv⃗| / Δz over a layer of ±dz_m centred on alt_m.
@@ -178,17 +195,13 @@ class WindProfile:  # pylint: disable=too-many-instance-attributes
         """
         if not np.any(self._valid):
             return 0.0
-        alts = self.altitudes_m[self._valid]
-        alt_lo = alt_m - dz_m
-        alt_hi = alt_m + dz_m
-        u_lo = float(np.interp(alt_lo, alts, self._u_ms))
-        v_lo = float(np.interp(alt_lo, alts, self._v_ms))
-        u_hi = float(np.interp(alt_hi, alts, self._u_ms))
-        v_hi = float(np.interp(alt_hi, alts, self._v_ms))
-        dv_ms = math.hypot(u_hi - u_lo, v_hi - v_lo)
+        alts, us, vs = self._levels(bottom_m)
+        lo_hi = [alt_m - dz_m, alt_m + dz_m]
+        u_lo, u_hi = np.interp(lo_hi, alts, us)
+        v_lo, v_hi = np.interp(lo_hi, alts, vs)
+        dv_ms = math.hypot(float(u_hi - u_lo), float(v_hi - v_lo))
         dz_ft = dz_m * 2.0 / 0.3048   # full layer in feet
-        shear_kt_per_1kft = (dv_ms * MS_TO_KT) / (dz_ft / 1000.0)
-        return shear_kt_per_1kft
+        return (dv_ms * MS_TO_KT) / (dz_ft / 1000.0)
 
     def max_shear_in_layer(self, alt_bottom_m: float, alt_top_m: float) -> float:
         """Return maximum vertical wind shear within [alt_bottom_m, alt_top_m].

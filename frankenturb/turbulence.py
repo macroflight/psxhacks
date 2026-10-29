@@ -271,7 +271,7 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
         # Wind at ridge-top level drives mountain waves; surface wind drives
         # mechanical turbulence.  We resolve both from the profile.
         surface_alt_m = terrain_m + SURFACE_SAMPLE_AGL_M
-        surface_spd_kt, surface_dir_deg = wind_profile.wind_at(surface_alt_m)
+        surface_spd_kt, surface_dir_deg = wind_profile.wind_at(surface_alt_m, bottom_m=terrain_m)
         surface_wind_ms = surface_spd_kt * KT_TO_MS
 
         # No terrain turbulence in light low-level wind or with no terrain
@@ -354,7 +354,8 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
     def _blend_shear(state: TurbulenceState, wind_profile: WindProfile,
                      alt_m: float, agl_m: float) -> TurbulenceState:
         """Return state with vertical wind shear (CAT) blended in."""
-        shear = wind_profile.vertical_wind_shear(alt_m)
+        # Not from pressure levels below the ground (extrapolated)
+        shear = wind_profile.vertical_wind_shear(alt_m, bottom_m=alt_m - agl_m)
         low, high = _shear_thresholds(alt_m / FT_TO_M)
         shear_factor = _normalise(shear, low, high)
         # The shear's own turbulence, and a boost to the other mechanism's
