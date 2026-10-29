@@ -3,13 +3,14 @@
 ## Unreleased
 
 - **Change (testing profile): inside a CB's cloud the turbulence is
-  moderate all the time.** The testing profile capped all continuous
+  severe all the time.** The testing profile capped all continuous
   turbulence at light chop (34%) and left moderate and worse to events,
   so a CB core with no event running was calmer than its edge during a
   moderate patch: flying through a typhoon's CB core at FL340 the
   autopilot had no trouble at all. Inside a CB's cloud the turbulence is
-  now held at 38-50% (the moderate patches' level, scaled by the
-  intensity sliders), with the core's severe events on top. Outside CB
+  now held at 55-70% (scaled by the intensity sliders), with the core's
+  severe events on top and, like events, without the limit on up/down
+  bursts in one direction. Expect to hand-fly in a CB core. Outside CB
   cores and in the stable profile nothing changes.
 
 - **Fix: restarting frankenweather near CBs shrank them.** A CB that

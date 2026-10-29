@@ -561,7 +561,7 @@ normal turbulence. What testing changes:
 - **Realistic turbulence: light chop, with moderate, severe and extreme
   as rare events** (see [Turbulence events](#turbulence-events-testing-profile)
   below). The continuous turbulence is at most light chop (34%), except
-  inside a CB's cloud, where it's moderate.
+  inside a CB's cloud, where it's severe.
   Moderate patches, severe clusters and extreme encounters happen at
   random, at about real-world odds for the kind of area the aircraft is
   in, and crews can make each kind more likely.
@@ -629,10 +629,11 @@ In the testing profile:
   and TS-area levels vary between smooth and light; physically computed
   turbulence (terrain, CB, CAPE, boundary layer, wind shear) is capped
   at light.
-- **Inside a CB's cloud it's moderate all the time** (38-50%, the level
-  of a moderate patch, scaled by the intensity sliders), with the CB
-  core's severe events on top. Capped at light chop, a CB core was
-  calmer than its edge during a moderate patch.
+- **Inside a CB's cloud it's severe all the time** (55-70%,
+  scaled by the intensity sliders), with the CB core's severe events on
+  top and, like events, without the up/down burst limit. Capped at light
+  chop, a CB core was calmer than its edge during a moderate patch.
+  Expect to hand-fly in a CB core: the autopilot may not cope.
 - **No pitch oscillation from the continuous turbulence**: its up/down
   bursts one way within 8 seconds add up to at most the largest single
   one, whatever the kind of turbulence. PSX's pitch rings for 3.5-4

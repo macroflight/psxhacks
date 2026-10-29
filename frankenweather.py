@@ -1782,13 +1782,14 @@ def _intensity_label(intensity, testing=False):
 
     testing: the testing profile's calibration, where the continuous
     turbulence up to 0.34 is light chop (REALISTIC_SEV_BANDS) and
-    moderate patches (0.38-0.50, _turb_events.MODERATE_LEVEL) are moderate.
+    moderate patches (0.38-0.50, _turb_events.MODERATE_LEVEL) are
+    moderate, 0.50 included; a CB core (_TURB_CB_CORE) severe.
     """
     if intensity < 0.10:
         return "none"
     if intensity < (0.35 if testing else 0.25):
         return "light"
-    if intensity < 0.50:
+    if intensity < (0.55 if testing else 0.50):
         return "moderate"
     if intensity < 0.75:
         return "severe"
@@ -1928,13 +1929,16 @@ _GROUND_TURB_CAP = 0.30
 # odds times the crew's multipliers (0 turns a kind off, at most
 # _TURB_EVENT_MULT_MAX).
 _TURB_BG_MAX = 0.34
-# ... except inside a CB's cloud (area "cb_core"): continuous moderate,
-# the moderate patches' level (turbulence_events.MODERATE_LEVEL), with the
-# core's severe events on top. Capped at light chop, a typhoon's CB core at
-# FL340 was calmer than its edge during a moderate patch (frankensim
-# 2026-10-29: 34 % inside, 40-46 % outside), and the autopilot had no
-# trouble at all.
-_TURB_CB_CORE = (0.38, 0.50)
+# ... except inside a CB's cloud (area "cb_core"): severe, with the
+# core's severe events on top and, like events, without the up/down burst
+# limiter. Capped at light chop, a typhoon's CB
+# core at FL340 was calmer than its edge during a moderate patch
+# (frankensim 2026-10-29: 34 % inside, 40-46 % outside); at 38-50 % the
+# autopilot still had no trouble at all (pilot: "could be even stronger",
+# then "more than" 45-60 %). The stable profile gives a CB interior 38-66 %;
+# 60 %+ upset the aircraft at cruise on the autopilot in the calibration
+# (docs/turbulence-calibration.md): in a CB core a pilot should hand-fly.
+_TURB_CB_CORE = (0.55, 0.70)
 _TURB_EVENT_MULT_MAX = {"moderate": 10.0, "severe": 100.0, "extreme": 1000.0}
 # Every this many seconds a line about the flight, the weather and the
 # turbulence goes to the log, so a pilot's report (too rough, too
@@ -4714,9 +4718,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         self._turb_enabled and not low_speed and not self._on_ground())
                 self._turb_effective_intensity = self._shown_intensity(effective_intensity)
                 if self._turb_enabled and not low_speed and not self._turb_event_burst_sent:
+                    # like events, a CB core isn't up/down limited (testing profile)
+                    limit = self._turb_testing() and state.kind != "event"
                     self._maybe_inject_burst(
                         state, effective_intensity, tas_kt,
-                        limit_updown=self._turb_testing() and state.kind != "event")
+                        limit_updown=limit and self._turb_area[0] != "cb_core")
                 self._log_burst_summary()
                 self._log_flight_status(pba, effective_intensity, state)
 
@@ -5274,7 +5280,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         """Return (state, intensity) to inject after the events (testing profile).
 
         The continuous turbulence is capped at _TURB_BG_MAX, inside a CB's
-        cloud held within _TURB_CB_CORE instead. Maybe starts an
+        cloud held within _TURB_CB_CORE instead (and its bursts aren't
+        up/down limited, see turbulence_coro()). Maybe starts an
         event for this tick's area (_turb_area), sends a running event's
         scripted bursts and raises the level to the event's (with random
         "event" bursts) while it lasts. Severe and extreme bursts are sent
