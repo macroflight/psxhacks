@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **New: `--turb-profile stable|testing`** chooses the turbulence profile
+  from the command line (e.g. in a start script). It overrides the
+  configuration file's `[turbulence] profile`; the file only changes if
+  you save the settings, and the /efb page can still switch for the
+  session.
 - **Removed: MSFS wind sync.** It put MSFS's wind at the aircraft into
   PSX's wind corridor as an extra `FWIND` waypoint, rewriting the corridor
   up to once a minute. Each corridor rewrite can make PSX pick new random

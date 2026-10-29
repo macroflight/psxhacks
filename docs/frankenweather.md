@@ -544,8 +544,13 @@ downloaded, all dashed.
 
 The turbulence has a profile, chosen on the router's /efb page
 (Turbulence Profile: Stable/Testing), in the configuration file
-(`[turbulence]` `profile`) or with `profile` on the turbulence API.
-"Stable" is the released turbulence. "Testing" also turns on changes
+(`[turbulence]` `profile`), with `profile` on the turbulence API, or with
+`--turb-profile stable|testing` on the command line. `--turb-profile`
+overrides the configuration file at startup and whenever the settings
+are reloaded or reset; switching on the /efb page still works for the
+session, and the file only changes when you save the settings. Without
+it, the file's profile is used, or stable. "Stable" is the released
+turbulence. "Testing" also turns on changes
 being tried out before they may become the default, so they can be
 compared in the sim (also with seat shakers) without changing anyone's
 normal turbulence. What testing changes:

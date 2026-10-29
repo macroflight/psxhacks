@@ -555,6 +555,8 @@
 # ---------------------------------------------------------------------------
 #$StartFrankenweather  = $true   # FrankenWeather
 #$FrankenweatherOptions = @("--web-port=9999", "--config-file=C:\fs\frankenweather.toml")
+# Add "--turb-profile=testing" (or "--turb-profile=stable") to choose the
+# turbulence profile here, overriding the one saved in the config file.
 #$FrankenweatherRepo    = $null
 
 

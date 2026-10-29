@@ -3983,10 +3983,24 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             # entering manual) can linger for up to _REFRESH_MAX_S.
             self._manual_wx_force_update = True
             self.fmc_changed_event.set()
+        self._apply_turb_profile_option()
         self._apply_turb_profile_bands()
         self._turb_state_changed_event.set()
         self._state_changed_event.set()
         self._enroute_wind_changed_event.set()
+
+    def _apply_turb_profile_option(self) -> None:
+        """Let --turb-profile override the profile from the config file (or the default).
+
+        Applied at startup and whenever settings are (re)loaded or reset; a
+        switch on the web UI or /efb still changes it for the session. The
+        config file only changes if the settings are saved.
+        """
+        wanted = self.args.turb_profile if self.args else None
+        if wanted and self._turb_profile != wanted:
+            self.logger.info("Turbulence profile %s from --turb-profile (the settings say %s)",
+                             wanted, self._turb_profile)
+            self._turb_profile = wanted
 
     def _load_config_file(self) -> None:
         """Load settings from --config-file, if given and it exists; else keep defaults."""
@@ -9148,6 +9162,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "diff data to as timestamped JSON, one file per flight, updated on every "
                  "WxCorridor refresh while the enroute wind importer is enabled.")
         parser.add_argument(
+            '--turb-profile', choices=_TURB_PROFILES, default=None,
+            help="Turbulence profile to use: stable (the released behaviour) or testing "
+                 "(also the changes being evaluated). Overrides the profile in the config "
+                 "file; the file itself only changes if you save the settings. Without it, "
+                 "the config file's profile is used, or stable.")
+        parser.add_argument(
             '--config-file', type=str, default=_DEFAULT_CONFIG_FILE, metavar='PATH',
             help="TOML file for every setting the web GUI can change (MSFS sync, enroute "
                  "wind, manual weather, turbulence). Loaded at startup if it exists; "
@@ -9280,6 +9300,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._turb_gairmet_fetcher = GairmetFetcher()
         self.logger.info("Turbulence engine initialized")
         self._load_config_file()
+        self._apply_turb_profile_option()      # also without a config file
+        self._apply_turb_profile_bands()
+        self.logger.info("Turbulence profile: %s", self._turb_profile)
         # Trigger initial TURBSTATE broadcast so the router has config data immediately.
         self._turb_state_changed_event.set()
 
