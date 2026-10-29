@@ -537,7 +537,7 @@ average:
 |---|---|---|
 | Wind shear (clear-air turbulence) | 2,000 ft | 0.5-1.2 |
 | Mountain wave | 6,000 ft | 0.7-1.3 |
-| Rotor and mechanical | 2,000 ft | 0.5-1.5 |
+| Rotor and mechanical | 2,000 ft | 0.5-1.2 |
 | CAPE | 2,000 ft | 0.5-1.5 |
 
 Wind shear clear-air turbulence starts at a vertical wind shear of 5

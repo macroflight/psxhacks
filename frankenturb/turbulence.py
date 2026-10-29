@@ -120,8 +120,8 @@ SHEAR_ALOFT_FT = 20000.0
 # EGLL on a windy day got 100% (2026-10-24).
 LOW_LEVEL_SHEAR_CAP = 0.30
 # Most the caller's gust multiplier raises terrain turbulence (frankenweather
-# _TURB_GUST "lowlevel" 0.5-1.5)
-TERRAIN_GUST_MAX = 1.5
+# _TURB_GUST "lowlevel" 0.5-1.2)
+TERRAIN_GUST_MAX = 1.2
 LOW_LEVEL_SHEAR_AGL_FT = 3000.0
 LOW_LEVEL_SHEAR_BLEND_FT = 5000.0
 
