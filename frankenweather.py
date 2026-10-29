@@ -4098,7 +4098,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     self._turb_effective_intensity = self._shown_intensity(eff)
                     # The normal path announces once manual is off again
                     announced_kind = None
-                    if not low_speed:
+                    # The turbulence on/off switch applies here too
+                    if self._turb_enabled and not low_speed:
                         self._maybe_inject_burst(manual_state, eff, tas_kt)
                     state_changed = (
                         self._turb_state is None or

@@ -2064,7 +2064,7 @@ def _build_weather_turb_page(ctx):  # pylint: disable=too-many-locals,too-many-b
         '<h3 style="margin:0 0 0.5em">Manual turbulence override</h3>'
         '<p style="font-size:0.85em;color:#94a3b8;margin:0 0 0.75em">When enabled, '
         'directly injects one turbulence type at a fixed intensity, '
-        'bypassing the automatic engine entirely.</p>'
+        'bypassing the automatic engine entirely (only while turbulence is ON).</p>'
         f'{manual_active_note}'
         f'<div style="margin-bottom:0.75em">'
     ) + _toggle_btn(
