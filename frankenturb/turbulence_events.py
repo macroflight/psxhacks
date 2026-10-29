@@ -96,10 +96,11 @@ class TurbulenceEvent:  # pylint: disable=too-many-instance-attributes
         """Return True until the event is over."""
         return now < self.start + self.duration_s
 
-    def due_bursts(self, now: float) -> list:
-        """Return the bursts due by now that weren't returned before."""
+    def due_bursts(self, now: float, limit: int = 0) -> list:
+        """Return the bursts due by now that weren't returned before (at most limit, 0: all)."""
         due = []
-        while self._next < len(self.bursts) and self.start + self.bursts[self._next][0] <= now:
+        while (self._next < len(self.bursts) and self.start + self.bursts[self._next][0] <= now and
+               (not limit or len(due) < limit)):
             due.append(self.bursts[self._next][1])
             self._next += 1
         return due

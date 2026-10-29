@@ -17,6 +17,10 @@
   likely, never stronger, and a trigger starts one right away. Based
   on the research in docs/turbulence-research. The stable profile is
   unchanged.
+- **Testing profile: fix: a turbulence event's big jolts could be lost.**
+  A background burst sent in the same 0.2 s as one replaced it (PSX
+  keeps only the last WxBurst of several sent at once): about a third
+  gave a fraction of their effect, e.g. 0.45 g instead of 1.3 g.
 - **Testing profile: a situation load ends a running turbulence event**,
   which used to carry on at the new place.
 - **New: a once-a-minute `Flight:` line in the log**, also without

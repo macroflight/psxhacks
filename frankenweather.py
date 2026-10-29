@@ -2458,6 +2458,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._turb_event_mult: dict = dict.fromkeys(_turb_events.KINDS, 1.0)
         self._turb_area: tuple = ("clean", "")
         self._turb_event_shown = None
+        self._turb_event_burst_sent = False   # this tick, see _turb_event_step()
         self._turb_event_log: collections.deque = collections.deque(maxlen=20)
         self._flight_log_last = 0.0
         # (monotonic time, vertical) of the last wave/MTW burst decision,
@@ -4580,7 +4581,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         state, effective_intensity,
                         self._turb_enabled and not low_speed and not self._on_ground())
                 self._turb_effective_intensity = self._shown_intensity(effective_intensity)
-                if self._turb_enabled and not low_speed:
+                if self._turb_enabled and not low_speed and not self._turb_event_burst_sent:
                     self._maybe_inject_burst(
                         state, effective_intensity, tas_kt,
                         limit_updown=self._turb_testing() and state.kind != "event")
@@ -5162,6 +5163,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         as they are: their effect on the aircraft is meant to be real.
         """
         intensity = min(intensity, _TURB_BG_MAX)
+        self._turb_event_burst_sent = False
         if not airborne:
             return state, intensity
         area = self._turb_area[0]
@@ -5173,7 +5175,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             if self._turb_event_shown is not None:
                 self._log_turb_event_end()
             return state, intensity
-        for value in event.due_bursts(time.monotonic()):
+        # One per tick, and no other burst in that tick: WxBurst is a delta
+        # variable, and PSX keeps only the last of several sent at once (a
+        # background burst right after a -99 left 0.45 g instead of 1.3 g)
+        for value in event.due_bursts(time.monotonic(), limit=1):
+            self._turb_event_burst_sent = True
             self.psx_send_and_set("WxBurst", str(value), force=True)
             self._burst_summary.append((_BURST_SINK, _sign(value), abs(value), event.kind,
                                         event.level))
