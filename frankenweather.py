@@ -1922,6 +1922,13 @@ _GROUND_TURB_CAP = 0.30
 # odds times the crew's multipliers (0 turns a kind off, at most
 # _TURB_EVENT_MULT_MAX).
 _TURB_BG_MAX = 0.34
+# ... except inside a CB's cloud (area "cb_core"): continuous moderate,
+# the moderate patches' level (turbulence_events.MODERATE_LEVEL), with the
+# core's severe events on top. Capped at light chop, a typhoon's CB core at
+# FL340 was calmer than its edge during a moderate patch (frankensim
+# 2026-10-29: 34 % inside, 40-46 % outside), and the autopilot had no
+# trouble at all.
+_TURB_CB_CORE = (0.38, 0.50)
 _TURB_EVENT_MULT_MAX = {"moderate": 10.0, "severe": 100.0, "extreme": 1000.0}
 # Every this many seconds a line about the flight, the weather and the
 # turbulence goes to the log, so a pilot's report (too rough, too
@@ -5259,13 +5266,19 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                          airborne: bool) -> tuple:
         """Return (state, intensity) to inject after the events (testing profile).
 
-        The continuous turbulence is capped at _TURB_BG_MAX. Maybe starts an
+        The continuous turbulence is capped at _TURB_BG_MAX, inside a CB's
+        cloud held within _TURB_CB_CORE instead. Maybe starts an
         event for this tick's area (_turb_area), sends a running event's
         scripted bursts and raises the level to the event's (with random
         "event" bursts) while it lasts. Severe and extreme bursts are sent
         as they are: their effect on the aircraft is meant to be real.
         """
-        intensity = min(intensity, _TURB_BG_MAX)
+        if self._turb_area[0] == "cb_core":
+            # scaled like the CB turbulence itself by the turbulence page's sliders
+            scale = self._turb_intensity_bias * self._turb_type_effective_bias("cb") / 10000.0
+            intensity = min(max(intensity, _TURB_CB_CORE[0] * scale), _TURB_CB_CORE[1] * scale)
+        else:
+            intensity = min(intensity, _TURB_BG_MAX)
         self._turb_event_burst_sent = False
         if not airborne:
             return state, intensity
