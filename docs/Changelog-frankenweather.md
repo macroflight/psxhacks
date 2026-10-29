@@ -1,6 +1,6 @@
 # frankenweather changelog
 
-## Unreleased
+## 2.0.1 (2026-10-29)
 
 - **Fix: in the testing profile, the PIREP button said "rough" at every
   level of a TURB SIGMET.** The ride rating counted 25% as moderate,
