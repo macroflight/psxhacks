@@ -64,6 +64,16 @@ DEFAULT_BANDS = (
     IntensityBand(0.45, 0.62, 0.02, 0.29, 90.0, 300.0),
     IntensityBand(0.62, 0.75, 0.005, 0.17, 30.0, 100.0),
 )
+# Testing profile: smooth and light only. Moderate and stronger come as
+# rare events instead (frankenturb/turbulence_events.py): real turbulence
+# areas are mostly smooth or light, with moderate in patches and severe a
+# few seconds now and then (docs/turbulence-research/realism-targets.md).
+# 0.30 is light chop (p95 about 0.07 g, docs/turbulence-calibration.md).
+REALISTIC_BANDS = (
+    IntensityBand(0.00, 0.05, 0.50, 0.25, 90.0, 420.0),   # smooth air
+    IntensityBand(0.12, 0.22, 0.35, 0.40, 120.0, 420.0),
+    IntensityBand(0.22, 0.30, 0.15, 0.35, 60.0, 300.0),
+)
 ABRUPT_PROBABILITY = 0.2      # share of ramps that are abrupt
 ABRUPT_RAMP_S = (2.0, 10.0)   # abrupt ramp time range
 SLOW_RAMP_S = (30.0, 180.0)   # normal ramp time range
@@ -237,6 +247,12 @@ class LayeredIntensityProfile:
         self._rng = rng or random.Random()
         self._clock = clock
         self._layers: dict = {}      # layer -> (IntensityProfile, LayerRoughness)
+
+    def set_bands(self, bands) -> None:
+        """Use these bands from now on; the layers start over (e.g. a turbulence profile switch)."""
+        if tuple(bands) != tuple(self._bands):
+            self._bands = bands
+            self._layers = {}
 
     def layer_of(self, alt_ft: float) -> int:
         """Return the index of the layer alt_ft is in."""

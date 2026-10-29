@@ -1,5 +1,33 @@
 # frankenweather changelog
 
+## Unreleased
+
+- **Testing profile: realistic turbulence, with rare events.** The
+  continuous turbulence is now at most light chop. Moderate patches,
+  severe clusters (5-30 s, 0.5-1.2 g jolts) and extreme encounters
+  (a drop below zero g, like SQ321) happen at random, at about
+  real-world odds for the kind of area (clean air, G-AIRMET, SEV TURB
+  SIGMET, MTW, near or in a CB, strong low-level wind). For example, a
+  30-minute SEV TURB SIGMET transit has about a one in five chance of
+  a severe cluster. Events are not softened for the autopilot. New
+  likelihood multipliers per kind (Turbulence page, config file
+  `event_mult`; presets Realistic/Eventful/Training) make them more
+  likely, never stronger, and a trigger starts one right away. Based
+  on the research in docs/turbulence-research. The stable profile is
+  unchanged.
+- **New: a once-a-minute `Flight:` line in the log**, also without
+  `--debug` and also when it's smooth: position, altitude, heading,
+  TAS, attitude, UTC and PSX time, wind, MSFS cloud, the turbulence
+  level and its source, and the profile, so a pilot's report can be
+  checked from a normal log. Every turbulence setting change is now
+  logged with its value.
+- **Fix: false "changed by another client" warnings** for frankenweather's
+  own zone placements (PSX rounds zone positions a little more than
+  frankenweather allowed for), and the extra rewrites they caused.
+- **Testing profile: wave up/down bursts one way within 8 seconds add up
+  to at most the largest single one**: a run of them pumped the
+  autopilot's pitch oscillation in ALT HOLD to over 1.5 g.
+
 ## 1.27.0 (2026-10-25)
 
 - **Fix: frankenweather keeps its weather when something else changes

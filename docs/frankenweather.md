@@ -557,6 +557,12 @@ being tried out before they may become the default, so they can be
 compared in the sim (also with seat shakers) without changing anyone's
 normal turbulence. What testing changes:
 
+- **Realistic turbulence: light chop, with moderate, severe and extreme
+  as rare events** (see [Turbulence events](#turbulence-events-testing-profile)
+  below). The continuous turbulence is at most light chop (30%).
+  Moderate patches, severe clusters and extreme encounters happen at
+  random, at about real-world odds for the kind of area the aircraft is
+  in, and crews can make each kind more likely.
 - **Boundary-layer turbulence**: the light bumps of an ordinary breezy
   or sunny day, which the stable profile doesn't have (its mechanical
   turbulence starts at a 20 kt wind and stays near nothing over flat
@@ -601,6 +607,92 @@ normal turbulence. What testing changes:
   the descent rate reached 2,400 ft/min, but didn't swing. V/S copes
   better than FLCH with any turbulence that changes the airspeed, since
   the autothrottle takes the speed. In severe wave, fly by hand.
+
+### Turbulence events (testing profile)
+
+Real turbulence is mostly smooth or light. Moderate comes in patches a
+minute or two long, and severe is something an aircraft hits, not
+something it flies in: a 5-30 second cluster of jolts. At cruise about
+0.4% of the time is moderate or worse and 0.1% or less severe, and in
+the US there is about one severe pilot report per 3,500 airline hours
+(see [turbulence-research](turbulence-research/README.md)). The stable
+profile instead holds one level per source for minutes, which in a SEV
+TURB SIGMET gave severe-class shaking (peaks over 2 g) for minutes at a
+time.
+
+In the testing profile:
+
+- **The continuous turbulence is at most light chop** (30%, about
+  0.07 g). The SIGMET, G-AIRMET, PIREP and TS-area levels vary between
+  smooth and light; physically computed turbulence (terrain, CB, CAPE,
+  boundary layer, wind shear) is capped at light.
+- **Moderate patches**: the turbulence level goes up to 35-50% for 20
+  seconds to 10 minutes (typically a minute and a half).
+- **Severe clusters**: 5-30 seconds of moderate chop with one to four
+  big up/down jolts of 0.5-1.2 g, at least 6 seconds apart. In PSX one
+  big jolt sets off a few more swings by itself, as in real recordings.
+- **Extreme encounters**: 12-25 seconds of moderate chop, then an
+  updraft and a sudden drop to below zero g (about -0.4 g, one in four
+  about -1.2 g, like the SQ321 and UA826 accidents), then a rebound.
+
+None of these is softened for the autopilot. If an event makes the
+aircraft hard to control, that's realistic. Test flights at FL350 on
+autopilot (ALT HOLD): severe 0.6-1.5 g and about 100 ft; extreme -1.3
+to -2.4 g and up to 150 ft.
+
+How often each happens depends on the kind of area the aircraft is in
+(events per hour of flight):
+
+| Area | Moderate | Severe | Extreme |
+|---|---|---|---|
+| Clean air (no turbulence source) | 0.1 | 1 in 2,000 | 1 in 500,000 |
+| G-AIRMET, MOD SIGMET or PIREP | 4 | 1 in 100 | 1 in 50,000 |
+| SEV TURB SIGMET, SEV PIREP | 5 | 0.5 | 1 in 1,000 |
+| MTW SIGMET | 3 | 0.2 | 1 in 2,000 |
+| Near a CB, TS/TC SIGMET area | 7 | 0.75 | 1 in 500 |
+| In a CB | 20 | 8 | 1 in 20 |
+| Strong low-level wind, rotor | 7 | 0.1 | 1 in 10,000 |
+
+So a 30-minute transit through a SEV TURB SIGMET is mostly light chop
+with a few moderate patches, and has about a one in five chance of a
+severe cluster. The area is whichever source present (switched on, at
+least 5%) has the highest severe rate; switched-off turbulence types
+don't count. Only while flying at 30 kt or more, and turbulence is on.
+
+**Likelihood** (Turbulence page, "Turbulence events"; configuration
+file `[turbulence]` `event_mult`; API `event_mult`): a multiplier per
+kind (moderate up to 10, severe up to 100, extreme up to 1,000), which
+makes it more likely but never stronger. 0 turns a kind off; 1 (the
+default) is real-world odds. Presets: Realistic (1/1/1), Eventful
+(3/20/50) and Training (5/100/500). At real-world odds severe is rare in
+a few hours of flying; Eventful makes it likely on a flight through a
+SEV TURB SIGMET.
+
+**Trigger** (Turbulence page, testing profile; API `trigger`:
+`moderate`, `severe` or `extreme`) starts an event right away, for
+testing and training.
+
+Every event is logged: its start (kind, area and what made it, position
+and altitude, length, planned peak, and the likelihood if not 1), each
+big jolt, and its end. The Turbulence page shows the last 20.
+
+### The log: checking a pilot's report
+
+Every run writes a log file (Config and logs page), and the normal log
+(without `--debug`) is meant to be enough to check a pilot's report of
+too much, too little or just right weather or turbulence afterwards:
+
+- Once a minute a `Flight:` line: position, altitude, heading, TAS,
+  pitch and bank, on the ground, UTC and PSX time, the wind at the
+  aircraft, in MSFS cloud, the turbulence level and what makes it, the
+  turbulence profile and (testing) the area, any event and the
+  likelihoods. Also when it's smooth, so "it was smooth here" can be
+  checked too.
+- Once a minute (when there were bursts) the burst summary: how many of
+  each kind, direction and size, and from which source.
+- Every 10 seconds while there is turbulence, the level and its sources.
+- Every turbulence event, every change of a turbulence setting (with its
+  value) and every zone update, SIGMET download and reposition.
 
 ### Turbulence gustiness and PIREPs
 

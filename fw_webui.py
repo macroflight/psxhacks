@@ -225,6 +225,15 @@ _TURB_KIND_LABELS = {
     'cape': 'CAPE convective', 'gairmet': 'G-AIRMET', 'sigmet': 'SIGMET',
     'mtw': 'Mountain wave SIGMET',
 }
+# Testing turbulence profile: likelihood multipliers per event kind
+# (frankenturb/turbulence_events.py), and the presets offered
+_TURB_EVENT_KINDS = ('moderate', 'severe', 'extreme')
+_TURB_EVENT_MAX = {'moderate': 10, 'severe': 100, 'extreme': 1000}
+_TURB_EVENT_PRESETS = {
+    'realistic': (1.0, 1.0, 1.0),
+    'eventful': (3.0, 20.0, 50.0),
+    'training': (5.0, 100.0, 500.0),
+}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -2243,7 +2252,8 @@ def _build_weather_turb_page(ctx):  # pylint: disable=too-many-locals,too-many-b
         'in the zone, wind shear from jet streams, and turbulence from SIGMET areas. '
         'Disabling extra turbulence does not affect the weather zone weather itself.</p>\n'
     )
-    body = intro + stale_banner + status_html + manual_html + global_html
+    body = intro + stale_banner + status_html + _turb_events_html(tstate) + manual_html
+    body += global_html
     body += msfs_html + wind_html + types_html
     return _page(body)
 
@@ -2948,6 +2958,14 @@ def register_weather_routes(routes, ctx):  # pylint: disable=too-many-statements
             }
         if 'msfs_turb_magnitude' in data:
             cmd['msfs_turb_magnitude'] = int(data['msfs_turb_magnitude'])
+        if data.get('event_preset') in _TURB_EVENT_PRESETS:
+            cmd['event_mult'] = dict(zip(_TURB_EVENT_KINDS,
+                                         _TURB_EVENT_PRESETS[data['event_preset']]))
+        elif any(f'event_mult_{k}' in data for k in _TURB_EVENT_KINDS):
+            cmd['event_mult'] = {k: float(data[f'event_mult_{k}']) for k in _TURB_EVENT_KINDS
+                                 if f'event_mult_{k}' in data}
+        if data.get('event_trigger') in _TURB_EVENT_KINDS:
+            cmd['trigger'] = data['event_trigger']
         if cmd:
             await ctx.send_turb_cmd(cmd)
         raise web.HTTPFound('/weather/turbulence')
@@ -2995,6 +3013,66 @@ def _list_event_logs(log_dir: str) -> list:
         entries.append((name, stat.st_size, stat.st_mtime))
     entries.sort(key=lambda e: e[2], reverse=True)
     return entries
+
+
+def _turb_events_html(tstate: dict) -> str:
+    """Return the turbulence page's events card: likelihoods, trigger, the last events."""
+    testing = tstate.get('profile') == 'testing'
+    mult = tstate.get('event_mult') or dict.fromkeys(_TURB_EVENT_KINDS, 1.0)
+    active = tstate.get('event_active')
+    html = (
+        '<div class="card"><h3 style="margin:0 0 0.5em">Turbulence events</h3>'
+        '<p style="font-size:0.85em;color:#94a3b8;margin:0 0 0.75em">'
+        'Testing profile only. The continuous turbulence is at most light chop; moderate '
+        'patches, severe clusters (5-30 s) and extreme encounters come as rare events, at '
+        'real-world odds for the kind of area the aircraft is in. The likelihoods make a kind '
+        'more (or less) likely without making it stronger; 0 turns it off. '
+        'Severe and extreme events are not softened for the autopilot.</p>')
+    if not testing:
+        html += ('<p style="font-size:0.85em;color:#f59e0b;margin:0">The turbulence profile is '
+                 f'"{_esc(tstate.get("profile", "stable"))}": no events.</p>')
+    html += (
+        f'<p style="font-size:0.85em;margin:0 0 0.5em">Area: '
+        f'<b>{_esc(tstate.get("event_area", "clean"))}</b> '
+        f'{_esc(tstate.get("event_area_reason", ""))}'
+        f'{f" — <b>{_esc(active)} event in progress</b>" if active else ""}</p>'
+        '<form method="post" action="/api/weather/turbulence"'
+        ' style="display:inline-flex;gap:0.6em;align-items:center;flex-wrap:wrap">')
+    for kind in _TURB_EVENT_KINDS:
+        html += (f'<label>{kind.capitalize()} ×<input type="number" name="event_mult_{kind}"'
+                 f' value="{mult.get(kind, 1.0):g}" min="0" max="{_TURB_EVENT_MAX[kind]}"'
+                 ' step="any" style="width:4.5em"></label>')
+    html += '<button class="btn btn-gray btn-sm">Set</button></form><div style="margin-top:0.5em">'
+    for preset, values in _TURB_EVENT_PRESETS.items():
+        html += (
+            '<form method="post" action="/api/weather/turbulence" style="display:inline">'
+            f'<input type="hidden" name="event_preset" value="{preset}">'
+            f'<button class="btn btn-blue btn-sm">{preset.capitalize()} '
+            f'({"/".join(f"{v:g}" for v in values)})</button></form> ')
+    html += '</div>'
+    if testing:
+        html += '<div style="margin-top:0.5em;font-size:0.85em;color:#94a3b8">Trigger now: '
+        for kind in _TURB_EVENT_KINDS:
+            html += (
+                '<form method="post" action="/api/weather/turbulence" style="display:inline">'
+                f'<input type="hidden" name="event_trigger" value="{kind}">'
+                f'<button class="btn btn-red btn-sm">{kind}</button></form> ')
+        html += '</div>'
+    events = tstate.get('events') or []
+    if events:
+        html += ('<table style="border-collapse:collapse;margin-top:0.75em;font-size:0.85em">'
+                 '<tr><th>UTC</th><th>Kind</th><th>Area</th><th>Length</th><th>Peak</th>'
+                 '<th>Position</th></tr>')
+        for ev in events:
+            peak = f'{ev["peak_g"]:.1f} g' if ev.get('peak_g') else '-'
+            html += (
+                f'<tr><td>{_esc(ev.get("utc", ""))}</td><td>{_esc(ev.get("kind", ""))}'
+                f'{" (triggered)" if ev.get("triggered") else ""}</td>'
+                f'<td title="{_esc(ev.get("reason", ""))}">{_esc(ev.get("area", ""))}</td>'
+                f'<td>{ev.get("duration_s", 0)} s</td><td>{peak}</td>'
+                f'<td>{_esc(ev.get("position", ""))}</td></tr>')
+        html += '</table>'
+    return html + '</div>\n'
 
 
 def _event_logs_html(ctx) -> str:

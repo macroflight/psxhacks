@@ -55,7 +55,9 @@ from frankenturb.cb import (
 from frankenturb.cb_turbulence import cb_flank_width_nm
 from frankenturb.disk_cache import DiskCache
 from frankenturb.openmeteo import CLIENT as _OM_CLIENT
-from frankenturb.intensity_profile import GustinessProfile, LayeredIntensityProfile
+from frankenturb import turbulence_events as _turb_events
+from frankenturb.intensity_profile import (
+    DEFAULT_BANDS, REALISTIC_BANDS, GustinessProfile, LayeredIntensityProfile)
 from fw_cb import (
     WX_DEFAULTS as _WX_DEFAULTS,
     CB_TOP_MAX_FT as _CB_TOP_MAX_FT,
@@ -1853,6 +1855,17 @@ def _sign(v):
 # SPD bursts had no visible effect on the ground.
 _TURB_MIN_TAS_KT = 30.0
 _GROUND_TURB_CAP = 0.30
+# Testing profile: the continuous turbulence is at most light chop (p95
+# about 0.07 g); moderate and stronger come as events
+# (frankenturb/turbulence_events.py, _turb_event_step()), at real-world
+# odds times the crew's multipliers (0 turns a kind off, at most
+# _TURB_EVENT_MULT_MAX).
+_TURB_BG_MAX = 0.30
+_TURB_EVENT_MULT_MAX = {"moderate": 10.0, "severe": 100.0, "extreme": 1000.0}
+# Every this many seconds a line about the flight, the weather and the
+# turbulence goes to the log, so a pilot's report (too rough, too
+# smooth, just right) can be checked without --debug (_log_flight_status())
+_FLIGHT_LOG_S = 60.0
 
 
 def _pick_ground_burst():
@@ -2433,6 +2446,16 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._turb_lateral_size_bias: int = 50
         self._turb_rate: int = 100             # 0-100, injection rate scale
         self._turb_profile: str = "stable"     # _TURB_PROFILES
+        # Testing profile: rare turbulence events (_turb_event_step()), the
+        # crew's multiplier per kind, the kind of area the aircraft is in
+        # ((area, reason), _turb_area_class()) and the last events, for the
+        # web UI
+        self._turb_events = _turb_events.EventScheduler()
+        self._turb_event_mult: dict = dict.fromkeys(_turb_events.KINDS, 1.0)
+        self._turb_area: tuple = ("clean", "")
+        self._turb_event_shown = None
+        self._turb_event_log: collections.deque = collections.deque(maxlen=20)
+        self._flight_log_last = 0.0
         # (monotonic time, vertical) of the last wave/MTW burst decision,
         # see _pick_wave_burst_testing()
         self._wave_vert_prev: Optional[tuple] = None
@@ -3826,6 +3849,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         }
         config["turbulence"]["type_enabled"] = dict(self._turb_type_enabled)
         config["turbulence"]["type_biases"] = dict(self._turb_type_biases)
+        config["turbulence"]["event_mult"] = dict(self._turb_event_mult)
         return config
 
     def _apply_config_dict(self, config: dict) -> None:  # pylint: disable=too-many-branches,too-many-locals
@@ -3886,6 +3910,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 self._turb_type_enabled[kind] = bool(turb["type_enabled"][kind])
             if kind in turb.get("type_biases", {}):
                 self._turb_type_biases[kind] = int(turb["type_biases"][kind])
+        for kind, val in (turb.get("event_mult") or {}).items():
+            if kind in self._turb_event_mult:
+                self._turb_event_mult[kind] = min(_TURB_EVENT_MULT_MAX[kind],
+                                                  max(0.0, float(val)))
 
         self._reconcile_after_config_load(old_mode)
 
@@ -3929,6 +3957,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             # entering manual) can linger for up to _REFRESH_MAX_S.
             self._manual_wx_force_update = True
             self.fmc_changed_event.set()
+        self._apply_turb_profile_bands()
         self._turb_state_changed_event.set()
         self._state_changed_event.set()
         self._enroute_wind_changed_event.set()
@@ -4079,8 +4108,26 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if cmd.get("profile") in _TURB_PROFILES:
             self._turb_profile = cmd["profile"]
             self.logger.info("Turbulence profile → %s", self._turb_profile)
+            self._apply_turb_profile_bands()
             changed = True
+        if isinstance(cmd.get("event_mult"), dict):
+            for kind, val in cmd["event_mult"].items():
+                if kind in self._turb_event_mult:
+                    self._turb_event_mult[kind] = min(_TURB_EVENT_MULT_MAX[kind],
+                                                      max(0.0, float(val)))
+            changed = True
+        if cmd.get("trigger") in _turb_events.KINDS:
+            if self._turb_testing():
+                event = self._turb_events.trigger(cmd["trigger"], self._turb_area[0])
+                self._log_turb_event_start(event)
+                changed = True
+            else:
+                self.logger.warning("Turbulence event trigger ignored: events need the "
+                                    "testing turbulence profile")
         if changed:
+            # Every change is logged: a pilot's report is checked against
+            # the settings at the time
+            self.logger.info("Turbulence settings changed: %s", json.dumps(cmd))
             self._turb_state_changed_event.set()
 
     def _get_nearest_cb(self, lat: float, lon: float):
@@ -4161,6 +4208,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     "manual_turb_intensity": self._turb_manual_turb_intensity,
                     "intensity_bias": self._turb_intensity_bias,
                     "profile": self._turb_profile,
+                    "event_mult": dict(self._turb_event_mult),
+                    "event_area": self._turb_area[0],
+                    "event_area_reason": self._turb_area[1],
+                    "event_active": (self._turb_events.current().kind
+                                     if self._turb_events.current() else None),
+                    "events": list(self._turb_event_log),
                     "lateral_size_bias": self._turb_lateral_size_bias,
                     "wind_mode": self._turb_wind_mode,
                     "manual_wind_dir": self._turb_manual_wind_dir,
@@ -4361,10 +4414,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 if not raw:
                     continue
                 try:
-                    _, _, _, alt_ft, tas_kt, lat, lon = parse_pibahealtas(raw)
+                    pba = parse_pibahealtas(raw)
                 except ValueError as exc:
                     self.logger.warning("Bad PiBaHeAlTas: %s", exc)
                     continue
+                _, _, _, alt_ft, tas_kt, lat, lon = pba
 
                 low_speed = tas_kt < _TURB_MIN_TAS_KT
                 if low_speed != self._turb_low_speed:
@@ -4512,10 +4566,19 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     state.intensity * self._turb_intensity_bias *
                     self._turb_type_effective_bias(state.kind) / 10000.0 * msfs_factor,
                 )
+                if self._turb_testing():
+                    self._turb_area = self._turb_area_class({
+                        "terrain": terrain_state, "cb": cb_state, "pirep": pirep_state,
+                        "gairmet": gairmet_state, "sigmet": sigmet_state, "mtw": mtw_state,
+                        "conv": conv_state})
+                    state, effective_intensity = self._turb_event_step(
+                        state, effective_intensity,
+                        self._turb_enabled and not low_speed and not self._on_ground())
                 self._turb_effective_intensity = self._shown_intensity(effective_intensity)
                 if self._turb_enabled and not low_speed:
                     self._maybe_inject_burst(state, effective_intensity, tas_kt)
                 self._log_burst_summary()
+                self._log_flight_status(pba, effective_intensity, state)
 
                 all_sources = []
                 for src_s in [terrain_state, cb_state, pirep_state, cape_state, bl_state,
@@ -5030,6 +5093,162 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
     def _turb_testing(self) -> bool:
         """Return True if the "testing" turbulence profile is on (see _TURB_PROFILES)."""
         return self._turb_profile == "testing"
+
+    def _apply_turb_profile_bands(self) -> None:
+        """Give the varying SIGMET/G-AIRMET/PIREP levels the profile's bands.
+
+        Testing: smooth and light only (REALISTIC_BANDS); moderate and
+        stronger come as events (_turb_event_step()).
+        """
+        bands = REALISTIC_BANDS if self._turb_testing() else DEFAULT_BANDS
+        for profile in (*self._sigmet_turb_profiles.values(), self._sigmet_conv_profile,
+                        self._gairmet_turb_profile, self._pirep_turb_profile):
+            profile.set_bands(bands)
+
+    def _turb_area_class(self, sources: dict) -> tuple:
+        """Return (area, reason): the kind of area (_turb_events.AREA_RATES) the aircraft is in.
+
+        sources maps a source name to its TurbulenceState or None; of the
+        sources present (switched on, at least 5 %) the one with the
+        highest severe-event rate wins.
+        """
+        best = ("clean", "", _turb_events.AREA_RATES["clean"][1])
+
+        def consider(area, src):
+            nonlocal best
+            if (src is None or src.intensity * self._turb_type_effective_bias(src.kind) < 5.0):
+                return
+            if _turb_events.AREA_RATES[area][1] > best[2]:
+                best = (area, src.reason or src.kind, _turb_events.AREA_RATES[area][1])
+
+        cb = sources.get("cb")
+        if cb is not None:
+            consider("cb_core" if cb.intensity >= 0.6 else "cb_near" if cb.intensity >= 0.2
+                     else "clean", cb)
+        consider("cb_near", sources.get("conv"))
+        sigmet = sources.get("sigmet")
+        if sigmet is not None:
+            consider("sev_sigmet" if sigmet.reason.startswith("SEV") else "advisory", sigmet)
+        consider("mtw", sources.get("mtw"))
+        pirep = sources.get("pirep")
+        if pirep is not None:
+            consider("sev_sigmet" if "SEV" in pirep.reason else "advisory", pirep)
+        consider("advisory", sources.get("gairmet"))
+        terrain = sources.get("terrain")
+        if terrain is not None and (terrain.kind == "rotor" or
+                                    (terrain.kind == "mechanical" and terrain.intensity >= 0.3)):
+            consider("bl_strong", terrain)
+        return best[0], best[1]
+
+    def _turb_event_step(self, state: TurbulenceState, intensity: float,
+                         airborne: bool) -> tuple:
+        """Return (state, intensity) to inject after the events (testing profile).
+
+        The continuous turbulence is capped at _TURB_BG_MAX. Maybe starts an
+        event for this tick's area (_turb_area), sends a running event's
+        scripted bursts and raises the level to the event's (with random
+        "event" bursts) while it lasts. Severe and extreme bursts are sent
+        as they are: their effect on the aircraft is meant to be real.
+        """
+        intensity = min(intensity, _TURB_BG_MAX)
+        if not airborne:
+            return state, intensity
+        area = self._turb_area[0]
+        started = self._turb_events.step(0.2, area, 1.0, self._turb_event_mult)
+        if started is not None:
+            self._log_turb_event_start(started)
+        event = self._turb_events.current()
+        if event is None:
+            if self._turb_event_shown is not None:
+                self._log_turb_event_end()
+            return state, intensity
+        for value in event.due_bursts(time.monotonic()):
+            self.psx_send_and_set("WxBurst", str(value), force=True)
+            self._burst_summary.append((_BURST_SINK, _sign(value), abs(value), event.kind,
+                                        event.level))
+            self.logger.info("Turbulence event: %s burst %+d (about %.2f g)", event.kind, value,
+                             1.25 * (abs(value) / 99.0) ** 2)
+        if event.level > intensity:
+            return TurbulenceState(intensity=event.level, kind="event",
+                                   reason=f"{event.kind} event ({area})"), event.level
+        return state, intensity
+
+    def _log_turb_event_start(self, event) -> None:
+        """Log a turbulence event starting and remember it for the web UI and its end."""
+        mult = self._turb_event_mult.get(event.kind, 1.0)
+        how = "triggered" if event.triggered else f"area {event.area or 'clean'}"
+        self.logger.info(
+            "Turbulence event: %s started (%s: %s) at %s, %.0f s, level %.0f%%%s%s%s",
+            event.kind.upper(), how, self._turb_area[1] or "-", self._flight_position_text(),
+            event.duration_s, event.level * 100,
+            f", {len(event.bursts)} big bursts, planned peak {event.peak_g:.1f} g"
+            if event.bursts else "",
+            f", likelihood x{mult:g}" if mult != 1.0 and not event.triggered else "",
+            "" if self._turb_enabled else " (turbulence off)")
+        self._turb_event_shown = event
+        self._turb_event_log.appendleft({
+            "kind": event.kind, "utc": datetime.now(timezone.utc).strftime("%H:%M:%SZ"),
+            "area": event.area, "reason": self._turb_area[1], "triggered": event.triggered,
+            "duration_s": round(event.duration_s), "peak_g": round(event.peak_g, 1),
+            "position": self._flight_position_text()})
+
+    def _log_turb_event_end(self) -> None:
+        """Log the end of the event last started."""
+        self.logger.info("Turbulence event: %s over", self._turb_event_shown.kind)
+        self._turb_event_shown = None
+
+    def _flight_position_text(self) -> str:
+        """Return the aircraft's position and altitude, e.g. "N57 00.1 E003 00.0 35,010 ft"."""
+        raw = self.psx.get("PiBaHeAlTas") if self.psx else None
+        try:
+            _, _, _, alt_ft, _, lat, lon = parse_pibahealtas(raw)
+        except (TypeError, ValueError):
+            return "unknown position"
+
+        def dm(value, pos, neg, width):
+            deg, minutes = divmod(abs(value) * 60.0, 60.0)
+            return f"{pos if value >= 0 else neg}{int(deg):0{width}d} {minutes:04.1f}"
+        return f"{dm(lat, 'N', 'S', 2)} {dm(lon, 'E', 'W', 3)} {alt_ft:,.0f} ft"
+
+    def _log_flight_status(self, pba: tuple, effective_intensity: float,  # pylint: disable=too-many-locals
+                           state: TurbulenceState) -> None:
+        """Every _FLIGHT_LOG_S, log the flight, weather and turbulence (also when smooth).
+
+        So that a pilot's report of unrealistic (or good) weather or
+        turbulence can be checked from the normal log, without --debug.
+        """
+        now = time.monotonic()
+        if now - self._flight_log_last < _FLIGHT_LOG_S:
+            return
+        self._flight_log_last = now
+        pitch, bank, hdg = (math.degrees(v) for v in pba[:3])
+        alt_ft, tas_kt = pba[3], pba[4]
+        wind = "-"
+        profile = self._turb_engine.wind_profile() if self._turb_engine else None
+        if profile is not None:
+            spd, wdir = profile.wind_at(alt_ft * 0.3048)
+            wind = f"{wdir:03.0f}/{spd:.0f} kt"
+        psx_utc = "-"
+        try:
+            psx_utc = datetime.fromtimestamp(int(self.psx.get("TimeEarth")) / 1000.0,
+                                             timezone.utc).strftime("%Y-%m-%d %H:%MZ")
+        except (TypeError, ValueError, OverflowError, OSError):
+            pass
+        event = self._turb_events.current() if self._turb_testing() else None
+        self.logger.info(
+            "Flight: %s hdg %03.0f TAS %.0f kt pitch %.1f bank %.1f%s | UTC %s, PSX %s | "
+            "wind %s%s | turbulence %.0f%% %s (%s: %s)%s | profile %s%s",
+            self._flight_position_text(), hdg % 360, tas_kt, pitch, bank,
+            " on ground" if self._on_ground() else "",
+            datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ"), psx_utc, wind,
+            " in MSFS cloud" if self.msfs_in_cloud else "",
+            effective_intensity * 100, _intensity_label(effective_intensity),
+            state.kind, state.reason or "-",
+            "" if self._turb_enabled else " (OFF)",
+            self._turb_profile,
+            (f", area {self._turb_area[0]}, event {event.kind if event else 'none'}, "
+             f"likelihood {'/'.join(f'{m:g}' for m in self._turb_event_mult.values())}")
+            if self._turb_testing() else "")
 
     @staticmethod
     def _gust_family(kind: str) -> Optional[str]:

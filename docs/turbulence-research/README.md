@@ -18,6 +18,9 @@ looks like, and how the addon's turbulence measured against it.
   profile), findings and tables;
   [night-campaign-2026-10-26-notes.md](night-campaign-2026-10-26-notes.md)
   are the running notes from that night.
+- [event-shape-calibration.md](event-shape-calibration.md): how PSX answers
+  big scripted up/down bursts (ringing, adding up), the shapes of
+  frankenweather's turbulence events and how they flew (2026-10-26).
 - [../turbulence-calibration.md](../turbulence-calibration.md): what a single
   WxBurst and frankenweather's intensity (%) do to the PSX 747 (2026-10-25).
 

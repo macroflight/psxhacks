@@ -24,6 +24,7 @@ a = Analysis(
         'frankenturb.terrain.elevation',
         'frankenturb.terrain.tiles',
         'frankenturb.turbulence',
+        'frankenturb.turbulence_events',
         'frankenturb.wind',
         'frankenturb.wind.fetcher',
         'frankenturb.wind.profile',
