@@ -3471,11 +3471,16 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         The wind data comes per 1-degree square and forecast hour, so
         wind, shear, mechanical and wave turbulence used to step where the
         aircraft crossed into another square (~every 7 min at cruise) or
-        hour. Fading out, it keeps the kind it had.
+        hour. Fading out, it keeps the kind it had. It smooths the
+        intensity as capped (max_intensity, low-level wind shear): the
+        uncapped value used to carry over into the next kind, e.g. 0.53
+        shear below its 0.30 cap became 0.71 mechanical turbulence (with
+        its gust) at 900 ft near EINN, fading over a minute (flight test
+        2026-10-25).
         """
         now = time.monotonic()
         prev = self._terrain_smooth
-        value = state.intensity
+        value = min(state.intensity, state.max_intensity)
         if prev is not None and now - prev[1] < 5.0:
             value = prev[0] + (value - prev[0]) * min(1.0, (now - prev[1]) / _TERRAIN_SMOOTH_S)
         if state.kind == "none" and value >= 0.01 and prev is not None:
