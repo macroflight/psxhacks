@@ -98,7 +98,8 @@ MALFUNCTION_CONNECT_FILTER_WINDOW_S = 30.0
 # forwarded messages are logged at debug rather than info. FRANKENWEATHER is
 # not listed here since it never reaches this classification -- it is
 # special-cased and forwarded via its own filter in handle_addon() below.
-_KNOWN_ADDONS = frozenset(('FRANKENCDUPROXY', 'FRANKENMSFSBRIDGE', 'FRANKENCONTROL'))
+_KNOWN_ADDONS = frozenset(('FRANKENCDUPROXY', 'FRANKENMSFSBRIDGE', 'FRANKENCONTROL',
+                           'PSXNETVATSIM'))
 
 # Same idea, but for addons whose messages don't use the normal NAME:payload
 # colon convention (so the "addon" token above ends up being the whole
@@ -2795,6 +2796,28 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         (action, code, _, extra_data) = rules.route(line, testpeer)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.NOWRITE)
+
+    def test_addon_psxnetvatsim_known(self):
+        """PSXNETVATSIM: a known addon, forwarded locally, dropped between sims."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+
+        router.upstream = self.DummyUpstreamConnection()
+        router.clients = {
+            ('127.0.0.1', 12345): self.DummyClientConnection(('127.0.0.1', 12345)),
+        }
+        testpeer = router.clients[('127.0.0.1', 12345)]
+        for line in ("addon=PSXNETVATSIM:SELECT_ACP:LEFT", "addon=PSXNETVATSIM:SELECT_ACP:RIGHT"):
+            testpeer.is_frankenrouter = False
+            (action, code, *_) = rules.route(line, testpeer)
+            self.assertEqual(action, RulesAction.NORMAL, msg=line)
+            self.assertEqual(code, RulesCode.ADDON_FORWARDED_KNOWN, msg=line)
+
+            testpeer.is_frankenrouter = True
+            testpeer.simulator_name = 'OtherSim'
+            (action, code, *_) = rules.route(line, testpeer)
+            self.assertEqual(action, RulesAction.DROP, msg=line)
+            self.assertEqual(code, RulesCode.PSXNETVATSIM, msg=line)
 
     def test_addon_geovr_filter(self):
         """addon=GEOVR.PSX.* must be dropped from other sims only."""

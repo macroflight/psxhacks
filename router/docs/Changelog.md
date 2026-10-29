@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Change: `addon=PSXNETVATSIM` messages are no longer logged as an
+  unknown addon.** With `unknown_addons = true` every PSX.NET.VATSIM
+  `SELECT_ACP` message from a local client was logged as a "Non-frankenrouter
+  addon message"; it's a known addon now, logged at debug only. Forwarding
+  is unchanged (dropped between sims, as before).
+
 ## 2026-10-29: version 1.31.0
 
 - **Change: `addon=GEOVR.PSX` messages are no longer forwarded between
