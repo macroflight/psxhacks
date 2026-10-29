@@ -45,8 +45,8 @@ Other derived output:
 
 Computation
 -----------
-A rolling buffer of BoostSamples is kept.  Once the buffer spans at least
-_MIN_WINDOW_S seconds, first/middle/last samples form a non-uniform three-
+A rolling buffer of the last _WINDOW_S seconds of BoostSamples is kept.  Once
+it spans at least _MIN_WINDOW_S seconds, first/middle/last samples form a non-uniform three-
 point finite-difference stencil that estimates NED inertial acceleration.
 The gravity vector is subtracted and the result rotated to the body frame.
 
@@ -73,7 +73,12 @@ KT_TO_MS = 0.514444
 M_PER_DEG_LAT = 111_320.0
 
 # Buffer tuning
-_MAX_SAMPLES = 120         # keep up to ≈2 s at 60 Hz
+# The buffer used to be 120 samples, meant as about 2 s at 60 Hz, but PSX's
+# boost feed comes at about 24 Hz: 5 s, so a turbulence jolt of half a
+# second to a second was averaged away (an extreme event read +0.7..+1.3 g
+# instead of -1.5..+1.7 g, replayed from a test recording 2026-10-27).
+_WINDOW_S = 1.0            # keep this many seconds of samples
+_MAX_SAMPLES = 240         # and at most this many (safety)
 _MIN_WINDOW_S = 0.4        # require at least this span before computing
 
 
@@ -193,6 +198,8 @@ class AccelerationComputer:  # pylint: disable=too-few-public-methods
     def update(self, sample: BoostSample) -> Optional[AccelerationState]:
         """Add one sample; return AccelerationState when the buffer is ready."""
         self._buf.append(sample)
+        while sample.wall_time - self._buf[0].wall_time > _WINDOW_S:
+            self._buf.popleft()
         if len(self._buf) < 3:
             return None
         span = self._buf[-1].wall_time - self._buf[0].wall_time

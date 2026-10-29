@@ -1,5 +1,15 @@
 # frankenboostproxy changelog
 
+## Unreleased
+
+- **Fix: short jolts are no longer averaged away.** The accelerations
+  (and show_boost_gauges) came from about the last 5 seconds of the boost
+  feed instead of the intended 1 second (the buffer was 120 samples,
+  sized for 60 Hz, but PSX sends about 24 Hz), so a turbulence jolt of
+  half a second read at a fraction of its size: a replayed extreme
+  turbulence event showed +0.7 to +1.3 g instead of -1.5 to +1.7 g. The
+  readings now follow such jolts, and are a little jumpier.
+
 ## 2.0.0 (2026-10-14)
 
 - **`frankenboostproxy` and `show_boost_gauges` now have real version
