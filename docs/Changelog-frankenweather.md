@@ -1,5 +1,17 @@
 # frankenweather changelog
 
+## 1.23.0 (2026-10-24)
+
+- **Change: CBs fade away instead of vanishing**, also without
+  `--cb-growth`. When a CB's forecast shrinks or disappears (a TEMPO
+  group switching off, a new METAR, a SIGMET expiring), it shrinks over
+  up to about 15 minutes instead of disappearing from the radar, and its
+  turbulence with it, at once. New CBs still appear at once. "Remove CB
+  near dep/arr" still removes them at once, and a zone that moves starts
+  fresh, so this never keeps a zone in place.
+- **Fix: the manual turbulence override obeys the turbulence on/off
+  switch.** It injected turbulence even with turbulence switched off.
+
 ## 1.22.0 (2026-10-24)
 
 - **Change: mountain waves weaken downwind of the ridge**, to about a
