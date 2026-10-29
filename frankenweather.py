@@ -654,9 +654,12 @@ _CB_CLOSE_START_GRACE_S = 120.0
 # reposition, maneuvering) could put zones anywhere from 0 nm, packed 50 nm
 # apart. In Typhoon IN-FA (frankensim 2026-10-29) that gave small echoes,
 # small cores, and new zones 70 nm away capped at 15,000 ft. Spreading the
-# 7 zones also covers more of the area ahead with CBs.
+# 7 zones also covers more of the area ahead with CBs. 90 nm apart didn't
+# fit: forward placements (150-250 nm ahead, 100 nm either side) hold about
+# three zones that far apart, so most fell back to the best of the 10
+# tries and ended up 46-76 nm apart (frankensim 2026-10-29).
 _CB_AREA_MIN_DIST_NM = 60.0
-_CB_AREA_ZONE_SEP_NM = 90.0
+_CB_AREA_ZONE_SEP_NM = 70.0
 
 _BZ_URL = "https://data.blitzortung.org/Data_1/strikes"
 _BZ_LOOKBACK_MIN = 20  # fetch this many recent minute-files of strike data

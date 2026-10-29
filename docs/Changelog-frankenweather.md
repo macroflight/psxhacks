@@ -3,7 +3,7 @@
 ## Unreleased
 
 - **Change: zones are spread out inside TS and TC SIGMET areas.** With
-  `--sigmet`, inside a TS/TC SIGMET area the zones are now at least 90
+  `--sigmet`, inside a TS/TC SIGMET area the zones are now at least 70
   nm apart (otherwise 50), and the all-around placement (startup,
   reposition, maneuvering) keeps them at least 60 nm from the aircraft
   (otherwise anywhere from 0 nm). PSX draws a CB's echo, and

@@ -407,7 +407,7 @@ CB-free zones remove CBs at once, and a zone that's moved starts fresh,
 so this never holds a zone back.
 
 Inside a TS or TC SIGMET area (with `--sigmet`), zones are kept at least
-90 nm apart, and the all-around placement at startup, after a
+70 nm apart, and the all-around placement at startup, after a
 reposition and while maneuvering keeps them at least 60 nm from the
 aircraft. PSX draws a CB's echo by the distance to the nearest other
 zone, so packed zones looked like small, harmless cells; spread out,
