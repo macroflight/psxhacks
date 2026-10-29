@@ -1,6 +1,6 @@
 # frankenweather changelog
 
-## Unreleased
+## 2.1.2 (2026-10-29)
 
 - **Fix: alongside a TS SIGMET area, a zone could hop in and out every
   minute.** With `--sigmet` a zone is moved into a nearby TS/TC area so
