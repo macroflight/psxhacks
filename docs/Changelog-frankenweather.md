@@ -1,5 +1,15 @@
 # frankenweather changelog
 
+## Unreleased
+
+- **Change: inside a TS or TC SIGMET area a new CB is only kept small
+  within 40 nm.** Elsewhere a zone within 100 nm of the aircraft that gets
+  a CB still only gets a small one (2 oktas, 15,000 ft), so that none pops
+  up close ahead. Inside a TS/TC area, where CBs are expected everywhere,
+  that limit cut the TS CBs of zones placed 60-100 nm away while
+  maneuvering (a hold, a deviation) down to 15,000 ft. There it now only
+  applies within 40 nm.
+
 ## 2.1.1 (2026-10-29)
 
 - **Fix: the "QNH mismatch" warning flooded the log.** With MSFS sync in

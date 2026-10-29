@@ -417,7 +417,9 @@ New zones are never placed within 100 nm of the aircraft, but a zone the
 aircraft flies towards can still get a CB there: a new or moved TS
 SIGMET, CAPE, or a METAR. Such a CB is small, at most 2 oktas and 15,000
 ft, until the zone is moved (usually once it's behind the aircraft), so
-no 45,000 ft CB appears out of nowhere 10 nm ahead. A CB the zone already
+no 45,000 ft CB appears out of nowhere 10 nm ahead. Inside a TS or TC
+SIGMET area, where CBs are expected everywhere, this only applies within
+40 nm. A CB the zone already
 had when it came within 100 nm stays, but doesn't grow. In the first 2
 minutes after frankenweather starts no zone is limited (PSX may already
 be showing its CB, and the SIGMET, METAR and CAPE CBs arrive over the

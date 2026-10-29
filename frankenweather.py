@@ -659,6 +659,12 @@ _CB_CLOSE_START_GRACE_S = 120.0
 # three zones that far apart, so most fell back to the best of the 10
 # tries and ended up 46-76 nm apart (frankensim 2026-10-29).
 _CB_AREA_MIN_DIST_NM = 60.0
+# ... and the close-CB limit (_limit_close_cb()) only reaches this far
+# there, not _CB_SQUEEZE_MIN_FWD_NM: CBs are expected all over such an
+# area, so a new cell 60-100 nm away isn't startling, but maneuvering there
+# (a hold, a deviation) placed zones 60-100 nm away and cut their TS CBs
+# to 2 oktas, 15,000 ft (test sim 2026-10-29, TS SIGMET NTTT A1).
+_CB_CLOSE_AREA_NM = 40.0
 _CB_AREA_ZONE_SEP_NM = 70.0
 
 _BZ_URL = "https://data.blitzortung.org/Data_1/strikes"
@@ -5606,6 +5612,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         a METAR), which used to appear at full size, e.g. 45,000 ft
         within 10 nm. Not for the dep/dst airport zones (their METAR), and
         no new limit in the first _CB_CLOSE_START_GRACE_S after a start.
+        Inside a TS/TC SIGMET area only within _CB_CLOSE_AREA_NM.
         """
         cap = self.zone_cb_close_cap.get(zone_num)
         if cap is not None and cap[0] != pos:
@@ -5614,7 +5621,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if self.ac_lat is None or pos[2] in {self.fmc_dep_icao, self.fmc_dst_icao}:
             return wx
         if cap is None:
-            if self._dist_nm(self.ac_lat, self.ac_lon, pos[0], pos[1]) > _CB_SQUEEZE_MIN_FWD_NM:
+            reach = (_CB_CLOSE_AREA_NM if self._in_cb_sigmet_area(self.ac_lat, self.ac_lon)
+                     else _CB_SQUEEZE_MIN_FWD_NM)
+            if self._dist_nm(self.ac_lat, self.ac_lon, pos[0], pos[1]) > reach:
                 return wx
             if time.monotonic() < self._cb_close_grace_until:
                 return wx
@@ -5625,7 +5634,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                    (pos, _CB_CLOSE_MAX_OKTAS, _CB_CLOSE_MAX_TOP_FT))
             self.zone_cb_close_cap[zone_num] = cap
             self.logger.info("Zone %d within %.0fnm: CB at most %d oktas, %.0fft from now on",
-                             zone_num, _CB_SQUEEZE_MIN_FWD_NM, cap[1], cap[2])
+                             zone_num, reach, cap[1], cap[2])
         parts = wx.split(';')
         oktas = int(parts[9]) if parts[9].isdigit() else 0
         if oktas <= 0:
