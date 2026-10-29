@@ -1049,6 +1049,7 @@ def _parse_sigmets(raw: str) -> list:
 
 # Hail; not GS (small hail/snow pellets, mostly winter showers -- shower
 # precipitation for _METAR_SH_RE)
+_METAR_TIME_RE = re.compile(r'^\d{6}Z$')
 _METAR_GR_RE = re.compile(r'^[+-]?(SH|TS|VC|FZ|BL|DR|MI|PR)?GR$')
 _METAR_SH_RE = re.compile(r'^[+-]?SH[A-Z]{2,4}$')
 _METAR_FC_RE = re.compile(r'^[+-]?FC$')
@@ -1187,7 +1188,12 @@ def _parse_metar(raw: str) -> dict:  # pylint: disable=too-many-branches,too-man
         'vis_m': 10000, 'sky': [], 'temp_c': 15, 'dp_c': 10, 'qnh_hpa': 1013.0,
         'ts_oktas': 0, 'showers': False, 'trends': [],
     }
+    # Skip the header (METAR/SPECI, station, DDHHMMZ): station codes can
+    # look like weather (LTGP Gazipasa "LTG", SHTS "SH"+"TS")
     all_tokens = raw.split()
+    header = next((i + 1 for i, t in enumerate(all_tokens[:4]) if _METAR_TIME_RE.match(t)),
+                  min(1, len(all_tokens)))
+    all_tokens = all_tokens[header:]
     body_end = len(all_tokens)
     for idx, token in enumerate(all_tokens):
         if (token == 'RMK' or token in _METAR_TREND_MARKERS or
