@@ -1,6 +1,6 @@
 # frankenweather changelog
 
-## Unreleased
+## 2.1.0 (2026-10-29)
 
 - **Change: zones are spread out inside TS and TC SIGMET areas.** With
   `--sigmet`, inside a TS/TC SIGMET area the zones are now at least 70
@@ -24,7 +24,9 @@
   now held at 55-70% (scaled by the intensity sliders), with the core's
   severe events on top and, like events, without the limit on up/down
   bursts in one direction. Expect to hand-fly in a CB core. Outside CB
-  cores and in the stable profile nothing changes.
+  cores and in the stable profile nothing changes. The testing profile's
+  log labels now call up to 54% moderate (a moderate patch's 50% read
+  "severe").
 
 - **Fix: restarting frankenweather near CBs shrank them.** A CB that
   comes within 100 nm of the aircraft is kept from growing, and a zone
