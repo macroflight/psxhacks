@@ -67,10 +67,12 @@ WX_DEFAULTS = [
 def cape_to_cb_oktas(cape_jkg: float, cin_jkg: float) -> int:
     """Convert CAPE and CIN to CB cloud coverage in oktas.
 
-    Strong convective inhibition (CIN < -200 J/kg) suppresses CBs even with
-    high CAPE. Otherwise coverage scales with CAPE magnitude.
+    Strong convective inhibition (CIN beyond 200 J/kg) suppresses CBs even
+    with high CAPE. Otherwise coverage scales with CAPE magnitude. Open-Meteo
+    gives CIN as a positive magnitude; abs() so either sign works (it used
+    to test for < -200, which never happened).
     """
-    if cape_jkg < 100.0 or cin_jkg < -200.0:
+    if cape_jkg < 100.0 or abs(cin_jkg) > 200.0:
         return 0
     if cape_jkg < 500.0:
         return 2
@@ -150,7 +152,7 @@ def om_cb_fields(  # pylint: disable=too-many-locals,too-many-branches
 
     if is_ts:
         # Thunderstorm directly observed — no precipitation gate needed.
-        if oktas == 0 and cin > -200.0:
+        if oktas == 0 and abs(cin) <= 200.0:
             oktas = 4
     elif effective_showers >= 0.5 or metar_showers:
         # Showers confirmed (by OM, METAR, radar, or lightning); cap by intensity.
