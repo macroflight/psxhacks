@@ -116,12 +116,17 @@
   oscillation** (terrain wave and MTW SIGMETs). In a FLCH descent through
   a SEV MTW SIGMET near Glasgow, the wave's one-way bursts swung the
   descent rate between a few hundred and over 4,000 ft/min. Testing
-  gives no speed/gust bursts in a wave (even a quarter of them kept FLCH
-  swinging; a light wave under 25% gets up/down bursts in their place),
-  up/down bursts that follow how fast the wave changes rather than its
-  direction, and lets an MTW SIGMET lift the terrain model's own wave to
-  at most twice it plus 20%. Same descent: up to 2,400
-  ft/min, no swings. The stable profile is unchanged.
+  gives up/down bursts that follow how fast the wave changes rather than
+  its direction, lets an MTW SIGMET lift the terrain model's own wave to
+  at most twice it plus 20%, and in a wave no gust, bank or yaw bursts,
+  and only a quarter of the speed bursts. Gust bursts weather-vane the
+  aircraft: the yaw a 747 pilot found unrealistic in mountain wave (test
+  sim, 30% wave: heading swings 1.7° and banks 6.6° p95 with them, none
+  without). The speed bursts give the airspeed fluctuation pilots expect
+  there (about ±12 kt p95 at 45%); in V/S the autothrottle takes it and
+  the descent stays steady, while FLCH chases the speed with pitch (45%
+  wave: 14 swings of over 2,000 ft/min in a descent from FL300 to FL150).
+  The stable profile is unchanged.
 - **Testing profile: the turbulence level shown for a TS/TC SIGMET area**
   (console, router /efb) now includes its minimum, not just the part
   that varies.

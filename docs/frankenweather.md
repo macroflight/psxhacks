@@ -588,20 +588,22 @@ normal turbulence. What testing changes:
   between a few hundred and over 4,000 ft/min (EGPF, 2026-10-25). Testing:
   - Up/down bursts follow how fast the wave is changing, not which way
     it goes, so they don't add up to a long push.
-  - No speed or gust bursts in a wave. Even a quarter of them kept
-    FLCH swinging, because it answers every speed kick with pitch. A
-    real wave changes the airspeed slowly, over its cycle. A light wave
-    (under 25%), whose bursts were only speed and gust ones, gets
-    up/down bursts in their place, so it isn't glassy smooth.
+  - No gust, bank or yaw bursts in a wave, and only a quarter of the
+    speed bursts. Gust bursts weather-vane the aircraft, a yaw that real
+    pilots don't feel in mountain wave; the speed bursts give the
+    airspeed fluctuation they do (about ±12 kt at 45%). A light wave
+    (under 25%), whose bursts were only speed and gust ones, gets up/down
+    bursts for the rest, so it isn't glassy smooth.
   - Up/down bursts one way within 8 seconds add up to at most the
     largest single one (for all continuous turbulence, see below).
   - An MTW SIGMET lifts the terrain model's own wave to at most twice it
     plus 20%, instead of up to the SIGMET's full severity.
 
-  It's still rough: in the same FLCH descent, without the speed kicks,
-  the descent rate reached 2,400 ft/min, but didn't swing. V/S copes
-  better than FLCH with any turbulence that changes the airspeed, since
-  the autothrottle takes the speed. In severe wave, fly by hand.
+  It's still rough. FLCH holds the speed with pitch, so it chases the
+  speed bursts: in a 45% wave, a descent from FL300 to FL150 swung by
+  over 2,000 ft/min 14 times (without speed bursts: none). In V/S the
+  autothrottle takes the speed and the descent stays steady, as real
+  crews fly it. In severe wave, fly by hand.
 
 ### Turbulence events (testing profile)
 

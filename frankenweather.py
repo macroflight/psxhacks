@@ -332,13 +332,18 @@ _SIGMET_CONV_DEFAULT = (0.06, 0.25)
 # (_pick_wave_burst_testing()). A wave phase changing this fast (per s, a
 # sine of about a 2 min period) gives sink bursts at the full rate.
 _WAVE_PHASE_RATE_FULL = 0.05
-# ... and keep only this fraction of their speed/gust bursts: FLCH holds
-# speed with pitch, so even random-direction speed kicks keep it swinging.
-# EGPF FLCH descent, same weather and burst sequence replayed (2026-10-25):
-# all bursts -4300 fpm / 4 swings >2000 fpm, a quarter of the speed/gust
-# ones just as bad (-4500 / 8), none -2400 / 0. A real wave changes the
-# airspeed slowly, over its cycle, not in sharp kicks.
-_WAVE_SPD_KEEP = 0.0
+# ... and keep this fraction of their speed bursts. Gust bursts become
+# speed bursts and bank/yaw ones are dropped: GUST weather-vanes the
+# aircraft, the yaw a 747 pilot found unrealistic in mountain wave (test
+# sim 2026-10-28, 30 %: heading p95 1.7 deg / bank 6.6 deg with GUST,
+# 0.01 / 0.04 with speed and up/down bursts only), and pilots expect a lot
+# of speed fluctuation there. FLCH holds speed with pitch, so speed kicks
+# make it chase (EGPF FLCH descent replayed, 2026-10-25: -4300 fpm and 4
+# swings over 2000 fpm with them, -2400 / 0 without); accepted (user,
+# 2026-10-28): crews change to V/S in that. Half of them made a 45 % wave
+# FLCH descent swing 17 times by over 2000 fpm (-4240 to +395 fpm, TAS
+# +-15 kt p95; SINK only: none, -2140 to -1240 fpm), so a quarter.
+_WAVE_SPD_KEEP = 0.25
 # Below this intensity a wave's bursts are only speed/gust ones
 # (_pick_burst()); without them it would be glassy smooth, so the testing
 # profile makes them up/down bursts there instead (rate-gated like the rest)
@@ -4974,15 +4979,20 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         to 5,000+ ft/min (EGPF, 2026-10-25). Here sink bursts follow the
         change of the phase (the draft getting stronger or weaker), and
         only as often as it changes (_WAVE_PHASE_RATE_FULL), so the push is
-        bounded; speed and gust bursts go either way, and only
-        _WAVE_SPD_KEEP of them are kept -- below _WAVE_LIGHT_BELOW, where
-        a wave gets nothing else, the others become up/down bursts.
+        bounded. Gust bursts become speed bursts (GUST yaws the aircraft)
+        and bank/yaw bursts are dropped; speed bursts go either way, and
+        only _WAVE_SPD_KEEP of them are kept -- below _WAVE_LIGHT_BELOW,
+        where a wave gets nothing else, the others become up/down bursts.
         """
         now = time.monotonic()
         prev, self._wave_vert_prev = self._wave_vert_prev, (now, state.vertical)
         base, _, label = _pick_burst(state, intensity)
         direction = random.choice([-1, 1])
-        if base in (_BURST_SPD, _BURST_GUST) and random.random() >= _WAVE_SPD_KEEP:
+        if base == _BURST_GUST:
+            base, label = _BURST_SPD, "spd"
+        elif base in (_BURST_BANK, _BURST_YAW):
+            return None
+        if base == _BURST_SPD and random.random() >= _WAVE_SPD_KEEP:
             if intensity >= _WAVE_LIGHT_BELOW:
                 return None
             base, label = _BURST_SINK, "sink"
