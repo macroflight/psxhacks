@@ -1,5 +1,28 @@
 # frankenweather changelog
 
+## 1.17.0 (2026-10-24)
+
+- **Change: wind-shear clear-air turbulence at cruise.** Above FL200 it
+  now starts at a vertical wind shear of 5 kt/1000 ft and is at its
+  strongest from 12 (was 8 and 14; still so below FL100, blended in
+  between). Shear from forecast data is smoothed, so even on a day with
+  a 163 kt jet stream over the UK cruise was almost never turbulent; that
+  day it now gives about 12% light or more and 2% moderate at FL300-410.
+- **Change: CB tops are limited by the tropopause for the latitude and
+  season**, at most 2,000 ft above it and never above 44,999 ft (PSX's
+  limit): e.g. London about 39,400 ft in July and 33,600 ft in January,
+  44,999 ft in the tropics. Tops rise with CAPE from 15,000 ft (was
+  45,000 ft from 1,250 J/kg anywhere, never below 25,000 ft). A METAR
+  thunderstorm's CB no longer always tops at 40,000-45,000 ft, also in
+  winter.
+- **Change: turbulence inside a CB is severe to extreme whatever its
+  coverage**, mostly from the cloud's depth: mid-cloud in a 40,000 ft CB
+  it's 77% with 2 oktas, 100% with 8 (was 33% and 67%).
+- **Change: anvil turbulence above a CB fades faster with height and
+  reaches out mostly downwind**: a third as far upwind as downwind, from
+  the wind at the cloud top. 12,000 ft above a small CB it's now about
+  1% (was 9%).
+
 ## 1.16.0 (2026-10-24)
 
 - **Change: being in MSFS cloud makes turbulence at most 1.3 times
