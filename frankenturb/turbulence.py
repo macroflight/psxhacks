@@ -135,6 +135,7 @@ WIND_NORM_MS = 30.0        # rotor: normalise at 58 kt (high threshold OK for ro
 # WAVE_WIND_NORM_MS (~43 kt), and the barrier from WAVE_BARRIER_MIN_M to
 # WAVE_BARRIER_NORM_M. It used to switch on at 8 m/s (15 kt) and a 500 m
 # barrier, as a step to ~moderate (2026-10-24 review).
+WAVE_DECAY_KM = 50.0     # wave strength e-folding distance downwind of the ridge
 WAVE_RESET_S = 120.0     # see TerrainTurbulenceModel._wave_phase_at()
 WAVE_RESET_KM = 20.0
 WAVE_WIND_MIN_MS = 10.0
@@ -308,7 +309,7 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
         cross_ms = ridge_top_spd_kt * KT_TO_MS * max(0.0, math.cos(math.radians(
             (ridge_bearing_deg - ridge_top_dir_deg + 180.0) % 360.0 - 180.0)))
         wave = self._wave_conditions(barrier_height_m, cross_ms,
-                                     ridge_top_spd_kt * KT_TO_MS, agl_m)
+                                     ridge_top_spd_kt * KT_TO_MS, agl_m, ridge_dist_km)
 
         ridge_top_m_ft = max_upwind_m * 3.28084
 
@@ -421,6 +422,7 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
         cross_wind_ms: float,
         wind_ms: float,
         agl_m: float,
+        ridge_dist_km: float,
     ) -> dict:
         """Return the mountain wave conditions.
 
@@ -442,7 +444,10 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
         # the wave, not in it).  Scale linearly from zero at ground to 1.0 at the
         # barrier summit, then let the exponential handle high-altitude decay above.
         below_factor = min(1.0, agl_m / barrier_height_m)
-        alt_factor = below_factor * math.exp(-agl_m / WAVE_SCALE_M)
+        # Waves die out downwind of the ridge (WAVE_DECAY_KM): it used to
+        # be moderate at FL370 5-80 km and more east of the Rockies alike
+        alt_factor = (below_factor * math.exp(-agl_m / WAVE_SCALE_M) *
+                      math.exp(-ridge_dist_km / WAVE_DECAY_KM))
 
         if alt_factor < 0.02:
             return {"active": False}
