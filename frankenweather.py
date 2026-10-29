@@ -7131,18 +7131,25 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         Same geometry as the turbulence itself (_get_nearest_cb()): a circle
         around the CB cell -- which the map places itself -- with the core
         out to core_nm and the flank zone out to flank_nm beyond that. A
-        "shape" so other shapes can be added later.
+        "shape" so other shapes can be added later. Above the top, the anvil
+        zone reaches anvil_nm beyond the core downwind (anvil_downwind_deg,
+        None if the wind isn't known: then all round), a third of that
+        upwind (frankenturb/cb_turbulence.py).
         """
         raw = self.psx.get(f"Wx{zone_num}") if self.psx else None
         cb = parse_wx_zone_basic(raw) if raw else None
         if cb is None or cb[0] == 0 or zone_num not in zone_positions:
             return None
         coverage, top_ft, base_ft = cb
+        wind_dir = self._turb_engine.wind_dir_at(top_ft) if self._turb_engine else None
         return {
             "shape": "circle",
             "core_nm": round(zone_cb_radius_nm(zone_num, zone_positions,
                                                self._turb_lateral_size_bias / 100.0), 1),
             "flank_nm": round(cb_flank_width_nm(coverage, top_ft, base_ft), 1),
+            "anvil_nm": round(cb_flank_width_nm(coverage, top_ft, base_ft, anvil=True), 1),
+            "anvil_downwind_deg": (round((wind_dir + 180.0) % 360.0)
+                                   if wind_dir is not None else None),
         }
 
     def _build_state_message(self) -> str:  # pylint: disable=too-many-locals
