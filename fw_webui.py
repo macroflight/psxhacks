@@ -231,6 +231,13 @@ _TURB_KIND_LABELS = {
 # ---------------------------------------------------------------------------
 
 
+def _turb_kind_label(kind: str) -> str:
+    """Return the web UI label of a turbulence kind ("X+shear": wind shear outweighing X)."""
+    if kind.endswith('+shear'):
+        return _TURB_KIND_LABELS['shear']
+    return _TURB_KIND_LABELS.get(kind, kind)
+
+
 def _sigmets_enabled(ctx) -> bool:
     """Return True if frankenweather runs with --sigmet (so the SIGMETs page exists)."""
     sigstate = getattr(ctx, 'fw_sigmetstate', None) or {}
@@ -610,7 +617,7 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
     turb_kind = turbstate.get('active_kind', 'none')
     turb_intensity = turbstate.get('effective_intensity', turbstate.get('active_intensity', 0.0))
     turb_pct = int(turb_intensity * 100)
-    turb_label = _TURB_KIND_LABELS.get(turb_kind, turb_kind) if turbstate else '—'
+    turb_label = _turb_kind_label(turb_kind) if turbstate else '—'
 
     turb_intensity_label = (
         'none' if turb_intensity < 0.10 else
@@ -627,7 +634,7 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         'intensity_label': turb_intensity_label,
         'reason': turbstate.get('active_reason', ''),
         'sources': [
-            {'kind': _TURB_KIND_LABELS.get(s['kind'], s['kind']),
+            {'kind': _turb_kind_label(s['kind']),
              'pct': int(s['intensity'] * 100),
              'reason': s['reason'],
              'active': s['kind'] == turb_kind}
@@ -2004,7 +2011,7 @@ def _build_weather_turb_page(ctx):  # pylint: disable=too-many-locals,too-many-b
         f'<div><span style="color:#94a3b8;font-size:0.85em">Status</span><br>'
         f'<b style="color:#{on_off_color}">{on_off_label}</b></div>'
         f'<div><span style="color:#94a3b8;font-size:0.85em">Active type</span><br>'
-        f'<b>{_TURB_KIND_LABELS.get(active_kind, active_kind)}</b></div>'
+        f'<b>{_turb_kind_label(active_kind)}</b></div>'
         f'<div><span style="color:#94a3b8;font-size:0.85em">Intensity</span><br>'
         f'<b style="color:{intensity_color}">{intensity_pct}%</b></div>'
         f'<div style="flex:1"><span style="color:#94a3b8;font-size:0.85em">Reason</span><br>'
@@ -2024,7 +2031,7 @@ def _build_weather_turb_page(ctx):  # pylint: disable=too-many-locals,too-many-b
             marker = '▶ ' if is_active else '   '
             status_html += (
                 f'<div style="font-size:0.8em;margin-left:1em">'
-                f'{marker}<b>{_TURB_KIND_LABELS.get(src["kind"], src["kind"])}</b>'
+                f'{marker}<b>{_turb_kind_label(src["kind"])}</b>'
                 f' {src_pct}% — {src["reason"]}</div>'
             )
     if low_speed and enabled:

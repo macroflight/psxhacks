@@ -3414,6 +3414,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                           '+' if direction > 0 else '-', magnitude,
                           f" on the ground at {tas_kt:.0f} kt" if on_ground else "")
 
+    def _shown_intensity(self, intensity: float) -> float:
+        """Return the effective intensity the UIs show: on the ground, as capped there."""
+        return min(intensity, _GROUND_TURB_CAP) if self._on_ground() else intensity
+
     def _on_ground(self) -> bool:
         """Return True if PSX says the aircraft is on the ground (OnGround)."""
         return (self.psx.get("OnGround") if self.psx else None) == "1"
@@ -4026,7 +4030,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         reason="Manual",
                     )
                     eff = self._turb_manual_turb_intensity
-                    self._turb_effective_intensity = eff
+                    self._turb_effective_intensity = self._shown_intensity(eff)
+                    # The normal path announces once manual is off again
+                    announced_kind = None
                     if not low_speed:
                         self._maybe_inject_burst(manual_state, eff, tas_kt)
                     state_changed = (
@@ -4134,7 +4140,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     state.intensity * self._turb_intensity_bias *
                     self._turb_type_effective_bias(state.kind) / 10000.0 * msfs_factor,
                 )
-                self._turb_effective_intensity = effective_intensity
+                self._turb_effective_intensity = self._shown_intensity(effective_intensity)
                 if self._turb_enabled and not low_speed:
                     self._maybe_inject_burst(state, effective_intensity, tas_kt)
 
@@ -4144,7 +4150,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     if src_s is None or src_s.intensity < 0.01:
                         continue
                     src_eff = min(1.0, src_s.intensity * self._turb_intensity_bias *
-                                  self._turb_type_effective_bias(src_s.kind) / 10000.0)
+                                  self._turb_type_effective_bias(src_s.kind) / 10000.0 *
+                                  msfs_factor)
                     if src_eff < 0.01:
                         continue
                     all_sources.append((src_eff, src_s))
@@ -4153,11 +4160,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 # Compared with what was last announced, not the previous
                 # tick: a gradual change (e.g. a SIGMET intensity ramp) is
                 # far less than 0.05 per tick but must still be announced.
+                # The UIs show the effective intensity (biases, MSFS factor,
+                # ground cap), which can change without the computed one
                 state_changed = (
                     ramp_key != last_ramp_key or  # /efb shows the SIGMET ramp
                     pirep_fl != last_pirep_fl or
                     announced_kind != state.kind or
-                    abs(announced_intensity - (state.intensity or 0.0)) > 0.05
+                    abs(announced_intensity - self._turb_effective_intensity) > 0.05
                 )
                 self._turb_state = state
                 self._turb_sources = all_sources
@@ -4168,7 +4177,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 last_ramp_key = ramp_key
                 last_pirep_fl = pirep_fl
                 if state_changed:
-                    announced_kind, announced_intensity = state.kind, state.intensity or 0.0
+                    announced_kind, announced_intensity = state.kind, self._turb_effective_intensity
                     self._turb_state_changed_event.set()
 
                 now = time.monotonic()
@@ -4500,15 +4509,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 f"{entry['qualifier']} MTW SIGMET {entry['fir']} {entry['series']}")
         return turb_state, mtw_state
 
-    def _turb_ramp_status(self) -> Optional[dict]:
-        """Return the current ramp of what drives the turbulence's intensity, or None.
-
-        For TURBSTATE "intensity_ramp" and the console (fw_sigmet.ramp_text()).
-        Levels are scaled like the injected intensity (a SIGMET's edge fade
-        and qualifier, or the physical intensity a gustiness multiplies),
-        so they match active_intensity. ramp_end/hold_end are epoch times,
-        so the router can count down between TURBSTATE messages.
-        """
     def _mtw_state(self, terrain_state: TurbulenceState, intensity: float,
                    label: str) -> Optional[TurbulenceState]:
         """Return an MTW SIGMET's turbulence, or None if the terrain's own outweighs it.
@@ -4528,6 +4528,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         return dataclasses.replace(terrain_state, intensity=intensity, kind="mtw",
                                    reason=f"{label} (over {terrain_state.reason})")
 
+    def _turb_ramp_status(self) -> Optional[dict]:
+        """Return the current ramp of what drives the turbulence's intensity, or None.
+
+        For TURBSTATE "intensity_ramp" and the console (fw_sigmet.ramp_text()).
+        Levels are scaled like the injected intensity (a SIGMET's edge fade
+        and qualifier, or the physical intensity a gustiness multiplies),
+        so they match active_intensity. ramp_end/hold_end are epoch times,
+        so the router can count down between TURBSTATE messages.
+        """
         if self._turb_driver is None:
             return None
         name, profile, scale = self._turb_driver
