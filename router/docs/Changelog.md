@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-24: version 1.29.0
+
+- **Change: /efb shows the kind of turbulence readably**: "wind shear
+  CAT" for FrankenWeather's "mechanical+shear" and the like, "mountain
+  wave SIGMET" for "mtw".
+
 ## 2026-10-24: version 1.28.0
 
 - **Change: /efb shows the turbulence intensity that's actually
