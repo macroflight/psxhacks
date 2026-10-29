@@ -1,6 +1,6 @@
 # frankenweather changelog
 
-## Unreleased
+## 2.1.1 (2026-10-29)
 
 - **Fix: the "QNH mismatch" warning flooded the log.** With MSFS sync in
   "check" mode, a QNH difference between MSFS and the PSX zone was
