@@ -955,6 +955,33 @@ def _metar_is_fresh(metar: str, now: Optional[datetime] = None) -> bool:
     return age is not None and age <= _METAR_MAX_AGE_HOURS
 
 
+# The planet zone's 4 CB cells (WxClust) are parked at Null Island (0N 0E),
+# where they're harmless (no CB coverage there anyway, see _without_cb())
+# and where maps showing WxClust (the router's /efb map) put them out of the
+# way. PSX replaces a set with any cell more than about 250 nm from the
+# aircraft within some 15 s (test sim 2026-10-27), so they're checked and
+# re-parked every _WXCLUST_PARK_S.
+_WXCLUST_PARKED = ";".join(["0.00000000"] * 8)
+_WXCLUST_PARK_S = 10.0
+
+
+def _without_cb(wx_str: str) -> str:
+    """Return a Wx string with no CB coverage, for WxBasic (the planet zone).
+
+    PSX gives the planet zone 4 CB cells of its own (WxClust) wherever it
+    likes, with the planet zone's CB coverage, base and top; they're drawn
+    on the radar while the aircraft is in the planet zone (test sim
+    2026-10-28: not at all while it's in one of our 7 zones). CBs there would
+    be unintended ones the moment the aircraft leaves our zones, so the
+    planet zone never gets any from us (a copy of zone 1, manual weather,
+    MSFS cloud sync).
+    """
+    fields = wx_str.split(";")
+    if len(fields) > 9 and fields[9] not in ("0", ""):
+        fields[9] = "0"
+    return ";".join(fields)
+
+
 def _metar_age_text(age_h: Optional[float]) -> str:
     """Return age_h as e.g. "2h old", or "undated" if it is unknown (no DDHHMMZ group)."""
     return "undated" if age_h is None else f"{age_h:.0f}h old"
@@ -2626,12 +2653,33 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         return self.ac_tas_kt is not None and self.ac_tas_kt < _WXBASIC_MAX_WRITE_TAS_KT
 
     def _write_wxbasic(self, wx_str: str) -> None:
-        """Write WxBasic if _wxbasic_writable(), otherwise skip it entirely."""
+        """Write WxBasic if _wxbasic_writable(), otherwise skip it entirely; never with CBs."""
         if not self._wxbasic_writable():
             self.logger.debug("WxBasic write skipped (airborne, aircraft not in WxBasic)")
             return
+        wx_str = _without_cb(wx_str)
         self.zone_wx[0] = wx_str
         self.psx_send_and_set("WxBasic", wx_str)
+
+    def _clear_planet_cb(self, value: Optional[str]) -> bool:
+        """Set the planet zone's CB coverage to 0 if it isn't; return True if it was written.
+
+        Whoever put CBs there (a situ, PSX, another client), see _without_cb().
+        Only the CB coverage changes, so it's written in flight too, unlike
+        other WxBasic changes (_wxbasic_writable()): CB-field-only changes
+        didn't move the PFD (test sim 2026-10-28, FL350 and FL100). Not while
+        PSX is in charge of the weather (mode "disabled").
+        """
+        if not value or self._fw_mode == "disabled" or not self.psx_connected:
+            return False
+        cleared = _without_cb(value)
+        if cleared == value:
+            return False
+        self.logger.info("Planet zone (WxBasic) had %s oktas of CB: set to 0 (PSX's own CB cells "
+                         "would show when the aircraft is outside our zones)", value.split(";")[9])
+        self._inject_wx_slow_transit()
+        self.psx_send_and_set("WxBasic", cleared)
+        return True
 
     def _inject_wx_slow_transit(self) -> None:
         """Ask PSX to smooth-transit the weather write(s) about to follow.
@@ -2725,6 +2773,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         situ is loading (between load1 and load3), whose burst would
         otherwise hide behind the first restore.
         """
+        if key == "WxBasic" and self._clear_planet_cb(value):
+            return
         if self._owned_matches(key, value) or not self._owned_restore_wanted(key):
             focused_key = "WxBasic" if self.focused_zone == 0 else f"Wx{self.focused_zone}"
             if key == focused_key and self._fw_mode != "disabled":
@@ -5814,6 +5864,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.cloud_sync_last_alt_ft = self.ac_alt_ft
             self.last_write_time = time.time()
             new_wx = ";".join(data)
+            if zone_key == "WxBasic":
+                new_wx = _without_cb(new_wx)
             self.psx_send_and_set(zone_key, new_wx)
             self.zone_wx[self.focused_zone] = new_wx
 
@@ -8184,6 +8236,35 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
             self.logger.critical(traceback.format_exc())
 
+    async def wxclust_park_coro(self) -> None:
+        """Every _WXCLUST_PARK_S, park the planet zone's CB cells at Null Island if they aren't.
+
+        See _WXCLUST_PARKED. Logs once an hour how often PSX moved them back.
+        """
+        myname = inspect.currentframe().f_code.co_name
+        try:
+            self.logger.debug("Starting %s", myname)
+            parked, since = 0, time.monotonic()
+            while True:
+                await asyncio.sleep(_WXCLUST_PARK_S)
+                if time.monotonic() - since >= 3600.0:
+                    if parked:
+                        self.logger.info("WxClust: parked the planet CB cells at Null Island %d "
+                                         "time(s) in the last hour", parked)
+                    parked, since = 0, time.monotonic()
+                if not self.psx_connected or self._fw_mode == "disabled":
+                    continue
+                current = self.psx.get("WxClust")
+                if current is None or current == _WXCLUST_PARKED:
+                    continue
+                if parked == 0:
+                    self.logger.info("WxClust: parking the planet CB cells at Null Island")
+                self.psx_send_and_set("WxClust", _WXCLUST_PARKED)
+                parked += 1
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
+            self.logger.critical(traceback.format_exc())
+
     async def log_flush_coro(self) -> None:
         """Every _LOG_FLUSH_INTERVAL_S, flush and fsync every log file.
 
@@ -9010,6 +9091,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     ("StateBroadcast", self.state_broadcast_coro),
                     ("WindStateBroadcast", self.windstate_broadcast_coro),
                     ("TimeSync", self.time_sync_coro),
+                    ("WxClustPark", self.wxclust_park_coro),
                     ("OmFailureBanner", self.om_failure_banner_coro),
                     ("SigmetRefresh", self.sigmet_refresh_coro),
                     ("OwnSigmet", self.own_sigmet_coro),

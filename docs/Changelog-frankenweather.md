@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Fix: no CBs in the planet zone.** PSX gives the planet zone (the
+  weather outside the 7 weather zones) 4 CB cells of its own, placed
+  wherever PSX likes, with the planet zone's CB coverage. frankenweather
+  could give the planet zone CBs (copying zone 1's weather into it on the
+  ground, manual weather), and a situ or another client could too; they
+  then showed up as unexpected CBs, with their turbulence, whenever the
+  aircraft left frankenweather's zones. Now the planet zone's CB coverage
+  is always 0: frankenweather never writes CBs there, and sets the
+  coverage back to 0 whenever anything else does (only that field changes,
+  also in flight).
 - **New: `--turb-profile stable|testing`** chooses the turbulence profile
   from the command line (e.g. in a start script). It overrides the
   configuration file's `[turbulence] profile`; the file only changes if
