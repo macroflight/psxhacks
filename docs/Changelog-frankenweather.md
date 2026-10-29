@@ -32,9 +32,11 @@
 - **Fix: false "changed by another client" warnings** for frankenweather's
   own zone placements (PSX rounds zone positions a little more than
   frankenweather allowed for), and the extra rewrites they caused.
-- **Testing profile: wave up/down bursts one way within 8 seconds add up
-  to at most the largest single one**: a run of them pumped the
-  autopilot's pitch oscillation in ALT HOLD to over 1.5 g.
+- **Testing profile: up/down bursts one way within 8 seconds add up to
+  at most the largest single one**, for all continuous turbulence (not
+  events): a run of small ones pumped the autopilot's pitch oscillation
+  in ALT HOLD to over 1.5 g in mountain wave, and to ±2 g with pitch
+  swinging -6 to +14 degrees in light wind-shear turbulence.
 
 ## 1.27.0 (2026-10-25)
 

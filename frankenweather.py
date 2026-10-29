@@ -343,12 +343,15 @@ _WAVE_SPD_KEEP = 0.0
 # (_pick_burst()); without them it would be glassy smooth, so the testing
 # profile makes them up/down bursts there instead (rate-gated like the rest)
 _WAVE_LIGHT_BELOW = 0.25
-# ... and their up/down bursts one way within this many seconds add up to
-# at most the largest single burst (_wave_sink_budget()): a run of sinks
-# 1-3 s apart pumped the autopilot's ~8 s pitch oscillation in ALT HOLD
-# to +-0.6 g, pitch 0-6.6 deg, from bursts of ~0.2 g each (NZZC MTW
-# FL250, 2026-10-26 night campaign).
-_WAVE_SINK_WINDOW_S = 8.0
+# Testing profile: the continuous turbulence's up/down bursts one way
+# within this many seconds add up to at most the largest single burst
+# (_updown_budget()), whatever the kind. A run of them a second or two
+# apart pumps PSX's lightly damped pitch ringing (3.5-4 s a cycle): in
+# wave to +-0.6 g, pitch 0-6.6 deg, from bursts of ~0.2 g each (NZZC MTW
+# FL250, night campaign), and in wind shear at 34 % to +-2 g, pitch -5.7
+# to +13.8 deg (SCIZ FL330, 2026-10-26). Turbulence events' bursts (and
+# manual turbulence) are not limited: their effect is meant to be real.
+_UPDOWN_WINDOW_S = 8.0
 # Testing profile: an MTW SIGMET lifts the terrain model's own wave to at
 # most this factor times it plus this much (_mtw_state()).
 _MTW_LIFT_FACTOR = 2.0
@@ -2460,9 +2463,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # (monotonic time, vertical) of the last wave/MTW burst decision,
         # see _pick_wave_burst_testing()
         self._wave_vert_prev: Optional[tuple] = None
-        # (monotonic time, direction, size) of the recent wave/MTW up/down
-        # bursts, see _wave_sink_budget()
-        self._wave_sinks: collections.deque = collections.deque()
+        # (monotonic time, direction, size) of the recent up/down bursts,
+        # see _updown_budget()
+        self._updown_bursts: collections.deque = collections.deque()
         # Bursts since the last summary line (_log_burst_summary())
         self._burst_summary_start = time.monotonic()
         self._burst_summary: list = []
@@ -3694,10 +3697,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
     # ------------------------------------------------------------------
 
     def _maybe_inject_burst(self, state: TurbulenceState, intensity: float,
-                            tas_kt: float) -> None:
+                            tas_kt: float, limit_updown: bool = False) -> None:
         """Inject one WxBurst with probability intensity**1.5 (scaled by the rate setting).
 
         On the ground only a weaker yaw/roll burst (_GROUND_TURB_CAP).
+        limit_updown: up/down bursts one way add up to at most the largest
+        single one within _UPDOWN_WINDOW_S (_updown_budget()).
         """
         on_ground = self._on_ground()
         if on_ground:
@@ -3716,9 +3721,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         else:
             base, direction, label = _pick_burst(state, intensity)
         magnitude = min(99, random.randint(1, max(1, int(intensity * 99))))
-        if (base == _BURST_SINK and not on_ground and self._turb_testing() and
-                state.kind in ('wave', 'mtw')):
-            magnitude = self._wave_sink_budget(direction, magnitude, intensity)
+        if base == _BURST_SINK and not on_ground and limit_updown:
+            magnitude = self._updown_budget(direction, magnitude, intensity)
             if magnitude < 1:
                 return
         psx_value = direction * (base + magnitude)
@@ -4577,7 +4581,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         self._turb_enabled and not low_speed and not self._on_ground())
                 self._turb_effective_intensity = self._shown_intensity(effective_intensity)
                 if self._turb_enabled and not low_speed:
-                    self._maybe_inject_burst(state, effective_intensity, tas_kt)
+                    self._maybe_inject_burst(
+                        state, effective_intensity, tas_kt,
+                        limit_updown=self._turb_testing() and state.kind != "event")
                 self._log_burst_summary()
                 self._log_flight_status(pba, effective_intensity, state)
 
@@ -4978,20 +4984,20 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return None
         return base, _sign(rate), label
 
-    def _wave_sink_budget(self, direction: int, magnitude: int, intensity: float) -> int:
-        """Return how much of a wave/MTW up/down burst to send (testing profile; 0: none).
+    def _updown_budget(self, direction: int, magnitude: int, intensity: float) -> int:
+        """Return how much of an up/down burst to send (testing profile; 0: none).
 
-        Bursts one way within _WAVE_SINK_WINDOW_S add up to at most the
+        Bursts one way within _UPDOWN_WINDOW_S add up to at most the
         largest single burst at this intensity, so a run of them can't
         build up the autopilot's pitch oscillation.
         """
         now = time.monotonic()
-        while self._wave_sinks and now - self._wave_sinks[0][0] > _WAVE_SINK_WINDOW_S:
-            self._wave_sinks.popleft()
-        used = sum(size for _, d, size in self._wave_sinks if d == direction)
+        while self._updown_bursts and now - self._updown_bursts[0][0] > _UPDOWN_WINDOW_S:
+            self._updown_bursts.popleft()
+        used = sum(size for _, d, size in self._updown_bursts if d == direction)
         magnitude = min(magnitude, max(1, int(intensity * 99)) - used)
         if magnitude >= 1:
-            self._wave_sinks.append((now, direction, magnitude))
+            self._updown_bursts.append((now, direction, magnitude))
         return magnitude
 
     def _sigmet_convective_turbulence(self, lat: float, lon: float,

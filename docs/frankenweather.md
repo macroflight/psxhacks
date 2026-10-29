@@ -597,10 +597,7 @@ normal turbulence. What testing changes:
     (under 25%), whose bursts were only speed and gust ones, gets
     up/down bursts in their place, so it isn't glassy smooth.
   - Up/down bursts one way within 8 seconds add up to at most the
-    largest single one. A run of them a second or two apart pumped the
-    autopilot's pitch oscillation in ALT HOLD (about 8 seconds a cycle)
-    to over 1.5 g, from bursts of about 0.2 g each (NZ MTW SIGMET,
-    FL250).
+    largest single one (for all continuous turbulence, see below).
   - An MTW SIGMET lifts the terrain model's own wave to at most twice it
     plus 20%, instead of up to the SIGMET's full severity.
 
@@ -629,6 +626,14 @@ In the testing profile:
   and TS-area levels vary between smooth and light; physically computed
   turbulence (terrain, CB, CAPE, boundary layer, wind shear) is capped
   at light.
+- **No pitch oscillation from the continuous turbulence**: its up/down
+  bursts one way within 8 seconds add up to at most the largest single
+  one, whatever the kind of turbulence. PSX's pitch rings for 3.5-4
+  seconds after every up/down burst, and a run of small ones a second
+  or two apart can pump that up: in mountain wave to over 1.5 g (NZ MTW
+  SIGMET, FL250), and in light wind-shear turbulence to ±2 g with pitch
+  swinging from -6 to +14 degrees (SCIZ SEV TURB SIGMET, FL330). Events
+  are not limited.
 - **Moderate patches**: the turbulence level goes up to 38-50% for 20
   seconds to 10 minutes (typically a minute and a half).
 - **Severe clusters**: 5-30 seconds of moderate chop with one to four
