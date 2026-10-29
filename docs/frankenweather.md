@@ -539,8 +539,9 @@ The SIGMETs page also shows the download status, the number of SIGMETs
 of each type that could and couldn't be parsed, the nearest area of each
 type and every other one within 320 nm (with the weather zones inside
 TS/TC areas), the SIGMETs that couldn't be parsed, and the raw text and
-the text given to PSX. The weather map shows SIGMET areas of every type
-within 640 nm, one colour per type, and marks each zone's CB at its
+the text given to PSX. The weather map shows every valid SIGMET area of
+every type (zoom out to see the ones further away), one colour per type,
+with a legend for the types in view, and marks each zone's CB at its
 actual position. Areas frankenweather doesn't use with the current
 settings (PSX gets them, or nobody does with the Off preset) are drawn
 with a dashed outline; hovering over an area says which. Without
@@ -740,7 +741,7 @@ G-AIRMET turbulence areas (US) vary like a TURB SIGMET instead: the
 same varying level in 2,000 ft layers, scaled by the area's severity (a
 MOD area gets two thirds of it, like a MOD SIGMET), so a moderate
 G-AIRMET is mostly light with moderate spells. The weather map shows the
-G-AIRMET turbulence areas within 640 nm too.
+G-AIRMET turbulence areas within 640 nm too (in the legend while in view).
 
 CB turbulence and real PIREPs are not changed. The console shows the
 multiplier in the turbulence reason, e.g. `(gust x1.24)`.

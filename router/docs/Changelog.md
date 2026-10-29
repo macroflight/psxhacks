@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Change: the weather map shows every valid SIGMET area** frankenweather
+  downloaded (zoom out to see the far ones), and the legend lists only
+  the types in view. Needs FrankenWeather with `--sigmet`.
+
 ## 2026-10-25: version 1.30.0
 
 - **New: /efb has a Turbulence Profile selector** (Stable/Testing) for

@@ -21,6 +21,12 @@
   level and its source, and the profile, so a pilot's report can be
   checked from a normal log. Every turbulence setting change is now
   logged with its value.
+- **Change: the weather map shows every valid SIGMET area**, not just
+  those within 640 nm (zoom out to see them), and its legend lists only
+  the types with an area in view, updated as you pan and zoom. It used
+  to list types whose areas were off screen. Areas across the date line
+  are drawn in one piece. Needs `--sigmet` (frankenweather's SIGMET
+  download); without it the map shows the nearby areas as before.
 - **Fix: false "changed by another client" warnings** for frankenweather's
   own zone placements (PSX rounds zone positions a little more than
   frankenweather allowed for), and the extra rewrites they caused.
