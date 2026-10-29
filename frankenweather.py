@@ -2165,7 +2165,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self.route_waypoints: list = []           # [(name, lat_deg, lon_deg), ...] in route order
         self._enroute_waypoints: list = []        # persistent per-flight superset, same shape
         self._enroute_wind_enabled: bool = True    # on by default; can be disabled from the web UI
-        self._enroute_wind_deviation: int = 30     # Qs497 random wind/OAT deviation, 10-80
+        self._enroute_wind_deviation: int = 30     # Qs497 Random slider position x 10, 0-80
         # Exact text of the last corridor we ourselves sent (MSFS wind sync or
         # the enroute wind importer) — compared by value, not time, in
         # _handle_corridor to tell our own echo apart from an external load.
@@ -3582,7 +3582,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 val = int(cmd["enroute_wind_deviation"])
             except (TypeError, ValueError):
                 val = None
-            if val in (10, 20, 30, 40, 50, 60, 70, 80):
+            if val in (0, 10, 20, 30, 40, 50, 60, 70, 80):
                 self._enroute_wind_deviation = val
                 self.logger.info("enroute_wind_deviation → %s", val)
                 if self._enroute_wind_enabled:
@@ -3923,7 +3923,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         for key, attr, cast in _CONFIG_ENROUTE_WIND_FIELDS:
             if key in enroute:
                 setattr(self, attr, cast(enroute[key]))
-        if self._enroute_wind_deviation not in (10, 20, 30, 40, 50, 60, 70, 80):
+        if self._enroute_wind_deviation not in (0, 10, 20, 30, 40, 50, 60, 70, 80):
             self._enroute_wind_deviation = 30
 
         timesync = config.get("timesync", {})
@@ -4829,11 +4829,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
     def _apply_enroute_wind_qs497(self) -> None:
         """Ensure Qs497 tells PSX to use the wind corridor, with our chosen deviation level.
 
-        Qs497 is a 3-digit PSX value: the first digit must be '2' for PSX to
-        actually use the wind corridor data; the other two digits (a multiple
-        of 10, 10-80) control how much random wind/OAT deviation PSX applies
-        on top of it, simulating forecast inaccuracy. Re-sent on every corridor
-        refresh (not just once) to keep enforcing it while the importer is on.
+        Qs497 (WxCorridorSel) holds the Corridor page's selections, one digit
+        each (Aerowinx): the first is 2 for "embedded" (PSX uses the corridor
+        data; 1 = not embedded), the second the Random slider position (the
+        random wind/OAT deviation PSX applies on top, simulating forecast
+        inaccuracy; 0 = none), the third the Format menu selection (irrelevant
+        for an injected corridor, sent as 0). The deviation setting is kept as
+        0-80 in steps of 10, so its tens digit is the slider position. Re-sent
+        on every corridor refresh (not just once) to keep enforcing it while
+        the importer is on.
         """
         if not self.psx_connected:
             return

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **New: the random wind/OAT deviation can be set to 0.** The enroute
+  wind importer's deviation (PSX's Random slider on the Corridor page)
+  now goes from 0 to 80; at 0, PSX's winds are exactly the injected
+  forecast, which is unnaturally accurate for normal flying but useful
+  for testing. The default stays 30. The docs also describe `Qs497`
+  correctly now: its digits are "embedded", the Random slider position
+  and the Format menu selection, as Aerowinx describes them.
 - **Fix: frankenweather's wind corridor came back late after a situation
   load.** When another client or a situ replaced it, frankenweather
   rebuilt the same corridor but didn't resend it until the wind data

@@ -854,9 +854,11 @@ default; toggleable from the `/weather/enroute-wind` web page (or the
 - **Writing to PSX.** The fetched data is written back to PSX as a
   Format-A wind corridor, and `Qs497` (the PSX variable controlling
   wind corridor use and simulated forecast inaccuracy) is set so its
-  first digit is always `2` (use the corridor data) and the other two
-  digits are the deviation percentage chosen on the web page (10-80 in
-  steps of 10 — simulates that a forecast is never 100% accurate). To
+  first digit is always `2` (embedded: PSX uses the corridor data), the
+  second is PSX's Random slider position from the deviation chosen on the
+  web page (0-80 in steps of 10, e.g. 30 = position 3, 0 = no random
+  deviation; it simulates that a forecast is never 100% accurate), and
+  the third (the Format menu selection, irrelevant here) is 0. To
   avoid making PSX recalculate for nothing, a rebuilt corridor that's
   byte-identical to the last one actually sent is not resent — except
   right after enabling (or re-enabling) the importer, which always
@@ -929,7 +931,7 @@ wind_sync = false
 
 [enroute_wind]
 enabled = false
-deviation = 30            # 10-80, in steps of 10
+deviation = 30            # 0-80, in steps of 10 (0: no deviation)
 
 [timesync]
 on_startup = true
