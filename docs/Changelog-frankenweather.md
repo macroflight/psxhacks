@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Fix: the wind corridor settings were resent on every refresh.** With
+  the enroute wind importer on, frankenweather sent PSX's Corridor page
+  selections (`Qs497`: embedded, random deviation) with every corridor
+  refresh, even when PSX already had them. Now they're only sent when
+  PSX's value differs, e.g. after a situ load or a change on the Corridor
+  page. Rewriting them may make PSX pick new random wind deviations.
 - **Fix: memory peaks of about 700 MB.** Compressing the SIGMET data
   frankenweather broadcasts to the router and the web pages used LZMA's
   strongest preset, whose 64 MB dictionary made every broadcast allocate

@@ -4835,15 +4835,20 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         random wind/OAT deviation PSX applies on top, simulating forecast
         inaccuracy; 0 = none), the third the Format menu selection (irrelevant
         for an injected corridor, sent as 0). The deviation setting is kept as
-        0-80 in steps of 10, so its tens digit is the slider position. Re-sent
-        on every corridor refresh (not just once) to keep enforcing it while
-        the importer is on.
+        0-80 in steps of 10, so its tens digit is the slider position. Checked
+        on every corridor refresh, but only sent when PSX's value differs:
+        WxCorridorSel is subscribed, so psx.get() follows our own writes, the
+        Corridor page and situ loads alike. It used to go out on every
+        refresh (psx.get() of an unsubscribed key is always ""), and a
+        rewrite may make PSX pick new random deviations.
         """
         if not self.psx_connected:
             return
         value = f"2{self._enroute_wind_deviation:02d}"
+        if self._psx_has("WxCorridorSel", self.psx.get("WxCorridorSel"), value):
+            return
         self._inject_wx_slow_transit()
-        self.psx_send_and_set("Qs497", value)
+        self.psx_send_and_set("WxCorridorSel", value)
 
     def _apply_enroute_wind_injection(self) -> None:
         """Build a fresh Format-A corridor from route_waypoints + fetched OM wind.
@@ -8988,6 +8993,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.psx.subscribe("WxAloft", self.handle_wxaloft)
             self.psx.subscribe("addon", self._handle_addon)
             self.psx.subscribe("WxCorridorTxt", self._handle_corridor)
+            # Qs497: so psx.get() holds PSX's current value and
+            # _apply_enroute_wind_qs497() only sends it when it differs
+            self.psx.subscribe("WxCorridorSel")
             self.psx.subscribe("MetarsUp", self._handle_metars_up)
             self.psx.subscribe("PrinterText", self._handle_printer_text)
             # The weather variables we control (_OWNED_KEYS): subscribing
