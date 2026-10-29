@@ -17,7 +17,7 @@ Cache strategy
 import logging
 import math
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import numpy as np  # pylint: disable=import-error
@@ -82,7 +82,13 @@ def _pos_bucket(lat: float, lon: float) -> tuple[int, int]:
 
 
 def _time_bucket(dt: datetime) -> tuple[int, int]:
-    """Return (year*10000 + month*100 + day, hour // CACHE_HOURS)."""
+    """Return (year*10000 + month*100 + day, hour // CACHE_HOURS) of the nearest hour.
+
+    The nearest hour, like _parse() picks: rounding down kept whichever
+    forecast hour the first call in an hour picked for the whole hour, up
+    to ~1 h stale, and neighbouring squares could differ by an hour.
+    """
+    dt = dt + timedelta(minutes=30)
     d = dt.date()
     bucket = dt.hour // CACHE_HOURS
     return (d.year * 10000 + d.month * 100 + d.day, bucket)

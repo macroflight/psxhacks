@@ -13,7 +13,7 @@ import logging
 import math
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from .openmeteo import HourlyForecastCache
@@ -61,6 +61,8 @@ def _pos_bucket(lat: float, lon: float) -> tuple[int, int]:
 
 
 def _time_bucket(dt: datetime) -> tuple[int, int]:
+    """Return the nearest hour's cache bucket (like the wind fetcher's)."""
+    dt = dt + timedelta(minutes=30)
     d = dt.date()
     return (d.year * 10000 + d.month * 100 + d.day, dt.hour // CACHE_HOURS)
 

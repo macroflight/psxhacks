@@ -401,6 +401,7 @@ _TEMPO_HOLD_MAX_S = 1800.0            # 30 minutes
 _TEMPO_MIN_OKTAS = 2                  # lowest CB coverage used while a TEMPO segment is "on"
 _MSFS_BRIDGE_TIMEOUT_S = 300.0        # stop using bridge data after this silence period
 _MSFS_TURB_FACTOR_MAX = 1.3           # most turbulence is multiplied by in MSFS cloud
+_TERRAIN_SMOOTH_S = 30.0              # see Script._smooth_terrain()
 # Rolling window for the MSFS in-cloud duty cycle used by cloud sync (_msfs_cloud_oktas):
 # long enough to smooth out a brief punch through a wisp of cirrus, short enough to still
 # ramp up to full coverage reasonably quickly in a genuine sustained layer.
@@ -2322,6 +2323,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._turb_msfs_factor: float = 1.0   # last computed raw factor (for display)
         # What's injected: intensity x biases x MSFS factor (for display)
         self._turb_effective_intensity: float = 0.0
+        # (intensity, monotonic time, state) of the smoothed terrain model
+        # turbulence, see _smooth_terrain()
+        self._terrain_smooth: Optional[tuple] = None
         self._turb_engine: Optional[TurbulenceEngine] = None
         self._turb_state: Optional[TurbulenceState] = None
         self._turb_sources: list = []
@@ -3457,6 +3461,24 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                           '+' if direction > 0 else '-', magnitude,
                           f" on the ground at {tas_kt:.0f} kt" if on_ground else "")
 
+    def _smooth_terrain(self, state: TurbulenceState) -> TurbulenceState:
+        """Return the terrain model's state with its intensity smoothed (_TERRAIN_SMOOTH_S).
+
+        The wind data comes per 1-degree square and forecast hour, so
+        wind, shear, mechanical and wave turbulence used to step where the
+        aircraft crossed into another square (~every 7 min at cruise) or
+        hour. Fading out, it keeps the kind it had.
+        """
+        now = time.monotonic()
+        prev = self._terrain_smooth
+        value = state.intensity
+        if prev is not None and now - prev[1] < 5.0:
+            value = prev[0] + (value - prev[0]) * min(1.0, (now - prev[1]) / _TERRAIN_SMOOTH_S)
+        if state.kind == "none" and value >= 0.01 and prev is not None:
+            state = prev[2]
+        self._terrain_smooth = (value, now, state)
+        return dataclasses.replace(state, intensity=value)
+
     def _shown_intensity(self, intensity: float) -> float:
         """Return the effective intensity the UIs show: on the ground, as capped there."""
         return min(intensity, _GROUND_TURB_CAP) if self._on_ground() else intensity
@@ -4100,6 +4122,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                                          self._turb_gairmet_fetcher.get_active, lat, lon, alt_ft),
                 )
 
+                state = self._smooth_terrain(state)
                 # Gustiness: layered multipliers on the physically computed
                 # kinds (_apply_gust()); drivers maps each state to what
                 # drives its intensity over time (_turb_ramp_status())
