@@ -325,6 +325,25 @@ _SIGMET_CONV = {"ISOL": (0.03, 0.15), "OCNL": (0.06, 0.25), "FRQ": (0.10, 0.35),
                 "EMBD": (0.10, 0.35), "OBSC": (0.08, 0.30), "SQL": (0.12, 0.45),
                 "CONVECTIVE": (0.08, 0.30)}
 _SIGMET_CONV_DEFAULT = (0.06, 0.25)
+# Testing profile: wave/MTW bursts that don't drive FLCH into oscillation
+# (_pick_wave_burst_testing()). A wave phase changing this fast (per s, a
+# sine of about a 2 min period) gives sink bursts at the full rate.
+_WAVE_PHASE_RATE_FULL = 0.05
+# ... and keep only this fraction of their speed/gust bursts: FLCH holds
+# speed with pitch, so even random-direction speed kicks keep it swinging.
+# EGPF FLCH descent, same weather and burst sequence replayed (2026-10-25):
+# all bursts -4300 fpm / 4 swings >2000 fpm, a quarter of the speed/gust
+# ones just as bad (-4500 / 8), none -2400 / 0. A real wave changes the
+# airspeed slowly, over its cycle, not in sharp kicks.
+_WAVE_SPD_KEEP = 0.0
+# Below this intensity a wave's bursts are only speed/gust ones
+# (_pick_burst()); without them it would be glassy smooth, so the testing
+# profile makes them up/down bursts there instead (rate-gated like the rest)
+_WAVE_LIGHT_BELOW = 0.25
+# Testing profile: an MTW SIGMET lifts the terrain model's own wave to at
+# most this factor times it plus this much (_mtw_state()).
+_MTW_LIFT_FACTOR = 2.0
+_MTW_LIFT_ADD = 0.20
 _SIGMET_CONV_TC = (0.12, 0.45)
 # Gustiness of physically computed turbulence: a layered multiplier around
 # 1 (frankenturb/intensity_profile.py GustinessProfile) per family of
@@ -2363,6 +2382,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._turb_lateral_size_bias: int = 50
         self._turb_rate: int = 100             # 0-100, injection rate scale
         self._turb_profile: str = "stable"     # _TURB_PROFILES
+        # (monotonic time, vertical) of the last wave/MTW burst decision,
+        # see _pick_wave_burst_testing()
+        self._wave_vert_prev: Optional[tuple] = None
         self._turb_type_enabled: dict = {k: True for k in _TURB_TYPES}
         self._turb_type_biases: dict = {k: 100 for k in _TURB_TYPES}
         self._turb_msfs_magnitude: int = 100  # 0-200%; scales MSFS turbulence influence
@@ -3498,8 +3520,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return
         if random.random() >= (intensity ** 1.5) * (self._turb_rate / 100.0):
             return
-        base, direction, label = (_pick_ground_burst() if on_ground
-                                  else _pick_burst(state, intensity))
+        if on_ground:
+            base, direction, label = _pick_ground_burst()
+        elif self._turb_testing() and state.kind in ('wave', 'mtw'):
+            picked = self._pick_wave_burst_testing(state, intensity)
+            if picked is None:
+                return
+            base, direction, label = picked
+        else:
+            base, direction, label = _pick_burst(state, intensity)
         magnitude = min(99, random.randint(1, max(1, int(intensity * 99))))
         psx_value = direction * (base + magnitude)
         self.psx_send_and_set("WxBurst", str(psx_value), force=True)
@@ -4654,6 +4683,38 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 f"{entry['qualifier']} MTW SIGMET {entry['fir']} {entry['series']}")
         return turb_state, mtw_state
 
+    def _pick_wave_burst_testing(self, state: TurbulenceState,
+                                 intensity: float) -> Optional[tuple]:
+        """Return a wave/MTW burst like _pick_burst(), or None to skip it (testing profile).
+
+        _pick_burst() gives sink bursts in the direction of the wave's
+        phase and speed/gust bursts in the direction of its gust, so they
+        push the same way for a minute at a time: in a SEV MTW SIGMET's
+        61 % that drove FLCH into a ~40 s pitch oscillation with descents
+        to 5,000+ ft/min (EGPF, 2026-10-25). Here sink bursts follow the
+        change of the phase (the draft getting stronger or weaker), and
+        only as often as it changes (_WAVE_PHASE_RATE_FULL), so the push is
+        bounded; speed and gust bursts go either way, and only
+        _WAVE_SPD_KEEP of them are kept -- below _WAVE_LIGHT_BELOW, where
+        a wave gets nothing else, the others become up/down bursts.
+        """
+        now = time.monotonic()
+        prev, self._wave_vert_prev = self._wave_vert_prev, (now, state.vertical)
+        base, _, label = _pick_burst(state, intensity)
+        direction = random.choice([-1, 1])
+        if base in (_BURST_SPD, _BURST_GUST) and random.random() >= _WAVE_SPD_KEEP:
+            if intensity >= _WAVE_LIGHT_BELOW:
+                return None
+            base, label = _BURST_SINK, "sink"
+        if base != _BURST_SINK or _isnan(state.vertical):
+            return base, direction, label
+        if prev is None or _isnan(prev[1]) or now - prev[0] <= 0.0 or now - prev[0] > 5.0:
+            return None
+        rate = (state.vertical - prev[1]) / (now - prev[0])
+        if rate == 0.0 or random.random() >= min(1.0, abs(rate) / _WAVE_PHASE_RATE_FULL):
+            return None
+        return base, _sign(rate), label
+
     def _sigmet_convective_turbulence(self, lat: float, lon: float,
                                       alt_ft: float) -> Optional[tuple]:
         """Return (state, scale) for the TS/TC SIGMET area at the aircraft, or None (testing).
@@ -4705,6 +4766,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if terrain_state.kind not in ("wave", "rotor"):
             return TurbulenceState(intensity=intensity, kind="mtw",
                                    reason=f"{label} (no terrain wave found)")
+        if self._turb_testing():
+            # A SEV MTW SIGMET lifted a 2-4 % terrain wave to 61 % (EGPF, 2026-10-25)
+            intensity = min(intensity,
+                            terrain_state.intensity * _MTW_LIFT_FACTOR + _MTW_LIFT_ADD)
         if (terrain_state.intensity * self._turb_type_effective_bias(terrain_state.kind) >=
                 intensity * self._turb_type_effective_bias("mtw")):
             return None
