@@ -78,6 +78,9 @@ The p95 reaches the pilot report bands at about:
 - **frankenweather's labels are about one category too strong below
   50%**: its "light" (10-25%) is practically smooth, and the 30%
   low-level wind shear limit is light chop.
+- **A pilot's report agrees**: a hand-flown landing in the big sim with
+  manual turbulence fixed at 30% (mechanical) from 7,000 ft to touchdown
+  was "interesting, but not difficult or dangerous" (2026-10-25).
 - **At cruise, 60% and more can upset the aircraft**: at FL310 the
   autopilot repeatedly lost the altitude by up to about 2,000 ft with
   the pitch between about -10 and +28 degrees, and the speed bled off
