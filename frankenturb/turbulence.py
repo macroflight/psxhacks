@@ -26,9 +26,11 @@ Three mechanisms are modelled:
    perpendicular to the wind.
    - Wind used: profile at ridge-top altitude (the layer that actually drives waves).
    - Vertical wind shear across the profile amplifies wave intensity.
-   - Detected when: significant upwind barrier + wind speed threshold met.
-   - Vertical component follows a sinusoidal wave pattern whose half-wavelength
-     is estimated from ridge-top wind speed (λ ≈ U × T_WAVE_S).
+   - Ramps in with the wind across the ridge at ridge top (from ~20 kt,
+     full at ~43 kt) and the barrier height (200-1500 m).
+   - Vertical component follows a sinusoidal wave pattern anchored to the
+     ridge (sinking just downwind of it), whose wavelength is estimated
+     from ridge-top wind speed (λ ≈ U × T_WAVE_S).
    - Roll: small ±0.2 × wave phase.  Gust: small antiphase ±0.15.
 
 3. Lee rotor
@@ -43,6 +45,7 @@ Wind shear CAT contribution
 """
 
 import math
+from typing import Optional
 from dataclasses import dataclass, field, replace
 
 from .terrain.elevation import ElevationGrid
@@ -107,8 +110,16 @@ LOW_LEVEL_SHEAR_BLEND_FT = 5000.0
 # chart calls for severe turbulence at 30kt from 125-225°T) reach the
 # moderate-to-severe range rather than staying in the light range.
 WIND_NORM_MS = 30.0        # rotor: normalise at 58 kt (high threshold OK for rotors)
-WAVE_WIND_NORM_MS = 20.0   # wave: normalise at 39 kt; 30 kt → factor 0.77
-WAVE_BARRIER_NORM_M = 2000.0  # consistent with rotor; 1500 m barrier → factor 0.75
+# Mountain wave: the wind across the ridge at ridge top ramps it in from
+# WAVE_WIND_MIN_MS (~20 kt; real waves need ~25 kt+) to full at
+# WAVE_WIND_NORM_MS (~43 kt), and the barrier from WAVE_BARRIER_MIN_M to
+# WAVE_BARRIER_NORM_M. It used to switch on at 8 m/s (15 kt) and a 500 m
+# barrier, as a step to ~moderate (2026-10-24 review).
+WAVE_PEAK_CHANGE_M = 150.0   # see TerrainTurbulenceModel._wave_downwind_m()
+WAVE_WIND_MIN_MS = 10.0
+WAVE_WIND_NORM_MS = 22.0
+WAVE_BARRIER_MIN_M = 200.0
+WAVE_BARRIER_NORM_M = 1500.0
 
 # Height above terrain used to sample "surface" wind from the profile.
 SURFACE_SAMPLE_AGL_M = 300.0
@@ -196,6 +207,11 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
         self._grid = grid
         self._upwind_km = upwind_km
         self._roughness_km = roughness_radius_km
+        # (lat, lon, elevation_m) of the peak the mountain wave phase is
+        # measured from, and an offset keeping the phase continuous when it
+        # changes (see _wave_downwind_m())
+        self._wave_peak: Optional[tuple] = None
+        self._wave_offset_m = 0.0
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -264,9 +280,11 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
         # ---- 3. Dominant mechanism -----------------------------------------
         rotor = self._rotor_conditions(agl_m, terrain_m, max_upwind_m, ridge_dist_km)
         ridge_top_spd_kt, ridge_top_dir_deg = wind_profile.wind_at_ridge_top(max_upwind_m)
-        wave = self._wave_conditions(
-            barrier_height_m, ridge_top_spd_kt * KT_TO_MS, agl_m
-        )
+        # Only the wind blowing across the ridge (towards the peak) makes waves
+        cross_ms = ridge_top_spd_kt * KT_TO_MS * max(0.0, math.cos(math.radians(
+            (ridge_bearing_deg - ridge_top_dir_deg + 180.0) % 360.0 - 180.0)))
+        wave = self._wave_conditions(barrier_height_m, cross_ms,
+                                     ridge_top_spd_kt * KT_TO_MS, agl_m)
 
         ridge_top_m_ft = max_upwind_m * 3.28084
 
@@ -281,9 +299,8 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
             state.source_lon = peak_lon
         elif wave["active"]:
             state = self._wave_state(
-                wave, ridge_top_spd_kt * KT_TO_MS,
-                lat, lon, ridge_top_dir_deg, agl_m
-            )
+                wave, self._wave_downwind_m(lat, lon, (peak_lat, peak_lon, max_upwind_m),
+                                            ridge_top_dir_deg))
             state.reason = (
                 f"Mountain wave: wind {ridge_top_dir_deg:.0f}° {ridge_top_spd_kt:.0f}kt "
                 f"hitting {ridge_top_m_ft:.0f}ft terrain bearing "
@@ -356,15 +373,26 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
     def _wave_conditions(
         self,
         barrier_height_m: float,
-        ridge_top_wind_ms: float,
+        cross_wind_ms: float,
+        wind_ms: float,
         agl_m: float,
     ) -> dict:
-        if barrier_height_m < BARRIER_THRESHOLD_M:
-            return {"active": False}
-        if ridge_top_wind_ms < 8.0:
+        """Return the mountain wave conditions.
+
+        cross_wind_ms (across the ridge) drives the strength, wind_ms the
+        wavelength.
+
+        The wavelength comes from the whole wind, not the part across the
+        ridge: that jumps whenever another peak in the upwind fan becomes
+        the highest, and with the aircraft several wavelengths downwind any
+        wavelength change moves the phase a lot.
+        """
+        wind_factor = _normalise(cross_wind_ms, WAVE_WIND_MIN_MS, WAVE_WIND_NORM_MS)
+        barrier_factor = _normalise(barrier_height_m, WAVE_BARRIER_MIN_M, WAVE_BARRIER_NORM_M)
+        if wind_factor <= 0.0 or barrier_factor <= 0.0:
             return {"active": False}
 
-        half_lambda_m = ridge_top_wind_ms * T_WAVE_S / 2.0
+        half_lambda_m = wind_ms * T_WAVE_S / 2.0
         # Waves are strongest near ridge height and weaker below it (aircraft is under
         # the wave, not in it).  Scale linearly from zero at ground to 1.0 at the
         # barrier summit, then let the exponential handle high-altitude decay above.
@@ -379,6 +407,8 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
             "barrier_height_m": barrier_height_m,
             "half_lambda_m": half_lambda_m,
             "alt_factor": alt_factor,
+            "wind_factor": wind_factor,
+            "barrier_factor": barrier_factor,
         }
 
     # ------------------------------------------------------------------
@@ -407,23 +437,42 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
             kind="rotor",
         )
 
-    def _wave_state(  # pylint: disable=too-many-arguments,too-many-positional-arguments
-        self,
-        wave: dict,
-        ridge_top_wind_ms: float,
-        lat: float,
-        lon: float,
-        wind_dir_deg: float,
-        _agl_m: float,
-    ) -> TurbulenceState:
-        wind_factor = min(1.0, ridge_top_wind_ms / WAVE_WIND_NORM_MS)
-        barrier_factor = min(1.0, wave["barrier_height_m"] / WAVE_BARRIER_NORM_M)
-        intensity = 0.7 * wind_factor * barrier_factor * wave["alt_factor"]
+    def _wave_downwind_m(self, lat: float, lon: float, peak: tuple,
+                         wind_dir_deg: float) -> float:
+        """Return how far (m) the aircraft is downwind of the wave's peak, for the wave phase.
 
-        phase = self._wave_phase(lat, lon, wind_dir_deg, wave["half_lambda_m"])
-        vertical = math.sin(phase)
+        The detected peak jumps by 0.4-3 km as the aircraft moves (sampling
+        along the upwind fan), which would jump the wave phase. So the peak
+        is kept until one at least WAVE_PEAK_CHANGE_M higher or lower is
+        detected, or it's no longer upwind within the scan distance; and
+        when it does change, an offset keeps the distance (the phase)
+        continuous, so the aircraft doesn't jump from a down- to an updraft.
+        """
+        old = self._wave_peak
+        if old is not None:
+            along = _downwind_m(old[0], old[1], lat, lon, wind_dir_deg)
+            if (abs(peak[2] - old[2]) <= WAVE_PEAK_CHANGE_M and
+                    0.0 <= along <= self._upwind_km * 1000.0):
+                return along + self._wave_offset_m
+            self._wave_offset_m += along - _downwind_m(peak[0], peak[1], lat, lon, wind_dir_deg)
+        self._wave_peak = peak
+        return _downwind_m(peak[0], peak[1], lat, lon, wind_dir_deg) + self._wave_offset_m
+
+    @staticmethod
+    def _wave_state(wave: dict, downwind_m: float) -> TurbulenceState:
+        """Return the mountain wave state downwind_m downwind of the ridge.
+
+        The up/down phase is anchored to the ridge: just downwind of it the
+        air sinks, then rises and sinks again every wavelength. It used to
+        be the absolute position modulo the wavelength, so a 1° wind
+        change moved it by several wavelengths: noise, not waves.
+        """
+        intensity = 0.7 * wave["wind_factor"] * wave["barrier_factor"] * wave["alt_factor"]
+
+        phase = 2.0 * math.pi * downwind_m / (2.0 * wave["half_lambda_m"])
+        vertical = -math.sin(phase)
         roll = 0.2 * math.cos(phase)
-        gust = -0.15 * math.sin(phase)
+        gust = 0.15 * math.sin(phase)
 
         return TurbulenceState(
             intensity=min(1.0, intensity),
@@ -449,29 +498,19 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
             kind="mechanical",
         )
 
-    # ------------------------------------------------------------------
-    # Wave phase helper
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _wave_phase(
-        lat: float, lon: float, wind_dir_deg: float, half_lambda_m: float
-    ) -> float:
-        """Return spatially consistent wave phase projected onto the downwind axis.
-
-        Phase is based on position projected onto the downwind axis, modulo wavelength.
-        """
-        downwind_rad = math.radians((wind_dir_deg + 180.0) % 360.0)
-        x_m = lon * 111_320.0 * math.cos(math.radians(lat))
-        y_m = lat * 111_320.0
-        proj = x_m * math.sin(downwind_rad) + y_m * math.cos(downwind_rad)
-        wavelength_m = 2.0 * half_lambda_m
-        return (proj % wavelength_m) / wavelength_m * 2.0 * math.pi
-
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+def _downwind_m(from_lat: float, from_lon: float, lat: float, lon: float,
+                wind_dir_deg: float) -> float:
+    """Return how far (m) lat/lon is downwind of from_lat/from_lon (negative: upwind)."""
+    downwind_rad = math.radians((wind_dir_deg + 180.0) % 360.0)
+    x_m = (lon - from_lon) * 111_320.0 * math.cos(math.radians(lat))
+    y_m = (lat - from_lat) * 111_320.0
+    return x_m * math.sin(downwind_rad) + y_m * math.cos(downwind_rad)
+
 
 def _shear_thresholds(alt_ft: float) -> tuple:
     """Return the (onset, full) wind shear in kt/1000ft at alt_ft (see SHEAR_ALOFT_MODERATE)."""
