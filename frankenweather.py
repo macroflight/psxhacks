@@ -1674,6 +1674,15 @@ def _sign(v):
     return 1 if v >= 0.0 else -1
 
 
+def _turb_type(kind: str) -> str:
+    """Return the turbulence type (_TURB_TYPES) a kind's settings come from.
+
+    "X+shear" is wind shear outweighing X (frankenturb/turbulence.py), so
+    the wind shear settings apply; they used to be ignored for it.
+    """
+    return "shear" if kind.endswith("+shear") else kind
+
+
 def _pick_burst(state, intensity):
     """Choose (base_offset, direction, label) for one WxBurst event."""
     r = random.choice
@@ -1701,7 +1710,7 @@ def _pick_burst(state, intensity):
             (_BURST_BANK, r([-1, 1]), 'bank'),
             (_BURST_YAW, r([-1, 1]), 'yaw'),
         ])
-    if state.kind == 'shear':
+    if _turb_type(state.kind) == 'shear':
         return r([
             (_BURST_SINK, r([-1, 1]), 'sink'),
             (_BURST_BANK, r([-1, 1]), 'bank'),
@@ -3378,6 +3387,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
     # ------------------------------------------------------------------
     # --config-file (TOML): load/save every setting the web GUI can change
+        kind = _turb_type(kind)
     # ------------------------------------------------------------------
 
     def _build_config_dict(self) -> dict:
