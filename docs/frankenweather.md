@@ -411,8 +411,10 @@ aircraft flies towards can still get a CB there: a new or moved TS
 SIGMET, CAPE, or a METAR. Such a CB is small, at most 2 oktas and 15,000
 ft, until the zone is moved (usually once it's behind the aircraft), so
 no 45,000 ft CB appears out of nowhere 10 nm ahead. A CB the zone already
-had when it came within 100 nm stays, but doesn't grow. The departure
-and destination airport zones keep their METAR's CB.
+had when it came within 100 nm stays, but doesn't grow, and so does the
+CB a zone gets on frankenweather's first update after it starts (PSX may
+already be showing it). The departure and destination airport zones keep
+their METAR's CB.
 
 Both the forecast target and the live ramp rate are visible, not just the
 current (ramped) value: the web UI's weather map popup and the

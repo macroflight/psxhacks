@@ -1,5 +1,17 @@
 # frankenweather changelog
 
+## Unreleased
+
+- **Fix: restarting frankenweather near CBs shrank them.** A CB that
+  comes within 100 nm of the aircraft is kept from growing, and a zone
+  that had none there may only get a small one (2 oktas, 15,000 ft), so
+  that no full-size CB pops up right ahead. Right after a restart
+  frankenweather didn't know which zones already had CBs, so every zone
+  near the aircraft counted as CB-free: in a typhoon's CB area the
+  44,999 ft CBs PSX was showing were cut to 15,000 ft until the zones
+  moved. On the first update after a start, a zone near the aircraft now
+  keeps the CB it gets.
+
 ## 2.0.1 (2026-10-29)
 
 - **Fix: in the testing profile, the PIREP button said "rough" at every

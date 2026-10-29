@@ -5548,7 +5548,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         new zones are never placed this close, but a zone the aircraft
         flies towards can still get a CB (a new or moved TS SIGMET, CAPE,
         a METAR), which used to appear at full size, e.g. 45,000 ft
-        within 10 nm. Not for the dep/dst airport zones (their METAR).
+        within 10 nm. Not for the dep/dst airport zones (their METAR). On
+        a zone's first write since startup the cap is the CB it gets then:
+        PSX may already show it, so a restart must not shrink it.
         """
         cap = self.zone_cb_close_cap.get(zone_num)
         if cap is not None and cap[0] != pos:
@@ -5559,8 +5561,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if cap is None:
             if self._dist_nm(self.ac_lat, self.ac_lon, pos[0], pos[1]) > _CB_SQUEEZE_MIN_FWD_NM:
                 return wx
-            prev = (self.zone_wx.get(zone_num) or "").split(';')
-            same_zone = self._zone_wx_pos.get(zone_num) == pos and len(prev) > 11
+            if zone_num not in self.zone_wx:
+                # first write since startup: nothing "appears", the zone's
+                # CB is whatever it gets now (a restart near a TC's CBs cut
+                # them to 2 oktas, 15,000 ft, frankensim 2026-10-29)
+                prev, same_zone = wx.split(';'), True
+            else:
+                prev = (self.zone_wx.get(zone_num) or "").split(';')
+                same_zone = self._zone_wx_pos.get(zone_num) == pos and len(prev) > 11
             had = int(prev[9]) if same_zone and prev[9].isdigit() else 0
             cap = ((pos, had, float(prev[10])) if had > 0 else
                    (pos, _CB_CLOSE_MAX_OKTAS, _CB_CLOSE_MAX_TOP_FT))
