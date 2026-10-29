@@ -149,10 +149,12 @@ class CapeFetcher:
 
 
 def _precip_scale(showers_mm_h: float) -> float:
-    """Scale factor from precipitation rate — CAPE is potential, showers are reality."""
-    if math.isnan(showers_mm_h):
-        return 1.0
-    if showers_mm_h < 0.5:
+    """Scale factor from precipitation rate — CAPE is potential, showers are reality.
+
+    No showers data counts as none: CAPE alone in clear air is smooth (it
+    used to count as full showers, making the air rough).
+    """
+    if math.isnan(showers_mm_h) or showers_mm_h < 0.5:
         return 0.10
     if showers_mm_h < 2.0:
         return 0.40
