@@ -523,6 +523,10 @@ _CB_GROWTH_MAX_TOP_FT_PER_MIN_CEILING = 4000.0
 _MPS_TO_FT_PER_MIN = 196.85
 _CB_DECAY_TOP_FT_PER_MIN = 150.0            # fixed, real-CB-collapse-plausible rate
 _CB_DECAY_OKTAS_PER_MIN = 0.1               # ~1 okta every 10 minutes
+# Without --cb-growth a disappearing CB fades instead (_fade_cb_wx()):
+# 8 oktas / 40000 ft gone in ~13-15 min
+_CB_FADE_OKTAS_PER_MIN = 0.6
+_CB_FADE_TOP_FT_PER_MIN = 2500.0
 
 _HDG_WINDOW_S = 300.0                 # heading-change detection window (5 min)
 _MANEUVER_ENTER_DEG = 180.0           # total hdg change to enter maneuvering mode
@@ -4792,6 +4796,47 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         return min(_CB_GROWTH_MAX_TOP_FT_PER_MIN_CEILING,
                    max(_CB_GROWTH_MAX_TOP_FT_PER_MIN, scaled))
 
+    def _fade_cb_wx(self, zone_num: int, target_wx: str) -> str:
+        """Let zone_num's CB fade instead of vanishing (without --cb-growth).
+
+        A CB appears or grows at once, as forecast, but a CB whose
+        forecast shrinks or disappears (a TEMPO switching off, a new
+        METAR, SIGMET expiry...) shrinks at _CB_FADE_*_PER_MIN: at most
+        ~15 min from 8 oktas. It used to vanish in one zone update,
+        radar echo and turbulence with it. Zone moves reset it (the zone
+        starts fresh), so it never holds a zone back.
+        """
+        parts = target_wx.split(';')
+        target_oktas = int(parts[9])
+        target_top = float(parts[10])
+        now = time.time()
+        ramp = self.zone_cb_ramp.get(zone_num)
+        if ramp is None or target_oktas >= ramp['current_oktas']:
+            if target_oktas > 0:
+                self.zone_cb_ramp[zone_num] = {
+                    'current_oktas': float(target_oktas), 'current_top_ft': target_top,
+                    'base_ft': float(parts[11]), 'last_update_ts': now,
+                    'last_oktas_rate_per_min': 0.0, 'last_top_rate_per_min': 0.0}
+            else:
+                self.zone_cb_ramp.pop(zone_num, None)
+            return target_wx
+        elapsed_min = max(0.0, (now - ramp['last_update_ts']) / 60.0)
+        new_oktas = max(float(target_oktas),
+                        ramp['current_oktas'] - _CB_FADE_OKTAS_PER_MIN * elapsed_min)
+        if new_oktas < 0.5:
+            self.zone_cb_ramp.pop(zone_num, None)
+            return target_wx
+        base = float(parts[11]) if target_oktas > 0 else ramp.get('base_ft', float(parts[11]))
+        new_top = max(target_top if target_oktas > 0 else base + _CB_MIN_DEPTH_FT,
+                      ramp['current_top_ft'] - _CB_FADE_TOP_FT_PER_MIN * elapsed_min)
+        ramp.update(current_oktas=new_oktas, current_top_ft=new_top, base_ft=base,
+                    last_update_ts=now, last_oktas_rate_per_min=-_CB_FADE_OKTAS_PER_MIN,
+                    last_top_rate_per_min=-_CB_FADE_TOP_FT_PER_MIN)
+        parts[9] = str(max(1, round(new_oktas)))
+        parts[10] = str(round(new_top))
+        parts[11] = str(round(base))
+        return ';'.join(parts)
+
     def _ramp_cb_wx(  # pylint: disable=too-many-locals,too-many-statements
             self, zone_num: int, target_wx: str, cape_jkg: float = 0.0) -> str:
         """Ramp zone_num's CB oktas/top toward target_wx's values (--cb-growth).
@@ -7029,12 +7074,16 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 {'oktas': target_oktas_val, 'base': int(target_parts[11]),
                  'top': int(target_parts[10])} if target_oktas_val > 0 else None)
             # In every flight phase: it used to be off in maneuvering mode
-            # (holds, vectoring), where CBs then popped in and out at once
-            if self.args.cb_growth and not cb_removed_for:
+            # (holds, vectoring), where CBs then popped in and out at once.
+            # Without --cb-growth CBs still fade away (_fade_cb_wx()); CB
+            # removal near dep/arr and CB-free zones act at once.
+            if cb_removed_for or self._is_cb_free_zone(zone_num):
+                self.zone_cb_ramp.pop(zone_num, None)
+            elif self.args.cb_growth:
                 cape_here = _om_hval(om.get("hourly", {}), "cape", now.hour, 0) if om else 0.0
                 final_wx = self._ramp_cb_wx(zone_num, final_wx, cape_here)
             else:
-                self.zone_cb_ramp.pop(zone_num, None)
+                final_wx = self._fade_cb_wx(zone_num, final_wx)
             new_wxs.append(final_wx)
             _per_zone.append({
                 'radar_echo': radar_echo,

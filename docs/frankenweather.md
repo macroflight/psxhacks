@@ -386,7 +386,12 @@ offset) — any CB in the newly-assigned zone starts fresh from its own
 distance at that moment. The feature is active in every flight phase,
 including maneuvering mode (holds, vectoring; it used to be off there, so
 CBs, e.g. a destination METAR's TEMPO CB, popped in and out at once).
-With the flag off, CBs snap to forecast instantly.
+With the flag off, a CB appears or grows to its forecast at once, but a
+CB whose forecast shrinks or disappears (a TEMPO group switching off, a
+new METAR, a SIGMET expiring) still fades away rather than vanishing: up
+to about 15 minutes for a big one. "Remove CB near dep/arr" and
+CB-free zones remove CBs at once, and a zone that's moved starts fresh,
+so this never holds a zone back.
 
 Both the forecast target and the live ramp rate are visible, not just the
 current (ramped) value: the web UI's weather map popup and the
