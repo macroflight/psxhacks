@@ -1044,7 +1044,9 @@ def _parse_sigmets(raw: str) -> list:
     return result
 
 
-_METAR_GR_RE = re.compile(r'^[+-]?(SH|TS|VC|FZ|BL|DR|MI|PR)?(GR|GS)$')
+# Hail; not GS (small hail/snow pellets, mostly winter showers -- shower
+# precipitation for _METAR_SH_RE)
+_METAR_GR_RE = re.compile(r'^[+-]?(SH|TS|VC|FZ|BL|DR|MI|PR)?GR$')
 _METAR_SH_RE = re.compile(r'^[+-]?SH[A-Z]{2,4}$')
 _METAR_FC_RE = re.compile(r'^[+-]?FC$')
 _METAR_VIS4_RE = re.compile(r'^\d{4}$')
@@ -1069,9 +1071,17 @@ def _metar_parse_temp(s: str) -> int:
 
 
 def _metar_wx_token(token: str, out: dict) -> None:
-    """Update convective flags in parsed METAR dict from a present-weather token."""
-    if token == 'TSNO':
-        pass  # "Thunderstorm information not available" — sensor broken, not a CB indicator
+    """Update convective flags in parsed METAR dict from a present-weather token.
+
+    Only real weather groups count: 'TS' in e.g. the station VTSP (Phuket)
+    used to give a permanent 4-okta CB. TSNO ("thunderstorm information
+    not available") isn't one. Recent weather (RETS) counts as vicinity.
+    """
+    if not _METAR_PRESENT_WX_RE.match(token):
+        return
+    if token.startswith('RE'):
+        if 'TS' in token:
+            out['ts_oktas'] = max(out['ts_oktas'], 2)
     elif 'TS' in token:
         if token.startswith('+'):
             out['ts_oktas'] = max(out['ts_oktas'], 8)
@@ -1232,9 +1242,11 @@ def _parse_metar(raw: str) -> dict:  # pylint: disable=too-many-branches,too-man
         except ValueError:
             rmk_idx = len(trend_tokens)
         out['trends'] = _parse_metar_trends(trend_tokens[:rmk_idx])
-    # LTG (lightning) in remarks; DSNT = distant (~VCTS), otherwise overhead
-    if 'LTG' in raw:
-        if 'LTG DSNT' in raw:
+    # LTG (lightning, e.g. LTGICCG) in remarks; DSNT = distant (~VCTS),
+    # otherwise overhead. Whole groups only ("ALTG" isn't lightning).
+    ltg = next((i for i, t in enumerate(all_tokens) if t.startswith('LTG')), None)
+    if ltg is not None:
+        if 'DSNT' in all_tokens[ltg:ltg + 4]:
             out['ts_oktas'] = max(out['ts_oktas'], 2)
         else:
             out['ts_oktas'] = max(out['ts_oktas'], 4)
