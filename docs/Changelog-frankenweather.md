@@ -19,8 +19,9 @@
   frankenweather didn't know which zones already had CBs, so every zone
   near the aircraft counted as CB-free: in a typhoon's CB area the
   44,999 ft CBs PSX was showing were cut to 15,000 ft until the zones
-  moved. On the first update after a start, a zone near the aircraft now
-  keeps the CB it gets.
+  moved. Now no zone is limited in the first 2 minutes after a start,
+  while the SIGMET, METAR and CAPE CBs arrive; after that a zone near the
+  aircraft keeps the CB it has by then.
 
 ## 2.0.1 (2026-10-29)
 

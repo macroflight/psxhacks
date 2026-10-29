@@ -641,6 +641,12 @@ _CB_SQUEEZE_MIN_FWD_NM = 100.0
 # already had there may not grow. See Script._limit_close_cb().
 _CB_CLOSE_MAX_OKTAS = 2
 _CB_CLOSE_MAX_TOP_FT = 15000.0
+# No new limit this long after frankenweather starts: PSX may already show
+# the zones' CBs, and SIGMET, METAR and CAPE CBs only arrive over the first
+# updates. A restart inside Typhoon IN-FA's TC SIGMET (frankensim
+# 2026-10-29) limited the zones near the aircraft while their TC CBs
+# weren't applied yet, cutting 44,999 ft CBs to 15,000 ft.
+_CB_CLOSE_START_GRACE_S = 120.0
 
 _BZ_URL = "https://data.blitzortung.org/Data_1/strikes"
 _BZ_LOOKBACK_MIN = 20  # fetch this many recent minute-files of strike data
@@ -2185,6 +2191,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # _CB_SQUEEZE_MIN_FWD_NM, see _limit_close_cb(); and the zone
         # position each zone_wx was sent for
         self.zone_cb_close_cap: dict = {}
+        self._cb_close_grace_until = time.monotonic() + _CB_CLOSE_START_GRACE_S
         self._zone_wx_pos: dict = {}
         # zone_num → distance (nm) to the aircraft captured at the moment the
         # zone was last (re)placed; consumed (popped) by _ramp_cb_wx() the
@@ -5561,9 +5568,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         new zones are never placed this close, but a zone the aircraft
         flies towards can still get a CB (a new or moved TS SIGMET, CAPE,
         a METAR), which used to appear at full size, e.g. 45,000 ft
-        within 10 nm. Not for the dep/dst airport zones (their METAR). On
-        a zone's first write since startup the cap is the CB it gets then:
-        PSX may already show it, so a restart must not shrink it.
+        within 10 nm. Not for the dep/dst airport zones (their METAR), and
+        no new limit in the first _CB_CLOSE_START_GRACE_S after a start.
         """
         cap = self.zone_cb_close_cap.get(zone_num)
         if cap is not None and cap[0] != pos:
@@ -5574,14 +5580,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if cap is None:
             if self._dist_nm(self.ac_lat, self.ac_lon, pos[0], pos[1]) > _CB_SQUEEZE_MIN_FWD_NM:
                 return wx
-            if zone_num not in self.zone_wx:
-                # first write since startup: nothing "appears", the zone's
-                # CB is whatever it gets now (a restart near a TC's CBs cut
-                # them to 2 oktas, 15,000 ft, frankensim 2026-10-29)
-                prev, same_zone = wx.split(';'), True
-            else:
-                prev = (self.zone_wx.get(zone_num) or "").split(';')
-                same_zone = self._zone_wx_pos.get(zone_num) == pos and len(prev) > 11
+            if time.monotonic() < self._cb_close_grace_until:
+                return wx
+            prev = (self.zone_wx.get(zone_num) or "").split(';')
+            same_zone = self._zone_wx_pos.get(zone_num) == pos and len(prev) > 11
             had = int(prev[9]) if same_zone and prev[9].isdigit() else 0
             cap = ((pos, had, float(prev[10])) if had > 0 else
                    (pos, _CB_CLOSE_MAX_OKTAS, _CB_CLOSE_MAX_TOP_FT))
