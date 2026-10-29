@@ -607,7 +607,7 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
     turb_src_lat = turbstate.get('source_lat')
     turb_src_lon = turbstate.get('source_lon')
     turb_kind = turbstate.get('active_kind', 'none')
-    turb_intensity = turbstate.get('active_intensity', 0.0)
+    turb_intensity = turbstate.get('effective_intensity', turbstate.get('active_intensity', 0.0))
     turb_pct = int(turb_intensity * 100)
     turb_label = _TURB_KIND_LABELS.get(turb_kind, turb_kind) if turbstate else '—'
 
@@ -1940,7 +1940,9 @@ def _build_weather_turb_page(ctx):  # pylint: disable=too-many-locals,too-many-b
     type_enabled = tstate.get('type_enabled', {k: True for k in _TURB_TYPES_ORDER})
     type_biases = tstate.get('type_biases', {k: 100 for k in _TURB_TYPES_ORDER})
     active_kind = tstate.get('active_kind', 'none')
-    active_intensity = tstate.get('active_intensity', 0.0)
+    # What's injected (biases and MSFS factor applied); before 1.16.0 only
+    # the computed intensity
+    active_intensity = tstate.get('effective_intensity', tstate.get('active_intensity', 0.0))
     active_reason = tstate.get('active_reason', '')
     sources = tstate.get('sources', [])
     msfs_active = tstate.get('msfs_active', False)
@@ -2097,8 +2099,8 @@ def _build_weather_turb_page(ctx):  # pylint: disable=too-many-locals,too-many-b
         f'<input type="number" name="msfs_turb_magnitude" value="{msfs_turb_magnitude}"'
         f' min="0" max="200" style="width:4.5em">'
         f'<button class="btn btn-gray btn-sm">Set</button></form>'
-        f'<div style="{_note}">How much MSFS in-cloud and precipitation data boosts computed '
-        'intensity when the aircraft is inside convective weather. 0 = ignore MSFS data.</div>'
+        f'<div style="{_note}">How much being in MSFS cloud boosts the computed intensity '
+        '(at most ×1.3 at 100%, ×1.6 at 200%). 0 = ignore MSFS data.</div>'
         '</td></tr>'
         '</table>'
         '</div>\n'
@@ -2125,8 +2127,8 @@ def _build_weather_turb_page(ctx):  # pylint: disable=too-many-locals,too-many-b
         '<h3 style="margin:0 0 0.5em">MSFS bridge</h3>'
         '<p style="font-size:0.85em;color:#94a3b8;margin:0 0 0.75em">'
         'Real-time data read from MSFS via PSX.NET.MSFS.Client. '
-        'Used to boost turbulence intensity when the aircraft is inside cloud or precipitation — '
-        'e.g. a higher cloud density or active rain amplifies the computed intensity. '
+        'Used to boost turbulence intensity a little (at most ×1.3) when the aircraft is '
+        'inside MSFS cloud, more with a higher cloud density or vertical wind. '
         'The Turb factor shows the current multiplier being applied.</p>'
         '<div style="display:flex;gap:1.5em;flex-wrap:wrap;font-size:0.9em">'
         f'<div><span style="color:#94a3b8">Status</span><br>'

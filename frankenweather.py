@@ -398,6 +398,7 @@ _TEMPO_HOLD_MIN_S = 600.0             # 10 minutes
 _TEMPO_HOLD_MAX_S = 1800.0            # 30 minutes
 _TEMPO_MIN_OKTAS = 2                  # lowest CB coverage used while a TEMPO segment is "on"
 _MSFS_BRIDGE_TIMEOUT_S = 300.0        # stop using bridge data after this silence period
+_MSFS_TURB_FACTOR_MAX = 1.3           # most turbulence is multiplied by in MSFS cloud
 # Rolling window for the MSFS in-cloud duty cycle used by cloud sync (_msfs_cloud_oktas):
 # long enough to smooth out a brief punch through a wisp of cirrus, short enough to still
 # ramp up to full coverage reasonably quickly in a genuine sustained layer.
@@ -2246,6 +2247,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._turb_type_biases: dict = {k: 100 for k in _TURB_TYPES}
         self._turb_msfs_magnitude: int = 100  # 0-200%; scales MSFS turbulence influence
         self._turb_msfs_factor: float = 1.0   # last computed raw factor (for display)
+        # What's injected: intensity x biases x MSFS factor (for display)
+        self._turb_effective_intensity: float = 0.0
         self._turb_engine: Optional[TurbulenceEngine] = None
         self._turb_state: Optional[TurbulenceState] = None
         self._turb_sources: list = []
@@ -3392,44 +3395,30 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return 0
         return self._turb_type_biases.get(kind, 100)
 
-    def _compute_msfs_turb_factor(self, cb_active: bool) -> float:
+    def _compute_msfs_turb_factor(self) -> float:
         """Compute turbulence multiplier from MSFS bridge data.
 
-        Returns 1.0 if bridge data is absent or magnitude is zero.
-        cb_active should be True when a PSX CB is the dominant turbulence source,
-        because PSX CB clouds do not appear in MSFS so in-cloud will read False.
+        1.0 out of cloud, or if bridge data is absent or magnitude is zero.
+        In MSFS cloud a little more, at most _MSFS_TURB_FACTOR_MAX at 100%
+        magnitude: it used to reach ~2.8 in any cloud (stratus and cirrus
+        too), on top of everything else, and to cut clear-air turbulence
+        to 0.8 (2026-10-24 review).
         """
         if self._turb_msfs_magnitude == 0:
             return 1.0
         if (self._msfs_bridge_last_seen is None or
                 time.monotonic() - self._msfs_bridge_last_seen > _MSFS_BRIDGE_TIMEOUT_S):
             return 1.0
-        if self.msfs_in_cloud is None:
+        if not self.msfs_in_cloud:
             return 1.0
-
-        in_cloud = self.msfs_in_cloud or cb_active
-
-        if not in_cloud:
-            raw = 0.8
-        else:
-            raw = 1.3
-            # Cloud density 0.0–1.0: up to +30 %
-            if self.msfs_cloud_density is not None:
-                d = max(0.0, min(1.0, self.msfs_cloud_density))
-                raw *= 1.0 + d * 0.3
-            # Vertical wind: up to +40 % for 10 kt; ignore noise below 3 kt
-            if self.msfs_wind_vert is not None:
-                v = abs(self.msfs_wind_vert)
-                if v > 3.0:
-                    raw *= 1.0 + min((v - 3.0) / 7.0, 1.0) * 0.4
-            # Precipitation type (character indicator: rain=convective, snow=stratiform)
-            if self.msfs_precip_state is not None:
-                if self.msfs_precip_state & 4:    # rain → convective
-                    raw *= 1.2
-                elif self.msfs_precip_state & 8:  # snow → stratiform
-                    raw *= 1.1
-            raw = min(3.0, raw)
-
+        raw = 1.1
+        # Cloud density: MSFS rarely reports more than ~0.2 even in dense cloud
+        if self.msfs_cloud_density is not None:
+            raw += 0.1 * max(0.0, min(1.0, self.msfs_cloud_density / 0.2))
+        # Vertical wind: up to +0.1 at 10 kt; ignore noise below 3 kt
+        if self.msfs_wind_vert is not None:
+            raw += 0.1 * max(0.0, min(1.0, (abs(self.msfs_wind_vert) - 3.0) / 7.0))
+        raw = min(_MSFS_TURB_FACTOR_MAX, raw)
         # Scale by magnitude: 0 % = no influence, 100 % = full, 200 % = amplified
         return 1.0 + (raw - 1.0) * self._turb_msfs_magnitude / 100.0
 
@@ -3795,6 +3784,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     "type_biases": dict(self._turb_type_biases),
                     "active_kind": state.kind if state else "none",
                     "active_intensity": round(state.intensity, 3) if state else 0.0,
+                    "effective_intensity": round(self._turb_effective_intensity, 3),
                     "active_reason": state.reason if state else "",
                     "intensity_ramp": self._turb_ramp_status(),
                     "pireps": self._pirep_levels,
@@ -4003,6 +3993,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         reason="Manual",
                     )
                     eff = self._turb_manual_turb_intensity
+                    self._turb_effective_intensity = eff
                     if not low_speed:
                         self._maybe_inject_burst(manual_state, eff, tas_kt)
                     state_changed = (
@@ -4102,14 +4093,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 pirep_fl = next((r["fl"] for r in self._pirep_levels or ()
                                  if r["current"]), None)
 
-                cb_active = state.kind == 'cb'
-                msfs_factor = self._compute_msfs_turb_factor(cb_active)
+                msfs_factor = self._compute_msfs_turb_factor()
                 self._turb_msfs_factor = msfs_factor
                 effective_intensity = min(
                     1.0,
                     state.intensity * self._turb_intensity_bias *
                     self._turb_type_effective_bias(state.kind) / 10000.0 * msfs_factor,
                 )
+                self._turb_effective_intensity = effective_intensity
                 if self._turb_enabled and not low_speed:
                     self._maybe_inject_burst(state, effective_intensity, tas_kt)
 
