@@ -71,15 +71,16 @@ WAVE_SCALE_M = 12_000.0
 
 # Mechanical turbulence (_mechanical_state()): the wind 300 m above the
 # ground ramps it in from MECH_WIND_MIN_KT to MECH_MAX at MECH_WIND_FULL_KT
-# over very rough terrain, half that over flat land (log-scaled roughness:
-# std-dev of elevation from MECH_ROUGHNESS_REF_M up to
-# ROUGHNESS_SATURATION_M), MECH_SEA_FACTOR of that over the sea. It used to
+# over very rough terrain, rising continuously with log-scaled roughness
+# (std-dev of elevation, MECH_ROUGHNESS_REF_M up to ROUGHNESS_SATURATION_M)
+# from half x MECH_SEA_FACTOR of that over the sea or flat water (about
+# 0.57 of it over flat land like the London area, 44 m). It used to
 # be roughness/800 m x wind/58 kt, so ~4% at most over flat land even in a
 # 46 kt wind (EGLL, 2026-10-24), and none at all over the sea.
 MECH_WIND_MIN_KT = 20.0
 MECH_WIND_FULL_KT = 55.0
 MECH_MAX = 0.5
-MECH_ROUGHNESS_REF_M = 30.0
+MECH_ROUGHNESS_REF_M = 10.0
 MECH_SEA_FACTOR = 0.6
 
 # Terrain roughness (std-dev of elevation, m) that saturates mechanical turb.
@@ -544,12 +545,14 @@ class TerrainTurbulenceModel:  # pylint: disable=too-few-public-methods
         roughness_m: Optional[float], surface_wind_kt: float, agl_m: float
     ) -> TurbulenceState:
         """Return low-level mechanical turbulence (see MECH_MAX); roughness_m None: over the sea."""
-        if roughness_m is None:
-            terrain_factor = 0.5 * MECH_SEA_FACTOR
-        else:
-            rough = min(1.0, max(0.0, math.log1p(roughness_m / MECH_ROUGHNESS_REF_M) /
-                                 math.log1p(ROUGHNESS_SATURATION_M / MECH_ROUGHNESS_REF_M)))
-            terrain_factor = 0.5 + 0.5 * rough
+        # From the sea's (also roughness 0: flat land or water) to 1 for
+        # very rough terrain, continuously: it used to jump from the sea's
+        # 0.3 to 0.5 where the scan first reached a land tile at a coast
+        sea = 0.5 * MECH_SEA_FACTOR
+        rough = 0.0 if roughness_m is None else min(1.0, max(0.0, math.log1p(
+            roughness_m / MECH_ROUGHNESS_REF_M) / math.log1p(
+                ROUGHNESS_SATURATION_M / MECH_ROUGHNESS_REF_M)))
+        terrain_factor = sea + (1.0 - sea) * rough
         wind_factor = _normalise(surface_wind_kt, MECH_WIND_MIN_KT, MECH_WIND_FULL_KT)
         agl_factor = math.exp(-agl_m / MECHANICAL_SCALE_M)
         intensity = MECH_MAX * wind_factor * terrain_factor * agl_factor
