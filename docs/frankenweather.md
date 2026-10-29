@@ -104,7 +104,10 @@ Features:
 
 - CAPE-based CB (cumulonimbus) generation: computes CB coverage and
   tops from Open-Meteo CAPE/CIN data, with convective inhibition
-  suppression when CIN is high. With [`--sigmet`](#sigmets),
+  suppression when CIN is high. CB tops are at most 2,000 ft above a
+  typical tropopause for the latitude and season (about 33,000-39,000 ft
+  in the mid-latitudes, 30,000 ft in a polar winter) and never above
+  44,999 ft, PSX's limit. With [`--sigmet`](#sigmets),
   frankenweather also places zones in TS/TC SIGMET areas and gives them
   CBs, since TS SIGMETs report observed thunderstorms. METAR convective indicators (TS, TSRA,
   SHRA, GR, LTG, FC, CB sky groups) are also used and can override or

@@ -59,6 +59,7 @@ from fw_cb import (
     CB_TOP_MAX_FT as _CB_TOP_MAX_FT,
     cape_to_cb_oktas as _cape_to_cb_oktas,
     cb_base_ft as _cb_base_ft,
+    cb_top_ceiling_ft as _cb_top_ceiling_ft,
     cb_tops_ft as _cb_tops_ft,
     om_cb_fields as _om_cb_fields,
     apply_om_cb as _apply_om_cb,
@@ -1254,8 +1255,15 @@ def _parse_metar(raw: str) -> dict:  # pylint: disable=too-many-branches,too-man
     return out
 
 
-def metar_to_wx_string(parsed: dict) -> str:
-    """Convert a parsed METAR dict to a PSX Wx semicolon string."""
+def metar_to_wx_string(parsed: dict, lat: Optional[float] = None,
+                       month: Optional[int] = None) -> str:
+    """Convert a parsed METAR dict to a PSX Wx semicolon string.
+
+    A thunderstorm's CB top is the highest at lat/month (tropopause plus
+    an overshoot, see fw_cb.cb_top_ceiling_ft()) for 8 oktas, 5000 ft less
+    for 4 and 12000 ft less for 2. It used to be 45000/40000/30000 ft
+    everywhere, also in winter.
+    """
     data = list(_WX_DEFAULTS)
 
     best_cov, best_base = 0, 2000
@@ -1270,12 +1278,13 @@ def metar_to_wx_string(parsed: dict) -> str:
     ts_oktas = parsed.get('ts_oktas', 0)
     if ts_oktas > 0:
         cb_base = _cb_base_ft(parsed['temp_c'], parsed['dp_c'])
+        ceiling = _cb_top_ceiling_ft(lat, month)
         if ts_oktas >= 8:
-            cb_tops = _CB_TOP_MAX_FT
+            cb_tops = ceiling
         elif ts_oktas >= 4:
-            cb_tops = 40000
+            cb_tops = ceiling - 5000
         else:
-            cb_tops = 30000
+            cb_tops = ceiling - 12000
         data[9] = str(ts_oktas)
         data[10] = str(cb_tops)
         data[11] = str(cb_base)
@@ -4365,7 +4374,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             h_temp = _om_hval(hourly, "temperature_2m", hi, 15.0)
             h_dp = _om_hval(hourly, "dewpoint_2m", hi, 10.0)
             cb_oktas = max(_cape_to_cb_oktas(cape, cin), 4)
-            cb_tops = min(max(_cb_tops_ft(cape), sig['top_ft']), _CB_TOP_MAX_FT)
+            cb_tops = min(max(_cb_tops_ft(cape, pos[0], datetime.now(timezone.utc).month),
+                              sig['top_ft']), _CB_TOP_MAX_FT)
             fields[9] = str(cb_oktas)
             fields[10] = str(cb_tops)
             fields[11] = str(_cb_base_ft(h_temp, h_dp))
@@ -4397,7 +4407,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         else:
             base = _cb_base_ft(_om_hval(hourly, "temperature_2m", hi, 15.0),
                                _om_hval(hourly, "dewpoint_2m", hi, 10.0))
-            top = max(_cb_tops_ft(_om_hval(hourly, "cape", hi, 0)), sig['top_ft'])
+            top = max(_cb_tops_ft(_om_hval(hourly, "cape", hi, 0), pos[0],
+                                  datetime.now(timezone.utc).month), sig['top_ft'])
         fields[9] = str(max(oktas, have_oktas))
         fields[10] = str(min(top, _CB_TOP_MAX_FT))
         fields[11] = str(base)
@@ -6827,7 +6838,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 parsed['showers'] = parsed['showers'] or trend_showers
                 new_modes.append(build_wxmode_string(
                     lat, lon, self._stable_zone_elev(i + 1, lat, lon, 0.0), month, icao))
-                wx = metar_to_wx_string(parsed)
+                wx = metar_to_wx_string(parsed, lat, month)
                 ts_oktas = parsed.get('ts_oktas', 0)
                 has_showers_metar = parsed.get('showers', False)
                 need_cb = ts_oktas > 0 or has_showers_metar or radar_echo >= 2 or has_lightning

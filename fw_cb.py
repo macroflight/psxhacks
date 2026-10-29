@@ -4,7 +4,9 @@ Shared between frankenweather.py (live PSX injection) and fw_scanner.py
 (offline quality scanning).  All functions are pure computations with no
 external dependencies beyond the standard library.
 """
+import math
 from datetime import datetime, timezone
+from typing import Optional
 
 
 # "No cloud" ceiling sentinels for hi/loCloudTop/Base. NOT 45000: live
@@ -34,6 +36,8 @@ _NO_LO_CLOUD_CEILING_FT = "44900"
 # tiers, and the TS-SIGMET override's max() against the SIGMET's own
 # reported top (which can exceed even cb_tops_ft()'s 55000 cap).
 CB_TOP_MAX_FT = 44999
+CB_TOP_MIN_FT = 15000      # lowest CB top (winter showers)
+CB_OVERSHOOT_FT = 2000     # how far a CB top may overshoot the tropopause
 
 # Default PSX Wx semicolon-string field values (24 fields, 0-indexed).
 WX_DEFAULTS = [
@@ -88,14 +92,53 @@ def cb_base_ft(temp_c: float, dp_c: float) -> int:
     return max(1500, int((temp_c - dp_c) * 125.0 * 3.28084))
 
 
-def cb_tops_ft(cape_jkg: float) -> int:
-    """Estimate CB tops in feet from CAPE (J/kg).
+def climate_tropopause_ft(lat: float, month: int) -> int:
+    """Return a climatological tropopause height in feet for a latitude and month.
 
-    Targets ~40000 ft at CAPE 1000 J/kg (typical tropical CB), saturates at
-    CB_TOP_MAX_FT for severe convection above ~1250 J/kg -- not higher (see
-    CB_TOP_MAX_FT's own comment: PSX corrects anything above 45000 itself).
+    About 54000 ft in the tropics (|lat| up to 20), 38000/32000 ft in the
+    mid-latitudes (35-50) in summer/winter, 32000/28000 ft in polar regions
+    (65 and beyond), blended in between.
     """
-    return max(25000, min(CB_TOP_MAX_FT, 20000 + int(cape_jkg * 20)))
+    season = math.cos(2.0 * math.pi * (month - 7) / 12.0)  # 1 in July, -1 in January
+    if lat < 0:
+        season = -season
+    alat = abs(lat)
+    tropics, midlat, polar = 54000.0, 35000.0 + 3000.0 * season, 30000.0 + 2000.0 * season
+    if alat <= 20.0:
+        return int(tropics)
+    if alat <= 35.0:
+        return int(tropics + (midlat - tropics) * (alat - 20.0) / 15.0)
+    if alat <= 50.0:
+        return int(midlat)
+    if alat <= 65.0:
+        return int(midlat + (polar - midlat) * (alat - 50.0) / 15.0)
+    return int(polar)
+
+
+def cb_top_ceiling_ft(lat: Optional[float], month: Optional[int]) -> int:
+    """Return the highest CB top at lat/month.
+
+    The tropopause plus an overshoot, at most PSX's limit (CB_TOP_MAX_FT).
+    """
+    if lat is None or month is None:
+        return CB_TOP_MAX_FT
+    return min(CB_TOP_MAX_FT, climate_tropopause_ft(lat, month) + CB_OVERSHOOT_FT)
+
+
+def cb_tops_ft(cape_jkg: float, lat: Optional[float] = None,
+               month: Optional[int] = None) -> int:
+    """Estimate CB tops in feet from CAPE (J/kg), at most the tropopause plus an overshoot.
+
+    From CB_TOP_MIN_FT, rising with the square root of CAPE to the ceiling
+    (cb_top_ceiling_ft()) at 1500 J/kg: e.g. ~22000 ft at 100 J/kg in a
+    mid-latitude summer, 40000 ft from 1500 J/kg there, CB_TOP_MAX_FT in the
+    tropics. Without lat/month the ceiling is CB_TOP_MAX_FT. It used to be
+    20000 + 20 x CAPE, so 45000 ft from 1250 J/kg anywhere, also far above
+    a winter tropopause.
+    """
+    ceiling = cb_top_ceiling_ft(lat, month)
+    frac = math.sqrt(min(1.0, max(0.0, cape_jkg) / 1500.0))
+    return int(CB_TOP_MIN_FT + (ceiling - CB_TOP_MIN_FT) * frac)
 
 
 _RADAR_CAPE_MIN = 300.0   # J/kg — minimum CAPE required for radar/lightning to gate CBs
@@ -167,7 +210,10 @@ def om_cb_fields(  # pylint: disable=too-many-locals,too-many-branches
 
     if oktas == 0:
         return 0, int(WX_DEFAULTS[10]), int(WX_DEFAULTS[11])
-    return oktas, cb_tops_ft(cape), cb_base_ft(h_temp, h_dp)
+    lat = om.get("latitude")
+    return (oktas, cb_tops_ft(cape, float(lat) if lat is not None else None,
+                              datetime.now(timezone.utc).month),
+            cb_base_ft(h_temp, h_dp))
 
 
 def apply_om_cb(  # pylint: disable=too-many-arguments,too-many-positional-arguments
