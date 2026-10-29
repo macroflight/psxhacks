@@ -2362,6 +2362,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # Runtime toggles for MSFS sync features
         self._msfs_in_cloud_sync: bool = True
         self._msfs_qnh_check: str = "CHECK"   # "CHECK" or "SYNC"
+        # zone_key -> (time.monotonic(), diff hPa) of the last "QNH mismatch" warning
+        self._qnh_mismatch_warned: dict = {}
         # Runtime toggles for PSX clock sync (see _sync_psx_clock/time_sync_coro)
         self._timesync_on_startup: bool = True    # on every PSX connect/reconnect
         self._timesync_on_situ_load: bool = True  # on every PSX situ load (load1..load3)
@@ -5902,9 +5904,16 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                             new_metar = _metar_with_note(new_metar, METAR_NOTE_QNH_SYNC)
                             self.psx_send_and_set(f"Metar{metar_zone_num}", new_metar)
                 else:
-                    self.logger.warning(
-                        "*** QNH mismatch [%s]: MSFS %.1f hPa  PSX %.1f hPa  Δ%.1f ***",
-                        zone_key, self.msfs_qnh_hpa, psx_qnh_hpa, diff)
+                    # once per zone, again only when the difference changes or after
+                    # 10 minutes: it came on every cloud sync, 179 times in 40 minutes
+                    # (frankensim 2026-10-29)
+                    last = self._qnh_mismatch_warned.get(zone_key)
+                    now = time.monotonic()
+                    if last is None or abs(diff - last[1]) >= 0.5 or now - last[0] >= 600.0:
+                        self._qnh_mismatch_warned[zone_key] = (now, diff)
+                        self.logger.warning(
+                            "*** QNH mismatch [%s]: MSFS %.1f hPa  PSX %.1f hPa  Δ%.1f ***",
+                            zone_key, self.msfs_qnh_hpa, psx_qnh_hpa, diff)
 
         if need_cloud:
             alt = self.ac_alt_ft

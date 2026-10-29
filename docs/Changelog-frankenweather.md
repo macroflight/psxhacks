@@ -1,5 +1,13 @@
 # frankenweather changelog
 
+## Unreleased
+
+- **Fix: the "QNH mismatch" warning flooded the log.** With MSFS sync in
+  "check" mode, a QNH difference between MSFS and the PSX zone was
+  logged on every cloud sync, 179 times in 40 minutes. It's now logged
+  once per zone, and again only when the difference changes by 0.5 hPa
+  or more, or after 10 minutes.
+
 ## 2.1.0 (2026-10-29)
 
 - **Change: zones are spread out inside TS and TC SIGMET areas.** With
