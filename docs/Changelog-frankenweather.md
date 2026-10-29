@@ -1,5 +1,19 @@
 # frankenweather changelog
 
+## 1.21.0 (2026-10-24)
+
+- **Fix: weather zones at high airports are at the right elevation.**
+  PSX takes a zone's elevation in feet (live-tested: PSX's own zone for
+  SKBO says 8360), but frankenweather gave it in metres, and 0 for zones
+  at an airport with a METAR. A zone at Bogotá was at 0 or 2,548 ft
+  instead of 8,360 ft. Airports now get their own elevation.
+- **Fix: CB tops over high ground.** PSX's cloud heights are above the
+  zone (a METAR's FEW030 is a base of 3000), but CB tops are worked out
+  above sea level, so a CB at Bogotá topped out about 8,000 ft too high.
+  A CB is now also always at least 5,000 ft deep: a thunderstorm forced
+  by a METAR or SIGMET in hot, dry air with little CAPE could have its
+  base above its top, and then no turbulence.
+
 ## 1.20.0 (2026-10-24)
 
 - **Fix: Gazipaşa (LTGP) no longer has a permanent thunderstorm**, and
