@@ -655,6 +655,24 @@ $ChangeWindowPositions = $false
 
 
 # ---------------------------------------------------------------------------
+# PSX navdata check: startsim_master.ps1/startsim_slave.ps1 stop with an
+# error unless PSX uses custom navdata ($AerowinxDir\Navigation\-Custom\
+# Misc\listSelect.txt exists), select the navdata in listSelect.txt, and
+# write it to psx_navdata.json in $FrankenrouterDir. frankenrouter sends it to the other routers; the
+# master router reports an error if the sims use different navdata, and
+# a warning if a newer AIRAC cycle is in effect.
+# $AerowinxNavData: the directory in $AerowinxDir\Navigation\-Custom\List
+# to use, e.g. "2611-Navigraph" (stops with an error if the directory
+# doesn't exist). Defaults to "" in common.ps1: the latest YYNN-Navigraph
+# directory there.
+# $AerowinxNavDataCheck: defaults to $true in common.ps1. Set to $false
+# to skip the check and not write psx_navdata.json.
+# ---------------------------------------------------------------------------
+#$AerowinxNavData      = "2611-Navigraph"
+#$AerowinxNavDataCheck = $true
+
+
+# ---------------------------------------------------------------------------
 # Confirmation prompt in stopsim_master.ps1/stopsim_slave.ps1
 # Defaults to $true in common.ps1 (asks "Are you sure?" before stopping).
 # Set to $false to stop the sim immediately with no confirmation prompt.

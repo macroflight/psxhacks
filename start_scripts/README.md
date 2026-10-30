@@ -199,6 +199,10 @@ Typically, the following is started:
 
 Both of the `startsim_*` script use the variables in `common.ps1`, but again: you should not edit this file directly and use the override script.
 
+#### PSX navdata check
+
+Before starting PSX, `startsim_master.ps1` and `startsim_slave.ps1` select the navdata PSX will use: the directory in `$AerowinxDir\Navigation\-Custom\List` named by `$AerowinxNavData` in your override file (e.g. `"2611-Navigraph"`), or if that isn't set, the latest `YYNN-Navigraph` directory there (other directories, like `EOSID`, are ignored). It's written to `$AerowinxDir\Navigation\-Custom\Misc\listSelect.txt`, the file Navburo writes when you select navdata, so every PC in your sim uses the same navdata. The scripts stop with an error if there's no `listSelect.txt` (PSX isn't set up for custom navdata), if the `$AerowinxNavData` directory isn't installed, or if no Navigraph navdata is found. The navdata in use is written to `psx_navdata.json` in `$FrankenrouterDir`, where frankenrouter reads it: the master sim's router reports an error if the sims in a shared cockpit use different navdata, and a warning if a newer AIRAC cycle is in effect. Set `$AerowinxNavDataCheck = $false` to skip all of this.
+
 ### stopsim_master.ps1
 
 Used to stop a main PSX instance and any programs or scripts that need are running alongside the master PSX instance. This will also stop the master router if you're using one. If you're only flying by yourself, you should first run `stopsim_slave.ps1` to stop all the clients first. Both `stopsim_*` scripts ask for confirmation before stopping anything.

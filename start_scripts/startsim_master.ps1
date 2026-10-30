@@ -11,6 +11,8 @@ if (Test-ClockSyncNeeded) {
     & "$PSScriptRoot\sync_clock.ps1"
 }
 
+Write-PsxNavDataFile
+
 Write-Output "Starting PSX main server..."
 Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_psx_main_server.ps1"
 

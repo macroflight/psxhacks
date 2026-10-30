@@ -325,6 +325,19 @@ $DelayBetweenAddons           = 0
 # prompting for elevation.
 $ClockSyncEnabled = $true
 
+# PSX navdata check (Write-PsxNavDataFile in functions.ps1), run by
+# startsim_master.ps1/startsim_slave.ps1 before PSX starts: stop with an
+# error unless PSX uses custom navdata
+# ($AerowinxDir\Navigation\-Custom\Misc\listSelect.txt exists), select
+# the navdata in listSelect.txt and write it to psx_navdata.json in
+# $FrankenrouterDir so the routers can compare it between sims. The
+# navdata is $AerowinxNavData (a directory in -Custom\List, e.g.
+# "2611-Navigraph"; an error if it doesn't exist), or if that's empty the
+# latest YYNN-Navigraph directory there. Set $AerowinxNavDataCheck to
+# $false to skip it all.
+$AerowinxNavDataCheck = $true
+$AerowinxNavData      = ""
+
 # Human-readable display names for each sim addon key used in window-positioning scripts
 $SimAddonNames = [ordered]@{
     "BACARS"               = "BACARS"

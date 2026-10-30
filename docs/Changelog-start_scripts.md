@@ -1,5 +1,19 @@
 # start_scripts changelog
 
+## Unreleased
+
+- **New: PSX navdata check.** `startsim_master.ps1` (before the PSX main
+  server) and `startsim_slave.ps1` (before the slave router) select the
+  navdata PSX uses: `$AerowinxNavData` (e.g. `"2611-Navigraph"`, an
+  error if it isn't installed), or if that's empty (the default) the
+  latest `YYNN-Navigraph` directory in
+  `$AerowinxDir\Navigation\-Custom\List`. It's written to
+  `-Custom\Misc\listSelect.txt` (an error if that file doesn't exist:
+  PSX isn't set up for custom navdata) and to `psx_navdata.json` in
+  `$FrankenrouterDir` for frankenrouter, which compares it between sims.
+  Set `$AerowinxNavDataCheck = $false` to skip it all. See
+  `psxhacks-start-override-EXAMPLE.ps1`.
+
 ## 1.10.1 (2026-10-29)
 
 - **Docs: choosing FrankenWeather's turbulence profile.**

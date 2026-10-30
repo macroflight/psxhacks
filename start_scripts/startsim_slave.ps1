@@ -11,6 +11,8 @@ if (Test-ClockSyncNeeded) {
     & "$PSScriptRoot\sync_clock.ps1"
 }
 
+Write-PsxNavDataFile
+
 Write-Output "Starting slave sim router..."
 Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\start_router_slave.ps1"
 Invoke-WindowPosition "frankenrouter slave"

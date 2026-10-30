@@ -293,6 +293,58 @@ function Test-ClockSyncNeeded {
     return ((Get-Date) - $lastSync) -gt (New-TimeSpan -Days 1)
 }
 
+# Select the navdata PSX will use, and write it to psx_navdata.json in
+# $FrankenrouterDir, where frankenrouter reads it at startup and sends it
+# to the other routers (the master router reports a mismatch between sims
+# as an error - PSX clients with different navdata can fight over e.g.
+# ILS frequencies). Called by startsim_master.ps1/startsim_slave.ps1
+# before PSX starts. PSX uses the directory in -Custom\List named in
+# -Custom\Misc\listSelect.txt (as written by Navburo, e.g.
+# "2611-Navigraph"; names start with the AIRAC cycle). The navdata is
+# $AerowinxNavData, or if that's empty the latest YYNN-Navigraph
+# directory, and it's written to listSelect.txt if that names another.
+# Skipped if $AerowinxNavDataCheck is $false.
+function Write-PsxNavDataFile {
+    if (-not $AerowinxNavDataCheck) {
+        return
+    }
+    $custom = Join-Path $AerowinxDir "Navigation\-Custom"
+    $listSelect = Join-Path $custom "Misc\listSelect.txt"
+    $listDir = Join-Path $custom "List"
+    $skipHint = "or set `$AerowinxNavDataCheck = `$false in $OverrideFile to skip this check."
+    if (-not (Test-Path $listSelect -PathType Leaf)) {
+        Show-ErrorAndExit "PSX custom navdata is not selected: $listSelect not found.`nInstall your navdata with Navburo, $skipHint"
+    }
+    if (-not [string]::IsNullOrWhiteSpace($AerowinxNavData)) {
+        $navData = $AerowinxNavData
+        if (-not (Test-Path (Join-Path $listDir $navData) -PathType Container)) {
+            Show-ErrorAndExit "`$AerowinxNavData is set to '$navData', but $listDir\$navData does not exist.`nInstall that navdata, or edit $OverrideFile and fix or remove `$AerowinxNavData."
+        }
+    } else {
+        # Only Navigraph AIRAC directories (List can also hold e.g. EOSID
+        # or 2611-CIFP-PADQ-RNP); YYNN sorts by name
+        $latest = Get-ChildItem -Path $listDir -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^\d{4}-Navigraph$' } |
+            Sort-Object -Property Name | Select-Object -Last 1
+        if (-not $latest) {
+            Show-ErrorAndExit "No Navigraph navdata (a YYNN-Navigraph directory) found in $listDir.`nInstall your navdata with Navburo, set `$AerowinxNavData in $OverrideFile, $skipHint"
+        }
+        $navData = $latest.Name
+    }
+    $current = "$(Get-Content -Path $listSelect -Raw)".Trim()
+    if ($current -ne $navData) {
+        Write-Output "Selecting PSX navdata $navData (was: $current) in $listSelect"
+        # Same format as Navburo writes: the name and a newline, no BOM
+        [System.IO.File]::WriteAllText($listSelect, "$navData`n", (New-Object System.Text.UTF8Encoding $false))
+    }
+    $airac = if ($navData -match '^(\d{4})') { $Matches[1] } else { "unknown" }
+    $json = [ordered]@{ airac = $airac; directory = $navData } | ConvertTo-Json -Compress
+    $navDataFile = Join-Path $FrankenrouterDir "psx_navdata.json"
+    # No BOM (Out-File -Encoding utf8 adds one in Windows PowerShell 5.1)
+    [System.IO.File]::WriteAllText($navDataFile, $json, (New-Object System.Text.UTF8Encoding $false))
+    Write-Output "PSX navdata: $navData (AIRAC $airac), written to $navDataFile"
+}
+
 # Position (or minimize) an addon's window per its saved entry in
 # psxhacks-current-positions.ps1, if $ChangeWindowPositions is on. Called
 # from each start_<addon>.ps1, at the end, once the addon's process has
