@@ -2476,6 +2476,12 @@ def _build_weather_enroute_wind_page(ctx):  # pylint: disable=too-many-locals,to
             f'<b>{next_str}</b></div>'
         )
     body += '</div>\n'
+    if windstate and windstate.get("om_problem"):
+        body += (
+            '<div class="card warn"><p style="margin:0">'
+            f'{_esc(windstate["om_problem"])}. Waypoints without data use the '
+            "nearest waypoint's wind; with none at all, PSX keeps its current wind "
+            'corridor. Retrying every 2 minutes.</p></div>\n')
 
     deviation = (windstate or {}).get("deviation", 30)
     body += (

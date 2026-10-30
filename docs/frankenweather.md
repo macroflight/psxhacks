@@ -876,6 +876,14 @@ default; toggleable from the `/weather/enroute-wind` web page (or the
   otherwise a fixed default set (10 000 / 18 000 / 24 000 / 30 000 /
   34 000 / 39 000 ft).
 
+- **Open-Meteo outages.** If the download fails, older cached data that
+  still covers the current hour is used. A waypoint still without data
+  gets the nearest route waypoint's winds; with no data for any
+  waypoint, nothing is sent and PSX keeps its current corridor (the
+  flight plan's, or the last one sent). Either way the Enroute wind
+  page shows a warning, and the download is retried every 2 minutes
+  until it works.
+
 - **Writing to PSX.** The fetched data is written back to PSX as a
   Format-A wind corridor, and `Qs497` (the PSX variable controlling
   wind corridor use and simulated forecast inaccuracy) is set so its

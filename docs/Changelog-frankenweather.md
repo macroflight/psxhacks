@@ -1,5 +1,18 @@
 # frankenweather changelog
 
+## Unreleased
+
+- **Fix: during an Open-Meteo outage the enroute wind importer replaced
+  the flight plan's winds with calm wind.** After a datalink wind uplink
+  (or a reroute) the importer downloads the winds again; when that
+  failed with nothing cached, it still sent PSX a corridor, with calm
+  wind and ISA temperatures at every waypoint. Now PSX keeps its current
+  corridor when Open-Meteo gave no winds at all, and a waypoint without
+  data gets the nearest route waypoint's winds. After a failed download
+  the importer retries in 2 minutes instead of an hour (2026-10-30: a
+  single 15 s timeout right after the route was loaded), and the
+  Enroute wind page says that data is missing.
+
 ## 2.1.2 (2026-10-29)
 
 - **Fix: alongside a TS SIGMET area, a zone could hop in and out every

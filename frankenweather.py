@@ -188,6 +188,9 @@ def _prepare_event_log() -> Optional[str]:
 # fresh Format-A corridor, so PSX's enroute wind keeps drifting with reality
 # even if the crew never requests a new datalink wind uplink.
 _ENROUTE_FETCH_INTERVAL_S = 3600.0     # background refresh cadence ("hourly")
+# Sooner retry when a fetch left waypoints without wind data (Open-Meteo
+# down or rate-limited)
+_ENROUTE_RETRY_INTERVAL_S = 120.0
 # Enroute wind downloads cover 2 days (forecast_days=2): served from the
 # on-disk cache for _OM_ENROUTE_FRESH_S (newer forecast runs are out by
 # then), and kept for as long as they cover the current hour, as a fallback
@@ -2261,6 +2264,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._waypoint_om_wind: dict = {}       # _enroute_waypoints index → {fl_ft: (dir,spd,oat)}
         self._enroute_last_fetch_time: float = 0.0     # epoch
         self._enroute_next_fetch_time: float = 0.0     # epoch
+        # Why the last fetch left waypoints without wind data, None if it didn't
+        self._enroute_om_problem: Optional[str] = None
         self._enroute_wind_changed_event: asyncio.Event = asyncio.Event()
         self._enroute_log_path: Optional[str] = None   # fixed per-flight --save-logs base path
         self._enroute_last_corridor_txt: Optional[str] = None  # last corridor we generated
@@ -4943,9 +4948,31 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return
         offset = len(self._enroute_waypoints) - len(self.route_waypoints)
         wind_by_live_index = {
-            i: self._waypoint_om_wind.get(offset + i, {})
+            i: self._waypoint_om_wind[offset + i]
             for i in range(len(self.route_waypoints))
+            if self._waypoint_om_wind.get(offset + i)
         }
+        if not wind_by_live_index:
+            # Open-Meteo gave us nothing: a corridor now would be calm wind and
+            # ISA temperatures everywhere, replacing the flight plan's (or our
+            # last) winds with nothing (2026-10-30, a BACARS uplink during an
+            # outage). Leave PSX's corridor alone.
+            self.logger.warning(
+                "Enroute wind: no Open-Meteo wind for any of the %d route waypoint(s) — "
+                "leaving PSX's current wind corridor in place",
+                len(self.route_waypoints))
+            return
+        missing = [i for i in range(len(self.route_waypoints)) if i not in wind_by_live_index]
+        if missing:
+            # Fill each gap from the nearest waypoint (along the route) that
+            # has data: a neighbour's wind beats calm and ISA
+            have = sorted(wind_by_live_index)
+            for i in missing:
+                src = min(have, key=lambda j, i=i: (abs(j - i), j))
+                wind_by_live_index[i] = wind_by_live_index[src]
+            self.logger.warning(
+                "Enroute wind: no Open-Meteo wind for %s — using the nearest route "
+                "waypoint's", ", ".join(self.route_waypoints[i][0] for i in missing))
         new_corridor = wind_corridor.build_corridor_a(
             self.route_waypoints, self._current_fl_list_ft(), wind_by_live_index)
         if new_corridor != self._enroute_last_corridor_txt:
@@ -7412,7 +7439,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         return sorted({_nearest_om_hpa(fl) for fl in fl_list_ft}, reverse=True)
 
     async def _fetch_enroute_om_batch(  # pylint: disable=too-many-locals,too-many-branches
-            self, targets: list) -> None:
+            self, targets: list) -> list:
         """Fetch Open-Meteo pressure-level wind/OAT for each (index, name, lat, lon) target.
 
         Updates self._waypoint_om_wind[index] with {fl_ft: (dir_deg, spd_kt, oat_c)}
@@ -7427,9 +7454,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         requested), and served from it for _OM_ENROUTE_FRESH_S. Only the
         targets without fresh data are fetched; if that fails, older data
         that still covers the current hour is used.
+
+        Returns the names of the targets left without wind data.
         """
         if not targets:
-            return
+            return []
         fl_list_ft = self._current_fl_list_ft()
         hpa_levels = self._enroute_hpa_levels(fl_list_ft)
         levels_sig = "-".join(str(h) for h in hpa_levels)
@@ -7470,9 +7499,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     len(missing) - stale)
 
         fl_to_hpa = {fl: _nearest_om_hpa(fl) for fl in fl_list_ft}
+        without = []
         for (idx, name, _lat, _lon), loc in zip(targets, body):
             hi = _om_hour_index(loc, now_ts) if loc else None
             if hi is None:
+                without.append(name)
                 continue
             hourly = loc.get("hourly") or {}
             levels = {}
@@ -7489,8 +7520,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             if levels:
                 self._waypoint_om_wind[idx] = levels
             else:
+                without.append(name)
                 self.logger.warning(
                     "Enroute wind: no Open-Meteo pressure-level data for %s", name)
+        return without
 
     # ------------------------------------------------------------------
     # Radar (RainViewer) helpers
@@ -8706,6 +8739,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "waypoints": waypoints,
             "last_fetch_epoch": self._enroute_last_fetch_time or None,
             "next_fetch_epoch": self._enroute_next_fetch_time or None,
+            "om_problem": self._enroute_om_problem,
         }
 
     def _build_windstate_message(self) -> str:
@@ -9072,11 +9106,18 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     for i, (name, lat, lon) in enumerate(self._enroute_waypoints)
                     if i not in self._waypoint_passed
                 ]
-                await self._fetch_enroute_om_batch(targets)
+                without = await self._fetch_enroute_om_batch(targets)
+                if without:
+                    self._enroute_om_problem = (
+                        f"No Open-Meteo wind for {len(without)} of {len(targets)} "
+                        "waypoint(s) (Open-Meteo unreachable or rate-limited?)")
+                else:
+                    self._enroute_om_problem = None
                 self._apply_enroute_wind_injection()
                 now = time.time()
                 self._enroute_last_fetch_time = now
-                self._enroute_next_fetch_time = now + _ENROUTE_FETCH_INTERVAL_S
+                self._enroute_next_fetch_time = now + (
+                    _ENROUTE_RETRY_INTERVAL_S if without else _ENROUTE_FETCH_INTERVAL_S)
                 self._enroute_wind_changed_event.set()
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
