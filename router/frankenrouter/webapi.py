@@ -1285,7 +1285,7 @@ def _evt_fmt_ts(ts, now):
         return '?', '?'
 
 
-def _evt_describe(evt, get_var_name):  # pylint: disable=too-many-return-statements,too-many-locals,too-many-statements
+def _evt_describe(evt, get_var_name):  # pylint: disable=too-many-return-statements,too-many-locals,too-many-statements,too-many-branches
     """Return (description, raw_str) for a sim event dict."""
     etype = evt.get('type', '?')
     if etype == 'var_change':
@@ -1376,10 +1376,22 @@ def _evt_describe(evt, get_var_name):  # pylint: disable=too-many-return-stateme
         if evt.get('is_frankenrouter'):
             return f'Frankenrouter connected: {client_name} ({evt.get("client_sim", "")})', ''
         return f'Client connected: {client_name}', ''
+    if etype == 'client_disconnected':
+        client_name = evt.get('client_name', '?')
+        detail = f"{evt.get('reason', '?')}, connected {evt.get('duration_s', '?')} s"
+        if evt.get('is_frankenrouter'):
+            return (f'Frankenrouter disconnected: {client_name}'
+                    f' ({evt.get("client_sim", "")})', detail)
+        return f'Client disconnected: {client_name}', detail
     if etype == 'upstream_connected':
         host = evt.get('upstream_host', '?')
         port = evt.get('upstream_port', '?')
         return f'Connected to upstream {host}:{port}', ''
+    if etype == 'upstream_disconnected':
+        host = evt.get('upstream_host', '?')
+        port = evt.get('upstream_port', '?')
+        return (f'Disconnected from upstream {host}:{port}',
+                f"connected {evt.get('duration_s', '?')} s")
     return etype, ''
 
 

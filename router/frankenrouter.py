@@ -606,6 +606,26 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         if self.simevents_logger is not None:
             self.simevents_logger.info(self._simevents_log_line(event))
 
+    def record_client_disconnected(self, client, reason):
+        """Record client_disconnected for a client whose connection was recorded.
+
+        Only clients with a client_connected event (see
+        _sim_events_clients_recorded) get one, so a connection that never
+        identified itself (e.g. a port scan) logs neither.
+        """
+        if client.client_id not in self._sim_events_clients_recorded:
+            return
+        self._sim_events_clients_recorded.discard(client.client_id)
+        event = {
+            'client_name': client.display_name,
+            'reason': reason,
+            'duration_s': int(time.perf_counter() - client.connected_at),
+        }
+        if client.is_frankenrouter:
+            event['is_frankenrouter'] = True
+            event['client_sim'] = client.simulator_name
+        self.record_sim_event('client_disconnected', **event)
+
     async def _send_simevents_if_due(self):
         """Broadcast pending sim events to the network if the batch interval has elapsed."""
         if not self._simevents_pending:
@@ -1345,8 +1365,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 *(self.reset_client_welcome(client) for client in clients),
                 return_exceptions=True)
 
-    async def close_client_connection(self, client, clean=True):
-        """Close a client connection and remove client data."""
+    async def close_client_connection(self, client, clean=True, reason="closed by router"):
+        """Close a client connection and remove client data.
+
+        reason goes in the client_disconnected sim event.
+        """
         if client.is_closing:
             self.logger.debug("Client connection already closing: %s", client.peername)
             return
@@ -1354,6 +1377,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.logger.debug("Closing client connection %s cleanly", client.peername)
         # Send "exit" and close connection
         await client.close(clean)
+        self.record_client_disconnected(client, reason)
         # Destroy client connection object and log
         await self.log_connect_evt(client.peername, clientid=client.client_id, disconnect=True)
         try:
@@ -1374,6 +1398,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.upstream.is_closing = True
         # Send "exit" and close connection
         await self.upstream.close()
+        self.record_sim_event(
+            'upstream_disconnected',
+            upstream_host=self.config.upstream.host,
+            upstream_port=self.config.upstream.port,
+            duration_s=int(time.perf_counter() - self.upstream.connected_at),
+        )
         # Destroy upstream connection object
         await self.log_connect_evt(peername, disconnect=True)
         self.upstream = None
@@ -1497,6 +1527,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 except connection.ConnectionClosed as exc:
                     await self.log_connect_evt(
                         this_client.peername, clientid=this_client.client_id, disconnect=True)
+                    self.record_client_disconnected(this_client, "connection lost")
                     del self.clients[this_client.peername]
                     self.logger.warning("Client connection broke (%s) for %s",
                                         exc, this_client.peername)
@@ -2666,9 +2697,19 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             extra = (f" [{event.get('client_sim', '')}]"
                      if event.get('is_frankenrouter', False) else '')
             return f"{prefix} client_connected: {client_name}{extra}"
+        if etype == 'client_disconnected':
+            client_name = event.get('client_name', '?')
+            extra = (f" [{event.get('client_sim', '')}]"
+                     if event.get('is_frankenrouter', False) else '')
+            return (f"{prefix} client_disconnected: {client_name}{extra}"
+                    f" ({event.get('reason', '?')}, connected {event.get('duration_s', '?')} s)")
         if etype == 'upstream_connected':
             return (f"{prefix} upstream_connected: "
                     f"{event.get('upstream_host', '?')}:{event.get('upstream_port', '?')}")
+        if etype == 'upstream_disconnected':
+            return (f"{prefix} upstream_disconnected: "
+                    f"{event.get('upstream_host', '?')}:{event.get('upstream_port', '?')}"
+                    f" (connected {event.get('duration_s', '?')} s)")
         return f"{prefix} {etype}: {event}"
 
     async def simevents_logging_task(self, name):
@@ -3895,6 +3936,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                             clients_to_purge.append(peername)
                     for peername in clients_to_purge:
                         self.logger.info("Housekeeping removed disconnected client %s", peername)
+                        self.record_client_disconnected(self.clients[peername], "connection lost")
                         del self.clients[peername]
 
                     # Trim client stats buffers
@@ -4221,7 +4263,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             if sender.upstream:
                 await self.close_upstream_connection()
             else:
-                await self.close_client_connection(sender)
+                await self.close_client_connection(sender, reason="client exit")
         elif code == RulesCode.KEYVALUE_NORMAL:
             self.logger.debug("Got normal key-value from %s: %s", sender_hr, line)
         elif code == RulesCode.KEYVALUE_FILTERED_INGRESS:

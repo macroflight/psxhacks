@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Fix: sim events now include disconnections.** A client that had a
+  `client_connected` event gets a `client_disconnected` event when it
+  disconnects (with the reason: connection lost, client exit or closed
+  by the router, and how long it was connected), and the upstream gets
+  `upstream_disconnected`. They're in the sim events log, the web UI and
+  the SIMEVENTS sent to the network (and so to Flight Centre).
 - **New: PSX navdata check.** At startup the router reads
   `psx_navdata.json` from its working directory (written there by the
   start scripts, see `start_scripts/README.md`; `--navdata-file` to read
