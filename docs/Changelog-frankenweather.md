@@ -1,6 +1,6 @@
 # frankenweather changelog
 
-## Unreleased
+## 2.1.3 (2026-10-30)
 
 - **Fix: during an Open-Meteo outage the enroute wind importer replaced
   the flight plan's winds with calm wind.** After a datalink wind uplink
