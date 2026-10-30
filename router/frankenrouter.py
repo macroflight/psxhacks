@@ -32,6 +32,7 @@ from frankenrouter import config
 from frankenrouter import connection
 from frankenrouter import variables
 from frankenrouter import routercache
+from frankenrouter import navdata
 
 from frankenrouter.rules import (
     RulesAction, RulesCode, Rules, START_PRIVATE_WINDOW_S, FLIGHT_CONTROL_INPUT_KEYWORDS)
@@ -320,6 +321,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         """Initialize the class."""
         self.uuid = None
         self.args = None
+        self.navdata = navdata.UNKNOWN
         self.config = None
         self.logger = None
         self.traffic_logger = None
@@ -721,6 +723,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             type=str, action='store', default=None, metavar='MSG',
             help="Always include this string in the errors list (for testing).",
         )
+        parser.add_argument(
+            '--navdata-file',
+            type=str, action='store', default=navdata.NAVDATA_FILE, metavar='FILE',
+            help=("PSX navdata version file written by the start scripts"
+                  f" (default: {navdata.NAVDATA_FILE} in the working directory)"),
+        )
         self.args = parser.parse_args()
         for attr, message in DEPRECATED_ARGS:
             if getattr(self.args, attr):
@@ -838,8 +846,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         else:
             shutdown_hint = "Ctrl-C to shut down cleanly"
         self.logger.info(
-            "Router version %s with UUID: %s - %s",
+            "Router version %s (navdata %s) with UUID: %s - %s",
             __VERSION__,
+            self.navdata,
             trimstring(self.uuid),
             shutdown_hint,
         )
@@ -975,11 +984,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 skew = self._clock_skew(routeruuid, info)
                 skew_str = "unknown" if skew is None else f"{skew:+.1f}s"
                 self.logger.info(
-                    "Remote %s (%s) v%s in sim %s has %d clients, up %d s"
+                    "Remote %s (%s) v%s (navdata %s) in sim %s has %d clients, up %d s"
                     " (data age %.0fs, clock skew %s)",
                     info['router_name'],
                     trimstring(info['uuid']),
                     info.get('version', 'unknown'),
+                    info.get('navdata', navdata.UNKNOWN),
                     info['simulator_name'],
                     clients,
                     info['performance']['uptime'],
@@ -2823,6 +2833,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.frdp_routerinfo_requested = False
         payload = {
             "version": __VERSION__,
+            "navdata": self.navdata,
             "timestamp": time.time(),
             "router_name": self.config.identity.router,
             "simulator_name": self.config.identity.simulator,
@@ -3177,6 +3188,17 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             skews.append((name, skew))
         return skews
 
+    def _navdata_check(self):
+        """Return (errors, warnings) comparing PSX navdata across all routers."""
+        identity = self.config.identity
+        routers = [(f"{identity.router}/{identity.simulator}", self.navdata)]
+        for router_uuid, info in self.routerinfo.items():
+            if router_uuid == self.uuid:
+                continue
+            name = f"{info.get('router_name') or router_uuid}/{info.get('simulator_name')}"
+            routers.append((name, info.get('navdata')))
+        return navdata.check_navdata(routers)
+
     def _clock_skew(self, router_uuid, info):
         """Return the (RTT-corrected, if possible) clock skew in seconds for one router.
 
@@ -3299,6 +3321,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     errors.append(
                         f"Router {name}'s clock is off by {skew:+.1f}s"
                         f" (limit {critical_s:.0f}s)")
+            errors.extend(self._navdata_check()[0])
         if self.config.identity.type == 'master':
             for pattern in MASTER_ADDON_PATTERNS:
                 matches = self._find_network_clients_matching(pattern)
@@ -3347,6 +3370,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     warnings.append(
                         f"Router {name}'s clock is off by {skew:+.1f}s"
                         f" (limit {perf.clock_skew_warning:.0f}s)")
+            warnings.extend(self._navdata_check()[1])
         checks = self.config.check
         if checks is None:
             return warnings
@@ -4878,6 +4902,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.tasks.add(task)
                 await asyncio.sleep(0)
                 print(f"frankenrouter version {__VERSION__} starting")
+                self.navdata, problem = navdata.load_navdata(self.args.navdata_file)
+                if problem is not None:
+                    self.logger.warning("%s", problem)
+                else:
+                    self.logger.info("PSX navdata: %s", self.navdata)
                 if self.basic_mode:
                     config_path = os.path.abspath(self.args.config_file)
                     print(

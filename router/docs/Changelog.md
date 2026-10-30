@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **New: PSX navdata check.** At startup the router reads
+  `psx_navdata.json` from its working directory (written there by the
+  start scripts, see `start_scripts/README.md`; `--navdata-file` to read
+  another file) and logs a warning if it's missing or broken. Each router
+  sends its navdata (e.g. `2610-Navigraph`) in FRDP ROUTERINFO and shows
+  the other routers' navdata in the status display. The master sim
+  router reports an error to all sims if they use different navdata, and
+  a warning for a router whose navdata is unknown (no file, or an older
+  version) or older than the AIRAC cycle in effect today (cycles are
+  28 days apart, so this needs no download).
 ## 2026-10-29: version 1.31.1
 
 - **Change: `addon=PSXNETVATSIM` messages are no longer logged as an
