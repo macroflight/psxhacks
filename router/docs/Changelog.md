@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026-10-30: version 1.32.0
 
 - **Fix: sim events now include disconnections.** A client that had a
   `client_connected` event gets a `client_disconnected` event when it
@@ -18,6 +18,7 @@
   a warning for a router whose navdata is unknown (no file, or an older
   version) or older than the AIRAC cycle in effect today (cycles are
   28 days apart, so this needs no download).
+
 ## 2026-10-29: version 1.31.1
 
 - **Change: `addon=PSXNETVATSIM` messages are no longer logged as an
