@@ -1,6 +1,6 @@
 # start_scripts changelog
 
-## Unreleased
+## 1.11.0 (2026-10-30)
 
 - **New: PSX navdata check.** `startsim_master.ps1` (before the PSX main
   server) and `startsim_slave.ps1` (before the slave router) select the
