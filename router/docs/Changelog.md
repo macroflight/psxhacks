@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026-10-31: version 1.33.0
 
 - **Change: unknown PSX navdata is no longer a warning.** Not every sim
   uses the start scripts, so the master router now only logs a router
