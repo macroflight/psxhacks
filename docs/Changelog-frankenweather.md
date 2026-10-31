@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **New: restore the startup settings from the router's `/efb` page.**
+  Its DEFAULTS button (frankenrouter, unreleased) puts the weather mode,
+  enroute wind, extra turbulence on/off and profile, CB near dep/arr
+  and SIGMET settings back as they were when frankenweather started,
+  from its config file and command line options (FRANKENWEATHER
+  COMMAND `config_action` `startup`).
+
 - **Fix: the terrain tile cache had no size limit.** Terrain tiles
   (about 33 MB each) were kept forever in `~/.cache/frankenturb/terrain`;
   a long trip can pass near over a thousand of them (WorldFlight 2026: about

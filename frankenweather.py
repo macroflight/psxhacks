@@ -2612,6 +2612,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # Snapshot of every web-GUI-configurable setting at its built-in default,
         # captured before any --config-file load — used by "reset to default".
         self._default_config_dict: dict = self._build_config_dict()
+        # The same at startup, after --config-file and the command line
+        # options -- restored by config_action "startup" (the router's /efb
+        # DEFAULTS button), see _startup_weather_settings()
+        self._startup_config_dict: Optional[dict] = None
 
     # ------------------------------------------------------------------
     # PSX helpers
@@ -3588,6 +3592,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 self._apply_config_dict(copy.deepcopy(self._default_config_dict))
                 self.logger.info("Settings reset to default (not saved to config file)")
                 settings_changed = True
+            elif action == "startup":
+                self._apply_config_dict(self._startup_weather_settings())
+                self.logger.info("Weather mode, enroute wind, turbulence on/off and profile, "
+                                 "CB near dep/arr and SIGMET settings restored to their "
+                                 "startup values (config file and command line options)")
+                settings_changed = True
             else:
                 self.logger.warning("config_action: unknown action %r", action)
         if "msfs_in_cloud_sync" in cmd:
@@ -4004,6 +4014,33 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         config["turbulence"]["type_biases"] = dict(self._turb_type_biases)
         config["turbulence"]["event_mult"] = dict(self._turb_event_mult)
         return config
+
+    @staticmethod
+    def _weather_settings(config: dict) -> dict:
+        """Return the settings the router's /efb page controls, from a config dict.
+
+        As a partial config dict for _apply_config_dict(): weather mode,
+        enroute wind on/off, turbulence on/off and profile, CB near
+        dep/arr and the SIGMET settings.
+        """
+        return copy.deepcopy({
+            "general": {"mode": config["general"]["mode"]},
+            "enroute_wind": {"enabled": config["enroute_wind"]["enabled"]},
+            "sigmet": config["sigmet"],
+            "cb_avoidance": config["cb_avoidance"],
+            "turbulence": {key: config["turbulence"][key] for key in ("enabled", "profile")},
+        })
+
+    def _startup_weather_settings(self) -> dict:
+        """Return _weather_settings() as they were at startup.
+
+        After loading --config-file and applying the command line options.
+        """
+        return self._weather_settings(self._startup_config_dict or self._default_config_dict)
+
+    def _startup_differs(self) -> bool:
+        """Return True if any _weather_settings() differ from their startup values."""
+        return self._weather_settings(self._build_config_dict()) != self._startup_weather_settings()
 
     def _apply_config_dict(self, config: dict) -> None:  # pylint: disable=too-many-branches,too-many-locals
         """Apply a loaded config-file dict onto runtime state; reconciles side effects after."""
@@ -8250,6 +8287,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             # Routers before 1.26.0 only know this on/off form
             "avoid_cb_near_airport": self._cb_airport_mode != "off",
             "cb_airport_clearance_nm": _CB_AIRPORT_CLEARANCE_NM,
+            # config_action "startup" is understood (the router's /efb DEFAULTS)
+            "startup_defaults": True,
+            # ... and would change something (the router shows RESTORE DEFAULTS)
+            "startup_differs": self._startup_differs(),
             "config_file": cfg.config_file,
             "config_file_exists": bool(cfg.config_file and os.path.exists(cfg.config_file)),
         }
@@ -9613,6 +9654,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._load_config_file()
         self._apply_turb_profile_option()      # also without a config file
         self._apply_turb_profile_bands()
+        self._startup_config_dict = self._build_config_dict()
         self.logger.info("Turbulence profile: %s", self._turb_profile)
         # Trigger initial TURBSTATE broadcast so the router has config data immediately.
         self._turb_state_changed_event.set()
