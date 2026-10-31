@@ -139,7 +139,8 @@ def fly_leg(sim: Sim, leg: dict, log: Callable[[str], None]) -> Optional[str]:
         "McpWdoSpd": str(leg["mcp_speed"] or min(330, int(leg["tas_kt"]))),
         "McpPshLnv": "0", "McpPshVnv": "0", "McpPshHdgHld": "0", "McpPshAltHld": "0",
         "McpPshSpd": "8", "CfgRego": leg["registration"],
-        "FmcRte1": empty_route(leg["route_airport"]), "FmcFltNo": callsign})
+        "FmcRte1": empty_route(leg["route_airport"]), "FmcFltNo": callsign,
+        **leg.get("situ_vars", {})})
     log(f"LOADED {name}: {count} variables")
     if sim.ensure_alt_hold(leg["alt_ft"]):
         log(f"ALT HOLD {name}: FLCH hadn't handed over, pressed ALT HOLD")
