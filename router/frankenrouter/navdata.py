@@ -73,16 +73,19 @@ def check_navdata(routers, today=None):
 
     routers is a list of (router display name, navdata) tuples, where
     navdata is None or UNKNOWN when the router didn't report it (e.g.
-    an older version). Returns (errors, warnings): a mismatch between
-    the known versions is an error, an unknown version or one older
-    than the AIRAC cycle in effect today a warning.
+    an older version, or a sim not started by the start scripts).
+    Returns (errors, warnings, unknown): a mismatch between the known
+    versions is an error, one older than the AIRAC cycle in effect
+    today a warning; unknown lists the routers whose navdata is
+    unknown, which is normal (for the log only).
     """
     errors = []
     warnings = []
+    unknown = []
     known = {}
     for name, navdata in routers:
         if navdata in (None, UNKNOWN):
-            warnings.append(f"Navdata version of router {name} is unknown")
+            unknown.append(name)
         else:
             known.setdefault(navdata, []).append(name)
     if len(known) > 1:
@@ -95,7 +98,7 @@ def check_navdata(routers, today=None):
             warnings.append(
                 f"Navdata {navdata} ({', '.join(names)}) is out of date:"
                 f" AIRAC {cycle} has been in effect since {effective.isoformat()}")
-    return errors, warnings
+    return errors, warnings, unknown
 
 
 class TestNavdata(unittest.TestCase):
@@ -141,19 +144,20 @@ class TestNavdata(unittest.TestCase):
             self.assertEqual(current_airac(today), expected, today)
 
     def test_check(self):
-        """Mismatch is an error, unknown or out of date a warning."""
+        """Mismatch is an error, out of date a warning, unknown neither."""
         today = datetime.date(2026, 10, 15)
-        self.assertEqual(check_navdata([("a", "2610-X"), ("b", "2610-X")], today), ([], []))
-        errors, warnings = check_navdata([("a", "2610-X"), ("b", "2611-X"), ("c", "2610-X")], today)
+        self.assertEqual(check_navdata([("a", "2610-X"), ("b", "2610-X")], today), ([], [], []))
+        errors, warnings, _ = check_navdata(
+            [("a", "2610-X"), ("b", "2611-X"), ("c", "2610-X")], today)
         self.assertEqual(errors, ["Navdata mismatch: 2610-X (a, c); 2611-X (b)"])
         self.assertEqual(warnings, [])
-        errors, warnings = check_navdata([("a", "2609-X"), ("b", "2609-X")], today)
+        errors, warnings, _ = check_navdata([("a", "2609-X"), ("b", "2609-X")], today)
         self.assertEqual(errors, [])
         self.assertEqual(warnings, ["Navdata 2609-X (a, b) is out of date:"
                                     " AIRAC 2610 has been in effect since 2026-10-01"])
-        errors, warnings = check_navdata([("a", "2610-X"), ("b", None), ("c", UNKNOWN)], today)
-        self.assertEqual(errors, [])
-        self.assertEqual(len(warnings), 2)
+        self.assertEqual(
+            check_navdata([("a", "2610-X"), ("b", None), ("c", UNKNOWN)], today),
+            ([], [], ["b", "c"]))
 
 
 if __name__ == '__main__':

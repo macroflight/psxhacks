@@ -322,6 +322,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.uuid = None
         self.args = None
         self.navdata = navdata.UNKNOWN
+        # Routers whose unknown navdata the master has logged (_navdata_check())
+        self.navdata_unknown_logged: set = set()
         self.config = None
         self.logger = None
         self.traffic_logger = None
@@ -3241,7 +3243,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 continue
             name = f"{info.get('router_name') or router_uuid}/{info.get('simulator_name')}"
             routers.append((name, info.get('navdata')))
-        return navdata.check_navdata(routers)
+        errors, warnings, unknown = navdata.check_navdata(routers)
+        # Unknown navdata is normal (a sim not started by the start scripts,
+        # or an older router): logged once per router, not a warning
+        for name in sorted(set(unknown) - self.navdata_unknown_logged):
+            self.logger.info("Navdata version of router %s is unknown", name)
+        self.navdata_unknown_logged = set(unknown)
+        return errors, warnings
 
     def _clock_skew(self, router_uuid, info):
         """Return the (RTT-corrected, if possible) clock skew in seconds for one router.
@@ -4948,7 +4956,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 await asyncio.sleep(0)
                 print(f"frankenrouter version {__VERSION__} starting")
                 self.navdata, problem = navdata.load_navdata(self.args.navdata_file)
-                if problem is not None:
+                if problem is not None and not os.path.exists(self.args.navdata_file):
+                    # Normal without the start scripts
+                    self.logger.info("%s", problem)
+                elif problem is not None:
                     self.logger.warning("%s", problem)
                 else:
                     self.logger.info("PSX navdata: %s", self.navdata)

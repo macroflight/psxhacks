@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Change: unknown PSX navdata is no longer a warning.** Not every sim
+  uses the start scripts, so the master router now only logs a router
+  whose navdata is unknown, at INFO and once per router, and a router
+  without `psx_navdata.json` logs that at INFO at startup. A navdata
+  mismatch between the known versions is still an error, and an
+  out-of-date AIRAC cycle still a warning.
+
 - **Change: a more compact `/efb` page, in three columns.** Router
   status and weather status share the first column, and all the
   weather controls are in the second, without the explanations under
