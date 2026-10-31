@@ -1,5 +1,12 @@
 # frankenweather changelog
 
+## Unreleased
+
+- **Fix: an FMC departure or destination missing from the airport
+  database was logged twice every 3 seconds.** For example NZFX
+  (Phoenix Airfield, Antarctica), which isn't in the station list
+  frankenweather uses. The warning is now logged once per airport.
+
 ## 2.1.3 (2026-10-30)
 
 - **Fix: during an Open-Meteo outage the enroute wind importer replaced

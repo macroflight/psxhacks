@@ -2239,6 +2239,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # can sit protected for many minutes at a time (see _check_and_relocate()),
         # so this is throttled rather than logged on every single check.
         self._zone_protected_last_logged: dict = {}
+        # FMC dep/dst airports already warned about as missing from the
+        # airport database (checked every few seconds; warn once each)
+        self._arpt_missing_warned: set = set()
 
         # FMC route state — dep/dst airports get a dedicated zone when within range
         self.fmc_dep_icao: Optional[str] = None
@@ -6484,8 +6487,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 continue
             seen.add(icao)
             if icao not in self.airports:
-                self.logger.warning("FMC arpt %s not in airport database — no zone assigned",
-                                    icao)
+                if icao not in self._arpt_missing_warned:
+                    self._arpt_missing_warned.add(icao)
+                    self.logger.warning("FMC arpt %s not in airport database — no zone assigned",
+                                        icao)
                 continue
             lat, lon = self.airports[icao]
             dist = self._dist_nm(self.ac_lat, self.ac_lon, lat, lon)
