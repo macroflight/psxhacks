@@ -1,6 +1,6 @@
 # frankenweather changelog
 
-## Unreleased
+## 2.2.0 (2026-10-31)
 
 - **New: an EFB page in frankenweather's own web UI (`/efb`, "EFB
   page" button on every weather page).** Like the router's `/efb`, for
