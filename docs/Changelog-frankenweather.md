@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **New: an EFB page in frankenweather's own web UI (`/efb`, "EFB
+  page" button on every weather page).** Like the router's `/efb`, for
+  PSX.NET.EFB or any small screen: weather status (with frankenweather's
+  PSX connection), all the weather controls with PANIC, RESTORE
+  DEFAULTS and Help, extra turbulence, surface weather and the PIREP
+  popup. It says at the top that it's frankenweather's own page, not
+  the router's: with a frankenrouter, use the router's `/efb`. The
+  router and frankenweather now share this page's code (`fw_efb.py`).
+
 - **New: restore the startup settings from the router's `/efb` page.**
   Its DEFAULTS button (frankenrouter, unreleased) puts the weather mode,
   enroute wind, extra turbulence on/off and profile, CB near dep/arr

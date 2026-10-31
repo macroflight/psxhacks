@@ -70,6 +70,7 @@ from fw_cb import (
     apply_om_cb as _apply_om_cb,
     apply_fake_cb as _apply_fake_cb,
 )
+import fw_efb as _fw_efb  # pylint: disable=wrong-import-order
 import fw_webui as _fw_webui  # pylint: disable=wrong-import-order
 import fw_sigmet as _fw_sigmet  # pylint: disable=wrong-import-order
 from psxhacks_version import get_version
@@ -2106,6 +2107,11 @@ class StandaloneFWContext:
     def event_log_path(self):
         """Return this run's own event log file path, or None if unavailable."""
         return self._fw._event_log_path  # pylint: disable=protected-access
+
+    @property
+    def psx_connected(self):
+        """Return True while frankenweather is connected to PSX (fw_efb.py's /efb page)."""
+        return bool(self._fw.psx_connected)
 
     def cache_get(self, name):
         """Return a PSX-variable-like value from local frankenweather state."""
@@ -9776,6 +9782,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             raise _web.HTTPFound('/weather')
 
         _fw_webui.register_weather_routes(routes, ctx)
+        # The compact /efb page, as on the router (fw_efb.py)
+        _fw_efb.register_page_routes(routes, ctx, self.logger)
         # Standalone-only: the router UI has no need to browse/download
         # frankenweather's own per-run event logs (see the Config and logs page).
         _fw_webui.register_weather_logs_routes(routes, ctx)

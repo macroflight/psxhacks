@@ -10,15 +10,47 @@
   out-of-date AIRAC cycle still a warning.
 
 - **Change: a more compact `/efb` page, in three columns.** Router
-  status and weather status share the first column, and all the
-  weather controls are in the second, without the explanations under
-  each set of buttons: a new Help button shows them all in a popup
-  (tap it to close). "Current Location Weather" is now called "Surface
-  Weather": it's the surface weather of the zone PSX uses at the
-  aircraft's position, not the weather at the aircraft's altitude.
-  Flight control locks show as "None (all sims can fly)" or "All (no
-  sim can fly)" instead of `NO_CONTROL_LOCKS`/`ALL_CONTROL_LOCKS`, on
-  the main page too.
+  and weather status share the first column, all the weather controls
+  are in the second, and extra turbulence and surface weather are in
+  the third.
+  - The explanations under each set of weather buttons moved to a Help
+    popup (tap it to close), so the controls take much less room.
+  - Button names: weather mode Normal/PSX Auto/PSX Manual (Normal was
+    Full), CB near dep/arr Normal/Move CB/Remove CB (were Off/Move
+    zone/Remove CB), SIGMETs in the order Normal/PSX/Off.
+  - The weather mode buttons follow only FrankenWeather's weather mode:
+    Normal stays highlighted with extra turbulence off.
+  - The turbulence profile buttons are greyed out while extra
+    turbulence is off.
+  - Extra turbulence is always the same three one-line rows (now,
+    reason, trend), so the page no longer jumps when flying in and out
+    of turbulence.
+  - "Current Location Weather" is now "Surface Weather": the surface
+    weather of the zone PSX uses at the aircraft's position, not the
+    weather at the aircraft's altitude.
+  - The PIREP popup explains what its ride reports are:
+    FrankenWeather's own forecast, not real pilot reports.
+  - Flight control locks show as "None (all sims can fly)" or "All (no
+    sim can fly)" instead of `NO_CONTROL_LOCKS`/`ALL_CONTROL_LOCKS`, on
+    the main page too.
+
+- **New: PANIC and RESTORE DEFAULTS buttons on `/efb`.** PANIC (red),
+  for when the weather gets too much: one press disables
+  FrankenWeather's extra turbulence, sets CB near dep/arr to Remove CB
+  and SIGMETs to Off (greyed out when they already are). RESTORE
+  DEFAULTS (red, shown only when one of
+  those settings or the weather mode, turbulence profile or enroute
+  wind differs from how FrankenWeather started) puts them all back, from
+  its config file and command line options. It needs FrankenWeather
+  2.1.4 or later.
+
+- **New: a "Router errors and warnings" button on `/efb`**, shown only
+  when there's something to report: yellow with warnings, red with
+  errors. It opens a popup listing them all: the master router's and
+  this router's own. Critical errors are still shown at the top of the
+  page too. The master router now sends its warnings to all sims along
+  with its errors (FRDP SHAREDINFO `warnings`), so e.g. its navdata
+  warnings show on every sim's `/efb`, not only in its own log.
 
 ## 2026-10-30: version 1.32.0
 

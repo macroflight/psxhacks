@@ -279,7 +279,8 @@ def _weather_nav(ctx, current: str) -> str:
     if _sigmets_enabled(ctx):
         pages.append(('sigmets', '/weather/sigmets', 'SIGMETs'))
     pages += [('turb', '/weather/turbulence', 'Extra turbulence'),
-              ('config', '/weather/config', _config_page_title(ctx))]
+              ('config', '/weather/config', _config_page_title(ctx)),
+              ('efb', '/efb', 'EFB page')]
     here = next((url for key, url, _ in pages if key == current), '')
     # In the router's web UI: a way back to the router's own start page
     home = getattr(ctx, 'router_home', None)

@@ -23,6 +23,7 @@ if _PSXHACKS not in sys.path:
 
 from aiohttp import web  # noqa: E402  pylint: disable=import-error,wrong-import-position
 
+import fw_efb as _fw_efb  # noqa: E402  pylint: disable=wrong-import-position
 import fw_sigmet as _fw_sigmet  # noqa: E402  pylint: disable=wrong-import-position
 import fw_webui as _fw_webui  # noqa: E402  pylint: disable=wrong-import-position
 
@@ -343,7 +344,7 @@ def _build_services_page(router, color_scheme):
     hardcoded here, so this stays in sync with frankencontrol.py's own
     SERVICES registry automatically, with no risk of the two drifting apart.
     """
-    color, label, age = _efb_data_status(
+    color, label, age = _fw_efb.data_status(
         time.time(), router.frankencontrol_status_received_at, timeout_s=120.0)
 
     services = (router.frankencontrol_status or {}).get('services') or {}
@@ -1483,88 +1484,6 @@ def _build_events_page(router, color_scheme):
     )
 
 
-_EFB_STALE_TIMEOUT_S = 300.0
-# VATSIM METAR only refreshes every 30 minutes by design (frankenweather.py's
-# _VATSIM_CACHE_MAX_S), and even that only happens opportunistically inside
-# _update_zones() -- flagging it "not getting data" against the generic 5-minute
-# threshold above would be a false alarm on every normal cycle. Give it a
-# matching cadence plus a buffer instead.
-_EFB_VATSIM_STALE_TIMEOUT_S = 2100.0
-
-_EFB_CSS = '''\
-<style>
-* { box-sizing: border-box; }
-html, body {
-  margin: 0; padding: 0; background: #000; color: #dbe6f5;
-  font-family: "Segoe UI", -apple-system, "Helvetica Neue", Arial, sans-serif;
-}
-body { padding: 0.8rem 1.1rem 1rem; }
-.efb-grid { display: grid; gap: 0.7rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
-.efb-grid.wide { grid-template-columns: repeat(auto-fit, minmax(15.5rem, 1fr)); }
-.efb-card {
-  background: #0d1826; border: 1px solid #1e2f45; border-radius: 10px;
-  padding: 0.75rem 0.9rem; min-width: 0;
-}
-.efb-card.fill-green { background: linear-gradient(135deg, #1f8a4c, #176b3c); border-color: #1f8a4c; }
-.efb-card.fill-red { background: linear-gradient(135deg, #8a2f2f, #6b2323); border-color: #8a2f2f; }
-.efb-eyebrow {
-  color: #7e97ba; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em;
-  text-transform: uppercase; margin: 0 0 0.5rem;
-}
-.fill-green .efb-eyebrow, .fill-red .efb-eyebrow { color: rgba(255,255,255,0.75); }
-.efb-value { font-size: 1.35rem; font-weight: 700; color: #eef4fb; }
-.efb-value small { display: block; font-size: 0.78rem; font-weight: 400; color: #9fb2cc; margin-top: 0.15rem; }
-.fill-green .efb-value, .fill-red .efb-value { color: #fff; }
-.fill-green .efb-value small, .fill-red .efb-value small { color: rgba(255,255,255,0.8); }
-.efb-dot { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 50%; margin-right: 0.4rem; }
-.efb-chip-row { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-top: 0.4rem; }
-.efb-hint { margin: 0.35rem 0 0; font-size: 0.78rem; color: #7e97ba; }
-.efb-chip {
-  display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.55rem 0.9rem;
-  border-radius: 8px; border: 1px solid #24384f; background: #101c2c; color: #cbd8ea;
-  font-size: 0.88rem; font-weight: 600; cursor: pointer; text-decoration: none;
-}
-.efb-chip.active { background: #f4d100; border-color: #f4d100; color: #1a1a1a; }
-.efb-chip.active.blue { background: #2058a8; border-color: #3b7fe0; color: #fff; }
-.efb-chip-sm { padding: 0.3rem 0.6rem; font-size: 0.76rem; flex-shrink: 0; white-space: nowrap; }
-.efb-popup {
-  display: none; position: fixed; left: 50%; top: 20%; transform: translateX(-50%);
-  min-width: 15rem; max-width: 90vw; z-index: 10; cursor: pointer;
-  background: #0d1826; border: 1px solid #3b7fe0; border-radius: 10px;
-  padding: 0.75rem 1rem; box-shadow: 0 8px 30px rgba(0,0,0,0.7);
-}
-#efb-help { top: 6%; width: 44rem; max-height: 88vh; overflow-y: auto; font-size: 0.88rem; }
-#efb-help h4 { margin: 0.7rem 0 0.2rem; color: #7e97ba; font-size: 0.75rem;
-  letter-spacing: 0.08em; text-transform: uppercase; }
-#efb-help p { margin: 0.15rem 0; }
-#efb-help b { color: #eef4fb; }
-.efb-section { margin-top: 0.9rem; padding-top: 0.7rem; border-top: 1px solid #1e2f45; }
-.efb-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.3rem; }
-.efb-head .efb-eyebrow { margin: 0; }
-#efb-pirep table { border-collapse: collapse; width: 100%; font-size: 0.95rem; }
-#efb-pirep td { padding: 0.2rem 0.4rem; }
-#efb-pirep tr.cur td { background: #16233a; font-weight: 700; }
-.efb-src-row {
-  display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline;
-  gap: 0.15rem 0.5rem; font-size: 0.82rem; padding: 0.28rem 0; border-bottom: 1px solid #16233a;
-}
-.efb-src-row:last-of-type { border-bottom: none; }
-.efb-src-row .lbl { color: #9fb2cc; }
-.efb-src-row .val { color: #eef4fb; font-weight: 600; }
-.efb-banner {
-  border-radius: 8px; padding: 0.65rem 0.9rem; font-size: 0.9rem; font-weight: 600;
-  margin-top: 0.7rem; background: #4a3a06; border: 1px solid #8a6d0d; color: #ffdf7a;
-}
-.efb-foot {
-  margin-bottom: 1rem; border-radius: 8px; padding: 0.6rem 0.9rem; font-size: 0.85rem;
-  color: #7c8fac; border: 1px solid #1e2f45; background: #0a1120;
-}
-.efb-foot ul { margin: 0.3rem 0 0; padding-left: 1.2rem; color: #f5a3a3; }
-form.efb-inline { display: inline; }
-</style>
-'''
-
-
 def _flight_control_locks_label(value, own_sim):
     """Return the flight control locks state (sharedinfo pilot_flying_simulator) for display."""
     if value == 'NO_CONTROL_LOCKS':
@@ -1572,27 +1491,6 @@ def _flight_control_locks_label(value, own_sim):
     if value == 'ALL_CONTROL_LOCKS':
         return 'All (no sim can fly)'
     return f"{value} (this sim)" if value == own_sim else value
-
-
-def _efb_age_label(age_s):
-    """Return a short human-readable age string for a data-freshness display."""
-    if age_s == float('inf'):
-        return 'never'
-    if age_s < 60:
-        return f"{int(age_s)}s ago"
-    if age_s < 3600:
-        return f"{int(age_s / 60)}m ago"
-    return f"{int(age_s / 3600)}h ago"
-
-
-def _efb_data_status(now, epoch, timeout_s=_EFB_STALE_TIMEOUT_S):
-    """Return (color, label, age_label) describing a 'last received' epoch timestamp."""
-    if not epoch:
-        return '#ef4444', 'not getting data', 'never'
-    age_s = now - epoch
-    if age_s > timeout_s:
-        return '#ef4444', 'not getting data', _efb_age_label(age_s)
-    return '#22c55e', 'OK', _efb_age_label(age_s)
 
 
 def _efb_status_dict(router, ctx):  # pylint: disable=too-many-locals
@@ -1622,6 +1520,12 @@ def _efb_status_dict(router, ctx):  # pylint: disable=too-many-locals
         'standalone': standalone,
         'is_slave': router.config.identity.type == 'slave',
         'errors': list(router.sharedinfo.get('errors', [])),
+        # The errors and warnings popup: the master router's (SHAREDINFO;
+        # its warnings from 1.33.0) plus this router's own
+        'all_errors': list(dict.fromkeys(
+            list(router.sharedinfo.get('errors', [])) + router.get_errors())),
+        'warnings': list(dict.fromkeys(
+            list(router.sharedinfo.get('warnings', [])) + router.get_warnings())),
     }
     if not standalone:
         connected_sims = ', '.join(
@@ -1646,81 +1550,7 @@ def _efb_status_dict(router, ctx):  # pylint: disable=too-many-locals
             'connected_sims': connected_sims,
         })
 
-    state = ctx.fw_state
-    fw_color, fw_label, fw_age = _efb_data_status(now, ctx.fw_state_received_at)
-    cfg = (state or {}).get('config', {})
-    last_om_failed = bool((state or {}).get('last_om_fetch_failed'))
-    metar_fallback = bool((state or {}).get('metar_fallback_active'))
-    if metar_fallback:
-        om_color, om_label = '#f4d100', 'METAR fallback active'
-    elif last_om_failed:
-        om_color, om_label = '#f4d100', 'retrying'
-    elif state is not None:
-        om_color, om_label = '#22c55e', 'OK'
-    else:
-        om_color, om_label = '#64748b', 'unknown'
-    # frankenweather's --primary-metar-source (experimental, default
-    # 'vatsim') decides which bulk METAR cache is actually kept warm in
-    # normal operation (see frankenweather.py's _refresh_primary_metar_cache())
-    # -- show freshness for whichever one that is, not always VATSIM,
-    # or NOAA-primary installs permanently show "VATSIM METAR -- not
-    # getting data, never" even though that's expected and fine.
-    primary_metar_source = (state or {}).get('primary_metar_source', 'vatsim')
-    if primary_metar_source == 'noaa':
-        metar_src_name, metar_src_epoch = 'NOAA METAR', (state or {}).get('noaa_metar_cache_time')
-    else:
-        metar_src_name, metar_src_epoch = 'VATSIM METAR', (state or {}).get('vatsim_cache_time')
-    vatsim_color, vatsim_label, vatsim_age = _efb_data_status(
-        now, metar_src_epoch, _EFB_VATSIM_STALE_TIMEOUT_S)
-
-    turbstate = ctx.fw_turbstate
-    turb_fresh_color, _, turb_age = _efb_data_status(now, ctx.fw_turbstate_received_at)
-    turb_available = turbstate is not None and turb_fresh_color == '#22c55e'
-    msfs_active = bool((turbstate or {}).get('msfs_active'))
-    msfs_color, _, msfs_age = _efb_data_status(now, (turbstate or {}).get('msfs_last_seen_epoch'))
-    if not msfs_active:
-        msfs_color = '#64748b'
-
-    weather_info = {
-        'available': state is not None,
-        'status_color': fw_color, 'status_label': fw_label, 'age_label': fw_age,
-        'fw_mode': (state or {}).get('fw_mode', 'unknown'),
-        'enroute_wind_enabled': bool(cfg.get('enroute_wind_enabled', False)),
-        # (mode, has_modes): has_modes False for FrankenWeather before
-        # 1.14.0, which can only move the zone
-        'cb_airport_mode': _fw_webui.cb_airport_mode(cfg),
-        'cb_airport_clearance_nm': cfg.get('cb_airport_clearance_nm', 15),
-        'disable_psx_sigmets': bool(cfg.get('disable_psx_sigmets', False)),
-        'sigmet_enabled': bool(cfg.get('sigmet_enabled', False)),
-        # sigmet_own: switched off by the Off/PSX presets (missing from
-        # FrankenWeather versions before the presets: always on)
-        'sigmet_preset': _fw_sigmet.current_preset(
-            bool(cfg.get('sigmet_enabled', False)) and bool(cfg.get('sigmet_own', True)),
-            bool(cfg.get('disable_psx_sigmets', False)),
-            {h for h, on in (cfg.get('sigmet_handle') or {}).items() if on}),
-        'sigmet_hazards': list((state or {}).get('sigmet_hazards', [])),
-        'src_router_color': fw_color, 'src_router_label': fw_label, 'src_router_age': fw_age,
-        'src_msfs_color': msfs_color,
-        'src_msfs_label': 'connected' if msfs_active else 'not connected',
-        'src_msfs_age': msfs_age,
-        'src_om_color': om_color, 'src_om_label': om_label,
-        'src_vatsim_color': vatsim_color, 'src_vatsim_label': vatsim_label,
-        'src_vatsim_age': vatsim_age, 'src_vatsim_source_name': metar_src_name,
-        'turb_available': turb_available,
-        'turb_enabled': bool((turbstate or {}).get('enabled', True)),
-        # "stable"/"testing"; None from a FrankenWeather without profiles
-        'turb_profile': (turbstate or {}).get('profile'),
-        'turb_kind': (turbstate or {}).get('active_kind', 'none'),
-        # What's injected (biases and MSFS factor applied); FrankenWeather
-        # before 1.16.0 only sends the computed intensity
-        'turb_intensity_pct': round((turbstate or {}).get(
-            'effective_intensity', (turbstate or {}).get('active_intensity', 0.0)) * 100),
-        'turb_age': turb_age,
-        'turb_reason': (turbstate or {}).get('active_reason') or '—',
-        # "sigmet_ramp" is FrankenWeather 1.11.0's name for it
-        'turb_ramp': ((turbstate or {}).get('intensity_ramp') or
-                      (turbstate or {}).get('sigmet_ramp')),
-    }
+    weather_info = _fw_efb.weather_status(ctx, now)
     return {'router': router_info, 'weather': weather_info}
 
 
@@ -1744,287 +1574,17 @@ def _efb_router_section(info):
                  f'<span style="color:#7e97ba">Connected simulators:</span> '
                  f'<span style="color:#cbd8ea;font-weight:600">'
                  f'{info["connected_sims"]}</span></div>\n')
+    # The errors and warnings button only when there's something to show
+    button = ''
+    if info['all_errors'] or info['warnings']:
+        color = 'red' if info['all_errors'] else 'yellow'
+        button = (f'<button type="button" class="efb-chip efb-chip-sm {color}" '
+                  'onclick="efbProblems()">Router errors and warnings</button>')
     return (
-        '<div class="efb-eyebrow">Router Status</div>\n'
+        f'<div class="efb-head"><div class="efb-eyebrow">Router Status</div>{button}</div>\n'
         f'<div class="efb-value"><span class="efb-dot" style="background:{dot}"></span>'
         f'{label}<small>{info["upstream_label"]} — {info["client_count"]} client(s)</small>'
         '</div>\n' + rows
-    )
-
-
-def _efb_bool_chip_row(  # pylint: disable=too-many-arguments,too-many-positional-arguments
-        action, field, current, true_label='Enabled', false_label='Disabled', small=False):
-    """Render a two-state (true/false) chip toggle row posting an absolute value."""
-    cls = 'efb-chip efb-chip-sm' if small else 'efb-chip'
-
-    def _chip(value, label):
-        active = ' active' if current == value else ''
-        val = '1' if value else '0'
-        return (f'<form class="efb-inline" method="post" action="{action}">'
-                f'<input type="hidden" name="field" value="{field}">'
-                f'<input type="hidden" name="value" value="{val}">'
-                f'<button type="submit" class="{cls}{active}">{label}</button></form>\n')
-    return f'<div class="efb-chip-row">{_chip(True, true_label)}{_chip(False, false_label)}</div>\n'
-
-
-# Each preset bundles FrankenWeather's fw_mode together with the turbulence
-# and enroute-wind toggles, so one tap sets all three at once instead of
-# requiring three separate taps to get a fully "on" or fully "off" state.
-# 'mode'/'enroute_wind_enabled' go out in one addon=FRANKENWEATHER:COMMAND:
-# message (RouterFWContext.send_fw_settings_cmd, handled by
-# frankenweather.py's _handle_fw_command()); 'enabled' (turbulence) is a
-# *different* message type, addon=FRANKENWEATHER:TURBCOMMAND: (send_turb_cmd,
-# handled by _handle_turb_command()) -- the two are not interchangeable, see
-# handle_efb_weather_preset_post().
-_WEATHER_PRESET_CMDS = {
-    'full': {'mode': 'enabled', 'enabled': True, 'enroute_wind_enabled': True},
-    'psx_auto': {'mode': 'disabled', 'enabled': False, 'enroute_wind_enabled': False},
-    'psx_manual': {'mode': 'paused', 'enabled': False, 'enroute_wind_enabled': False},
-}
-
-_WEATHER_PRESET_LABELS = (
-    ('full', 'Full'),
-    ('psx_auto', 'PSX Auto'),
-    ('psx_manual', 'PSX Manual'),
-)
-
-
-def _efb_weather_preset(w):
-    """Return the current combined weather-mode preset key, or None if mixed/custom."""
-    mode, turb, enroute = w['fw_mode'], w['turb_enabled'], w['enroute_wind_enabled']
-    for preset, cmd in _WEATHER_PRESET_CMDS.items():
-        if (mode, turb, enroute) == (cmd['mode'], cmd['enabled'], cmd['enroute_wind_enabled']):
-            return preset
-    return None
-
-
-def _efb_weather_mode_row(current):
-    """Render the 3-way Full/PSX Auto/PSX Manual weather-mode chip row."""
-    chips = ''.join(
-        f'<form class="efb-inline" method="post" action="/api/efb/weather-preset">'
-        f'<input type="hidden" name="preset" value="{preset}">'
-        f'<button type="submit" '
-        f'class="efb-chip efb-chip-sm{" active" if current == preset else ""}">'
-        f'{label}</button></form>\n'
-        for preset, label in _WEATHER_PRESET_LABELS
-    )
-    return f'<div class="efb-chip-row">{chips}</div>\n'
-
-
-def _efb_cb_airport_mode_row(w):
-    """Render the Off/Move zone/Remove CB chip row (fw_webui.CB_AIRPORT_MODES).
-
-    Remove CB is only offered by FrankenWeather 1.14.0 or later.
-    """
-    current, has_modes = w['cb_airport_mode']
-    chips = ''.join(
-        f'<form class="efb-inline" method="post" action="/api/efb/cb-airport-mode">'
-        f'<input type="hidden" name="mode" value="{mode}">'
-        f'<button type="submit" '
-        f'class="efb-chip efb-chip-sm{" active" if current == mode else ""}">'
-        f'{label}</button></form>\n'
-        for mode, label, _hint in _fw_webui.CB_AIRPORT_MODES
-        if mode != 'remove' or has_modes
-    )
-    return f'<div class="efb-chip-row">{chips}</div>\n'
-
-
-def _efb_sigmet_preset_row(w):
-    """Render the Off/Normal/PSX SIGMET preset chip row (fw_sigmet.PRESETS).
-
-    Normal is only offered with FrankenWeather's SIGMET system (--sigmet).
-    No chip is highlighted when the settings are a custom choice made on
-    the SIGMETs page.
-    """
-    chips = ''.join(
-        f'<form class="efb-inline" method="post" action="/api/efb/sigmet-preset">'
-        f'<input type="hidden" name="preset" value="{preset}">'
-        f'<button type="submit" '
-        f'class="efb-chip efb-chip-sm{" active" if w["sigmet_preset"] == preset else ""}">'
-        f'{label}</button></form>\n'
-        for preset, label, _hint in _fw_sigmet.PRESETS
-        if preset != 'normal' or w['sigmet_enabled']
-    )
-    return f'<div class="efb-chip-row">{chips}</div>\n'
-
-
-def _efb_sigmet_hint(w):
-    """Return the /efb hint line explaining the SIGMET presets."""
-    if not w['sigmet_enabled']:
-        return ('Off: no SIGMETs at all, neither FrankenWeather nor PSX uses any. '
-                'PSX: PSX handles every SIGMET itself. '
-                'Start FrankenWeather with --sigmet for Normal.')
-    hint = '. '.join(f'{label}: {hint}' for preset, label, hint in _fw_sigmet.PRESETS)
-    if w['sigmet_preset'] is None:
-        hint += '. Now: a custom choice from the SIGMETs page'
-    return hint + '.'
-
-
-# FrankenWeather turbulence profiles (TURBCOMMAND "profile")
-_EFB_TURB_PROFILES = (('stable', 'Stable'), ('testing', 'Testing'))
-
-
-def _efb_turb_profile_html(w):
-    """Render the Stable/Testing turbulence profile chips, or '' for an older FrankenWeather."""
-    if w['turb_profile'] is None:
-        return ''
-    chips = ''.join(
-        f'<form class="efb-inline" method="post" action="/api/efb/turb-profile">'
-        f'<input type="hidden" name="profile" value="{profile}">'
-        f'<button type="submit" '
-        f'class="efb-chip efb-chip-sm{" active" if w["turb_profile"] == profile else ""}">'
-        f'{label}</button></form>\n'
-        for profile, label in _EFB_TURB_PROFILES)
-    return ('<div class="efb-eyebrow" style="margin-top:0.6rem">Turbulence Profile</div>\n'
-            f'<div class="efb-chip-row">{chips}</div>\n')
-
-
-def _efb_controls_card(w):
-    """Render the weather controls card: every weather/turbulence/SIGMET control, no hints.
-
-    The explanations are in the Help popup (_efb_help_html()), to keep
-    the card short. If FrankenWeather itself isn't running (no STATE
-    message ever received, or none recently -- see _efb_data_status()),
-    none of these controls can do anything: posting a preset/toggle
-    still works mechanically (the router accepts the request), but
-    there is no FrankenWeather process on the other end to act on it or
-    to report back a new state, so the buttons would appear to do
-    nothing and the weather-mode 3-way row would never match any preset
-    (see _efb_weather_preset()) and so never highlight. Show a dimmed,
-    control-free card instead of a set of dead buttons.
-    """
-    if w['status_label'] != 'OK':
-        return (
-            '<div class="efb-card" id="efb-controls-card" style="opacity:0.55">\n'
-            '<div class="efb-eyebrow">Weather Mode</div>\n'
-            '<div class="efb-banner" style="margin-top:0">FrankenWeather is not running '
-            '-- weather controls unavailable.</div>\n'
-            '</div>\n'
-        )
-    return (
-        '<div class="efb-card" id="efb-controls-card">\n'
-        '<div class="efb-head"><div class="efb-eyebrow">Weather Mode</div>'
-        '<button type="button" class="efb-chip efb-chip-sm" onclick="efbHelp()">Help</button>'
-        '</div>\n' +
-        _efb_weather_mode_row(_efb_weather_preset(w)) +
-        '<div class="efb-eyebrow" style="margin-top:0.6rem">Extra Turbulence</div>\n' +
-        _efb_bool_chip_row(
-            '/api/efb/turb-toggle', 'enabled', w['turb_enabled'], small=True) +
-        _efb_turb_profile_html(w) +
-        '<div class="efb-eyebrow" style="margin-top:0.6rem">CB Near Dep/Arr</div>\n' +
-        _efb_cb_airport_mode_row(w) +
-        '<div class="efb-eyebrow" style="margin-top:0.6rem">SIGMETs</div>\n' +
-        _efb_sigmet_preset_row(w) +
-        '</div>\n'
-    )
-
-
-def _efb_help_html(w):
-    """Return the Help popup's explanation of every weather control on the /efb page."""
-    def section(title, items):
-        return (f'<h4>{title}</h4>\n' +
-                ''.join(f'<p><b>{label}:</b> {text}</p>\n' for label, text in items))
-    profile = ''
-    if w['turb_profile'] is not None:
-        profile = section('Turbulence Profile', (
-            ('Stable', 'the released turbulence'),
-            ('Testing', 'also the changes being tried out before they become the default')))
-    return (
-        '<div style="text-align:right;color:#7e97ba;font-size:0.75rem">Tap to close</div>\n' +
-        section('Weather Mode', (
-            ('Full', 'FrankenWeather active'),
-            ('PSX Auto', "PSX's own METAR weather"),
-            ('PSX Manual', 'weather frozen, instructor control'))) +
-        section('Extra Turbulence', (
-            ('Enabled', "FrankenWeather's own turbulence: wind, terrain, convection, "
-                        'CB proximity, etc.'),
-            ('Disabled', "only PSX's own turbulence"))) +
-        profile +
-        section('CB Near Dep/Arr', tuple(
-            (label, hint) for _mode, label, hint in _fw_webui.CB_AIRPORT_MODES)) +
-        (section('SIGMETs', tuple(
-            (label, hint) for _preset, label, hint in _fw_sigmet.PRESETS)) +
-         ('<p>Now: a custom choice from the SIGMETs page.</p>\n'
-          if w['sigmet_preset'] is None else '')
-         if w['sigmet_enabled'] else
-         f'<h4>SIGMETs</h4>\n<p>{_efb_sigmet_hint(w)}</p>\n')
-    )
-
-
-def _efb_src_row(label, color, text):
-    """Render one labelled/colored status row shared by the data-sources-style cards."""
-    return (f'<div class="efb-src-row"><span class="lbl">{label}</span>'
-            f'<span class="val"><span class="efb-dot" style="background:{color}">'
-            f'</span>{text}</span></div>\n')
-
-
-# FrankenWeather turbulence kinds as fw_webui.py's _TURB_KIND_LABELS shows them
-_EFB_TURB_KIND_LABELS = {
-    'wave': 'mountain wave', 'rotor': 'lee rotor', 'mechanical': 'mechanical',
-    'shear': 'wind shear CAT', 'cb': 'CB', 'pirep': 'PIREP', 'cape': 'CAPE',
-    'gairmet': 'G-AIRMET', 'sigmet': 'SIGMET', 'mtw': 'mountain wave SIGMET',
-}
-
-
-def _efb_turb_text(w):
-    """Return a short human-readable description of the currently-injected turbulence."""
-    if not w['turb_available']:
-        return 'no data'
-    if not w['turb_enabled']:
-        return 'OFF'
-    kind = w['turb_kind']
-    if kind in (None, 'none'):
-        return 'none active'
-    # "X+shear": wind shear outweighing X
-    label = (_EFB_TURB_KIND_LABELS['shear'] if kind.endswith('+shear')
-             else _EFB_TURB_KIND_LABELS.get(kind, kind))
-    return f"{label}, {w['turb_intensity_pct']}%"
-
-
-def _efb_turb_color(w):
-    """Return the extra-turbulence row color: intensity-graded when active, else neutral/alert."""
-    if not w['turb_available']:
-        return '#ef4444'
-    if not w['turb_enabled'] or w['turb_kind'] in (None, 'none'):
-        return '#22c55e'
-    pct = w['turb_intensity_pct']
-    if pct < 25:
-        return '#22c55e'
-    if pct < 50:
-        return '#f4d100'
-    return '#ef4444'
-
-
-def _efb_turb_injected(w):
-    """Return True when turbulence is actually being injected right now."""
-    return w['turb_available'] and w['turb_enabled'] and w['turb_kind'] not in (None, 'none')
-
-
-def _efb_datasources_section(w):
-    """Render the extra-turbulence status + data-source connectivity/freshness rows."""
-    reason_row = (
-        _efb_src_row('Turbulence reason', '#64748b', w['turb_reason'])
-        if _efb_turb_injected(w) else ''
-    ) + (
-        _efb_src_row('Intensity trend', '#64748b', _fw_sigmet.ramp_text(w['turb_ramp']))
-        if _efb_turb_injected(w) and w['turb_ramp'] else ''
-    )
-    rows = (
-        _efb_src_row('Extra turbulence', _efb_turb_color(w), _efb_turb_text(w)) +
-        reason_row +
-        _efb_src_row('Router ← FrankenWeather', w['src_router_color'],
-                     f"{w['src_router_label']}, {w['age_label']}") +
-        _efb_src_row('FrankenWeather ← MSFS', w['src_msfs_color'],
-                     f"{w['src_msfs_label']}, {w['src_msfs_age']}") +
-        _efb_src_row('FrankenWeather ← Open-Meteo', w['src_om_color'], w['src_om_label']) +
-        _efb_src_row(f"FrankenWeather ← {w['src_vatsim_source_name']}", w['src_vatsim_color'],
-                     f"{w['src_vatsim_label']}, {w['src_vatsim_age']}")
-    )
-    return (
-        '<div class="efb-section">\n'
-        '<div class="efb-eyebrow">Weather Status</div>\n' +
-        rows +
-        '</div>\n'
     )
 
 
@@ -2032,101 +1592,7 @@ def _efb_status_card(r, w):
     """Render the status card: router status above weather status."""
     return (
         '<div class="efb-card" id="efb-status-card">\n' +
-        _efb_router_section(r) + _efb_datasources_section(w) +
-        '</div>\n'
-    )
-
-
-def _efb_decode_wx_wind(wind_field):
-    """Decode a Wx-string wind field (VVV+DDD+SS or legacy VVV+DD+SS) into (dir_deg, spd_kt)."""
-    try:
-        if len(wind_field) == 8:
-            return int(wind_field[3:6]), int(wind_field[6:8])
-        if len(wind_field) == 7:
-            return int(wind_field[3:5]) * 10, int(wind_field[5:7])
-    except ValueError:
-        pass
-    return None, None
-
-
-def _efb_decode_wx(wx_str):
-    """Decode a PSX Wx<N>/WxBasic string into display-ready weather fields, or None."""
-    if not wx_str:
-        return None
-    parts = wx_str.split(';')
-    if len(parts) < 24:
-        return None
-    wind_dir, wind_spd = _efb_decode_wx_wind(parts[18])
-    if wind_dir is None:
-        return None
-    try:
-        gust = int(parts[19])
-        return {
-            'wind_dir': wind_dir,
-            'wind_spd_kt': wind_spd,
-            'wind_gust_kt': gust if gust > wind_spd else None,
-            'visibility_m': int(parts[20]),
-            'temp_c': int(parts[22]),
-            'qnh_hpa': round(int(parts[23]) / 2.953, 1),
-            'cloud_oktas': int(parts[3]),
-            'cloud_base_ft': int(parts[5]),
-            'cb_oktas': int(parts[9]),
-            'cb_base_ft': int(parts[11]),
-            'cb_top_ft': int(parts[10]),
-        }
-    except (ValueError, IndexError):
-        return None
-
-
-def _efb_current_location_dict(ctx):
-    """Read PSX's currently-focused weather zone directly and decode its content."""
-    raw_zone = ctx.cache_get('FocussedWxZone')
-    try:
-        zone_num = int(raw_zone) if raw_zone not in (None, '') else 0
-    except ValueError:
-        zone_num = 0
-    if zone_num <= 0:
-        wx_key, zone_label = 'WxBasic', 'Global (no zone)'
-    else:
-        wx_key = f'Wx{zone_num}'
-        raw_mode = ctx.cache_get(f'WxMode{zone_num}') or ''
-        mode_parts = raw_mode.split(';')
-        icao = mode_parts[5][:4] if len(mode_parts) >= 6 else ''
-        zone_label = f'Zone {zone_num} ({icao})' if icao else f'Zone {zone_num}'
-    fields = _efb_decode_wx(ctx.cache_get(wx_key))
-    if fields is None:
-        return None
-    fields['zone_label'] = zone_label
-    return fields
-
-
-def _efb_location_wx_card(loc, sigmet_hazards=()):
-    """Render the currently-focused zone's weather detail card."""
-    if loc is None:
-        body = '<p style="margin:0;color:#64748b">No weather data available.</p>\n'
-    else:
-        gust = f" G{loc['wind_gust_kt']}kt" if loc['wind_gust_kt'] else ''
-        clouds = (f"{loc['cloud_oktas']}/8 oktas @ {loc['cloud_base_ft']:,}ft"
-                  if loc['cloud_oktas'] > 0 else 'Clear')
-        cb = (f"{loc['cb_oktas']}/8 oktas, base {loc['cb_base_ft']:,}ft, "
-              f"tops {loc['cb_top_ft']:,}ft" if loc['cb_oktas'] > 0 else 'None')
-        body = (
-            _efb_src_row('Zone', '#3b82f6', loc['zone_label']) +
-            _efb_src_row('Wind', '#3b82f6',
-                         f"{loc['wind_dir']:03d}° / {loc['wind_spd_kt']}kt{gust}") +
-            _efb_src_row('QNH', '#3b82f6', f"{loc['qnh_hpa']} hPa") +
-            _efb_src_row('Temperature', '#3b82f6', f"{loc['temp_c']}°C") +
-            _efb_src_row('Visibility', '#3b82f6', f"{loc['visibility_m']:,} m") +
-            _efb_src_row('Clouds', '#3b82f6', clouds) +
-            _efb_src_row('Convective (CB)', '#3b82f6', cb) +
-            _efb_src_row(
-                'In SIGMET area', '#f4d100' if sigmet_hazards else '#64748b',
-                ', '.join(sigmet_hazards) if sigmet_hazards else 'No')
-        )
-    return (
-        '<div class="efb-card" id="efb-location-card">\n'
-        '<div class="efb-eyebrow">Surface Weather</div>\n' +
-        body +
+        _efb_router_section(r) + _fw_efb.datasources_section(w) +
         '</div>\n'
     )
 
@@ -2140,6 +1606,22 @@ def _efb_errors_html(errors):
         '<b style="color:#f5a3a3">Critical errors</b><ul>' +
         ''.join(f'<li>{e}</li>' for e in errors) + '</ul></div>\n'
     )
+
+
+def _efb_problems_html(info):
+    """Return the router errors and warnings popup's content."""
+    def section(title, color, items):
+        return (f'<h4 style="color:{color}">{title}</h4><ul>' +
+                ''.join(f'<li>{html.escape(str(i))}</li>' for i in items) + '</ul>\n')
+    body = ''
+    if info['all_errors']:
+        body += section('Errors', '#f5a3a3', info['all_errors'])
+    if info['warnings']:
+        body += section('Warnings', '#ffdf7a', info['warnings'])
+    if not body:
+        body = '<p style="margin:0.4rem 0 0">No errors or warnings.</p>\n'
+    return ('<div style="text-align:right;color:#7e97ba;font-size:0.75rem">Tap to close</div>\n' +
+            body)
 
 
 def _efb_claim_sources_html(info):
@@ -2166,42 +1648,11 @@ def _efb_claim_sources_html(info):
     )
 
 
-_EFB_PIREP_SHOW_MS = 8000  # the PIREP popup closes by itself after this long
-_PIREP_RIDE_COLORS = {
-    'smooth': '#22c55e', 'light': '#a3e635', 'moderate': '#eab308', 'rough': '#ef4444'}
-
-
-def _efb_pirep_html(ctx, now=None):
-    """Render the PIREP popup: FrankenWeather's ride reports near the current flight level.
-
-    The reports (TURBSTATE "pireps", FrankenWeather after 1.11.0) rate
-    every source of turbulence at each level, refreshed every minute and
-    on a flight level change; highest level first, the current one marked.
-    """
-    now = time.time() if now is None else now
-    turbstate = ctx.fw_turbstate
-    fresh, _, _ = _efb_data_status(now, ctx.fw_turbstate_received_at)
-    head = '<div class="efb-eyebrow">PIREPs – reported ride</div>\n'
-    if turbstate is None or fresh != '#22c55e':
-        return head + '<p class="efb-hint">No data from FrankenWeather.</p>\n'
-    reports = turbstate.get('pireps')
-    if not reports:
-        return head + '<p class="efb-hint">No reports yet.</p>\n'
-    rows = ''
-    for rep in sorted(reports, key=lambda x: -x['fl']):
-        color = _PIREP_RIDE_COLORS.get(rep['ride'], '#cbd8ea')
-        rows += (f'<tr{" class=\"cur\"" if rep.get("current") else ""}>'
-                 f'<td>FL{rep["fl"]:03d}</td>'
-                 f'<td style="color:{color};font-weight:700">{rep["ride"]}</td>'
-                 f'<td style="color:#7e97ba">{"◀ you" if rep.get("current") else ""}</td></tr>')
-    return head + f'<table>{rows}</table>\n'
-
-
 def _build_efb_page(router, ctx, page_url):
     """Build the compact /efb status+control page for the PSX.NET EFB app."""
     status = _efb_status_dict(router, ctx)
     r, w = status['router'], status['weather']
-    loc = _efb_current_location_dict(ctx)
+    loc = _fw_efb.current_location_dict(ctx)
     music_link = ''
     if router.config.listen.rest_api_efb_music_link_enabled:
         music_url = (
@@ -2217,16 +1668,19 @@ def _build_efb_page(router, ctx, page_url):
         '<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         '<meta name="color-scheme" content="dark">\n' +
-        _EFB_CSS +
+        _fw_efb.CSS +
         '</head>\n<body>\n'
         f'<div id="efb-errors">{_efb_errors_html(r["errors"])}</div>\n'
         f'<div id="efb-claim-sources">{_efb_claim_sources_html(r)}</div>\n'
         '<div class="efb-grid wide">' +
-        _efb_status_card(r, w) + _efb_controls_card(w) +
-        _efb_location_wx_card(loc, w['sigmet_hazards']) +
+        _efb_status_card(r, w) + _fw_efb.controls_card(w) +
+        _fw_efb.location_wx_card(loc, w, w['sigmet_hazards']) +
         '</div>\n'
         '<div id="efb-pirep" class="efb-popup" onclick="efbPirepClose()"></div>\n'
-        f'<div id="efb-help" class="efb-popup" onclick="efbHelpClose()">{_efb_help_html(w)}</div>\n'
+        '<div id="efb-help" class="efb-popup" onclick="efbHelpClose()">'
+        f'{_fw_efb.help_html(w)}</div>\n'
+        '<div id="efb-problems" class="efb-popup" onclick="efbProblemsClose()">'
+        f'{_efb_problems_html(r)}</div>\n'
         '<div style="text-align:right;margin-top:0.5rem">'
         '<button type="button" class="efb-chip efb-chip-sm" onclick="efbPirep()">'
         'PIREP</button> ' +
@@ -2240,7 +1694,6 @@ def _build_efb_page(router, ctx, page_url):
         '    var cs = document.getElementById("efb-claim-sources");\n'
         '    var sc = document.getElementById("efb-status-card");\n'
         '    var cc = document.getElementById("efb-controls-card");\n'
-
         '    var lc = document.getElementById("efb-location-card");\n'
         '    if (ec) ec.innerHTML = s.errors_html;\n'
         '    if (cs) cs.innerHTML = s.claim_sources_html;\n'
@@ -2248,33 +1701,14 @@ def _build_efb_page(router, ctx, page_url):
         '    if (cc) cc.outerHTML = s.controls_html;\n'
         '    var hp = document.getElementById("efb-help");\n'
         '    if (hp && hp.style.display != "block") hp.innerHTML = s.help_html;\n'
+        '    var pp = document.getElementById("efb-problems");\n'
+        '    if (pp && pp.style.display != "block") pp.innerHTML = s.problems_html;\n'
         '    if (lc) lc.outerHTML = s.location_html;\n'
         '  }).catch(function() {});\n'
         '}\n'
         'setInterval(efbPoll, 5000);\n'
-        # PIREP button: a popup that closes by itself after a few seconds
-        # (or when tapped)
-        'var efbPirepTimer = null;\n'
-        'function efbPirepClose() {\n'
-        '  document.getElementById("efb-pirep").style.display = "none";\n'
-        '}\n'
-        'function efbHelp() {\n'
-        '  document.getElementById("efb-help").style.display = "block";\n'
-        '}\n'
-        'function efbHelpClose() {\n'
-        '  document.getElementById("efb-help").style.display = "none";\n'
-        '}\n'
-        'function efbPirep() {\n'
-        '  fetch("/api/efb/pirep", {cache: "no-store"}).then(function(r) { return r.json(); })'
-        '.then(function(p) {\n'
-        '    var box = document.getElementById("efb-pirep");\n'
-        '    box.innerHTML = p.html;\n'
-        '    box.style.display = "block";\n'
-        '    if (efbPirepTimer) clearTimeout(efbPirepTimer);\n'
-        f'    efbPirepTimer = setTimeout(efbPirepClose, {_EFB_PIREP_SHOW_MS});\n'
-        '  }).catch(function() {});\n'
-        '}\n'
-        '</script>\n'
+        '</script>\n' +
+        _fw_efb.POPUP_JS +
         '</body>\n</html>\n'
     )
 
@@ -3042,11 +2476,6 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     content_type='text/html',
                     headers={'Cache-Control': 'no-store'})
 
-            @routes.get('/api/efb/pirep')
-            async def handle_efb_pirep_get(_):
-                return web.json_response({'html': _efb_pirep_html(_efb_ctx)},
-                                         headers={'Cache-Control': 'no-store'})
-
             @routes.get('/api/sigmet/latest/json')
             async def handle_sigmet_latest_json_get(_):
                 # The parsed SIGMET download, as frankenweather's own web
@@ -3060,81 +2489,24 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     headers={'Content-Disposition': 'inline; filename="sigmets.json"',
                              'Cache-Control': 'no-store'})
 
+            _fw_efb.register_control_routes(routes, _efb_ctx, router.logger)
+
             @routes.get('/api/efb/status')
             async def handle_efb_status_get(_):
                 status = _efb_status_dict(router, _efb_ctx)
                 r, w = status['router'], status['weather']
-                loc = _efb_current_location_dict(_efb_ctx)
+                loc = _fw_efb.current_location_dict(_efb_ctx)
                 return web.json_response({
                     'router': r,
                     'weather': w,
                     'errors_html': _efb_errors_html(r['errors']),
                     'claim_sources_html': _efb_claim_sources_html(r),
                     'status_html': _efb_status_card(r, w),
-                    'controls_html': _efb_controls_card(w),
-                    'help_html': _efb_help_html(w),
-                    'location_html': _efb_location_wx_card(loc, w['sigmet_hazards']),
+                    'controls_html': _fw_efb.controls_card(w),
+                    'help_html': _fw_efb.help_html(w),
+                    'problems_html': _efb_problems_html(r),
+                    'location_html': _fw_efb.location_wx_card(loc, w, w['sigmet_hazards']),
                 }, headers={'Cache-Control': 'no-store'})
-
-            @routes.post('/api/efb/mode')
-            async def handle_efb_mode_post(request):
-                data = await request.post()
-                mode = data.get('mode')
-                if mode in ('enabled', 'paused', 'disabled', 'manual'):
-                    await _efb_ctx.send_mode_cmd(mode)
-                raise web.HTTPFound('/efb')
-
-            @routes.post('/api/efb/weather-preset')
-            async def handle_efb_weather_preset_post(request):
-                data = await request.post()
-                cmd = _WEATHER_PRESET_CMDS.get(data.get('preset'))
-                if cmd:
-                    await _efb_ctx.send_fw_settings_cmd(
-                        {'mode': cmd['mode'], 'enroute_wind_enabled': cmd['enroute_wind_enabled']})
-                    await _efb_ctx.send_turb_cmd({'enabled': cmd['enabled']})
-                    await asyncio.sleep(3)
-                raise web.HTTPFound('/efb')
-
-            @routes.post('/api/efb/sigmet-preset')
-            async def handle_efb_sigmet_preset_post(request):
-                data = await request.post()
-                status = _efb_status_dict(router, _efb_ctx)
-                cmd = _fw_sigmet.preset_command(
-                    data.get('preset'), status['weather']['sigmet_enabled'])
-                if cmd:
-                    await _efb_ctx.send_fw_settings_cmd(cmd)
-                raise web.HTTPFound('/efb')
-
-            @routes.post('/api/efb/cb-airport-mode')
-            async def handle_efb_cb_airport_mode_post(request):
-                data = await request.post()
-                cmd = _fw_webui.cb_airport_mode_command(data.get('mode'))
-                if cmd:
-                    await _efb_ctx.send_fw_settings_cmd(cmd)
-                raise web.HTTPFound('/efb')
-
-            @routes.post('/api/efb/toggle')
-            async def handle_efb_toggle_post(request):
-                data = await request.post()
-                field = data.get('field')
-                if field in ('enroute_wind_enabled', 'disable_psx_sigmets'):
-                    await _efb_ctx.send_fw_settings_cmd({field: data.get('value') == '1'})
-                raise web.HTTPFound('/efb')
-
-            @routes.post('/api/efb/turb-toggle')
-            async def handle_efb_turb_toggle_post(request):
-                data = await request.post()
-                if data.get('field') == 'enabled':
-                    await _efb_ctx.send_turb_cmd({'enabled': data.get('value') == '1'})
-                raise web.HTTPFound('/efb')
-
-            @routes.post('/api/efb/turb-profile')
-            async def handle_efb_turb_profile_post(request):
-                data = await request.post()
-                if data.get('profile') in dict(_EFB_TURB_PROFILES):
-                    router.logger.info("API: EFB turbulence profile -> %s", data.get('profile'))
-                    await _efb_ctx.send_turb_cmd({'profile': data.get('profile')})
-                raise web.HTTPFound('/efb')
 
             @routes.post('/api/efb/claim-sources')
             async def handle_efb_claim_sources_post(_):
