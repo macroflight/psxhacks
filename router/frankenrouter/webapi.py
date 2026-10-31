@@ -205,9 +205,10 @@ _RESET_CLIENTS_PAGE = (
     'load1/load2/load3 and full state refresh -- the same sequence a client '
     'gets on first connect. Use this if this sim has ended up in a bad '
     'state (e.g. after a situ load) and nothing else has fixed it. Normally '
-    'unnoticeable, but may cause a brief visible glitch. Clients matching '
-    'this router\'s client_reset_blacklist config start unchecked, but you '
-    'can check them anyway if you really want to.</p>\n'
+    'unnoticeable, but may cause a brief visible glitch. Only clients '
+    'matching this router\'s client_reset_whitelist config (usually the PSX '
+    'main clients) start checked; you can check others too, but some addons '
+    'misbehave when reset.</p>\n'
     '</div>\n'
     '{list_section}'
     '{result_section}'
@@ -2716,13 +2717,13 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 if router.config.identity.type != 'slave':
                     raise web.HTTPFound('/utils')
                 cs = router.config.listen.rest_api_color_scheme
-                blacklist = set(router.config.filtering.client_reset_blacklist)
                 candidates = router.resettable_clients()
+                whitelisted = router.config.filtering.client_reset_whitelisted
                 if candidates:
                     checkbox_rows = ''.join(
                         _RESET_CLIENTS_CHECKBOX_ROW.format(
                             client_id=client.client_id,
-                            checked='' if client.display_name in blacklist else ' checked',
+                            checked=' checked' if whitelisted(client.display_name) else '',
                             display_name=html.escape(client.display_name),
                         )
                         for client in candidates

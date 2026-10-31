@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **Change: `client_reset_blacklist` is replaced by
+  `client_reset_whitelist`.** The `/utils` "Reset clients" page now
+  pre-selects only the clients you list, usually your PSX main clients,
+  instead of everything except a blacklist. Most sims have only a few
+  main clients, but many addons, and several of them misbehave when
+  reset. Entries match the start of a client's display name, ignoring
+  case, because many clients put their version number in their name
+  (`"PSX FO"` matches `PSX FO 10.195`). An empty list (the default)
+  pre-selects nothing. An old `client_reset_blacklist` setting is ignored
+  with a warning at startup.
+
 ## 2026-10-31: version 1.33.0
 
 - **Change: unknown PSX navdata is no longer a warning.** Not every sim

@@ -578,17 +578,21 @@ frdp_rtt_warning = 0.5
 
 ### `[filtering]`
 
-- `client_reset_blacklist`: `display_name` values to skip for the
-  `/utils` "Reset clients" button (a slave-router-only feature that
-  re-sends `load1`/`load2`/`load3` and a full state refresh to every
-  locally-connected client, as a self-service recovery option when a
-  sim has ended up in a bad state -- see
+- `client_reset_whitelist`: display names of the clients the `/utils`
+  "Reset clients" page pre-selects. That page is a slave-router-only
+  feature: it re-sends `load1`/`load2`/`load3` and a full state refresh
+  to the selected locally-connected clients, as a self-service recovery
+  option when a sim has ended up in a bad state (see
   `Frankenrouter.resettable_clients()`/`reset_client_welcomes()`).
-  Empty by default; some addons are known to misbehave on an
+  List your PSX main clients here. Many addons misbehave on an
   unsolicited situ-load-like sequence (e.g. PSX Sound plays a sound on
-  `Qi191`, some `PSX.NET.Router` versions jump into the air on
-  `loadX` -- see `router/docs/NOTES.md`), so list their display names
-  here if you connect them to a slave router.
+  `Qi191`, some `PSX.NET.Router` versions jump into the air on `loadX`
+  -- see `router/docs/NOTES.md`), so they're best left unselected. Each
+  entry matches any display name that starts with it, ignoring case,
+  since many clients put a version number in their name: `"PSX FO"`
+  matches `PSX FO 10.195`. Empty by default, so nothing is pre-selected;
+  you can always tick clients by hand on the page. Replaces
+  `client_reset_blacklist`, which is now ignored with a warning.
 
 - `notify_filtered_non_q_keywords`: non-Q-code keywords (exact match,
   case-sensitive, e.g. `"addon"` not `"Addon"`) withheld from any client
@@ -607,7 +611,7 @@ Example:
 
 ```text
 [filtering]
-client_reset_blacklist = ["PSX Sound"]
+client_reset_whitelist = ["PSX Captain", "PSX FO"]
 notify_filtered_non_q_keywords = ["addon", "cduC"]
 ```
 

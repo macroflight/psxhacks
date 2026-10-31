@@ -248,19 +248,27 @@ class _RouterConfigFiltering:  # pylint: disable=missing-class-docstring,too-few
             raise RouterConfigError(
                 "filtering ground_handling_forward_names entries must be strings")
 
-        # display_name values to skip for the /utils "Reset clients" button
-        # (a slave-router-only feature -- see
-        # Frankenrouter.resettable_clients()/reset_client_welcomes()).
-        # Empty by default; some addons are known to misbehave on an
-        # unsolicited load1/load2/load3 (e.g. PSX Sound plays a sound on
-        # Qi191, some PSX.NET.Router versions jump into the air on
-        # loadX -- see router/docs/NOTES.md), so sites that connect such
-        # addons to a slave router should list their display names here.
-        self.client_reset_blacklist = data.get('client_reset_blacklist', [])
-        if not isinstance(self.client_reset_blacklist, list):
-            raise RouterConfigError("filtering client_reset_blacklist must be a list")
-        if not all(isinstance(k, str) for k in self.client_reset_blacklist):
-            raise RouterConfigError("filtering client_reset_blacklist entries must be strings")
+        # display_name values the /utils "Reset clients" page (a
+        # slave-router-only feature -- see
+        # Frankenrouter.resettable_clients()/reset_client_welcomes())
+        # pre-selects. Usually just the sim's PSX main clients: some
+        # addons misbehave on an unsolicited load1/load2/load3 (e.g. PSX
+        # Sound plays a sound on Qi191, some PSX.NET.Router versions jump
+        # into the air on loadX -- see router/docs/NOTES.md). Empty by
+        # default (nothing pre-selected). Each entry is a case-insensitive
+        # prefix of the display name, since many clients put their version
+        # number in it (e.g. "FrankenPush 1.4.0") -- see
+        # client_reset_whitelisted().
+        self.client_reset_whitelist = data.get('client_reset_whitelist', [])
+        if not isinstance(self.client_reset_whitelist, list):
+            raise RouterConfigError("filtering client_reset_whitelist must be a list")
+        if not all(isinstance(k, str) for k in self.client_reset_whitelist):
+            raise RouterConfigError("filtering client_reset_whitelist entries must be strings")
+        if not all(k.strip() for k in self.client_reset_whitelist):
+            raise RouterConfigError("filtering client_reset_whitelist entries must not be empty")
+        # Replaced by client_reset_whitelist: still accepted (so old config
+        # files load), but ignored with a warning.
+        self.client_reset_blacklist_present = 'client_reset_blacklist' in data
 
         # When a PTT/audio-panel variable (see rules.py's PTT_KEYWORDS) is
         # dropped because it crossed a sim boundary, also synthesize an
@@ -294,6 +302,11 @@ class _RouterConfigFiltering:  # pylint: disable=missing-class-docstring,too-few
         if not all(isinstance(k, str) for k in self.notify_filtered_non_q_keywords):
             raise RouterConfigError(
                 "filtering notify_filtered_non_q_keywords entries must be strings")
+
+    def client_reset_whitelisted(self, display_name: str) -> bool:
+        """Return True if display_name starts with a client_reset_whitelist entry (any case)."""
+        name = display_name.casefold()
+        return any(name.startswith(entry.casefold()) for entry in self.client_reset_whitelist)
 
 
 class _RouterConfigPerformance:  # pylint: disable=missing-class-docstring,too-few-public-methods,too-many-instance-attributes
@@ -588,6 +601,10 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
                 "in [identity] instead")
             self.identity.type = 'master'
         self.filtering = _RouterConfigFiltering(config.get('filtering', {}))
+        if self.filtering.client_reset_blacklist_present:
+            self.logger.warning(
+                "Config: [filtering] client_reset_blacklist is no longer used; list "
+                "the clients to pre-select in client_reset_whitelist instead")
 
         # To handle the old upstream format, we check if we get a list
         # ([[upstream]]) or a dict ([upstream]).
@@ -902,6 +919,26 @@ keywords = ["Qs123"]
             RouterConfig(config_data="[filtering]\nnotify_filtered_non_q_keywords = 'nope'\n")
         with self.assertRaises(RouterConfigError):
             RouterConfig(config_data="[filtering]\nnotify_filtered_non_q_keywords = [1, 2]\n")
+
+    def test_client_reset_whitelist(self):
+        """client_reset_whitelist entries are case-insensitive display name prefixes."""
+        conf = RouterConfig(config_data="")
+        self.assertFalse(conf.filtering.client_reset_whitelisted('PSX Captain'))
+        conf = RouterConfig(config_data=(
+            "[filtering]\nclient_reset_whitelist = ['PSX Captain', 'psx fo']\n"))
+        self.assertTrue(conf.filtering.client_reset_whitelisted('PSX Captain'))
+        self.assertTrue(conf.filtering.client_reset_whitelisted('PSX Captain 10.195'))
+        self.assertTrue(conf.filtering.client_reset_whitelisted('PSX FO left'))
+        self.assertFalse(conf.filtering.client_reset_whitelisted('My PSX Captain'))
+        self.assertFalse(conf.filtering.client_reset_whitelisted('PSX Sound 2.3'))
+        with self.assertRaises(RouterConfigError):
+            RouterConfig(config_data="[filtering]\nclient_reset_whitelist = ['']\n")
+        with self.assertRaises(RouterConfigError):
+            RouterConfig(config_data="[filtering]\nclient_reset_whitelist = [1]\n")
+        # The old blacklist still loads, but is ignored
+        conf = RouterConfig(config_data="[filtering]\nclient_reset_blacklist = ['PSX Sound']\n")
+        self.assertTrue(conf.filtering.client_reset_blacklist_present)
+        self.assertFalse(conf.filtering.client_reset_whitelisted('PSX Sound'))
 
     def test_file_input(self):
         """Test reading from one of the example files."""

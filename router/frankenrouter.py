@@ -1343,10 +1343,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         frankenrouters are never included -- resetting a child
         router's own welcome state is a different, cascading operation
         this feature is not meant to trigger. config.filtering.
-        client_reset_blacklist (by display_name) only affects which of
+        client_reset_whitelist (display_name prefixes) only affects which of
         these the page pre-checks by default; the operator can still
-        select a blacklisted client explicitly, since they can see
-        exactly what they are about to reset.
+        select any other client explicitly, since they can see exactly
+        what they are about to reset.
         """
         return [client for client in self.clients.values() if not client.is_frankenrouter]
 
