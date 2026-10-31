@@ -1527,12 +1527,20 @@ body { padding: 0.8rem 1.1rem 1rem; }
 .efb-chip.active { background: #f4d100; border-color: #f4d100; color: #1a1a1a; }
 .efb-chip.active.blue { background: #2058a8; border-color: #3b7fe0; color: #fff; }
 .efb-chip-sm { padding: 0.3rem 0.6rem; font-size: 0.76rem; flex-shrink: 0; white-space: nowrap; }
-#efb-pirep {
+.efb-popup {
   display: none; position: fixed; left: 50%; top: 20%; transform: translateX(-50%);
   min-width: 15rem; max-width: 90vw; z-index: 10; cursor: pointer;
   background: #0d1826; border: 1px solid #3b7fe0; border-radius: 10px;
   padding: 0.75rem 1rem; box-shadow: 0 8px 30px rgba(0,0,0,0.7);
 }
+#efb-help { top: 6%; width: 44rem; max-height: 88vh; overflow-y: auto; font-size: 0.88rem; }
+#efb-help h4 { margin: 0.7rem 0 0.2rem; color: #7e97ba; font-size: 0.75rem;
+  letter-spacing: 0.08em; text-transform: uppercase; }
+#efb-help p { margin: 0.15rem 0; }
+#efb-help b { color: #eef4fb; }
+.efb-section { margin-top: 0.9rem; padding-top: 0.7rem; border-top: 1px solid #1e2f45; }
+.efb-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.3rem; }
+.efb-head .efb-eyebrow { margin: 0; }
 #efb-pirep table { border-collapse: collapse; width: 100%; font-size: 0.95rem; }
 #efb-pirep td { padding: 0.2rem 0.4rem; }
 #efb-pirep tr.cur td { background: #16233a; font-weight: 700; }
@@ -1868,67 +1876,78 @@ def _efb_turb_profile_html(w):
         f'{label}</button></form>\n'
         for profile, label in _EFB_TURB_PROFILES)
     return ('<div class="efb-eyebrow" style="margin-top:0.6rem">Turbulence Profile</div>\n'
-            f'<div class="efb-chip-row">{chips}</div>\n'
-            '<p class="efb-hint">Stable: the released turbulence. Testing: also the '
-            'changes being tried out before they become the default.</p>\n')
+            f'<div class="efb-chip-row">{chips}</div>\n')
 
 
 def _efb_controls_card(w):
-    """Render the weather-mode and SIGMET control card (turbulence: _efb_turb_controls_card()).
+    """Render the weather controls card: every weather/turbulence/SIGMET control, no hints.
 
-    If FrankenWeather itself isn't running (no STATE message ever
-    received, or none recently -- see _efb_data_status()), none of
-    these controls can do anything: posting a preset/toggle still
-    works mechanically (the router accepts the request), but there is
-    no FrankenWeather process on the other end to act on it or to
-    report back a new state, so the buttons would appear to do nothing
-    and the weather-mode 3-way row would never match any preset (see
-    _efb_weather_preset()) and so never highlight. Show a dimmed,
+    The explanations are in the Help popup (_efb_help_html()), to keep
+    the card short. If FrankenWeather itself isn't running (no STATE
+    message ever received, or none recently -- see _efb_data_status()),
+    none of these controls can do anything: posting a preset/toggle
+    still works mechanically (the router accepts the request), but
+    there is no FrankenWeather process on the other end to act on it or
+    to report back a new state, so the buttons would appear to do
+    nothing and the weather-mode 3-way row would never match any preset
+    (see _efb_weather_preset()) and so never highlight. Show a dimmed,
     control-free card instead of a set of dead buttons.
     """
     if w['status_label'] != 'OK':
-        return _efb_controls_unavailable_card('efb-controls-card', 'Weather Mode')
+        return (
+            '<div class="efb-card" id="efb-controls-card" style="opacity:0.55">\n'
+            '<div class="efb-eyebrow">Weather Mode</div>\n'
+            '<div class="efb-banner" style="margin-top:0">FrankenWeather is not running '
+            '-- weather controls unavailable.</div>\n'
+            '</div>\n'
+        )
     return (
         '<div class="efb-card" id="efb-controls-card">\n'
-        '<div class="efb-eyebrow">Weather Mode</div>\n' +
+        '<div class="efb-head"><div class="efb-eyebrow">Weather Mode</div>'
+        '<button type="button" class="efb-chip efb-chip-sm" onclick="efbHelp()">Help</button>'
+        '</div>\n' +
         _efb_weather_mode_row(_efb_weather_preset(w)) +
-        '<p class="efb-hint">Full: FrankenWeather active. PSX Auto: '
-        "PSX's own METAR weather. PSX Manual: weather frozen, instructor "
-        'control.</p>\n'
-        '<div class="efb-eyebrow" style="margin-top:0.6rem">SIGMETs</div>\n' +
-        _efb_sigmet_preset_row(w) +
-        f'<p class="efb-hint">{_efb_sigmet_hint(w)}</p>\n'
-        '</div>\n'
-    )
-
-
-def _efb_turb_controls_card(w):
-    """Render the turbulence and CB-near-dep/arr control card (see _efb_controls_card())."""
-    if w['status_label'] != 'OK':
-        return _efb_controls_unavailable_card('efb-turb-controls-card', 'Extra Turbulence')
-    return (
-        '<div class="efb-card" id="efb-turb-controls-card">\n'
-        '<div class="efb-eyebrow">Extra Turbulence</div>\n' +
+        '<div class="efb-eyebrow" style="margin-top:0.6rem">Extra Turbulence</div>\n' +
         _efb_bool_chip_row(
             '/api/efb/turb-toggle', 'enabled', w['turb_enabled'], small=True) +
-        '<p class="efb-hint">Wind, terrain, convection, CB proximity, etc.</p>\n' +
         _efb_turb_profile_html(w) +
         '<div class="efb-eyebrow" style="margin-top:0.6rem">CB Near Dep/Arr</div>\n' +
         _efb_cb_airport_mode_row(w) +
-        '<p class="efb-hint">Move zone: moves the airport\'s weather zone so its CB stays '
-        '15 nm away. Remove CB: removes every CB within 15 nm.</p>\n'
+        '<div class="efb-eyebrow" style="margin-top:0.6rem">SIGMETs</div>\n' +
+        _efb_sigmet_preset_row(w) +
         '</div>\n'
     )
 
 
-def _efb_controls_unavailable_card(card_id, title):
-    """Render a dimmed, control-free weather control card for when FrankenWeather isn't running."""
+def _efb_help_html(w):
+    """Return the Help popup's explanation of every weather control on the /efb page."""
+    def section(title, items):
+        return (f'<h4>{title}</h4>\n' +
+                ''.join(f'<p><b>{label}:</b> {text}</p>\n' for label, text in items))
+    profile = ''
+    if w['turb_profile'] is not None:
+        profile = section('Turbulence Profile', (
+            ('Stable', 'the released turbulence'),
+            ('Testing', 'also the changes being tried out before they become the default')))
     return (
-        f'<div class="efb-card" id="{card_id}" style="opacity:0.55">\n'
-        f'<div class="efb-eyebrow">{title}</div>\n'
-        '<div class="efb-banner" style="margin-top:0">FrankenWeather is not running '
-        '-- weather controls unavailable.</div>\n'
-        '</div>\n'
+        '<div style="text-align:right;color:#7e97ba;font-size:0.75rem">Tap to close</div>\n' +
+        section('Weather Mode', (
+            ('Full', 'FrankenWeather active'),
+            ('PSX Auto', "PSX's own METAR weather"),
+            ('PSX Manual', 'weather frozen, instructor control'))) +
+        section('Extra Turbulence', (
+            ('Enabled', "FrankenWeather's own turbulence: wind, terrain, convection, "
+                        'CB proximity, etc.'),
+            ('Disabled', "only PSX's own turbulence"))) +
+        profile +
+        section('CB Near Dep/Arr', tuple(
+            (label, hint) for _mode, label, hint in _fw_webui.CB_AIRPORT_MODES)) +
+        (section('SIGMETs', tuple(
+            (label, hint) for _preset, label, hint in _fw_sigmet.PRESETS)) +
+         ('<p>Now: a custom choice from the SIGMETs page.</p>\n'
+          if w['sigmet_preset'] is None else '')
+         if w['sigmet_enabled'] else
+         f'<h4>SIGMETs</h4>\n<p>{_efb_sigmet_hint(w)}</p>\n')
     )
 
 
@@ -2002,8 +2021,10 @@ def _efb_datasources_section(w):
                      f"{w['src_vatsim_label']}, {w['src_vatsim_age']}")
     )
     return (
-        '<div class="efb-eyebrow" style="margin-top:0.9rem">Weather Status</div>\n' +
-        rows
+        '<div class="efb-section">\n'
+        '<div class="efb-eyebrow">Weather Status</div>\n' +
+        rows +
+        '</div>\n'
     )
 
 
@@ -2201,10 +2222,11 @@ def _build_efb_page(router, ctx, page_url):
         f'<div id="efb-errors">{_efb_errors_html(r["errors"])}</div>\n'
         f'<div id="efb-claim-sources">{_efb_claim_sources_html(r)}</div>\n'
         '<div class="efb-grid wide">' +
-        _efb_status_card(r, w) + _efb_controls_card(w) + _efb_turb_controls_card(w) +
+        _efb_status_card(r, w) + _efb_controls_card(w) +
         _efb_location_wx_card(loc, w['sigmet_hazards']) +
         '</div>\n'
-        '<div id="efb-pirep" onclick="efbPirepClose()"></div>\n'
+        '<div id="efb-pirep" class="efb-popup" onclick="efbPirepClose()"></div>\n'
+        f'<div id="efb-help" class="efb-popup" onclick="efbHelpClose()">{_efb_help_html(w)}</div>\n'
         '<div style="text-align:right;margin-top:0.5rem">'
         '<button type="button" class="efb-chip efb-chip-sm" onclick="efbPirep()">'
         'PIREP</button> ' +
@@ -2218,13 +2240,14 @@ def _build_efb_page(router, ctx, page_url):
         '    var cs = document.getElementById("efb-claim-sources");\n'
         '    var sc = document.getElementById("efb-status-card");\n'
         '    var cc = document.getElementById("efb-controls-card");\n'
-        '    var tc = document.getElementById("efb-turb-controls-card");\n'
+
         '    var lc = document.getElementById("efb-location-card");\n'
         '    if (ec) ec.innerHTML = s.errors_html;\n'
         '    if (cs) cs.innerHTML = s.claim_sources_html;\n'
         '    if (sc) sc.outerHTML = s.status_html;\n'
         '    if (cc) cc.outerHTML = s.controls_html;\n'
-        '    if (tc) tc.outerHTML = s.turb_controls_html;\n'
+        '    var hp = document.getElementById("efb-help");\n'
+        '    if (hp && hp.style.display != "block") hp.innerHTML = s.help_html;\n'
         '    if (lc) lc.outerHTML = s.location_html;\n'
         '  }).catch(function() {});\n'
         '}\n'
@@ -2234,6 +2257,12 @@ def _build_efb_page(router, ctx, page_url):
         'var efbPirepTimer = null;\n'
         'function efbPirepClose() {\n'
         '  document.getElementById("efb-pirep").style.display = "none";\n'
+        '}\n'
+        'function efbHelp() {\n'
+        '  document.getElementById("efb-help").style.display = "block";\n'
+        '}\n'
+        'function efbHelpClose() {\n'
+        '  document.getElementById("efb-help").style.display = "none";\n'
         '}\n'
         'function efbPirep() {\n'
         '  fetch("/api/efb/pirep", {cache: "no-store"}).then(function(r) { return r.json(); })'
@@ -3043,7 +3072,7 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     'claim_sources_html': _efb_claim_sources_html(r),
                     'status_html': _efb_status_card(r, w),
                     'controls_html': _efb_controls_card(w),
-                    'turb_controls_html': _efb_turb_controls_card(w),
+                    'help_html': _efb_help_html(w),
                     'location_html': _efb_location_wx_card(loc, w['sigmet_hazards']),
                 }, headers={'Cache-Control': 'no-store'})
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **Change: a more compact `/efb` page, in three columns.** Router
+  status and weather status share the first column, and all the
+  weather controls are in the second, without the explanations under
+  each set of buttons: a new Help button shows them all in a popup
+  (tap it to close). "Current Location Weather" is now called "Surface
+  Weather": it's the surface weather of the zone PSX uses at the
+  aircraft's position, not the weather at the aircraft's altitude.
+  Flight control locks show as "None (all sims can fly)" or "All (no
+  sim can fly)" instead of `NO_CONTROL_LOCKS`/`ALL_CONTROL_LOCKS`, on
+  the main page too.
+
 ## 2026-10-30: version 1.32.0
 
 - **Fix: sim events now include disconnections.** A client that had a
