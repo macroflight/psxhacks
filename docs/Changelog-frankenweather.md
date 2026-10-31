@@ -1,5 +1,12 @@
 # frankenweather changelog
 
+## Unreleased
+
+- **Change: the turbulence Reason and Trend on the `/efb` page are no
+  longer cut short.** Reason now has room for three lines and Trend for
+  two. The rows keep a fixed height, so the page still doesn't jump when
+  you fly in and out of turbulence.
+
 ## 2.2.0 (2026-10-31)
 
 - **New: an EFB page in frankenweather's own web UI (`/efb`, "EFB

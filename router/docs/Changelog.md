@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Change: the turbulence Reason and Trend on the `/efb` page are no
+  longer cut short.** Reason now has room for three lines and Trend for
+  two. The rows keep a fixed height, so the page still doesn't jump when
+  you fly in and out of turbulence.
+
 - **Change: `client_reset_blacklist` is replaced by
   `client_reset_whitelist`.** The `/utils` "Reset clients" page now
   pre-selects only the clients you list, usually your PSX main clients,

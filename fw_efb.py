@@ -91,6 +91,13 @@ body { padding: 0.8rem 1.1rem 1rem; }
 .efb-src-row.fixed { flex-wrap: nowrap; }
 .efb-src-row.fixed .lbl { white-space: nowrap; flex-shrink: 0; }
 .efb-src-row.fixed .val { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.efb-src-row.multi { flex-wrap: nowrap; align-items: flex-start; }
+.efb-src-row.multi .lbl { white-space: nowrap; flex-shrink: 0; }
+.efb-src-row.multi .val {
+  display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; min-width: 0;
+  text-align: right; line-height: 1.3; height: calc(var(--efb-lines) * 1.3em);
+  -webkit-line-clamp: var(--efb-lines); line-clamp: var(--efb-lines);
+}
 .efb-src-row .lbl { color: #9fb2cc; }
 .efb-src-row .val { color: #eef4fb; font-weight: 600; }
 .efb-banner {
@@ -365,12 +372,16 @@ def help_html(w):
     )
 
 
-def src_row(label, color, text, fixed=False):
+def src_row(label, color, text, fixed=False, lines=1):
     """Render one labelled/colored status row shared by the data-sources-style cards.
 
-    fixed: always one line (a long value is cut short, in full on hover),
-    so the row's height never changes.
+    fixed: always the same height, lines lines of text (a longer value is
+    cut short, in full on hover), so the row's height never changes.
     """
+    if fixed and lines > 1:
+        return (f'<div class="efb-src-row multi"><span class="lbl">{label}</span>'
+                f'<span class="val" style="--efb-lines:{lines}" title="{html.escape(str(text))}">'
+                f'<span class="efb-dot" style="background:{color}"></span>{text}</span></div>\n')
     if fixed:
         return (f'<div class="efb-src-row fixed"><span class="lbl">{label}</span>'
                 f'<span class="val" title="{html.escape(str(text))}">'
@@ -423,7 +434,7 @@ def turb_injected(w):
 
 
 def turb_section(w):
-    """Render the extra-turbulence rows: always the same three one-line rows.
+    """Render the extra-turbulence rows: always the same three fixed-height rows.
 
     Rows that only apply while turbulence is injected show a dash
     otherwise, so flying in and out of turbulence never changes the
@@ -433,10 +444,10 @@ def turb_section(w):
     return (
         '<div class="efb-eyebrow">Extra Turbulence</div>\n' +
         src_row('Now', turb_color(w), turb_text(w), fixed=True) +
-        src_row('Reason', '#64748b', w['turb_reason'] if injected else '—', fixed=True) +
+        src_row('Reason', '#64748b', w['turb_reason'] if injected else '—', fixed=True, lines=3) +
         src_row('Trend', '#64748b',
                 _fw_sigmet.ramp_text(w['turb_ramp'])
-                if injected and w['turb_ramp'] else '—', fixed=True)
+                if injected and w['turb_ramp'] else '—', fixed=True, lines=2)
     )
 
 
