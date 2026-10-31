@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **Fix: the terrain tile cache had no size limit.** Terrain tiles
+  (about 33 MB each) were kept forever in `~/.cache/frankenturb/terrain`;
+  a long trip can pass near over a thousand of them (WorldFlight 2026: about
+  30-55 GB around the world), and on 2026-10-31 a test machine's disk
+  filled up. The cache is now limited to 10 GB (`--terrain-cache-gb`,
+  0 for no limit): at startup and after each download the least
+  recently used tiles are deleted, and a deleted tile is downloaded
+  again if it's needed again.
+
+- **Fix: some other files were never deleted either.** Temporary files
+  left behind when frankenweather was stopped while saving a cache
+  (up to about 11 MB each) are deleted at startup once they're an hour
+  old. Saved unusable SIGMETs (`logs/sigmet-unparsed`) are deleted
+  after 30 days, and the Open-Meteo cache files of older versions
+  (`om_cape.json`, `om_cape_hourly.json`, `om_wind.json` in
+  `~/.cache/frankenturb`) at startup. The Open-Meteo caches themselves
+  (at most 48 hours of data) and the per-run logs (the last 10 runs)
+  were already limited.
+
 - **Fix: an FMC departure or destination missing from the airport
   database was logged twice every 3 seconds.** For example NZFX
   (Phoenix Airfield, Antarctica), which isn't in the station list

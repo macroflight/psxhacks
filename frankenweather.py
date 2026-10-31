@@ -111,6 +111,11 @@ _EVENT_LOG_RETAIN = 10  # keep only the most recent N per-run log files
 # --sigmet: SIGMETs we could not use are saved here, one file each, so
 # the parser can be improved later (see _save_unparsed_sigmets()).
 _SIGMET_UNPARSED_DIR = os.path.join(_EVENT_LOG_DIR, "sigmet-unparsed")
+_SIGMET_UNPARSED_KEEP_S = 30 * 86400.0  # deleted after 30 days
+# Cache files of older versions, deleted at startup
+_OBSOLETE_CACHE_FILES = [
+    os.path.join(os.path.expanduser("~"), ".cache", "frankenturb", name)
+    for name in ("om_cape.json", "om_cape_hourly.json", "om_wind.json")]
 # How often log_flush_coro() fsyncs the log files, so a log copied off disk
 # mid-flight (e.g. from ~/.cache/frankenweather/logs on Windows) is never
 # more than this far behind -- same cadence as frankenrouter's own logs.
@@ -2175,6 +2180,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # right now). See _trend_cb_contribution().
         self._metar_trend_state: dict = {}
 
+        for path in _OBSOLETE_CACHE_FILES:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
         # On-disk Open-Meteo caches — see _OM_ZONE_CACHE_PATH for why the
         # max age matches each fetch's own existing refresh cadence.
         self._om_zone_cache = DiskCache(_OM_ZONE_CACHE_PATH, max_age_s=_OM_ZONE_KEEP_S)
@@ -8954,8 +8964,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         One small text file per SIGMET (reason, then its raw text), named
         after its unique key, so the parser can be improved later.
         Existing files are left alone, so a SIGMET seen on every download
-        is only written once.
+        is only written once. Files older than _SIGMET_UNPARSED_KEEP_S
+        are deleted.
         """
+        now = time.time()
+        try:
+            for name in os.listdir(_SIGMET_UNPARSED_DIR):
+                path = os.path.join(_SIGMET_UNPARSED_DIR, name)
+                if now - os.path.getmtime(path) > _SIGMET_UNPARSED_KEEP_S:
+                    os.remove(path)
+        except OSError:
+            pass
         if not entries:
             return
         try:
@@ -9431,6 +9450,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "regardless of distance. Off by default -- CBs snap to "
                  "forecast instantly, as before.")
         parser.add_argument(
+            '--terrain-cache-gb', type=float, default=10.0, metavar='GB',
+            help="Size limit for the terrain tiles cached on disk"
+                 " (~/.cache/frankenturb/terrain, about 33 MB per tile); the least"
+                 " recently used tiles are deleted, and downloaded again if needed."
+                 " 0 means no limit. Default: %(default)s")
+        parser.add_argument(
             '--om-proxy', type=str, default=None, metavar='URL',
             help="Proxy URL for all Open-Meteo requests, e.g. socks5h://localhost:1080."
                  " Requires PySocks (pip install requests[socks]).")
@@ -9579,7 +9604,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.airports, source = get_airports(_UCAR_STATIONS_URL, _STATIONS_CACHE)
             self.logger.info("Loaded %d airports from %s", len(self.airports), source)
 
-        self._turb_engine = TurbulenceEngine(om_proxy=self.args.om_proxy)
+        self._turb_engine = TurbulenceEngine(om_proxy=self.args.om_proxy,
+                                             cache_max_gb=self.args.terrain_cache_gb)
         self._turb_pirep_fetcher = PirepFetcher()
         self._turb_cape_fetcher = CapeFetcher(proxy=self.args.om_proxy)
         self._turb_gairmet_fetcher = GairmetFetcher()

@@ -21,6 +21,38 @@ from typing import Any, Optional
 
 log = logging.getLogger(__name__)
 
+# A temporary file older than this is left over from a write that never
+# finished (process killed, disk full) and can go
+_STALE_TMP_S = 3600.0
+
+
+def remove_stale_tmp(directory: str, pattern_suffix: str = ".tmp") -> int:
+    """Delete leftover temporary files (*pattern_suffix) older than an hour in directory.
+
+    Atomic writes (mkstemp, then rename) leave their temporary file
+    behind if the process is killed mid-write; nothing else ever removes
+    it. Returns the number of files deleted.
+    """
+    removed = 0
+    now = time.time()
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return 0
+    for name in names:
+        if not name.endswith(pattern_suffix):
+            continue
+        path = os.path.join(directory, name)
+        try:
+            if now - os.path.getmtime(path) > _STALE_TMP_S:
+                os.remove(path)
+                removed += 1
+        except OSError:
+            pass
+    if removed:
+        log.info("Removed %d leftover temporary file(s) from %s", removed, directory)
+    return removed
+
 
 class DiskCache:
     """A flat JSON-backed string-key cache with a single max age.
@@ -35,6 +67,7 @@ class DiskCache:
         self._path = path
         self._max_age_s = max_age_s
         self._entries: dict[str, tuple[float, Any]] = {}
+        remove_stale_tmp(os.path.dirname(path) or ".")
         self._load()
 
     def _load(self) -> None:

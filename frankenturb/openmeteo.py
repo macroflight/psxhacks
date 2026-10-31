@@ -160,11 +160,19 @@ class OpenMeteoClient:
             directory = os.path.dirname(self._usage_path) or "."
             os.makedirs(directory, exist_ok=True)
             fd, tmp_path = tempfile.mkstemp(dir=directory, suffix=".tmp")
+        except OSError as exc:
+            log.debug("Failed to save Open-Meteo usage %s: %s", self._usage_path, exc)
+            return
+        try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 json.dump(entries, fh)
             os.replace(tmp_path, self._usage_path)
         except OSError as exc:
             log.debug("Failed to save Open-Meteo usage %s: %s", self._usage_path, exc)
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
 
 # The one client everybody in this process uses.

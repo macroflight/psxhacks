@@ -180,9 +180,14 @@ Features:
   its zone's centre): a core (CB interior) of half the distance to the
   nearest other zone, times the CB lateral size bias -- the closer the
   zones, the smaller PSX's radar return too -- and a flank zone beyond
-  it of up to 20 nm, depending on how big the CB is. DEM tiles (~26 MB
-  each, 1°×1°) are downloaded on demand and cached at
-  `~/.cache/frankenturb/terrain/` (up to 9 tiles ≈ 235 MB).
+  it of up to 20 nm, depending on how big the CB is. DEM tiles (about
+  33 MB each, 1°×1°) are downloaded on demand and cached at
+  `~/.cache/frankenturb/terrain/`, up to 10 GB in total
+  (`--terrain-cache-gb`, 0 for no limit). Above the limit the least
+  recently used tiles are deleted, and downloaded again if needed. Up
+  to 9 tiles are held in memory. For scale: WorldFlight 2026 passes
+  near about 1,000-1,700 tiles (30-55 GB) around the world, but a
+  single sector needs at most about 130 (4.3 GB).
 
 - MSFS in-cloud sync: reads the MSFS in-cloud state and adjusts the
   active PSX weather zone's cloud layers so that PSX shows the aircraft

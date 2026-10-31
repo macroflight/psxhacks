@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Optional
 
 from .terrain import TileCache, ElevationGrid
+from .terrain.tiles import DEFAULT_MAX_GB
 from .turbulence import TerrainTurbulenceModel, TurbulenceState
 from .wind import WindProfile, WindFetcher, make_fixed_wind_profile
 from .cb_turbulence import compute_cb_turbulence
@@ -90,6 +91,9 @@ class TurbulenceEngine:
         Radius for terrain roughness window (km).
     max_tiles:
         Maximum terrain tiles held in RAM (~26 MB each; default 9).
+    cache_max_gb:
+        Size limit for the tile cache on disk in GB (default
+        DEFAULT_MAX_GB); 0 or None means no limit.
     wind_models:
         Open-Meteo model(s) to use for wind profiles ('best_match' by default).
 
@@ -103,10 +107,11 @@ class TurbulenceEngine:
         max_tiles: int = 9,
         wind_models: str = "best_match",
         om_proxy: Optional[str] = None,
+        cache_max_gb: Optional[float] = DEFAULT_MAX_GB,
     ):
         """Initialize the TurbulenceEngine, setting up all subsystems."""
         kwargs = {"cache_dir": cache_dir} if cache_dir else {}
-        self.cache = TileCache(**kwargs)
+        self.cache = TileCache(max_gb=cache_max_gb, **kwargs)
         self.grid = ElevationGrid(self.cache, max_tiles=max_tiles)
         self.model = TerrainTurbulenceModel(
             self.grid,

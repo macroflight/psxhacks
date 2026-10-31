@@ -7,16 +7,29 @@ Available from AWS S3 (no credentials required):
 
 import logging
 import math
+import os
+import threading
+import time
 from pathlib import Path
 from typing import Optional
 
 import requests  # pylint: disable=import-error
+
+from ..disk_cache import remove_stale_tmp
 
 log = logging.getLogger(__name__)
 
 COPERNICUS_BASE = "https://copernicus-dem-30m.s3.amazonaws.com"
 TILE_LIST_URL = f"{COPERNICUS_BASE}/tileList.txt"
 DEFAULT_CACHE_DIR = Path.home() / ".cache" / "frankenturb" / "terrain"
+# Default total size of the cached tiles. Tiles average ~33 MB, so this is
+# about 300 tiles: more than any single WorldFlight 2026 sector needs
+# (at most ~130 tiles, 4.3 GB, within 100 km of the route).
+DEFAULT_MAX_GB = 10.0
+
+# A cached tile's modification time is its "last used" time for the size
+# limit; it's refreshed on use, at most this often.
+_TOUCH_INTERVAL_S = 3600.0
 
 # Download chunk size (64 KiB)
 _CHUNK = 1 << 16
@@ -63,20 +76,31 @@ class TileCache:
 
     Downloads tiles from AWS on demand and stores them as local GeoTIFFs.
     Uses tileList.txt to avoid attempting downloads for ocean/no-data cells.
+    Keeps the cached tiles within max_gb in total by deleting the least
+    recently used ones (at startup and after each download); a deleted
+    tile is downloaded again if it's needed again.
 
     Parameters
     ----------
     cache_dir:
         Directory for cached tiles. Created automatically if absent.
         Defaults to ~/.cache/frankenturb/terrain.
+    max_gb:
+        Size limit for the cached tiles in GB (10^9 bytes); 0 or None
+        means no limit.
 
     """
 
-    def __init__(self, cache_dir: Path = DEFAULT_CACHE_DIR):
+    def __init__(self, cache_dir: Path = DEFAULT_CACHE_DIR,
+                 max_gb: Optional[float] = DEFAULT_MAX_GB):
         """Initialize the tile cache, creating the cache directory if needed."""
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._available: Optional[set[str]] = None
+        self.max_bytes = int(max_gb * 1e9) if max_gb and max_gb > 0 else None
+        self._evict_lock = threading.Lock()
+        remove_stale_tmp(str(self.cache_dir))
+        self.evict()
 
     # ------------------------------------------------------------------
     # Tile index
@@ -137,6 +161,7 @@ class TileCache:
 
         path = self.local_path(name)
         if path.exists():
+            self._touch(path)
             return path
 
         try:
@@ -157,6 +182,8 @@ class TileCache:
             except requests.RequestException as exc:
                 log.error("Tile download failed for %s: %s", name, exc)
                 return None
+        else:
+            self._touch(path)
         return path
 
     def prefetch(
@@ -178,6 +205,61 @@ class TileCache:
             if p is not None:
                 paths.append(p)
         return paths
+
+    # ------------------------------------------------------------------
+    # Size limit
+    # ------------------------------------------------------------------
+
+    def evict(self, keep: Optional[Path] = None) -> int:
+        """Delete the least recently used tiles until the cache is within its size limit.
+
+        keep (e.g. the tile just downloaded) is never deleted. Tiles that
+        can't be deleted (e.g. open in another process on Windows) are
+        skipped. Returns the number of tiles deleted.
+        """
+        if self.max_bytes is None:
+            return 0
+        with self._evict_lock:
+            tiles = []
+            for path in self.cache_dir.glob("*.tif"):
+                try:
+                    st = path.stat()
+                except OSError:
+                    continue
+                tiles.append((st.st_mtime, st.st_size, path))
+            total = sum(size for _, size, _ in tiles)
+            if total <= self.max_bytes:
+                return 0
+            removed = 0
+            freed = 0
+            for _, size, path in sorted(tiles, key=lambda t: t[0]):
+                if total - freed <= self.max_bytes:
+                    break
+                if keep is not None and path == keep:
+                    continue
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    log.warning("Terrain cache: can't delete %s: %s", path.name, exc)
+                    continue
+                removed += 1
+                freed += size
+            log.info("Terrain cache: deleted %d least recently used tile(s) (%.1f GB),"
+                     " %.1f GB left (limit %.1f GB)", removed, freed / 1e9,
+                     (total - freed) / 1e9, self.max_bytes / 1e9)
+            return removed
+
+    @staticmethod
+    def _touch(path: Path) -> None:
+        """Mark a cached tile as used now (its mtime), at most once per _TOUCH_INTERVAL_S."""
+        try:
+            now = time.time()
+            if now - path.stat().st_mtime > _TOUCH_INTERVAL_S:
+                os.utime(path, (now, now))
+        except OSError:
+            pass
 
     # ------------------------------------------------------------------
     # Internal
@@ -202,3 +284,4 @@ class TileCache:
 
         mb = dest.stat().st_size / 1e6
         log.info("Cached %s (%.1f MB)", name, mb)
+        self.evict(keep=dest)
