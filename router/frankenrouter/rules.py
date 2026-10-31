@@ -687,6 +687,7 @@ class Rules():  # pylint: disable=too-many-public-methods
             'elevation_source_simulator',
             'traffic_source_simulator',
             'errors',
+            'warnings',
         ]:
             if key in sharedinfo:
                 self.router.sharedinfo[key] = sharedinfo[key]

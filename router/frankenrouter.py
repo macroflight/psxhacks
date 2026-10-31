@@ -2936,6 +2936,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             "elevation_source_simulator": self.sharedinfo["elevation_source_simulator"],
             "traffic_source_simulator": self.sharedinfo["traffic_source_simulator"],
             "errors": self.get_errors(),
+            # Shown on every sim's /efb (Router errors and warnings): e.g.
+            # the navdata checks only the master makes
+            "warnings": self.get_warnings(),
             "load_marker_pause_enabled": self.load_marker_pause_enabled,
             "load_marker_pause_delay": self.load_marker_pause_delay,
         }

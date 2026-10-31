@@ -335,7 +335,9 @@ still be a short period when duplicate SHAREDINFO messages are sent to
 the network, so try to avoid having two routers with `[sharedinfo]`
 in the config.
 
-FIXME: document the JSON data format.
+FIXME: document the JSON data format. Among its keys: `errors` and
+(since 1.33.0) `warnings`, the master router's current errors and
+warnings, shown on every router's `/efb` page.
 
 ### FRDP ROUTERINFO
 
