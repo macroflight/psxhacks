@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Change: more than one CMC-PSX on the network is a critical error on
+  the master router**, like two BACARS. Two CMC-PSX send each other's
+  MCP button values (VNAV, LOC) back and forth endlessly: at WorldFlight
+  on 2026-11-01 that ran for hours at up to about 450 messages a second
+  each, with a master caution every minute.
+
 - **New: MSROUTER's "CHECK SWITCHES" stays in its own sim.** A master
   router now drops `Qs419=CHECK SWITCHES` (PSX's free caution message)
   from its clients and logs it at `INFO`, so a slave sim's MCP mismatch

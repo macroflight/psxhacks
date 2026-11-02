@@ -281,6 +281,9 @@ MASTER_ADDON_PATTERNS = [
     r'.*(BA ACARS|BACARS).*',
     r'.*WEATHER.*',
     r'.*TANKER.*',
+    # Two CMC-PSX echo each other's MCP push values (VNAV/LOC) in an
+    # endless loop, hundreds of messages a second (WorldFlight 2026-11-01)
+    r'.*CMC-PSX.*',
 ]
 
 
