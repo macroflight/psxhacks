@@ -1,6 +1,7 @@
 """Diagnostic tool: run psx_variable_validator.py over real traffic logs.
 
-Scans one or more PSX router traffic logs (plain `*.psxnet.log` files, or
+Scans one or more PSX router traffic logs (`*-traffic.txt` and their rotated
+`*-traffic-<hour>.txt.gz`, or older `*.psxnet.log` files, or
 `.zip` archives containing them -- streamed directly from the zip, never
 extracted to disk) for every `Qxxx=value` message, validates each one
 with `psx_variable_validator.validate()`, and reports a summary: lookup
@@ -21,6 +22,7 @@ built for (see its own docstring): auditing a batch of real flight logs
 for out-of-spec values, not a live/real-time check.
 """
 import argparse
+import gzip
 import re
 import sys
 import time
@@ -52,18 +54,29 @@ _DATA_FROM_RE = re.compile(r'DATA FROM \[\s*([^\]\s]+)')
 # previously learned for it.
 _CONNECT_RE = re.compile(r'CONNECT client (\S+)')
 
-# Strips the directory and the per-run epoch timestamp from a *.psxnet.log
-# file name, so e.g. "logs/masterrouter-traffic-1788581757.psxnet.log" and
-# "masterrouter-traffic-1788701591.psxnet.log" (a later run of the same
-# router) both report as "masterrouter-traffic" -- a human-readable "which
-# router" label, grouping a router's own log rotations together.
-_ROUTER_LABEL_RE = re.compile(r'^(?:.*/)?(.*?)(?:-\d+)?\.psxnet\.log$')
+# Strips the directory and the per-run or rotation time stamps from a traffic
+# log's file name, so all of a router's traffic logs report under one
+# human-readable "which router" label, e.g. "WorldFlight1-masterrouter-traffic"
+# for "WorldFlight1-masterrouter-traffic.txt" and
+# "WorldFlight1-masterrouter-traffic-2026-11-02_14.txt.gz" (current names), or
+# "masterrouter-traffic" for "masterrouter-traffic-1788581757.psxnet.log",
+# "masterrouter-traffic.psxnet.log" and "...psxnet.log.2026-11-02_14.gz" (names
+# of older router versions).
+_HOUR = r'\d{4}-\d{2}-\d{2}_\d{2}(?:-\d+)?'
+_ROUTER_LABEL_RE = re.compile(
+    rf'^(?:.*/)?(?:(.*?-traffic)(?:-{_HOUR})?\.txt'
+    rf'|(.*?)(?:-\d+)?\.psxnet\.log(?:\.{_HOUR})?)(?:\.gz)?$')
+
+
+def _is_traffic_log(name):
+    """Return whether name is a router traffic log (plain or gzipped, current or rotated)."""
+    return bool(_ROUTER_LABEL_RE.match(name))
 
 
 def _router_label(path):
     """Return a short, human-readable label for the router a log file represents."""
     match = _ROUTER_LABEL_RE.match(path)
-    return match.group(1) if match else path
+    return (match.group(1) or match.group(2)) if match else path
 
 
 def _iter_log_lines(path):
@@ -77,12 +90,14 @@ def _iter_log_lines(path):
     if zipfile.is_zipfile(path):
         with zipfile.ZipFile(path) as zf:
             for member in zf.namelist():
-                if not member.endswith('.psxnet.log'):
+                if not _is_traffic_log(member):
                     continue
                 print(f"Scanning {path}::{member} ...", file=sys.stderr, flush=True)
                 label = _router_label(member)
                 file_id = f"{path}::{member}"
-                with zf.open(member) as raw:
+                with zf.open(member) as raw_member:
+                    raw = (gzip.GzipFile(fileobj=raw_member) if member.endswith('.gz')
+                           else raw_member)
                     for raw_line in raw:
                         yield (
                             label, file_id,
@@ -90,7 +105,8 @@ def _iter_log_lines(path):
     else:
         print(f"Scanning {path} ...", file=sys.stderr, flush=True)
         label = _router_label(path)
-        with open(path, encoding='utf-8', errors='replace') as logfile:
+        opener = gzip.open if path.endswith('.gz') else open
+        with opener(path, 'rt', encoding='utf-8', errors='replace') as logfile:
             for line in logfile:
                 yield label, path, line.rstrip('\r\n')
 
@@ -236,7 +252,9 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
         'paths', nargs='+',
-        help="one or more *.psxnet.log files and/or .zip archives containing them")
+        help="one or more router traffic logs (*-traffic.txt, rotated *-traffic-<hour>.txt.gz, "
+             "older *.psxnet.log) "
+             "and/or .zip archives containing them")
     parser.add_argument(
         '--variables-file', default=v.DEFAULT_VARIABLES_FILE,
         help=f"path to Variables.txt (default: {v.DEFAULT_VARIABLES_FILE})")

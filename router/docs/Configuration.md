@@ -146,40 +146,59 @@ port = 10748
 
 ### `[log]`
 
-- `traffic`: if set to true, the router will write all traffic data to
-  a log file.
-- `directory`: set to the directory where the traffic log file should
-  be written (default: the current working directory of the router
-  process)
-- `traffic_max_size`: if set, the traffic log file will be rotated
-  before reaching this size. The value is in **bytes**. The default is
-  to not rotate the log.
-- `traffic_keep_versions`: controls how many versions of the traffic
-  log file will be kept after being rotated.
-- `output_max_size`: as `traffic_max_size`, but for the router status
-  output log. The value is in **bytes**.
-- `output_keep_versions`: as `traffic_keep_versions`, but for the
-  router status output log.
+The router writes three logs in `directory`, named after the simulator
+and router names from `[identity]` (characters that aren't safe in a
+file name, such as spaces, become `_`):
+
+- `<sim>-<router>-router.txt`: what the router prints, its status and
+  warnings.
+- `<sim>-<router>-traffic.txt`: every message the router receives and
+  sends (traffic log).
+- `<sim>-<router>-simevents.txt`: sim events (connections, MCP changes,
+  FMA changes, ...).
+
+All three are rotated at the top of every UTC hour: the hour's file is
+renamed to `<sim>-<router>-<log>-<YYYY-MM-DD_HH>.txt` (the UTC hour it
+covers) and gzipped (`.txt.gz`, which Windows 11 opens in File Explorer;
+`zcat`/`zgrep` on Linux), in the background. Traffic logs shrink to
+about 17% of their size: a WorldFlight master router writes about 125 MB
+of traffic log an hour, a slave about 40 MB. Every line is written to
+disk at once, and each file is closed and reopened every minute so that
+Windows (File Explorer, sync tools such as Syncthing) shows its current
+size while the router runs. The router's web UI has a *Download logs*
+page listing them all with the time each covers.
+
+Logs under the names older versions used (`frankenrouter-<router>.log`,
+`<router>-traffic*.psxnet.log`, `<router>-simevents.log`) are gzipped at
+startup and deleted along with the hourly logs: once `keep_hours` hours
+of hourly logs exist, the ones older than all of those go, and with
+`keep_gb` they're the first to go.
+
+- `traffic`: defaults to `true`. Set to `false` to stop logging traffic.
+- `directory`: the directory the logs are written to (default: the
+  current working directory of the router process).
+- `keep_hours`: how many rotated hours of each log to keep, default `48`
+  (two days of router running; hours when the router isn't running don't
+  count). `0` keeps them all.
+- `keep_gb`: if set, also deletes the oldest logs (all three, rotated and
+  old-style together; never the current ones) to keep them within this
+  many gigabytes. The default, `0`, sets no size limit. Set both to `0`
+  to keep everything.
 - `unknown_addons`: if set to true, `addon=` messages from addons the
   router doesn't recognise are logged ("Non-frankenrouter addon message
   ... forwarded"). The default is false, which only logs them at debug
   level. They are forwarded either way.
-- `compress_old`: if set to true, old logs are compressed with gzip
-  (`.gz`, which Windows 11 opens in File Explorer; `zcat`/`zgrep` on
-  Linux). At startup the router compresses the traffic logs of earlier
-  runs (`<router>-traffic-<time>.psxnet.log`, all but the current one),
-  and with `traffic_max_size` or `output_max_size` set, each rotated
-  backup is compressed as it's rotated out (`.log.1.gz`). This happens in
-  background threads, so routing isn't held up. Traffic logs shrink to
-  about 17% of their size: a WorldFlight master router writes about
-  3 GB of traffic log a day. The default is false.
+
+`traffic_max_size`, `traffic_keep_versions`, `output_max_size`,
+`output_keep_versions` and `compress_old` are no longer used: the router
+starts with them, with a warning.
 
 Example:
 
 ```text
 [log]
-traffic = true
 directory = 'C:\fs\PSX\Routerlogs'
+keep_hours = 168
 ```
 
 ### `[psx]`

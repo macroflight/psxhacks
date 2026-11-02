@@ -105,29 +105,37 @@ class _RouterConfigUpstream:  # pylint: disable=missing-class-docstring,too-few-
                 "on_forced_disconnect must be one of 'disconnect', 'switch', 'ignore'")
 
 
-class _RouterConfigLog:  # pylint: disable=missing-class-docstring,too-few-public-methods,too-many-instance-attributes
+# [log] settings replaced by hourly rotation with keep_hours/keep_gb and
+# always-on compression (logcompress.py): still accepted, ignored with a warning
+_DEPRECATED_LOG_KEYS = ('traffic_max_size', 'traffic_keep_versions', 'output_max_size',
+                        'output_keep_versions', 'compress_old')
+
+
+class _RouterConfigLog:  # pylint: disable=missing-class-docstring,too-few-public-methods
     def __init__(self, data):
-        self.traffic = data.get('traffic', False)
-        self.traffic_max_size = data.get('traffic_max_size', 0)
-        self.traffic_keep_versions = data.get('traffic_keep_versions', 1)
-
-        self.output_max_size = data.get('output_max_size', 0)
-        self.output_keep_versions = data.get('output_keep_versions', 1)
-
+        # Traffic logging is on unless turned off here
+        self.traffic = data.get('traffic', True)
         if not isinstance(self.traffic, bool):
             raise RouterConfigError("The traffic setting must be true or false")
+
+        # All three logs rotate every UTC hour and are gzipped (logcompress.py).
+        # Rotated hours are kept for keep_hours (0 = no limit) and, if keep_gb
+        # is set, only as many of the newest as fit in that many gigabytes.
+        self.keep_hours = data.get('keep_hours', 48)
+        if isinstance(self.keep_hours, bool) or not isinstance(self.keep_hours, int) or \
+                self.keep_hours < 0:
+            raise RouterConfigError("The keep_hours setting must be a whole number, 0 or more")
+        self.keep_gb = data.get('keep_gb', 0)
+        if isinstance(self.keep_gb, bool) or not isinstance(self.keep_gb, (int, float)) or \
+                self.keep_gb < 0:
+            raise RouterConfigError("The keep_gb setting must be a number of gigabytes, 0 or more")
+        self.deprecated_keys_present = [key for key in _DEPRECATED_LOG_KEYS if key in data]
 
         # Log addon= messages from addons the router doesn't know about at
         # info level; when false (the default) they're logged at debug only.
         self.unknown_addons = data.get('unknown_addons', False)
         if not isinstance(self.unknown_addons, bool):
             raise RouterConfigError("The unknown_addons setting must be true or false")
-
-        # gzip old logs (logcompress.py): earlier runs' traffic logs at
-        # startup, and rotated backups as they're rotated out
-        self.compress_old = data.get('compress_old', False)
-        if not isinstance(self.compress_old, bool):
-            raise RouterConfigError("The compress_old setting must be true or false")
 
         self.directory = data.get('directory', os.getcwd())
         if not os.path.exists(self.directory):
@@ -683,6 +691,11 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
                 "in [identity] instead")
             self.identity.type = 'master'
         self.filtering = _RouterConfigFiltering(config.get('filtering', {}))
+        if self.log.deprecated_keys_present:
+            self.logger.warning(
+                "Config: [log] %s no longer used: all logs now rotate hourly and are "
+                "compressed, kept for keep_hours (default 48) or up to keep_gb",
+                ", ".join(self.log.deprecated_keys_present))
         self.crew_alertness = _RouterConfigCrewAlertness(config.get('crew_alertness', {}))
         if self.filtering.client_reset_blacklist_present:
             self.logger.warning(
@@ -1062,6 +1075,18 @@ keywords = ["Qs123"]
                     'ignore = "Tiller"', 'sound_repeat = -1'):
             with self.assertRaises(RouterConfigError):
                 RouterConfig(config_data=f"[crew_alertness]\n{bad}\n")
+
+    def test_log_defaults(self):
+        """Traffic logging on, 48 hours kept, no size limit; old settings flagged."""
+        conf = RouterConfig(config_data="")
+        self.assertEqual((conf.log.traffic, conf.log.keep_hours, conf.log.keep_gb), (True, 48, 0))
+        conf = RouterConfig(config_data="[log]\ntraffic = false\nkeep_hours = 0\nkeep_gb = 2.5\n"
+                                        "traffic_max_size = 1000\ncompress_old = true\n")
+        self.assertEqual((conf.log.traffic, conf.log.keep_hours, conf.log.keep_gb), (False, 0, 2.5))
+        self.assertEqual(conf.log.deprecated_keys_present, ['traffic_max_size', 'compress_old'])
+        for bad in ('keep_hours = -1', 'keep_hours = 1.5', 'keep_gb = -1', 'traffic = "yes"'):
+            with self.assertRaises(RouterConfigError):
+                RouterConfig(config_data=f"[log]\n{bad}\n")
 
     def test_file_input(self):
         """Test reading from one of the example files."""

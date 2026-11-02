@@ -7,6 +7,22 @@
   now logged as a one-line warning, like other connection errors, rather
   than as an unhandled exception.
 
+- **Change: traffic logging is on by default, and all logs have new
+  names, rotate every hour and are compressed.** The router's three logs
+  are now `<sim>-<router>-router.txt`, `<sim>-<router>-traffic.txt` and
+  `<sim>-<router>-simevents.txt` (no start time in the name). They're
+  rotated at the top of every UTC hour to
+  `<sim>-<router>-<log>-<YYYY-MM-DD_HH>.txt.gz` and kept for 48 hours of
+  router running by default (`[log] keep_hours`, `keep_gb` for a size
+  limit). Every file is reopened every minute, so Windows Explorer and
+  sync tools see a running log's current size. Turn traffic logging off
+  with `[log] traffic = false`. Logs under the old names are gzipped at
+  startup and deleted once they're older than all the hourly logs kept
+  (or first, with `keep_gb`). `--log-traffic` and the old `[log]`
+  rotation settings (`traffic_max_size`, `traffic_keep_versions`,
+  `output_max_size`, `output_keep_versions`, `compress_old`) are no
+  longer used: they give a warning.
+
 ## 2026-11-02: version 1.34.0
 
 - **Change: the crew alertness monitor on every slave router's Utils

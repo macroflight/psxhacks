@@ -749,7 +749,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         parser.add_argument(
             '--log-traffic',
             action='store_true',
-            help=("Override config file setting for data logging")
+            help=("Deprecated: traffic logging is on by default ([log] traffic = false "
+                  "turns it off)")
         )
         parser.add_argument(
             '--log-directory',
@@ -2527,13 +2528,19 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self._local_time_phase_str(lon)
             )
 
-    async def logging_task(self, name):  # pylint: disable=too-many-branches
+    def _log_path(self, kind):
+        """Return the path of one of our three logs ('router', 'traffic', 'simevents')."""
+        return os.path.join(self.config.log.directory, logcompress.log_names(
+            self.config.identity.simulator, self.config.identity.router)[kind])
+
+    def _hourly_log_handler(self, path):
+        """Return a handler for one of our logs: rotated hourly, gzipped (logcompress.py)."""
+        return logcompress.HourlyLogHandler(path, self.config.log.keep_hours, self.logger)
+
+    async def logging_task(self, name):  # pylint: disable=too-many-branches,too-many-locals
         """Handle application logging."""
         try:
-            router_log_file = os.path.join(
-                self.config.log.directory,
-                f"frankenrouter-{self.config.identity.router}.log"
-            )
+            router_log_file = self._log_path('router')
             self.logger = logging.getLogger(__MYNAME__)
 
             log_queue = queue.Queue(maxsize=0)
@@ -2548,13 +2555,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             console_handler = logging.StreamHandler()
             console_handler.setFormatter(console_formatter)
 
-            file_handler = logging.handlers.RotatingFileHandler(
-                router_log_file,
-                maxBytes=self.config.log.output_max_size,
-                backupCount=self.config.log.output_keep_versions
-            )
-            if self.config.log.compress_old:
-                logcompress.use_compression(file_handler)
+            file_handler = self._hourly_log_handler(router_log_file)
             file_handler.setFormatter(file_formatter)
 
             self.logger.setLevel(logging.INFO)
@@ -2578,12 +2579,22 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             listener.start()
             # report the logger is ready
             self.logger.debug("Task %s has initialized logging", name)
-            # Periodically flush so a log copied off disk mid-session (e.g. for
-            # troubleshooting while the router keeps running) is never more
-            # than this far behind, rather than sitting in a buffer.
+            # Every record is flushed to the OS at once; reopening the file
+            # every minute also makes Windows show its current size and
+            # time, so Explorer and sync tools see a running log. Also
+            # compress logs left uncompressed, and purge old ones
+            # (keep_hours, keep_gb), in the background.
+            ident, logcfg = self.config.identity, self.config.log
+            threading.Thread(target=logcompress.tidy_old_logs,
+                             args=(logcfg.directory, ident.simulator, ident.router, self.logger),
+                             name="compress old logs", daemon=True).start()
             while True:
                 await asyncio.sleep(60)
-                file_handler.flush()
+                file_handler.reopen()
+                if logcfg.keep_hours or logcfg.keep_gb:
+                    await asyncio.to_thread(
+                        logcompress.purge_logs, logcfg.directory, ident.simulator, ident.router,
+                        logcfg.keep_hours, logcfg.keep_gb * 1e9, self.logger)
 
         # Keep logger alive until all other tasks have ended (or max
         # 10s), otherwise we won't see the logs from their shutdown.
@@ -2617,23 +2628,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
     async def traffic_logging_task(self, name):
         """Handle traffic logging."""
         try:
-            if self.config.log.traffic_max_size > 0:
-                # In order to use log rotation to keep the disk from
-                # filling up with traffic logs, we need to use a fixed
-                # log file name that doesn't change every time the
-                # router is started.
-                self.log_traffic_filename = os.path.join(
-                    self.config.log.directory,
-                    f"{self.config.identity.router}-traffic.psxnet.log"
-                )
-            else:
-                # If not using log rotation, we use the old default
-                # behavior, one traffic log per router start that has
-                # the router start time in the filename
-                self.log_traffic_filename = os.path.join(
-                    self.config.log.directory,
-                    f"{self.config.identity.router}-traffic-{self.start_time}.psxnet.log"
-                )
+            # Rotated every hour like the other logs (logcompress.py)
+            self.log_traffic_filename = self._log_path('traffic')
 
             self.traffic_logger = logging.getLogger(f"{__MYNAME__}-traffic")
 
@@ -2645,21 +2641,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             file_formatter = logging.Formatter("%(asctime)s: %(message)s")
             file_formatter.converter = time.gmtime
 
-            file_handler = logging.handlers.RotatingFileHandler(
-                self.log_traffic_filename,
-                maxBytes=self.config.log.traffic_max_size,
-                backupCount=self.config.log.traffic_keep_versions,
-            )
-            if self.config.log.compress_old:
-                logcompress.use_compression(file_handler)
-                if self.config.log.traffic_max_size <= 0:
-                    # Earlier runs' traffic logs, in the background (a big
-                    # one takes a minute)
-                    threading.Thread(
-                        target=logcompress.compress_old_traffic_logs,
-                        args=(self.config.log.directory, self.config.identity.router,
-                              self.log_traffic_filename, self.logger),
-                        name="compress old traffic logs", daemon=True).start()
+            file_handler = self._hourly_log_handler(self.log_traffic_filename)
             file_handler.setFormatter(file_formatter)
 
             self.traffic_logger.setLevel(logging.DEBUG)
@@ -2673,12 +2655,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 listener.start()
                 # report the logger is ready
                 self.logger.debug("Task %s has initialized traffic logging", name)
-                # Periodically flush so a log copied off disk mid-session (e.g. for
-                # troubleshooting while the router keeps running) is never more
-                # than this far behind, rather than sitting in a buffer.
+                # See logging_task(): show Windows the current size and time
                 while True:
                     await asyncio.sleep(60)
-                    file_handler.flush()
+                    file_handler.reopen()
             finally:
                 # report the logger is done
                 self.logger.debug("Task %s has stopped traffic logging", name)
@@ -2789,10 +2769,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
     async def simevents_logging_task(self, name):
         """Handle sim events logging to a rotating file."""
         try:
-            simevents_log_file = os.path.join(
-                self.config.log.directory,
-                f"{self.config.identity.router}-simevents.log"
-            )
+            simevents_log_file = self._log_path('simevents')
 
             self.simevents_logger = logging.getLogger(f"{__MYNAME__}-simevents")
 
@@ -2804,13 +2781,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             file_formatter = logging.Formatter("%(asctime)s %(message)s")
             file_formatter.converter = time.gmtime
 
-            file_handler = logging.handlers.RotatingFileHandler(
-                simevents_log_file,
-                maxBytes=self.config.log.output_max_size,
-                backupCount=self.config.log.output_keep_versions,
-            )
-            if self.config.log.compress_old:
-                logcompress.use_compression(file_handler)
+            file_handler = self._hourly_log_handler(simevents_log_file)
             file_handler.setFormatter(file_formatter)
 
             self.simevents_logger.setLevel(logging.INFO)
@@ -2823,8 +2794,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 listener.start()
                 self.logger.debug("Task %s has initialized simevents logging to %s",
                                   name, simevents_log_file)
+                # See logging_task(): show Windows the current size and time
                 while True:
                     await asyncio.sleep(60)
+                    file_handler.reopen()
             finally:
                 self.logger.debug("Task %s has stopped simevents logging", name)
                 listener.stop()
@@ -5159,7 +5132,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
         # Override with command line options
         if self.args.log_traffic:
-            self.config.log.traffic = True
+            print("WARNING: --log-traffic is deprecated and does nothing: traffic logging is on "
+                  "by default ([log] traffic = false in the config file turns it off)", flush=True)
 
         if self.args.log_directory is not None:
             self.config.log.directory = self.args.log_directory

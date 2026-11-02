@@ -140,8 +140,8 @@ to start the router using that config file).
 There are some config examples in the config_examples directory.
 
 Some aspects of frankenrouter's configuration can be overridded by
-command line options, e.g `--log-traffic` will enable logging of
-traffic. Run `frankenrouter.py --help` to see the available command
+command line options, e.g `--log-directory` sets where the logs are
+written. Run `frankenrouter.py --help` to see the available command
 line options.
 
 ## Starting the router
@@ -164,7 +164,7 @@ Example of the router output when running:
 08:03:32: --------------------------------------------------------------------------------------------------------------
 08:03:32: Frankenrouter SlaveSim port 10748, 2460 keywords cached, uptime 2990 s, server connects 1, self restarts 0
 08:03:32: Ctrl-C to shut down cleanly. Password: None Read-only password: None
-08:03:32: Logging traffic to mastersim/frankenrouter-SlaveSim-traffic-1751260422.psxnet.log
+08:03:32: Logging traffic to mastersim/SlaveSim-router1-traffic.txt
 08:03:32: SERVER 127.0.0.1:20748 R:MasterSim, RTT mean/max: 0.6/6.2 ms, output delay avg/max 0.0/0.1 ms
 08:03:32: 2 clients                             Local                   Lines  Lines  Bytes  Bytes FRDP ms   Delay us
 08:03:32: id Identifier         Client IP        Port   Access Clients   sent  recvd   sent  recvd mean  max mean  max
