@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Change: the crew alertness monitor on every slave router's Utils
+  page.** Slave routers show the master's monitor state (from SHAREDINFO)
+  and their button turns it on or off (new FRDP message
+  `CREW_ALERTNESS`, relayed to the master). A Test button next to it
+  shows `PILOT RESPONSE` as a warning with the sound, until the next crew
+  input (30 seconds at most).
+
 - **New (opt-in): compress old logs.** With `[log] compress_old = true`
   the router gzips earlier runs' traffic logs at startup and rotated log
   backups as they're rotated out, in background threads. Traffic logs

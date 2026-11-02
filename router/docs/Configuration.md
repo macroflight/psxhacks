@@ -501,9 +501,14 @@ doesn't make it come sooner. A message is only cleared if the slot
 still shows our text, so it never removes someone else's message (the
 router's own `(ROUTER)` warning shares the warning slot).
 
-The Utils page shows whether the monitor is on (and turns it on or off
-until the next restart), how long ago the last crew input was, the
-phase and the times that apply, and which alert is up.
+The Utils page of the master router, and of every slave router (from
+the master's SHAREDINFO), shows whether the monitor is on, how long ago
+the last crew input was, the phase and the times that apply, and which
+alert is up; its button turns the master's monitor on or off until the
+master router restarts. Its Test button shows `PILOT RESPONSE` as a
+warning (with PSX's warning sound) and sends `sound`, until the next crew
+input or for 30 seconds at most, so crews can hear what the alert is
+like; it works whether the monitor is on or off.
 
 ```toml
 [crew_alertness]

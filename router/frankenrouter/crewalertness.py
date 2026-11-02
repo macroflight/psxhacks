@@ -135,6 +135,35 @@ class CrewAlertness:  # pylint: disable=too-many-instance-attributes
         """Seconds since the last crew activity while the monitor runs, or None."""
         return None if self.last_activity is None else now - self.last_activity
 
+    def status(self, now, message):
+        """Return the state for SHAREDINFO and the Utils pages (see status_text())."""
+        idle = self.idle(now)
+        return {
+            'enabled': self.enabled,
+            'level': self.level,
+            'idle_s': None if idle is None else round(idle),
+            'phase': self.phase,
+            'times_min': [t / 60 for t in self.times.get(self.phase, ())],
+            'min_altitude': self.min_altitude,
+            'message': message,
+        }
+
+
+def status_text(status):
+    """Return one line about the monitor's state, from status() (master's or via SHAREDINFO)."""
+    names = {'A': 'advisory', 'C': 'caution', 'W': 'warning'}
+    idle = status.get('idle_s')
+    if status.get('level'):
+        return (f"{status.get('message', '')} {names.get(status['level'], '?').upper()} "
+                f"(no crew input for {(idle or 0) / 60:.0f} min)")
+    if not status.get('enabled'):
+        return "off"
+    if idle is None:
+        return f"inactive: on the ground, paused or below {status.get('min_altitude')} ft"
+    times = '/'.join(f"{t:g}" for t in status.get('times_min') or ())
+    after = f", advisory/caution/warning after {times} min" if times else ""
+    return f"last crew input {idle / 60:.0f} min ago; {status.get('phase') or 'starting'}{after}"
+
 
 class TestCrewAlertness(unittest.TestCase):
     """Tests for CrewAlertness."""
@@ -213,6 +242,22 @@ class TestCrewAlertness(unittest.TestCase):
         cam.activity('Qh77', 600)
         out = self.fly(cam, 605, 1000, 35000, fpm=-3000)
         self.assertEqual(out[0], (900, 'A'))
+
+    def test_status_text(self):
+        """The Utils page line for each state."""
+        cam = self.cam()
+        self.assertEqual(status_text(cam.status(0, 'PILOT RESPONSE')),
+                         'inactive: on the ground, paused or below 20000 ft')
+        self.fly(cam, 0, 300, 35000)
+        self.assertEqual(status_text(cam.status(300, 'PILOT RESPONSE')),
+                         'last crew input 5 min ago; cruise, '
+                         'advisory/caution/warning after 15/20/25 min')
+        self.fly(cam, 305, 1200, 35000)
+        self.assertEqual(status_text(cam.status(1200, 'PILOT RESPONSE')),
+                         'PILOT RESPONSE CAUTION (no crew input for 20 min)')
+        cam.enabled = False
+        cam.tick(1205, True, 35000)
+        self.assertEqual(status_text(cam.status(1205, 'PILOT RESPONSE')), 'off')
 
     def test_inhibited_on_ground(self):
         """Never raised on the ground (or paused); landing clears it."""

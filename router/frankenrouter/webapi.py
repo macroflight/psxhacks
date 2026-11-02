@@ -28,6 +28,7 @@ import fw_sigmet as _fw_sigmet  # noqa: E402  pylint: disable=wrong-import-posit
 import fw_webui as _fw_webui  # noqa: E402  pylint: disable=wrong-import-position
 
 from . import variables as _variables  # noqa: E402  pylint: disable=wrong-import-position
+from . import crewalertness  # noqa: E402  pylint: disable=wrong-import-position
 
 
 _STATIC_DIR = pathlib.Path(__file__).parent / 'static'
@@ -2554,31 +2555,32 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 )
                 crew_alertness_button = ''
                 if router.config.identity.type == 'master':
-                    cam_on = router.crew_alertness.enabled
+                    cam_status = router.crew_alertness.status(
+                        time.perf_counter(), router.config.crew_alertness.message)
+                    where = ''
+                else:
+                    # The master's monitor, via SHAREDINFO
+                    cam_status = router.sharedinfo.get('crew_alertness')
+                    where = ' (master)'
+                if cam_status and router.config.identity.type in ('master', 'slave'):
+                    cam_on = cam_status.get('enabled')
                     crew_alertness_button = (
                         '<form method="post" action="/api/utils/crew_alertness" '
                         'style="display:inline">'
                         f'<input type="hidden" name="enabled" value="{0 if cam_on else 1}">'
                         f'<button class="btn {"btn-green" if cam_on else "btn-gray"}">'
-                        f'Crew alertness monitor: {"ON" if cam_on else "OFF"}</button></form>\n')
-                    cam = router.crew_alertness
-                    idle = cam.idle(time.perf_counter())
-                    names = {'A': 'advisory', 'C': 'caution', 'W': 'warning'}
-                    if cam.level:
-                        crew_alertness_button += (
-                            f'<b>{html.escape(router.config.crew_alertness.message)} '
-                            f'{names[cam.level].upper()}</b> (no crew input for '
-                            f'{idle / 60:.0f} min)\n')
-                    elif cam_on and idle is not None:
-                        times = '/'.join(f'{t / 60:g}' for t in cam.times.get(cam.phase, ()))
-                        after = f', advisory/caution/warning after {times} min' if times else ''
-                        crew_alertness_button += (
-                            f'(last crew input {idle / 60:.0f} min ago; '
-                            f'{cam.phase or "starting"}{after})\n')
-                    elif cam_on:
-                        crew_alertness_button += (
-                            '(inactive: on the ground, paused or below '
-                            f'{router.crew_alertness.min_altitude} ft)\n')
+                        f'Crew alertness monitor{where}: {"ON" if cam_on else "OFF"}'
+                        '</button></form>\n'
+                        '<form method="post" action="/api/utils/crew_alertness" '
+                        'style="display:inline">'
+                        '<input type="hidden" name="command" value="test">'
+                        '<button class="btn btn-gray" title="PILOT RESPONSE as a warning, '
+                        'with the sound, until the next crew input (30 s at most)">Test</button>'
+                        '</form>\n')
+                    text = html.escape(crewalertness.status_text(cam_status))
+                    if cam_status.get('level'):
+                        text = f'<b>{text}</b>'
+                    crew_alertness_button += f'({text})\n'
                 return web.Response(
                     text=_UTILS_PAGE.format(
                         rest_api_color_scheme=cs,
@@ -2709,11 +2711,15 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
 
             @routes.post('/api/utils/crew_alertness')
             async def handle_crew_alertness_post(request):
-                # Master router only (the monitor isn't used anywhere else);
-                # runtime only, the config's mode is the state at startup
-                if router.config.identity.type == 'master':
+                # The master's monitor: here on the master, via FRDP from a
+                # slave; runtime only, the config's mode is the state at startup
+                if router.config.identity.type in ('master', 'slave'):
                     post = await request.post()
-                    router.set_crew_alertness(post.get('enabled') == '1')
+                    if post.get('command') == 'test':
+                        command = 'test'
+                    else:
+                        command = 'on' if post.get('enabled') == '1' else 'off'
+                    await router.request_crew_alertness(command, 'Utils page')
                 raise web.HTTPFound('/utils')
 
             @routes.post('/api/utils/printer/reset')

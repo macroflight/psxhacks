@@ -337,7 +337,19 @@ in the config.
 
 FIXME: document the JSON data format. Among its keys: `errors` and
 (since 1.33.0) `warnings`, the master router's current errors and
-warnings, shown on every router's `/efb` page.
+warnings, shown on every router's `/efb` page; `crew_alertness`, the
+state of the master router's crew alertness monitor (`enabled`, `level`
+`A`/`C`/`W` or null, `idle_s`, `phase`, `times_min`, `min_altitude`,
+`message`), shown on every slave router's Utils page.
+
+### FRDP CREW_ALERTNESS
+
+`addon=FRANKENROUTER:<protocol version>:CREW_ALERTNESS:on` (or `off`,
+or `test`) is sent upstream by a slave router's Utils page to turn the
+master router's crew alertness monitor on or off, or to show its warning
+as a test. Routers between forward it
+upstream; the master router acts on it (not from observer connections)
+and its next SHAREDINFO shows the new state.
 
 ### FRDP ROUTERINFO
 

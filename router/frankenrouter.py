@@ -115,6 +115,9 @@ FRDP_ROUTERINFO_INTERVAL = 10.0
 
 # How often to send FRDP SHAREDINFO (also sent after certain events, e.g router connects to network)
 FRDP_SHAREDINFO_INTERVAL = 10.0
+# How long the crew alertness monitor's test (PILOT RESPONSE warning and
+# sound) stays up, unless crew input clears it first
+CREW_ALERTNESS_TEST_S = 30.0
 
 # Keep 300 seconds of RTT data for the statistics in the status display
 FRDP_KEEP_RTT_SAMPLES = 300
@@ -394,6 +397,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # Crew alertness monitor ([crew_alertness], master only), set up in main()
         self.crew_alertness = None
         self._crew_alertness_sound_sent = 0.0
+        # The Test button (web UI, FRDP): PILOT RESPONSE as a warning, with
+        # the sound, until crew input or CREW_ALERTNESS_TEST_S: 'pending',
+        # then the time it ends
+        self._crew_alertness_test = None
         # Latches True once maybe_sync_clock_from_upstream_skew() has
         # tried (successfully or not) for the current upstream
         # connection; reset in reset_after_upstream_connect().
@@ -3004,6 +3011,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             "warnings": self.get_warnings(),
             "load_marker_pause_enabled": self.load_marker_pause_enabled,
             "load_marker_pause_delay": self.load_marker_pause_delay,
+            # The crew alertness monitor, for the slave routers' Utils pages
+            "crew_alertness": self.crew_alertness.status(
+                time.perf_counter(), self.config.crew_alertness.message),
         }
         payload_json = json.dumps(payload)
         # Store our own sharedinfo so we have all the data in the same place
@@ -3835,6 +3845,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         if level:
             await self._crew_alertness_message(
                 level, None, f"crew activity: {line} from {sender.display_name}")
+        elif isinstance(self._crew_alertness_test, float):
+            self._crew_alertness_test = None
+            await self._crew_alertness_message(
+                'W', None, f"test ended by crew activity: {line}")
 
     async def _crew_alertness_message(self, old, new, reason):
         """Move the crew alertness EICAS message from level old to level new (None = none).
@@ -3864,6 +3878,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.cache.update(key, value)
             await self.send_to_upstream(f"{key}={value}")
             await self.client_broadcast(f"{key}={value}")
+        self.frdp_sharedinfo_requested = True     # slave routers' Utils pages
         if new:
             await self._crew_alertness_sound()
 
@@ -3896,6 +3911,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         except (routercache.RouterCacheException, IndexError, ValueError):
             altitude = None
         now = time.perf_counter()
+        await self._crew_alertness_test_tick(now)
         old = cam.level
         change = cam.tick(now, airborne, altitude)
         if change == 'clear':
@@ -3913,12 +3929,46 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             if now - self._crew_alertness_sound_sent >= self.config.crew_alertness.sound_repeat:
                 await self._crew_alertness_sound()
 
-    def set_crew_alertness(self, enabled):
-        """Turn the crew alertness monitor on or off (web UI); not saved."""
+    async def _crew_alertness_test_tick(self, now):
+        """Show a requested test warning, or take it down when its time is up."""
+        if self._crew_alertness_test == 'pending':
+            self._crew_alertness_test = None
+            if self.crew_alertness.level is None:    # a real alert is up: no test
+                self._crew_alertness_test = now + CREW_ALERTNESS_TEST_S
+                await self._crew_alertness_message(None, 'W', "test")
+        elif self._crew_alertness_test is not None and now >= self._crew_alertness_test:
+            self._crew_alertness_test = None
+            if self.crew_alertness.level is None:
+                await self._crew_alertness_message('W', None, "test over")
+
+    def set_crew_alertness(self, enabled, source):
+        """Turn the crew alertness monitor on or off (master only); not saved."""
         if self.config.identity.type != 'master':
             return
         self.crew_alertness.enabled = enabled
-        self.logger.info("Crew alertness monitor turned %s", "on" if enabled else "off")
+        self.logger.info("Crew alertness monitor turned %s (%s)", "on" if enabled else "off",
+                         source)
+        self.frdp_sharedinfo_requested = True
+
+    def test_crew_alertness(self, source):
+        """Show PILOT RESPONSE as a warning, with the sound, as a test (master only)."""
+        if self.config.identity.type != 'master':
+            return
+        self.logger.info("Crew alertness monitor test (%s)", source)
+        self._crew_alertness_test = 'pending'     # shown by the housekeeping task
+
+    async def request_crew_alertness(self, command, source):
+        """Crew alertness monitor 'on', 'off' or 'test': here on the master, else ask upstream."""
+        if self.config.identity.type == 'master':
+            if command == 'test':
+                self.test_crew_alertness(source)
+            else:
+                self.set_crew_alertness(command == 'on', source)
+        elif self.config.identity.type == 'slave':
+            self.logger.info("Asking the master router for crew alertness monitor %s (%s)",
+                             command, source)
+            await self.send_to_upstream(
+                f"addon=FRANKENROUTER:{self.frdp_version}:CREW_ALERTNESS:{command}")
 
     async def _housekeeping_cdu_menus(self):
         """Clean up CDU menu prompts whose addon disconnected (see cdumenus.py)."""
@@ -4407,6 +4457,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.info(
                 "Got FRDP TRAFFIC_SOURCE message from %s: %s",
                 sender_hr, line)
+        elif code == RulesCode.FRDP_CREW_ALERTNESS:
+            if extra_data and 'command' in extra_data:
+                await self.request_crew_alertness(
+                    extra_data['command'],
+                    f"asked by {sender.display_name} in {sender.simulator_name}")
+            else:
+                self.logger.info("Got FRDP CREW_ALERTNESS from %s: %s", sender_hr, line)
         elif code == RulesCode.FRDP_MASTER_BANG:
             self.logger.info(
                 "Got FRDP MASTER_BANG message from %s: %s",

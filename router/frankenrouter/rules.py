@@ -233,6 +233,7 @@ class RulesCode(enum.Enum):
     FRDP_ELEVATION_SOURCE = enum.auto()
     FRDP_TRAFFIC_SOURCE = enum.auto()
     FRDP_MASTER_BANG = enum.auto()
+    FRDP_CREW_ALERTNESS = enum.auto()
     FRDP_JOIN = enum.auto()
     FRDP_SUBSCRIBE = enum.auto()
     FRDP_CLIENTINFO = enum.auto()
@@ -478,6 +479,30 @@ class Rules():  # pylint: disable=too-many-public-methods
             return self.myreturn(RulesAction.DROP, RulesCode.FRDP_MASTER_BANG)
         return self.myreturn(RulesAction.UPSTREAM_ONLY, RulesCode.FRDP_MASTER_BANG)
 
+    def handle_addon_frankenrouter_crew_alertness(self, payload):
+        """Handle a FRDP CREW_ALERTNESS message.
+
+        Format: addon=FRANKENROUTER:<protocol version>:CREW_ALERTNESS:on|off|test
+
+        Sent by a slave router's Utils page to turn the master router's
+        crew alertness monitor (crewalertness.py) on or off, or to show its
+        warning as a test. The master acts on it (extra_data 'command');
+        any other router forwards it upstream toward the master. Not from
+        clients that may not write.
+        """
+        if payload not in ('on', 'off', 'test'):
+            return self.myreturn(
+                RulesAction.DROP, RulesCode.MESSAGE_INVALID,
+                message=f"Invalid CREW_ALERTNESS payload: {self.line}")
+        if not self.allow_write():
+            return self.myreturn(RulesAction.DROP, RulesCode.NOWRITE)
+        if self.router.config.identity.type == 'master':
+            return self.myreturn(RulesAction.DROP, RulesCode.FRDP_CREW_ALERTNESS,
+                                 extra_data={'command': payload})
+        if self.router.is_sharedinfo_authority():
+            return self.myreturn(RulesAction.DROP, RulesCode.FRDP_CREW_ALERTNESS)
+        return self.myreturn(RulesAction.UPSTREAM_ONLY, RulesCode.FRDP_CREW_ALERTNESS)
+
     def handle_addon_frankenrouter_flightcontrols(self, payload):
         """Handle a FRDP FLIGHTCONTROLS message.
 
@@ -698,6 +723,7 @@ class Rules():  # pylint: disable=too-many-public-methods
             'traffic_source_simulator',
             'errors',
             'warnings',
+            'crew_alertness',
         ]:
             if key in sharedinfo:
                 self.router.sharedinfo[key] = sharedinfo[key]
@@ -886,6 +912,8 @@ class Rules():  # pylint: disable=too-many-public-methods
             return self.handle_addon_frankenrouter_traffic_source(payload)
         if message_type == 'MASTER_BANG':
             return self.handle_addon_frankenrouter_master_bang()
+        if message_type == 'CREW_ALERTNESS':
+            return self.handle_addon_frankenrouter_crew_alertness(payload)
         if message_type == 'JOIN':
             return self.handle_addon_frankenrouter_join(payload)
         if message_type == 'ROUTERINFO':
@@ -2255,6 +2283,31 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             (action, code, *_) = rules.route("addon=FRANKENROUTER:1:MASTER_BANG", sender)
             self.assertEqual(action, expected_action, identity_type)
             self.assertEqual(code, RulesCode.FRDP_MASTER_BANG, identity_type)
+
+    def test_frdp_crew_alertness(self):
+        """FRDP CREW_ALERTNESS: the master acts on it, a slave forwards it."""
+        for identity_type, expected_action in (
+                ('master', RulesAction.DROP),
+                ('standalone', RulesAction.DROP),
+                ('slave', RulesAction.UPSTREAM_ONLY)):
+            router = self.DummyFrankenrouter()
+            router.config.identity.type = identity_type
+            rules = Rules(router)
+            router.clients = {
+                ('127.0.0.1', 12345): self.DummyClientConnection(('127.0.0.1', 12345)),
+            }
+            sender = router.clients[('127.0.0.1', 12345)]
+            (action, code, _, extra) = rules.route(
+                "addon=FRANKENROUTER:1:CREW_ALERTNESS:off", sender)
+            self.assertEqual((action, code), (expected_action, RulesCode.FRDP_CREW_ALERTNESS),
+                             identity_type)
+            if identity_type == 'master':
+                self.assertEqual(extra, {'command': 'off'})
+                (action, code, _, extra) = rules.route(
+                    "addon=FRANKENROUTER:1:CREW_ALERTNESS:test", sender)
+                self.assertEqual(extra, {'command': 'test'})
+            (action, code, *_) = rules.route("addon=FRANKENROUTER:1:CREW_ALERTNESS:maybe", sender)
+            self.assertEqual(code, RulesCode.MESSAGE_INVALID)
 
     def test_frdp_client_auth(self):  # pylint: disable=too-many-statements
         """Test FRDP messages from client."""
