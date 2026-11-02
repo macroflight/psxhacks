@@ -604,6 +604,31 @@ frdp_rtt_warning = 0.5
   is logged at `INFO`. The clear (`Qs419=`) and any other `Qs419` text are
   forwarded as usual. Set to `false` to forward CHECK SWITCHES too.
 
+- `cdu_menu_tracking`: defaults to `false`. Set to `true` to keep track
+  of the menu prompts addons put on a CDU's MENU page (`cduL`, `cduC`,
+  `cduR`, e.g. BACARS's `<ACARS` or PSX.NET.Orchestration's `GND SV>`)
+  and of which client registered each one. PSX keeps a prompt until
+  something removes it, so it outlives an addon that crashed or a slave
+  sim that left the network, and two addons can register the same
+  position: the CDU shows the last one, but pressing the key activates
+  both. With tracking on, the router raises a critical error while two
+  addons have registered the same position, naming both and their sims.
+  It removes a prompt `cdu_menu_stale_timeout` seconds after the client
+  that registered it disconnected, unless that addon (same name)
+  registered it again in the meantime, and logs that at `WARNING`. If
+  another connected addon had also registered that position, its prompt
+  is shown again instead; the same happens when the addon whose prompt is
+  shown removes it. After the router reconnects upstream, it registers its
+  clients' prompts again, since they may have been removed while it was
+  away.
+
+  A router only knows the prompts registered through it since it
+  started. Turn it on in the master router and in the slave routers.
+
+- `cdu_menu_stale_timeout`: defaults to `15` (seconds). How long after a
+  client disconnected its CDU menu prompts are removed, with
+  `cdu_menu_tracking` on. `0` never removes them.
+
 - `notify_filtered_non_q_keywords`: non-Q-code keywords (exact match,
   case-sensitive, e.g. `"addon"` not `"Addon"`) withheld from any client
   that has sent `notify=` (the Simstack-Switch-style "only send me these

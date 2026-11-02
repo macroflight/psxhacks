@@ -33,6 +33,7 @@ from frankenrouter import connection
 from frankenrouter import variables
 from frankenrouter import routercache
 from frankenrouter import navdata
+from frankenrouter import cdumenus
 
 from frankenrouter.rules import (
     RulesAction, RulesCode, Rules, START_PRIVATE_WINDOW_S, FLIGHT_CONTROL_INPUT_KEYWORDS)
@@ -385,6 +386,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.clients = {}
         self.upstream = None
         self.upstream_connections = 0
+        # Addon CDU menu prompts registered through us ([filtering] cdu_menu_tracking)
+        self.cdu_menus = cdumenus.CduMenus()
         # Latches True once maybe_sync_clock_from_upstream_skew() has
         # tried (successfully or not) for the current upstream
         # connection; reset in reset_after_upstream_connect().
@@ -618,6 +621,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         _sim_events_clients_recorded) get one, so a connection that never
         identified itself (e.g. a port scan) logs neither.
         """
+        if self.config.filtering.cdu_menu_tracking:
+            self.cdu_menus.owner_gone(client.client_id, time.perf_counter())
         if client.client_id not in self._sim_events_clients_recorded:
             return
         self._sim_events_clients_recorded.discard(client.client_id)
@@ -2095,6 +2100,15 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.logger.debug("Sending demand=%s to upstream", demand_var)
                     await self.send_to_upstream(f"demand={demand_var}")
 
+                # Our clients' CDU menu prompts may be gone upstream (PSX
+                # restarted, or the master router cleaned them up while we
+                # were away), and the addons don't know: register them again
+                if self.config.filtering.cdu_menu_tracking:
+                    for cdu_line in self.cdu_menus.replay():
+                        self.logger.info("Registering CDU menu prompt again upstream: %s",
+                                         cdu_line)
+                        await self.send_to_upstream(cdu_line)
+
                 # Connection complete, refresh status display and send FRDP ROUTERINFO
                 self.connection_state_changed()
 
@@ -3319,6 +3333,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         errors = []
         if self.args.add_fake_error:
             errors.append(self.args.add_fake_error)
+        if self.config.filtering.cdu_menu_tracking:
+            errors.extend(self.cdu_menus.conflicts())
         conns = list(self.clients.values())
         if self.is_upstream_connected():
             conns.append(self.upstream)
@@ -3763,6 +3779,46 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 client.peername, AUTH_PENDING_TIMEOUT)
             await self.close_client_connection(client, clean=False)
 
+    async def _housekeeping_cdu_menus(self):
+        """Clean up CDU menu prompts whose addon disconnected (see cdumenus.py)."""
+        timeout = self.config.filtering.cdu_menu_stale_timeout
+        if not self.config.filtering.cdu_menu_tracking or not timeout:
+            return
+        if not self.is_upstream_connected():
+            return      # keep them until there's somewhere to send the cleanup
+        for (claim, cdu, pos, line, restored) in self.cdu_menus.due(time.perf_counter(), timeout):
+            where = cdumenus.position_name(cdu, pos)
+            if restored is None:
+                self.logger.warning(
+                    "Removing stale %s prompt %r: %s disconnected over %s s ago",
+                    where, claim.text, claim.owner, timeout)
+            else:
+                self.logger.warning(
+                    "Replacing stale %s prompt %r (%s disconnected over %s s ago) with %r from %s",
+                    where, claim.text, claim.owner, timeout, restored.text, restored.owner)
+            await self.send_to_upstream(line)
+
+    def _cdu_menu_update(self, sender, line):
+        """Record a cduX= message from a client; log a new conflict.
+
+        Returns the line to send upstream instead of this one, or None (see
+        CduMenus.update()).
+        """
+        key, _, value = line.partition('=')
+        if sender.is_frankenrouter:
+            owner = f"sim {sender.simulator_name} (router {sender.display_name})"
+            program = f"router:{sender.simulator_name}"
+        else:
+            owner = f"{sender.display_name} in {self.config.identity.simulator}"
+            program = sender.client_provided_id or ''
+        conflict, instead = self.cdu_menus.update(key, value, sender.client_id, owner, program)
+        if conflict:
+            self.logger.warning("CDU menu conflict: %s", conflict)
+        if instead:
+            self.logger.info("%s removed its CDU menu prompt; showing the other addon's again: %s",
+                             owner, instead)
+        return instead
+
     def _housekeeping_mcp_window(self):
         """Log pending MCP window values that have been stable for more than 5 seconds."""
         if self.config.identity.type not in ('master', 'standalone'):
@@ -3894,6 +3950,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 await self._housekeeping_check_write_buffers()
                 await self._housekeeping_irs_align_fix()
                 self._housekeeping_mcp_window()
+                await self._housekeeping_cdu_menus()
                 if time.perf_counter() - last_run > HOUSEKEEPING_INTERVAL:
                     last_run = time.perf_counter()
                     self.logger.debug("Performing housekeeping")
@@ -4060,6 +4117,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     pass
 
         (action, code, message, extra_data) = self.rules.route(line, sender)
+
+        if (self.config.filtering.cdu_menu_tracking and not sender.upstream and
+                line.startswith(cdumenus.CDU_KEYWORDS) and
+                action not in (RulesAction.DROP, RulesAction.DISCONNECT)):
+            instead = self._cdu_menu_update(sender, line)
+            if instead:
+                await self.send_to_upstream(instead)
+                action = RulesAction.DROP
 
         if (self.config.psx.gps_spoofing_egress and '=' in line and
                 line.split('=', 1)[0] in ('Qs121', 'Qs572', 'Qs573', 'Qi277')):

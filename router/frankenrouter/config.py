@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 """Frankrouter config class."""
 
 import copy
@@ -232,7 +233,7 @@ _DEFAULT_GROUND_HANDLING_FORWARD_NAMES = [
 ]
 
 
-class _RouterConfigFiltering:  # pylint: disable=missing-class-docstring,too-few-public-methods
+class _RouterConfigFiltering:  # pylint: disable=missing-class-docstring,too-few-public-methods,too-many-instance-attributes
     def __init__(self, data):
         # display_name values of clients that addon=GROUND.HANDLING
         # (PSX.NET Orchestration ground-handling protocol) messages should
@@ -275,6 +276,21 @@ class _RouterConfigFiltering:  # pylint: disable=missing-class-docstring,too-few
         self.master_drop_check_switches = data.get('master_drop_check_switches', True)
         if not isinstance(self.master_drop_check_switches, bool):
             raise RouterConfigError("filtering master_drop_check_switches must be true or false")
+
+        # Track addon CDU menu prompts (cduL/cduC/cduR, see cdumenus.py):
+        # a critical error when two addons register the same position,
+        # stale prompts removed cdu_menu_stale_timeout seconds after their
+        # owner disconnected (0 = never), live ones registered again after
+        # an upstream reconnect. Off by default.
+        self.cdu_menu_tracking = data.get('cdu_menu_tracking', False)
+        if not isinstance(self.cdu_menu_tracking, bool):
+            raise RouterConfigError("filtering cdu_menu_tracking must be true or false")
+        self.cdu_menu_stale_timeout = data.get('cdu_menu_stale_timeout', 15)
+        if (isinstance(self.cdu_menu_stale_timeout, bool) or
+                not isinstance(self.cdu_menu_stale_timeout, (int, float)) or
+                self.cdu_menu_stale_timeout < 0):
+            raise RouterConfigError(
+                "filtering cdu_menu_stale_timeout must be a number of seconds, 0 or more")
 
         # When a PTT/audio-panel variable (see rules.py's PTT_KEYWORDS) is
         # dropped because it crossed a sim boundary, also synthesize an
@@ -684,7 +700,7 @@ identity.router = {self.identity.router}
 """
 
 
-class TestToml(unittest.TestCase):
+class TestToml(unittest.TestCase):  # pylint: disable=too-many-public-methods
     """Basic test cases for the module."""
 
     good_data_1 = r"""
@@ -951,6 +967,19 @@ keywords = ["Qs123"]
         self.assertTrue(RouterConfig(config_data="").filtering.master_drop_check_switches)
         conf = RouterConfig(config_data="[filtering]\nmaster_drop_check_switches = false\n")
         self.assertFalse(conf.filtering.master_drop_check_switches)
+
+    def test_cdu_menu_tracking(self):
+        """cdu_menu_tracking is off by default; the stale timeout is validated."""
+        conf = RouterConfig(config_data="")
+        self.assertFalse(conf.filtering.cdu_menu_tracking)
+        self.assertEqual(conf.filtering.cdu_menu_stale_timeout, 15)
+        conf = RouterConfig(config_data="[filtering]\ncdu_menu_tracking = true\n"
+                                        "cdu_menu_stale_timeout = 0\n")
+        self.assertTrue(conf.filtering.cdu_menu_tracking)
+        self.assertEqual(conf.filtering.cdu_menu_stale_timeout, 0)
+        for bad in ("-1", "'15'", "true"):
+            with self.assertRaises(RouterConfigError):
+                RouterConfig(config_data=f"[filtering]\ncdu_menu_stale_timeout = {bad}\n")
 
     def test_file_input(self):
         """Test reading from one of the example files."""

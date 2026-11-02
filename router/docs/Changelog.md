@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **New (opt-in): CDU menu prompt tracking.** With `[filtering]
+  cdu_menu_tracking = true` the router keeps track of which client put
+  each menu prompt on a CDU (`cduL`/`cduC`/`cduR`). A prompt whose addon
+  crashed or whose slave sim left the network is removed after
+  `cdu_menu_stale_timeout` seconds (default 15), logged at `WARNING`;
+  two addons registering the same position is a critical error; and
+  after an upstream reconnect the router registers its clients' prompts
+  again.
+
 - **Change: more than one CMC-PSX on the network is a critical error on
   the master router**, like two BACARS. Two CMC-PSX send each other's
   MCP button values (VNAV, LOC) back and forth endlessly: at WorldFlight
