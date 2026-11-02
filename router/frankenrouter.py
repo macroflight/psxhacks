@@ -1497,11 +1497,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         window.append(now)
         return True
 
-    async def handle_new_connection_cb(self, reader, writer):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
+    async def handle_new_connection_cb(self, reader, writer):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals,too-many-return-statements
         """Handle a new client connection."""
         # asyncio will intentionally not propagate exceptions from a
         # callback (see https://bugs.python.org/issue42526), so we
         # need to wrap the entire function in try-except.
+        this_client = None
         try:  # pylint: disable=too-many-nested-blocks
 
             # Check blocklist first
@@ -1594,6 +1595,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 })
         # Standard Task cleanup
         except asyncio.exceptions.CancelledError:
+            if this_client is None:     # before the connection was set up
+                writer.close()
+                raise
             self.logger.info(
                 "Client %s handler was cancelled, cleanup and exit",
                 this_client.peername)
@@ -1601,6 +1605,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.logger.info("Client %s connection closed", this_client.peername)
             raise
         except Exception as exc:  # pylint: disable=broad-exception-caught
+            if this_client is None:
+                # Failed while setting it up (e.g. a connection arriving as
+                # we shut down): nothing of ours to clean up
+                self.logger.warning("New client connection failed during setup: %s", exc)
+                writer.close()
+                return
             self.logger.critical("Unhandled exception %s in %s handler, shutting down",
                                  exc, this_client.peername)
             self.logger.critical(traceback.format_exc())

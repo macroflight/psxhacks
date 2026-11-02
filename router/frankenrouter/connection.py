@@ -52,7 +52,10 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         # almost always.
         sock = writer.transport.get_extra_info('socket')
         if sock is not None:
-            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            try:
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            except OSError:
+                pass    # already closed (e.g. connected as we shut down): reads will fail
 
         self.last_line_type = None
 
