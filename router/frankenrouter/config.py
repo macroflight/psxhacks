@@ -331,6 +331,60 @@ class _RouterConfigFiltering:  # pylint: disable=missing-class-docstring,too-few
         return any(name.startswith(entry.casefold()) for entry in self.client_reset_whitelist)
 
 
+def _crew_alertness_minutes(data, key, default):
+    """Return [advisory, caution, warning] minutes from [crew_alertness] key, validated."""
+    value = data.get(key, default)
+    if (not isinstance(value, list) or len(value) != 3 or
+            any(isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0
+                for v in value) or
+            not value[0] <= value[1] <= value[2]):
+        raise RouterConfigError(
+            f"crew_alertness {key} must be three increasing numbers of minutes "
+            "(advisory, caution, warning)")
+    return value
+
+
+class _RouterConfigCrewAlertness:  # pylint: disable=missing-class-docstring,too-few-public-methods,too-many-instance-attributes
+    def __init__(self, data):
+        # The master router's crew alertness monitor (crewalertness.py), like
+        # CMC-PSX 1.13's: "off", "on" or "debug" (on, and every Qh input
+        # that resets the timer logged at INFO). This is the state at
+        # startup; the web UI can turn it on and off.
+        self.mode = data.get('mode', 'off')
+        if self.mode not in ('off', 'on', 'debug'):
+            raise RouterConfigError('crew_alertness mode must be "off", "on" or "debug"')
+        # Minutes without crew input before the advisory, caution and
+        # warning, in cruise and in a descent (CMC-PSX's defaults)
+        self.cruise_minutes = _crew_alertness_minutes(data, 'cruise_minutes', [15, 20, 25])
+        self.descent_minutes = _crew_alertness_minutes(data, 'descent_minutes', [5, 6, 7])
+        # 16 characters at most (FreeMsgA/C/W)
+        self.message = data.get('message', 'PILOT RESPONSE')
+        if not isinstance(self.message, str) or not 0 < len(self.message) <= 16:
+            raise RouterConfigError("crew_alertness message must be 1-16 characters")
+        # No alerts below this altitude (ft)
+        self.min_altitude = data.get('min_altitude', 20000)
+        if isinstance(self.min_altitude, bool) or not isinstance(self.min_altitude, (int, float)):
+            raise RouterConfigError("crew_alertness min_altitude must be a number of feet")
+        # More variables (names or Q-codes) that don't count as crew input
+        self.ignore = data.get('ignore', [])
+        if not isinstance(self.ignore, list) or not all(isinstance(v, str) for v in self.ignore):
+            raise RouterConfigError("crew_alertness ignore must be a list of variable names")
+        # Paused or motion freeze counts as on the ground: the timer stops
+        self.stop_when_paused = data.get('stop_when_paused', True)
+        if not isinstance(self.stop_when_paused, bool):
+            raise RouterConfigError("crew_alertness stop_when_paused must be true or false")
+        # A message broadcast to all sims when the alert goes up or steps up,
+        # e.g. a PSX Sounds addon message; repeated every sound_repeat
+        # seconds while it's up (0 = once). Empty = none.
+        self.sound = data.get('sound', '')
+        if not isinstance(self.sound, str) or '\n' in self.sound:
+            raise RouterConfigError("crew_alertness sound must be a single line")
+        self.sound_repeat = data.get('sound_repeat', 0)
+        if (isinstance(self.sound_repeat, bool) or
+                not isinstance(self.sound_repeat, (int, float)) or self.sound_repeat < 0):
+            raise RouterConfigError("crew_alertness sound_repeat must be 0 or more seconds")
+
+
 class _RouterConfigPerformance:  # pylint: disable=missing-class-docstring,too-few-public-methods,too-many-instance-attributes
     def __init__(self, data):  # pylint: disable=too-many-branches
         self.write_buffer_critical_limit = data.get('write_buffer_critical_limit', 100000)
@@ -623,6 +677,7 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
                 "in [identity] instead")
             self.identity.type = 'master'
         self.filtering = _RouterConfigFiltering(config.get('filtering', {}))
+        self.crew_alertness = _RouterConfigCrewAlertness(config.get('crew_alertness', {}))
         if self.filtering.client_reset_blacklist_present:
             self.logger.warning(
                 "Config: [filtering] client_reset_blacklist is no longer used; list "
@@ -980,6 +1035,27 @@ keywords = ["Qs123"]
         for bad in ("-1", "'15'", "true"):
             with self.assertRaises(RouterConfigError):
                 RouterConfig(config_data=f"[filtering]\ncdu_menu_stale_timeout = {bad}\n")
+
+    def test_crew_alertness(self):
+        """crew_alertness defaults to off with CMC-PSX's times, and validates its options."""
+        conf = RouterConfig(config_data="")
+        cam = conf.crew_alertness
+        self.assertEqual((cam.mode, cam.message, cam.min_altitude),
+                         ('off', 'PILOT RESPONSE', 20000))
+        self.assertEqual((cam.cruise_minutes, cam.descent_minutes), ([15, 20, 25], [5, 6, 7]))
+        self.assertTrue(cam.stop_when_paused)
+        conf = RouterConfig(config_data=(
+            '[crew_alertness]\nmode = "debug"\ncruise_minutes = [1, 1.5, 2]\n'
+            'ignore = ["SpdBrkLever"]\nsound = "addon=CABINT;;;;Help.mp3"\nsound_repeat = 30\n'))
+        cam = conf.crew_alertness
+        self.assertEqual((cam.mode, cam.cruise_minutes, cam.ignore),
+                         ('debug', [1, 1.5, 2], ['SpdBrkLever']))
+        self.assertEqual(cam.sound, 'addon=CABINT;;;;Help.mp3')
+        for bad in ('mode = "yes"', 'cruise_minutes = [15, 20]', 'descent_minutes = [7, 6, 5]',
+                    'cruise_minutes = [0, 1, 2]', 'message = "SEVENTEEN CHARS XX"',
+                    'ignore = "Tiller"', 'sound_repeat = -1'):
+            with self.assertRaises(RouterConfigError):
+                RouterConfig(config_data=f"[crew_alertness]\n{bad}\n")
 
     def test_file_input(self):
         """Test reading from one of the example files."""

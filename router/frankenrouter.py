@@ -34,6 +34,7 @@ from frankenrouter import variables
 from frankenrouter import routercache
 from frankenrouter import navdata
 from frankenrouter import cdumenus
+from frankenrouter import crewalertness
 
 from frankenrouter.rules import (
     RulesAction, RulesCode, Rules, START_PRIVATE_WINDOW_S, FLIGHT_CONTROL_INPUT_KEYWORDS)
@@ -388,6 +389,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.upstream_connections = 0
         # Addon CDU menu prompts registered through us ([filtering] cdu_menu_tracking)
         self.cdu_menus = cdumenus.CduMenus()
+        # Crew alertness monitor ([crew_alertness], master only), set up in main()
+        self.crew_alertness = None
+        self._crew_alertness_sound_sent = 0.0
         # Latches True once maybe_sync_clock_from_upstream_skew() has
         # tried (successfully or not) for the current upstream
         # connection; reset in reset_after_upstream_connect().
@@ -3789,6 +3793,103 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 client.peername, AUTH_PENDING_TIMEOUT)
             await self.close_client_connection(client, clean=False)
 
+    async def _crew_alertness_activity(self, sender, line):
+        """Pass a Qh write from a client to the crew alertness monitor."""
+        key = line.split('=', 1)[0]
+        if not self.crew_alertness.activity(key, time.perf_counter()):
+            return
+        if self.config.crew_alertness.mode == 'debug':
+            self.logger.info("Crew alertness: activity %s (%s) from %s",
+                             line, self.variables.get_variable_name(key), sender.display_name)
+        level = self.crew_alertness.cleared_by_activity()
+        if level:
+            await self._crew_alertness_message(
+                level, None, f"crew activity: {line} from {sender.display_name}")
+
+    async def _crew_alertness_message(self, old, new, reason):
+        """Move the crew alertness EICAS message from level old to level new (None = none).
+
+        Levels are 'A', 'C', 'W' (FreeMsgA/C/W). A level's message is only
+        cleared if it still shows our text.
+        """
+        text = self.config.crew_alertness.message
+        names = {'A': 'advisory', 'C': 'caution', 'W': 'warning'}
+        if new:
+            self.logger.info("Crew alertness: %r %s (%s)", text, names[new], reason)
+        else:
+            self.logger.info("Crew alertness: clearing %r %s (%s)", text, names[old], reason)
+        self.record_sim_event('crew_alertness', level=new or 'clear', reason=reason)
+        updates = []
+        if old:
+            key = crewalertness.FREE_MSG_KEYWORDS[old]
+            try:
+                current = self.cache.get_value(key)
+            except routercache.RouterCacheException:
+                current = ""
+            if current == text:
+                updates.append((key, ""))
+        if new:
+            updates.append((crewalertness.FREE_MSG_KEYWORDS[new], text))
+        for key, value in updates:
+            self.cache.update(key, value)
+            await self.send_to_upstream(f"{key}={value}")
+            await self.client_broadcast(f"{key}={value}")
+        if new:
+            await self._crew_alertness_sound()
+
+    async def _crew_alertness_sound(self):
+        """Broadcast the configured alert sound message (e.g. PSX Sounds), if any."""
+        sound = self.config.crew_alertness.sound
+        if sound:
+            self._crew_alertness_sound_sent = time.perf_counter()
+            await self.client_broadcast(sound)
+
+    async def _housekeeping_crew_alertness(self):
+        """Raise, escalate or clear the crew alertness alert (crewalertness.py), master only."""
+        cam = self.crew_alertness
+        if cam is None or self.config.identity.type != 'master':
+            return
+        try:
+            airborne = str(self.cache.get_value("Qi257")) == "0"     # OnGround
+        except routercache.RouterCacheException:
+            airborne = False
+        if airborne and self.config.crew_alertness.stop_when_paused:
+            # Paused or motion freeze (SimPaused 2 or 1): like the ground,
+            # the timer stops (it measures wall clock time, for the people)
+            try:
+                airborne = str(self.cache.get_value("Qi129")) in ("0", "")
+            except routercache.RouterCacheException:
+                pass
+        try:
+            # PiBaHeAlTas: pitch;bank;heading;altitude (1/1000 ft);...
+            altitude = int(str(self.cache.get_value("Qs121")).split(';')[3]) / 1000
+        except (routercache.RouterCacheException, IndexError, ValueError):
+            altitude = None
+        now = time.perf_counter()
+        old = cam.level
+        change = cam.tick(now, airborne, altitude)
+        if change == 'clear':
+            if not cam.enabled:
+                why = "monitor turned off"
+            elif not airborne:
+                why = "on the ground or paused"
+            else:
+                why = f"below {cam.min_altitude} ft"
+            await self._crew_alertness_message(old, None, why)
+        elif change:
+            await self._crew_alertness_message(
+                old, change, f"no crew activity for {cam.idle(now) / 60:.0f} min in {cam.phase}")
+        elif cam.level and self.config.crew_alertness.sound_repeat:
+            if now - self._crew_alertness_sound_sent >= self.config.crew_alertness.sound_repeat:
+                await self._crew_alertness_sound()
+
+    def set_crew_alertness(self, enabled):
+        """Turn the crew alertness monitor on or off (web UI); not saved."""
+        if self.config.identity.type != 'master':
+            return
+        self.crew_alertness.enabled = enabled
+        self.logger.info("Crew alertness monitor turned %s", "on" if enabled else "off")
+
     async def _housekeeping_cdu_menus(self):
         """Clean up CDU menu prompts whose addon disconnected (see cdumenus.py)."""
         timeout = self.config.filtering.cdu_menu_stale_timeout
@@ -3961,6 +4062,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 await self._housekeeping_irs_align_fix()
                 self._housekeeping_mcp_window()
                 await self._housekeeping_cdu_menus()
+                await self._housekeeping_crew_alertness()
                 if time.perf_counter() - last_run > HOUSEKEEPING_INTERVAL:
                     last_run = time.perf_counter()
                     self.logger.debug("Performing housekeeping")
@@ -4127,6 +4229,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     pass
 
         (action, code, message, extra_data) = self.rules.route(line, sender)
+
+        if (line.startswith('Qh') and not sender.upstream and
+                self.crew_alertness is not None and self.crew_alertness.enabled and
+                action not in (RulesAction.DROP, RulesAction.DISCONNECT)):
+            await self._crew_alertness_activity(sender, line)
 
         if (self.config.filtering.cdu_menu_tracking and not sender.upstream and
                 line.startswith(cdumenus.CDU_KEYWORDS) and
@@ -4992,6 +5099,17 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # Get information from Variables.txt
         self.variables = variables.Variables(self.config, vfilepath=self.config.psx.variables)
         self._simevents_keywords = self.variables.keywords_for_simevents()
+
+        cam_conf = self.config.crew_alertness
+        ignore, unknown = crewalertness.resolve_ignore(
+            list(crewalertness.IGNORE_BUILTIN) + cam_conf.ignore,
+            self.variables.get_keyword_for_name)
+        for name in unknown:
+            self.logger.warning("Config: [crew_alertness] ignore: unknown variable %s", name)
+        self.crew_alertness = crewalertness.CrewAlertness(
+            cam_conf.mode != 'off' and self.config.identity.type == 'master',
+            [m * 60 for m in cam_conf.cruise_minutes],
+            [m * 60 for m in cam_conf.descent_minutes], ignore, cam_conf.min_altitude)
 
         # Initialize the router cache
         self.cache = routercache.RouterCache()

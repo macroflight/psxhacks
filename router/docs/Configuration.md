@@ -469,6 +469,60 @@ The `crew`, `airframes`, `portal_account`, `airline_icao` and
 has been removed). Old config files that still set them load fine, but
 the router logs a warning suggesting they be removed.
 
+### `[crew_alertness]`
+
+A crew alertness monitor in the master router, working like CMC-PSX's
+(version 1.13; CMC-PSX alerts on its own sim's network, while this one
+covers the whole shared cockpit). Only used by a router of type
+`master`. Every `Qh` variable a client writes counts as crew input:
+switches, knobs, levers, CDU keys, MCP, EFIS, EICAS panel, audio panel,
+PTT. With no crew input for a while, the router puts `PILOT RESPONSE` on
+the EICAS, first as an advisory, then a caution, then a warning (PSX's
+free messages `FreeMsgA`, `FreeMsgC`, `FreeMsgW`; the caution and
+warning come with PSX's master caution or warning and sound), and, if
+set, broadcasts `sound` to all sims. The next crew input clears it.
+
+It only runs at or above `min_altitude` (FL200), in flight, and (with
+`stop_when_paused`) not while PSX is paused or in motion freeze;
+descending below FL200, landing, pausing, or turning it off clears an
+alert. In a climb no alert is raised (the timer keeps running, so it can
+come at level-off); in a descent the shorter descent times apply. The
+timer measures wall clock time, not PSX's clock, so time acceleration
+doesn't make it come sooner. A message is only cleared if the slot
+still shows our text, so it never removes someone else's message (the
+router's own `(ROUTER)` warning shares the warning slot).
+
+The Utils page shows whether the monitor is on (and turns it on or off
+until the next restart), how long ago the last crew input was, the
+phase and the times that apply, and which alert is up.
+
+```toml
+[crew_alertness]
+mode = "on"
+sound = "addon=CABINT;;;;Help.mp3"
+```
+
+- `mode`: `"off"` (the default), `"on"` or `"debug"`: the state at
+  startup. `"debug"` also logs every crew input that resets the timer at
+  `INFO`; alerts shown and cleared are always logged at `INFO`.
+- `cruise_minutes`: minutes without crew input before the advisory,
+  caution and warning in cruise, default `[15, 20, 25]` (CMC-PSX's).
+- `descent_minutes`: the same in a descent, default `[5, 6, 7]`.
+- `message`: the EICAS text, at most 16 characters, default
+  `"PILOT RESPONSE"` (CMC-PSX's).
+- `min_altitude`: no alerts below this many feet, default `20000`.
+- `ignore`: more variables that don't count as crew input, by name
+  (`"SpdBrkLever"`) or Q-code (`"Qh388"`). `Tiller` and `ParkBrkLev` are
+  always ignored: hardware sends them all the time without anyone
+  touching anything.
+- `stop_when_paused`: defaults to `true`: while PSX is paused or in
+  motion freeze it counts as on the ground.
+- `sound`: a whole message the router broadcasts to all sims when an
+  alert goes up or steps up, e.g. PSX Sounds' `addon=CABINT;;;;Help.mp3`.
+  Empty (the default) sends nothing.
+- `sound_repeat`: send `sound` again every this many seconds while an
+  alert is up; `0` (the default) sends it once per level.
+
 ### `[performance]`
 
 Various limits that control when the router prints warning messages

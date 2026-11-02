@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **New (opt-in): crew alertness monitor in the master router**, working
+  like CMC-PSX's. `[crew_alertness] mode = "on"` (or `"debug"`): with no
+  crew input (any `Qh` variable from a client, except `Tiller` and
+  `ParkBrkLev`) at or above FL200, the router puts `PILOT RESPONSE` on
+  the EICAS as an advisory, then a caution, then a warning (after 15, 20,
+  25 minutes in cruise, 5, 6, 7 in a descent; none in a climb or on the
+  ground or paused), and can broadcast a sound message (e.g. PSX
+  Sounds). The next input clears it. Turn it on and off and see its
+  state on the Utils page.
+
 - **New (opt-in): CDU menu prompt tracking.** With `[filtering]
   cdu_menu_tracking = true` the router keeps track of which client put
   each menu prompt on a CDU (`cduL`/`cduC`/`cduR`). A prompt whose addon

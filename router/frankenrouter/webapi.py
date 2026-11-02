@@ -177,6 +177,7 @@ _UTILS_PAGE = (
     'CPDLC message currently in progress.\')">'
     '<button class="btn btn-gray">HAFAP(CPDLC) reset</button></form>\n'
     '{global_bang_button}'
+    '{crew_alertness_button}'
     '{reset_clients_link}'
     '{load_marker_pause_link}'
     '</body>\n</html>\n'
@@ -2551,9 +2552,37 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     'Load marker pause (experimental)</a>\n'
                     if router.config.identity.type == 'master' else ''
                 )
+                crew_alertness_button = ''
+                if router.config.identity.type == 'master':
+                    cam_on = router.crew_alertness.enabled
+                    crew_alertness_button = (
+                        '<form method="post" action="/api/utils/crew_alertness" '
+                        'style="display:inline">'
+                        f'<input type="hidden" name="enabled" value="{0 if cam_on else 1}">'
+                        f'<button class="btn {"btn-green" if cam_on else "btn-gray"}">'
+                        f'Crew alertness monitor: {"ON" if cam_on else "OFF"}</button></form>\n')
+                    cam = router.crew_alertness
+                    idle = cam.idle(time.perf_counter())
+                    names = {'A': 'advisory', 'C': 'caution', 'W': 'warning'}
+                    if cam.level:
+                        crew_alertness_button += (
+                            f'<b>{html.escape(router.config.crew_alertness.message)} '
+                            f'{names[cam.level].upper()}</b> (no crew input for '
+                            f'{idle / 60:.0f} min)\n')
+                    elif cam_on and idle is not None:
+                        times = '/'.join(f'{t / 60:g}' for t in cam.times.get(cam.phase, ()))
+                        after = f', advisory/caution/warning after {times} min' if times else ''
+                        crew_alertness_button += (
+                            f'(last crew input {idle / 60:.0f} min ago; '
+                            f'{cam.phase or "starting"}{after})\n')
+                    elif cam_on:
+                        crew_alertness_button += (
+                            '(inactive: on the ground, paused or below '
+                            f'{router.crew_alertness.min_altitude} ft)\n')
                 return web.Response(
                     text=_UTILS_PAGE.format(
                         rest_api_color_scheme=cs,
+                        crew_alertness_button=crew_alertness_button,
                         sims_link=sims_link,
                         reset_clients_link=reset_clients_link,
                         global_bang_button=global_bang_button,
@@ -2677,6 +2706,15 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                         result_section=_WINDIMPORT_SENT_SECTION,
                     ),
                     content_type='text/html')
+
+            @routes.post('/api/utils/crew_alertness')
+            async def handle_crew_alertness_post(request):
+                # Master router only (the monitor isn't used anywhere else);
+                # runtime only, the config's mode is the state at startup
+                if router.config.identity.type == 'master':
+                    post = await request.post()
+                    router.set_crew_alertness(post.get('enabled') == '1')
+                raise web.HTTPFound('/utils')
 
             @routes.post('/api/utils/printer/reset')
             async def handle_printer_reset(_):
