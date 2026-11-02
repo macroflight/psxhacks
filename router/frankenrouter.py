@@ -118,6 +118,8 @@ FRDP_SHAREDINFO_INTERVAL = 10.0
 # How long the crew alertness monitor's test (PILOT RESPONSE warning and
 # sound) stays up, unless crew input clears it first
 CREW_ALERTNESS_TEST_S = 30.0
+# A slave router shows (ROUTER) in its sim after this long without its master
+NO_UPSTREAM_WARNING_S = 10.0
 
 # Keep 300 seconds of RTT data for the statistics in the status display
 FRDP_KEEP_RTT_SAMPLES = 300
@@ -397,6 +399,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # Crew alertness monitor ([crew_alertness], master only), set up in main()
         self.crew_alertness = None
         self._crew_alertness_sound_sent = 0.0
+        # Slave router without its master: since when (monotonic), and
+        # whether we've put up the (ROUTER) warning in our sim
+        self._upstream_lost_at = None
+        self._no_upstream_warning_shown = False
         # The Test button (web UI, FRDP): PILOT RESPONSE as a warning, with
         # the sound, until crew input or CREW_ALERTNESS_TEST_S: 'pending',
         # then the time it ends
@@ -3924,6 +3930,34 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             if self.crew_alertness.level is None:
                 await self._crew_alertness_message('W', None, "test over")
 
+    async def _housekeeping_no_upstream_warning(self):
+        """On a slave router, put up (ROUTER) in our own sim while we have no master.
+
+        Without the master connection the sim gets no data (it seems frozen),
+        and the master's own (ROUTER) warning can't reach it. After
+        NO_UPSTREAM_WARNING_S without upstream we show the warning
+        (FreeMsgW, Qs418) to our own clients; crews know to look at the
+        router console then. When we're connected again the master's welcome
+        sends its own Qs418, which replaces ours.
+        """
+        if self.config.identity.type != 'slave':
+            return
+        if self.is_upstream_connected():
+            self._upstream_lost_at = None
+            self._no_upstream_warning_shown = False
+            return
+        now = time.perf_counter()
+        if self._upstream_lost_at is None:
+            self._upstream_lost_at = now
+        if self._no_upstream_warning_shown or now - self._upstream_lost_at < NO_UPSTREAM_WARNING_S:
+            return
+        self._no_upstream_warning_shown = True
+        self.logger.warning(
+            "No connection to the master sim for %.0f s: showing (ROUTER) in this sim",
+            now - self._upstream_lost_at)
+        self.cache.update("Qs418", "(ROUTER)")
+        await self.client_broadcast("Qs418=(ROUTER)")
+
     def set_crew_alertness(self, enabled, source):
         """Turn the crew alertness monitor on or off (master only); not saved."""
         if self.config.identity.type != 'master':
@@ -4126,6 +4160,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self._housekeeping_mcp_window()
                 await self._housekeeping_cdu_menus()
                 await self._housekeeping_crew_alertness()
+                await self._housekeeping_no_upstream_warning()
                 if time.perf_counter() - last_run > HOUSEKEEPING_INTERVAL:
                     last_run = time.perf_counter()
                     self.logger.debug("Performing housekeeping")

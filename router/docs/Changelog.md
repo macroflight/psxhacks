@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **New: a slave router shows `(ROUTER)` in its own sim when it loses the
+  master.** After 10 seconds without the master connection (the sim then
+  gets no data and seems frozen), the slave router puts the `(ROUTER)`
+  warning on its own sim's EICAS, so the crew looks at the router console.
+  Reconnecting clears it (the master's state replaces it).
+
 - **New: Download logs and Report a problem pages** (start page, every
   router type). *Download logs* (`/logs`) lists the router's log files with
   the time each covers (UTC); download one file, a ZIP of the files you
