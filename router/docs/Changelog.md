@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **New: MSROUTER's "CHECK SWITCHES" stays in its own sim.** A master
+  router now drops `Qs419=CHECK SWITCHES` (PSX's free caution message)
+  from its clients and logs it at `INFO`, so a slave sim's MCP mismatch
+  caution doesn't reach PSX or the other sims. The clear and other
+  `Qs419` text pass as before. Opt out with `[filtering]
+  master_drop_check_switches = false`.
+
 - **Change: the turbulence Reason and Trend on the `/efb` page are no
   longer cut short.** Reason now has room for three lines and Trend for
   two. The rows keep a fixed height, so the page still doesn't jump when

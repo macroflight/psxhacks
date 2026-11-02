@@ -50,6 +50,15 @@ TRAFFIC_KEYWORDS = frozenset({'Qs450', 'Qs451'})
 # Qh411="SwitchesAudioC"; Qh412="SwitchesAudioR"
 PTT_KEYWORDS = frozenset({'Qh82', 'Qh93', 'Qh410', 'Qh411', 'Qh412'})
 
+# MSROUTER, an MCP bridge in slave sims, shows "CHECK SWITCHES" in the free
+# caution message (Qs419, FreeMsgC) when its physical MCP switches don't match
+# PSX's, and clears it once they do. The slave router delivers it to its own
+# sim; the master router drops it, so it doesn't reach PSX or the other sims
+# (each of which may have an identical MCP). The clear (Qs419=) is not filtered.
+# See [filtering] master_drop_check_switches in the config.
+CHECK_SWITCHES_KEYWORD = 'Qs419'
+CHECK_SWITCHES_TEXT = 'CHECK SWITCHES'
+
 # PSX.NET.Orchestration relies on native PTT presses to detect a "doors to
 # manual" PA announcement, but a PTT press from another sim never reaches it
 # there since it's dropped by the PTT_KEYWORDS filter above (by design, to
@@ -265,6 +274,7 @@ class RulesCode(enum.Enum):
     CDUPROXY = enum.auto()
     KEYVALUE_FILTERED_INGRESS_SIM_LOCAL = enum.auto()
     KEYVALUE_FILTERED_EGRESS_SIM_LOCAL = enum.auto()
+    CHECK_SWITCHES_DROPPED = enum.auto()
     KEYVALUE_FILTERED_INGRESS = enum.auto()
     KEYVALUE_FILTERED_INGRESS_SILENT = enum.auto()
     KEYVALUE_FILTER_EGRESS = enum.auto()
@@ -1406,6 +1416,17 @@ class Rules():  # pylint: disable=too-many-public-methods
                 "Dropping %s from other-sim frankenrouter %s", key, self.sender.simulator_name)
             return self.myreturn(RulesAction.DROP, RulesCode.KEYVALUE_FILTERED_INGRESS_SIM_LOCAL)
 
+        if (
+                key == CHECK_SWITCHES_KEYWORD and
+                value.strip().upper() == CHECK_SWITCHES_TEXT and
+                not self.sender.upstream and
+                self.router.config.identity.type == 'master' and
+                self.router.config.filtering.master_drop_check_switches
+        ):
+            self.logger.info("Dropping %s=%s from %s (sim-local MCP caution)",
+                             key, value, self.sender.display_name)
+            return self.myreturn(RulesAction.DROP, RulesCode.CHECK_SWITCHES_DROPPED)
+
         if key in self.router.config.psx.filter_to_other_sim:
             return self.myreturn(
                 RulesAction.FILTER,
@@ -1814,6 +1835,7 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             self.ground_handling_forward_names = [
                 'PSX.NET EFB For Windows', 'PSX.NET.Orchestration', 'BA ACARS Simulation']
             self.ptt_ground_handling_translation = True
+            self.master_drop_check_switches = True
 
     class DummyConfig():  # pylint: disable=too-few-public-methods
         """Implement small parts of the router for unit testing."""
@@ -2967,6 +2989,36 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         # We are pilot flying ourselves: no filtering applies at all.
         router.sharedinfo["pilot_flying_simulator"] = router.config.identity.simulator
         (action, code, *_) = rules.route("Qh388=500", testpeer)
+        self.assertEqual(action, RulesAction.NORMAL)
+
+    def test_check_switches_dropped_on_master(self):
+        """A master router drops Qs419=CHECK SWITCHES from clients, but not the clear."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+        router.upstream = self.DummyUpstreamConnection()
+        router.clients = {
+            ('127.0.0.1', 12345): self.DummyClientConnection(('127.0.0.1', 12345)),
+        }
+        testpeer = router.clients[('127.0.0.1', 12345)]
+        testpeer.is_frankenrouter = True
+        testpeer.simulator_name = 'OtherSim'
+        router.config.identity.type = 'master'
+        (action, code, *_) = rules.route("Qs419=CHECK SWITCHES", testpeer)
+        self.assertEqual(action, RulesAction.DROP)
+        self.assertEqual(code, RulesCode.CHECK_SWITCHES_DROPPED)
+        # The clear and other cautions pass
+        for line in ("Qs419=", "Qs419=OTHER CAUTION"):
+            (action, code, *_) = rules.route(line, testpeer)
+            self.assertEqual(action, RulesAction.NORMAL, msg=line)
+        # Not on slave or standalone routers
+        for router_type in ('slave', 'standalone'):
+            router.config.identity.type = router_type
+            (action, code, *_) = rules.route("Qs419=CHECK SWITCHES", testpeer)
+            self.assertEqual(action, RulesAction.NORMAL, msg=router_type)
+        # Opted out
+        router.config.identity.type = 'master'
+        router.config.filtering.master_drop_check_switches = False
+        (action, code, *_) = rules.route("Qs419=CHECK SWITCHES", testpeer)
         self.assertEqual(action, RulesAction.NORMAL)
 
     def test_ptt_ground_handling_translation(self):

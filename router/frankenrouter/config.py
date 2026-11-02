@@ -270,6 +270,12 @@ class _RouterConfigFiltering:  # pylint: disable=missing-class-docstring,too-few
         # files load), but ignored with a warning.
         self.client_reset_blacklist_present = 'client_reset_blacklist' in data
 
+        # Master router: drop Qs419=CHECK SWITCHES from clients (rules.py's
+        # CHECK_SWITCHES_TEXT). On by default.
+        self.master_drop_check_switches = data.get('master_drop_check_switches', True)
+        if not isinstance(self.master_drop_check_switches, bool):
+            raise RouterConfigError("filtering master_drop_check_switches must be true or false")
+
         # When a PTT/audio-panel variable (see rules.py's PTT_KEYWORDS) is
         # dropped because it crossed a sim boundary, also synthesize an
         # addon=GROUND.HANDLING PTT event so PSX.NET.Orchestration still
@@ -939,6 +945,12 @@ keywords = ["Qs123"]
         conf = RouterConfig(config_data="[filtering]\nclient_reset_blacklist = ['PSX Sound']\n")
         self.assertTrue(conf.filtering.client_reset_blacklist_present)
         self.assertFalse(conf.filtering.client_reset_whitelisted('PSX Sound'))
+
+    def test_master_drop_check_switches(self):
+        """master_drop_check_switches defaults to true and can be turned off."""
+        self.assertTrue(RouterConfig(config_data="").filtering.master_drop_check_switches)
+        conf = RouterConfig(config_data="[filtering]\nmaster_drop_check_switches = false\n")
+        self.assertFalse(conf.filtering.master_drop_check_switches)
 
     def test_file_input(self):
         """Test reading from one of the example files."""

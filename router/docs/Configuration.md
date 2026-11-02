@@ -594,6 +594,16 @@ frdp_rtt_warning = 0.5
   you can always tick clients by hand on the page. Replaces
   `client_reset_blacklist`, which is now ignored with a warning.
 
+- `master_drop_check_switches`: defaults to `true`. Only applies to a
+  router of type `master`. MSROUTER, an MCP bridge in a slave sim, shows
+  "CHECK SWITCHES" in PSX's free caution message (`Qs419`) when the
+  physical MCP switches don't match PSX's, and clears it once they do.
+  The slave sim's own router delivers the message to that sim; the master
+  router drops `Qs419=CHECK SWITCHES` from its clients, so it doesn't
+  reach PSX or the other sims, which may have identical MCPs. Each drop
+  is logged at `INFO`. The clear (`Qs419=`) and any other `Qs419` text are
+  forwarded as usual. Set to `false` to forward CHECK SWITCHES too.
+
 - `notify_filtered_non_q_keywords`: non-Q-code keywords (exact match,
   case-sensitive, e.g. `"addon"` not `"Addon"`) withheld from any client
   that has sent `notify=` (the Simstack-Switch-style "only send me these
