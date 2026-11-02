@@ -1399,24 +1399,34 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
     async def close_upstream_connection(self):
         """Close an upstream connection."""
-        if self.upstream is None:
+        # Work on this connection object throughout: self.upstream can
+        # change while we await (another task closing it too, e.g. an
+        # upstream change from the web API racing the forwarding task's own
+        # close -- that used to crash on self.upstream being None, or a new
+        # connection already being made)
+        upstream = self.upstream
+        if upstream is None:
             self.logger.warning("Tried to close non-existant upstream connection")
             return
-        peername = self.upstream.peername
+        if upstream.is_closing:
+            self.logger.debug("Upstream connection already closing: %s", upstream.peername)
+            return
+        peername = upstream.peername
         # Lets upstream_connector_task() tell our own close (disconnect,
         # reconnect elsewhere) from the upstream dropping the connection
-        self.upstream.is_closing = True
+        upstream.is_closing = True
         # Send "exit" and close connection
-        await self.upstream.close()
+        await upstream.close()
         self.record_sim_event(
             'upstream_disconnected',
             upstream_host=self.config.upstream.host,
             upstream_port=self.config.upstream.port,
-            duration_s=int(time.perf_counter() - self.upstream.connected_at),
+            duration_s=int(time.perf_counter() - upstream.connected_at),
         )
         # Destroy upstream connection object
         await self.log_connect_evt(peername, disconnect=True)
-        self.upstream = None
+        if self.upstream is upstream:
+            self.upstream = None
         # Re-arm the known-good-situ load for the next connection attempt
         # (see upstream_connector_task()) -- this disconnected period
         # hasn't had its own chance at it yet.
