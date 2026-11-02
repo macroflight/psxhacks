@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Fix: MSFS cloud sync no longer puts a cloud layer under the weather's
+  own low layer.** In MSFS fog or low cloud below the zone's low layer
+  (e.g. fog on the ground at Pyongyang with an overcast layer at
+  2000-3500 ft), the sync made a high layer of 100-1077 ft underneath it.
+  PSX keeps the low layer below the high one, so it squashed the low
+  layer to 50/50 ft, and corrected it again after every zone update.
+  Now the sync stretches the low layer down to the aircraft instead, a
+  new high layer always starts above the low layer, and a zone is never
+  sent with the low layer above the high one.
+
 - **Change: the turbulence Reason and Trend on the `/efb` page are no
   longer cut short.** Reason now has room for three lines and Trend for
   two. The rows keep a fixed height, so the page still doesn't jump when

@@ -32,11 +32,15 @@ CBs.
 *Confirmed (2026-10-19, 2026-10-23).* PSX accepts some Wx values and
 rewrites them within about 20-40 ms: cloud top/base 45000/45000 sentinels
 (hi equal to lo makes PSX resend the previous Wx), CB tops above 45,000 ft
-(corrected to 45000). The correction appears to make the pending smooth
+(corrected to 45000), and a lo cloud layer reaching above the hi layer's
+base (2026-11-02: the lo top is cut to hi base - 50 ft and the lo base to
+no more than that, whatever the coverages: hi 1077/100 made a lo
+3500/2000 into 50/50). The correction appears to make the pending smooth
 transit snap, which jumps the PFD altitude.
 
-- **Workaround:** sentinels 44950/44900 and a CB top cap of 44,999 ft
-  (`fw_cb.py`, `CB_TOP_MAX_FT`).
+- **Workaround:** sentinels 44950/44900, a CB top cap of 44,999 ft
+  (`fw_cb.py`, `CB_TOP_MAX_FT`), and the MSFS cloud sync keeping the lo
+  layer below the hi layer (`frankenweather.py`, `_psx_layer_order()`).
 - **Request:** document the valid ranges, or reject invalid values
   instead of correcting them.
 

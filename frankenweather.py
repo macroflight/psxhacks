@@ -513,6 +513,12 @@ _MSFS_CLOUD_ALT_BAND_FT = 1500.0
 # ceiling cases in fw_cb.py's CB_TOP_MAX_FT comment. Clamping to PSX's own
 # observed floor here avoids ever sending it a value it has to correct.
 _MSFS_CLOUD_BASE_FLOOR_FT = 100.0
+# PSX keeps the lo cloud layer below the hi layer: it corrects any loCloudTop
+# above hiCloudBase - 50 ft down to exactly that, and loCloudBase down to the
+# new top, whatever the coverages (test sim, 2026-11-02: hi 1077/100 turned a
+# lo 3500/2000 into 50/50; hi 5000/3000 turned it into 2950/2000). See
+# _psx_layer_order().
+_PSX_LO_BELOW_HI_FT = 50
 # WxBasic (planet weather) is only written while on the ground (below this
 # TAS) or while the aircraft is actually in it (FocussedWxZone 0) -- see
 # _write_wxbasic(). Live traffic analysis (2026-10-20, CYVR-DNMM): every
@@ -1026,6 +1032,23 @@ def _without_cb(wx_str: str) -> str:
     if len(fields) > 9 and fields[9] not in ("0", ""):
         fields[9] = "0"
     return ";".join(fields)
+
+
+def _psx_layer_order(fields: list) -> bool:
+    """Put the lo cloud layer of Wx fields below the hi layer, as PSX would.
+
+    PSX corrects a lo layer reaching above hiCloudBase - 50 ft itself, a
+    moment after accepting the write (_PSX_LO_BELOW_HI_FT); doing it here
+    means it never has to. Changes fields in place; returns True if it did.
+    """
+    hi_base = int(fields[2])
+    lo_top, lo_base = int(fields[4]), int(fields[5])
+    top = min(lo_top, hi_base - _PSX_LO_BELOW_HI_FT)
+    base = min(lo_base, top)
+    if (top, base) == (lo_top, lo_base):
+        return False
+    fields[4], fields[5] = str(top), str(base)
+    return True
 
 
 def _metar_age_text(age_h: Optional[float]) -> str:
@@ -6016,14 +6039,31 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             in_hi = hi_cov > 0 and hi_base + margin <= alt <= hi_top - margin
             in_lo = lo_cov > 0 and lo_base + margin <= alt <= lo_top - margin
             in_cb = cb_cov > 0 and cb_base + margin <= alt <= cb_top - margin
+            # A new hi layer base never goes below the lo layer (PSX would push
+            # the lo layer down under it, see _psx_layer_order())
+            hi_floor = max(_MSFS_CLOUD_BASE_FLOOR_FT,
+                           lo_top + _PSX_LO_BELOW_HI_FT if lo_cov > 0 else 0)
             if self.msfs_in_cloud:
                 if in_hi or in_lo or in_cb:
                     self.logger.debug("Cloud sync [%s]: already in cloud", zone_key)
+                elif lo_cov > 0 and alt < lo_top + margin:
+                    # Below the lo layer, or at its top: stretch the lo layer to
+                    # the aircraft (e.g. fog on the ground under a layer at
+                    # 2000 ft) rather than put a hi layer underneath it
+                    oktas = max(lo_cov, self._msfs_cloud_oktas())
+                    top = int(min(max(lo_top, alt + margin), hi_base - _PSX_LO_BELOW_HI_FT))
+                    base = int(min(lo_base, max(_MSFS_CLOUD_BASE_FLOOR_FT, alt - margin), top))
+                    if (oktas, top, base) != (lo_cov, lo_top, lo_base):
+                        data[3], data[4], data[5] = str(oktas), str(top), str(base)
+                        self.logger.info(
+                            "Cloud sync [%s]: stretched lo layer to %d-%dft (%d oktas)",
+                            zone_key, base, top, oktas)
+                        changed = True
                 elif hi_cov == 0:
                     oktas = self._msfs_cloud_oktas()
                     data[0] = str(oktas)
-                    data[1] = str(int(alt + margin))
-                    data[2] = str(int(max(_MSFS_CLOUD_BASE_FLOOR_FT, alt - margin)))
+                    data[1] = str(int(max(alt + margin, hi_floor)))
+                    data[2] = str(int(max(hi_floor, alt - margin)))
                     self.logger.info("Cloud sync [%s]: created hi layer at %dft (%d oktas)",
                                      zone_key, int(alt), oktas)
                     changed = True
@@ -6037,7 +6077,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 else:
                     oktas = self._msfs_cloud_oktas()
                     data[0] = str(oktas)
-                    new_base = max(_MSFS_CLOUD_BASE_FLOOR_FT, alt - margin)
+                    new_base = max(hi_floor, alt - margin)
                     data[2] = str(int(new_base))
                     self.logger.info("Cloud sync [%s]: lowered hi layer base to %dft (%d oktas)",
                                      zone_key, int(new_base), oktas)
@@ -6054,6 +6094,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 else:
                     self.logger.debug("Cloud sync [%s]: MSFS clear, PSX not in cloud", zone_key)
 
+        if changed and _psx_layer_order(data):
+            self.logger.debug("Cloud sync [%s]: lo layer moved below the hi layer", zone_key)
         if changed:
             self._inject_wx_slow_transit()
             self.cloud_sync_last_alt_ft = self.ac_alt_ft
