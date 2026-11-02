@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Fix: no traceback when closing a connection that timed out on
+  Windows.** The timeout (`WinError 121`) is a plain `OSError` there; it's
+  now logged as a one-line warning, like other connection errors, rather
+  than as an unhandled exception.
+
 ## 2026-11-02: version 1.34.0
 
 - **Change: the crew alertness monitor on every slave router's Utils

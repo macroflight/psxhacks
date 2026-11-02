@@ -337,7 +337,9 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
                 await asyncio.sleep(0.5)
             self.writer.close()
             await self.writer.wait_closed()
-        except ConnectionError as exc:
+        except OSError as exc:
+            # ConnectionError and the like; on Windows a connection that
+            # timed out is a plain OSError (WinError 121) here
             self.logger.warning("Exception when closing: %s", exc)
         except Exception:  # pylint: disable=broad-exception-caught
             msg = f"Unhandled exception: {traceback.format_exc()}"
