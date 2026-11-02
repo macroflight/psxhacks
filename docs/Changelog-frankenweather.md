@@ -1,6 +1,6 @@
 # frankenweather changelog
 
-## Unreleased
+## 2.2.1 (2026-11-02)
 
 - **Fix: MSFS cloud sync no longer puts a cloud layer under the weather's
   own low layer.** In MSFS fog or low cloud below the zone's low layer
