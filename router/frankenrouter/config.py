@@ -105,7 +105,7 @@ class _RouterConfigUpstream:  # pylint: disable=missing-class-docstring,too-few-
                 "on_forced_disconnect must be one of 'disconnect', 'switch', 'ignore'")
 
 
-class _RouterConfigLog:  # pylint: disable=missing-class-docstring,too-few-public-methods
+class _RouterConfigLog:  # pylint: disable=missing-class-docstring,too-few-public-methods,too-many-instance-attributes
     def __init__(self, data):
         self.traffic = data.get('traffic', False)
         self.traffic_max_size = data.get('traffic_max_size', 0)
@@ -122,6 +122,12 @@ class _RouterConfigLog:  # pylint: disable=missing-class-docstring,too-few-publi
         self.unknown_addons = data.get('unknown_addons', False)
         if not isinstance(self.unknown_addons, bool):
             raise RouterConfigError("The unknown_addons setting must be true or false")
+
+        # gzip old logs (logcompress.py): earlier runs' traffic logs at
+        # startup, and rotated backups as they're rotated out
+        self.compress_old = data.get('compress_old', False)
+        if not isinstance(self.compress_old, bool):
+            raise RouterConfigError("The compress_old setting must be true or false")
 
         self.directory = data.get('directory', os.getcwd())
         if not os.path.exists(self.directory):

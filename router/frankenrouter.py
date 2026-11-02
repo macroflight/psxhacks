@@ -21,6 +21,7 @@ import secrets
 import signal
 import statistics
 import subprocess
+import threading
 import string
 import sys
 import time
@@ -35,6 +36,7 @@ from frankenrouter import routercache
 from frankenrouter import navdata
 from frankenrouter import cdumenus
 from frankenrouter import crewalertness
+from frankenrouter import logcompress
 
 from frankenrouter.rules import (
     RulesAction, RulesCode, Rules, START_PRIVATE_WINDOW_S, FLIGHT_CONTROL_INPUT_KEYWORDS)
@@ -2524,6 +2526,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 maxBytes=self.config.log.output_max_size,
                 backupCount=self.config.log.output_keep_versions
             )
+            if self.config.log.compress_old:
+                logcompress.use_compression(file_handler)
             file_handler.setFormatter(file_formatter)
 
             self.logger.setLevel(logging.INFO)
@@ -2619,6 +2623,16 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 maxBytes=self.config.log.traffic_max_size,
                 backupCount=self.config.log.traffic_keep_versions,
             )
+            if self.config.log.compress_old:
+                logcompress.use_compression(file_handler)
+                if self.config.log.traffic_max_size <= 0:
+                    # Earlier runs' traffic logs, in the background (a big
+                    # one takes a minute)
+                    threading.Thread(
+                        target=logcompress.compress_old_traffic_logs,
+                        args=(self.config.log.directory, self.config.identity.router,
+                              self.log_traffic_filename, self.logger),
+                        name="compress old traffic logs", daemon=True).start()
             file_handler.setFormatter(file_formatter)
 
             self.traffic_logger.setLevel(logging.DEBUG)
@@ -2768,6 +2782,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 maxBytes=self.config.log.output_max_size,
                 backupCount=self.config.log.output_keep_versions,
             )
+            if self.config.log.compress_old:
+                logcompress.use_compression(file_handler)
             file_handler.setFormatter(file_formatter)
 
             self.simevents_logger.setLevel(logging.INFO)

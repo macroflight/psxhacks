@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **New (opt-in): compress old logs.** With `[log] compress_old = true`
+  the router gzips earlier runs' traffic logs at startup and rotated log
+  backups as they're rotated out, in background threads. Traffic logs
+  shrink to about 17%: on a WorldFlight master router that's about
+  18 GB less per week.
+
 - **New (opt-in): crew alertness monitor in the master router**, working
   like CMC-PSX's. `[crew_alertness] mode = "on"` (or `"debug"`): with no
   crew input (any `Qh` variable from a client, except `Tiller` and

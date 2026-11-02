@@ -164,6 +164,15 @@ port = 10748
   router doesn't recognise are logged ("Non-frankenrouter addon message
   ... forwarded"). The default is false, which only logs them at debug
   level. They are forwarded either way.
+- `compress_old`: if set to true, old logs are compressed with gzip
+  (`.gz`, which Windows 11 opens in File Explorer; `zcat`/`zgrep` on
+  Linux). At startup the router compresses the traffic logs of earlier
+  runs (`<router>-traffic-<time>.psxnet.log`, all but the current one),
+  and with `traffic_max_size` or `output_max_size` set, each rotated
+  backup is compressed as it's rotated out (`.log.1.gz`). This happens in
+  background threads, so routing isn't held up. Traffic logs shrink to
+  about 17% of their size: a WorldFlight master router writes about
+  3 GB of traffic log a day. The default is false.
 
 Example:
 
