@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026-11-02: version 1.35.0
 
 - **Change: turning on observer mode asks first.** The *Enable
   read-only observer mode* button now explains that observer mode is
