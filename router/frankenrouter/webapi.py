@@ -2575,7 +2575,8 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                         'style="display:inline">'
                         '<input type="hidden" name="command" value="test">'
                         '<button class="btn btn-gray" title="PILOT RESPONSE as a warning, '
-                        'with the sound, until the next crew input (30 s at most)">Test</button>'
+                        'with the sound, until the next crew input (30 s at most)">'
+                        'Test crew alertness alert</button>'
                         '</form>\n')
                     text = html.escape(crewalertness.status_text(cam_status))
                     if cam_status.get('level'):
@@ -2720,6 +2721,9 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     else:
                         command = 'on' if post.get('enabled') == '1' else 'off'
                     await router.request_crew_alertness(command, 'Utils page')
+                    # Show the new state: a slave gets it in the master's
+                    # next SHAREDINFO, sent as soon as it changes
+                    await asyncio.sleep(2)
                 raise web.HTTPFound('/utils')
 
             @routes.post('/api/utils/printer/reset')
