@@ -44,7 +44,7 @@
   `output_max_size`, `output_keep_versions`, `compress_old`) are no
   longer used: they give a warning.
 
-## Unreleased
+## 2026-11-02: version 1.35.1
 
 - **Change: a sim that drops off the network gets its elevation and
   traffic source roles back when it returns.** The master router still
