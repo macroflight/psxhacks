@@ -113,6 +113,16 @@ hr {{ margin: 1em 0; border: none; border-top: 1px solid #2a2f45; }}
 </style>'''
 
 
+# Shown before turning observer mode on: a WorldFlight 2026 crew took
+# "observer" to mean the jump seat and kept flying their own controls, which
+# then only moved their own screens (no apostrophes: it's in a JS string)
+_OBSERVER_MODE_CONFIRM = (
+    "Observer mode is READ-ONLY. Nothing you do in your own sim is sent to the "
+    "shared aircraft. While it is on, do NOT operate your own sim controls (gear, "
+    "flaps, levers, switches, MCP, CDUs...): they would only change your own screens, "
+    "which would then not match the aircraft. Enable observer mode?")
+
+
 _INDEX_PAGE = (
     '<!DOCTYPE html>\n<html>\n<head>\n'
     '<meta name="color-scheme" content="{rest_api_color_scheme}" />\n' +
@@ -1975,7 +1985,8 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                         'Disable observer mode</a>\n'
                         if router.observer_mode else
                         '' if identity_type != 'slave' else
-                        '<a href="/api/observermode/enable" class="btn btn-amber">'
+                        '<a href="/api/observermode/enable" class="btn btn-amber" '
+                        f'onclick="return confirm(\'{_OBSERVER_MODE_CONFIRM}\')">'
                         'Enable read-only observer mode</a>\n'
                     ),
                     'sessionpwd_button': (

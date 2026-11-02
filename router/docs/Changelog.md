@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Change: turning on observer mode asks first.** The *Enable
+  read-only observer mode* button now explains that observer mode is
+  read-only: nothing done in the sim reaches the shared aircraft, so the
+  sim's own controls must not be used while it's on (they'd only change
+  that sim's screens). A WorldFlight 2026 crew took "observer" to mean
+  sitting in the jump seat.
+
 - **New: a slave router shows `(ROUTER)` in its own sim when it loses the
   master.** After 10 seconds without the master connection (the sim then
   gets no data and seems frozen), the slave router puts the `(ROUTER)`
