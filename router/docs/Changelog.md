@@ -44,6 +44,13 @@
   `output_max_size`, `output_keep_versions`, `compress_old`) are no
   longer used: they give a warning.
 
+## Unreleased
+
+- **Fix: a slave router's `(ROUTER)` warning now shows on PSX main
+  clients.** Like PSX's main server, the slave also sends the warning
+  list, the message paging and update signals and both MASTER WARNING
+  lights; a MASTER WARNING push turns the lights off.
+
 ## 2026-11-02: version 1.34.0
 
 - **Change: the crew alertness monitor on every slave router's Utils

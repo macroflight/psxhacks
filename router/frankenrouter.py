@@ -120,6 +120,9 @@ FRDP_SHAREDINFO_INTERVAL = 10.0
 CREW_ALERTNESS_TEST_S = 30.0
 # A slave router shows (ROUTER) in its sim after this long without its master
 NO_UPSTREAM_WARNING_S = 10.0
+# MastWarnCp/MastWarnFo (Qh114/Qh115) bit for the MASTER WARNING light on
+# (PSX sends 128 with a free warning; a push adds 1, and PSX answers 0)
+MASTER_WARNING_LIGHT = 128
 
 # Keep 300 seconds of RTT data for the statistics in the status display
 FRDP_KEEP_RTT_SAMPLES = 300
@@ -3955,8 +3958,53 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.logger.warning(
             "No connection to the master sim for %.0f s: showing (ROUTER) in this sim",
             now - self._upstream_lost_at)
-        self.cache.update("Qs418", "(ROUTER)")
-        await self.client_broadcast("Qs418=(ROUTER)")
+        # What PSX's main server would send for it: the text, the free
+        # warning (id 0) in the EicasW list, and both MASTER WARNING lights
+        # (bit 128); a PSX main client shows only what's in the list
+        eicasw = [i for i in str(self._cached("Qs130")).split(';') if i]
+        if '0' not in eicasw:
+            eicasw.insert(0, '0')
+        await self._send_to_clients("Qs418", "(ROUTER)")
+        for key in ("Qh114", "Qh115"):      # MastWarnCp, MastWarnFo
+            await self._send_to_clients(key, self._cached_int(key) | MASTER_WARNING_LIGHT)
+        await self._send_to_clients("Qs130", ';'.join(eicasw) + ';')
+        # EicasMsgPaging: its 3rd field follows the number of warnings (PSX
+        # sent 0;0;1;0;0 with its own (ROUTER)); then EicasMsgUpd (DELTA),
+        # which PSX sends with every change to the message lists
+        paging = (str(self._cached("Qs135")) or "0;0;0;0;0").split(';')
+        paging += ['0'] * (5 - len(paging))
+        paging[2] = str(len(eicasw))
+        await self._send_to_clients("Qs135", ';'.join(paging))
+        await self.client_broadcast("Qi138=1")
+
+    async def _no_upstream_master_warning_push(self, line):
+        """Without the master, a MASTER WARNING push in our sim turns both lights off."""
+        _, _, value = line.partition("=")
+        try:
+            pushed = int(value) & 1
+        except ValueError:
+            return
+        if not pushed:
+            return
+        for k in ("Qh114", "Qh115"):
+            await self._send_to_clients(k, self._cached_int(k) & ~(MASTER_WARNING_LIGHT | 1))
+
+    def _cached(self, key, default=""):
+        try:
+            return self.cache.get_value(key)
+        except routercache.RouterCacheException:
+            return default
+
+    def _cached_int(self, key):
+        try:
+            return int(self._cached(key, 0))
+        except (TypeError, ValueError):
+            return 0
+
+    async def _send_to_clients(self, key, value):
+        """Set a value in the cache and send it to all our clients (not upstream)."""
+        self.cache.update(key, value)
+        await self.client_broadcast(f"{key}={value}")
 
     def set_crew_alertness(self, enabled, source):
         """Turn the crew alertness monitor on or off (master only); not saved."""
@@ -4327,6 +4375,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     pass
 
         (action, code, message, extra_data) = self.rules.route(line, sender)
+
+        if (self._no_upstream_warning_shown and not sender.upstream and
+                line.startswith(('Qh114=', 'Qh115=')) and not self.is_upstream_connected()):
+            await self._no_upstream_master_warning_push(line)
 
         if (line.startswith('Qh') and not sender.upstream and
                 self.crew_alertness is not None and self.crew_alertness.enabled and
