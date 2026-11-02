@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **New: Download logs and Report a problem pages** (start page, every
+  router type). *Download logs* (`/logs`) lists the router's log files with
+  the time each covers (UTC); download one file, a ZIP of the files you
+  tick, or a ZIP of every log covering a time interval (or the last 1, 3 or
+  24 hours). *Report a problem* (`/report`) takes a description of what
+  happened and when, and gives a ZIP of the description and the logs for
+  that time, to keep and report in the PSCC Discord or the Aerowinx forum.
+
 - **Fix: no traceback when closing a connection that timed out on
   Windows.** The timeout (`WinError 121`) is a plain `OSError` there; it's
   now logged as a one-line warning, like other connection errors, rather

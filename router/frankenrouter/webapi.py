@@ -29,6 +29,7 @@ import fw_webui as _fw_webui  # noqa: E402  pylint: disable=wrong-import-positio
 
 from . import variables as _variables  # noqa: E402  pylint: disable=wrong-import-position
 from . import crewalertness  # noqa: E402  pylint: disable=wrong-import-position
+from . import logpages  # noqa: E402  pylint: disable=wrong-import-position
 
 
 _STATIC_DIR = pathlib.Path(__file__).parent / 'static'
@@ -143,6 +144,8 @@ _INDEX_PAGE = (
     '{change_upstream_button}'
     '<a href="/weather" class="btn btn-gray">Weather</a>\n'
     '<a href="/utils" class="btn btn-gray">Utils</a>\n'
+    '<a href="/logs" class="btn btn-gray">Download logs</a>\n'
+    '<a href="/report" class="btn btn-amber">Report a problem</a>\n'
     '{sessionpwd_button}'
     '</div>\n'
     '<div>\n'
@@ -2952,6 +2955,7 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 return response
 
             app = web.Application(middlewares=[cors_middleware])
+            logpages.add_routes(routes, router, _COMMON_CSS)
             app.add_routes(routes)
             app.router.add_static('/static', _STATIC_DIR)
             runner = web.AppRunner(app)
