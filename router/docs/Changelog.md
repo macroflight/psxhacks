@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026-11-02: version 1.34.0
 
 - **Change: the crew alertness monitor on every slave router's Utils
   page.** Slave routers show the master's monitor state (from SHAREDINFO)
