@@ -46,6 +46,12 @@
 
 ## Unreleased
 
+- **Change: a sim that drops off the network gets its elevation and
+  traffic source roles back when it returns.** The master router still
+  removes them at once (so the missing-source error shows), but now
+  remembers the sim and gives the roles back when it's on the network
+  again, unless another sim has taken them meanwhile.
+
 - **Fix: a slave router's `(ROUTER)` warning now shows on PSX main
   clients.** Like PSX's main server, the slave also sends the warning
   list, the message paging and update signals and both MASTER WARNING

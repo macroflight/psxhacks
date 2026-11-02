@@ -406,6 +406,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # whether we've put up the (ROUTER) warning in our sim
         self._upstream_lost_at = None
         self._no_upstream_warning_shown = False
+        # sharedinfo field -> the elevation/traffic source sim removed when it
+        # left the network, to restore when it's back (_housekeeping_remove_stale_masters)
+        self._previous_sources = {}
         # The Test button (web UI, FRDP): PILOT RESPONSE as a warning, with
         # the sound, until crew input or CREW_ALERTNESS_TEST_S: 'pending',
         # then the time it ends
@@ -3749,44 +3752,38 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     self.connection_state_changed()
 
     def _housekeeping_remove_stale_masters(self):
-        """Remove stale elevation or traffic master.
+        """Remove a stale elevation or traffic master, and give it back if it returns.
 
-        If the elevation or traffic master is no longer connected,
-        remove from sharedinfo.
+        When the elevation or traffic master sim is no longer on the network
+        (no ROUTERINFO from it), remove it from sharedinfo at once (so the
+        missing-source error shows), but remember it: if it comes back while
+        the role is still unassigned, it gets the role back (WorldFlight 2026:
+        a slave's internet dropped twice, and its crew had to claim the roles
+        again each time). Assigning the role to another sim forgets it.
         """
-        elevation_master = self.sharedinfo['elevation_source_simulator']
-        if elevation_master != "NOSIM":
-            elevation_master_seen = False
-            for router in self.routerinfo.values():
-                if router['simulator_name'] == elevation_master:
-                    elevation_master_seen = True
-            if not elevation_master_seen:
-                self.logger.info("Removing stale elevation master %s",
-                                 self.sharedinfo['elevation_source_simulator'])
-                self.sharedinfo['elevation_source_simulator'] = "NOSIM"
-                self.frdp_sharedinfo_requested = True
-                self.record_sim_event(
-                    'sharedinfo_change',
-                    field='elevation_source_simulator',
-                    value="NOSIM", prev=elevation_master,
-                    reason='stale master removed')
+        present = {router['simulator_name'] for router in self.routerinfo.values()}
+        for field, what in (('elevation_source_simulator', 'elevation'),
+                            ('traffic_source_simulator', 'traffic')):
+            source = self.sharedinfo[field]
+            previous = self._previous_sources.get(field)
+            if source == "NOSIM" and previous in present:
+                del self._previous_sources[field]
+                self.logger.info("Restoring %s master %s (back on the network)", what, previous)
+                self._set_source(field, previous, "NOSIM", 'previous master back')
+            elif source != "NOSIM" and source not in present:
+                self._previous_sources[field] = source
+                self.logger.info("Removing stale %s master %s (will be restored if it comes back)",
+                                 what, source)
+                self._set_source(field, "NOSIM", source, 'stale master removed')
+            elif source != "NOSIM" and previous is not None:
+                del self._previous_sources[field]       # someone else has the role now
 
-        traffic_master = self.sharedinfo['traffic_source_simulator']
-        if traffic_master != "NOSIM":
-            traffic_master_seen = False
-            for router in self.routerinfo.values():
-                if router['simulator_name'] == traffic_master:
-                    traffic_master_seen = True
-            if not traffic_master_seen:
-                self.logger.info("Removing stale traffic master %s",
-                                 self.sharedinfo['traffic_source_simulator'])
-                self.sharedinfo['traffic_source_simulator'] = "NOSIM"
-                self.frdp_sharedinfo_requested = True
-                self.record_sim_event(
-                    'sharedinfo_change',
-                    field='traffic_source_simulator',
-                    value="NOSIM", prev=traffic_master,
-                    reason='stale master removed')
+    def _set_source(self, field, value, prev, reason):
+        """Set an elevation/traffic source in sharedinfo, tell the network, record it."""
+        self.sharedinfo[field] = value
+        self.frdp_sharedinfo_requested = True
+        self.record_sim_event('sharedinfo_change', field=field, value=value, prev=prev,
+                              reason=reason)
 
     def _housekeeping_log_unnamed_clients(self):
         """Record client_connected for clients that haven't sent a name within 30 seconds."""
