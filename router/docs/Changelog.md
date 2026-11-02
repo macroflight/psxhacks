@@ -25,7 +25,9 @@
   `cdu_menu_stale_timeout` seconds (default 15), logged at `WARNING`;
   two addons registering the same position is a critical error; and
   after an upstream reconnect the router registers its clients' prompts
-  again.
+  again. Routers report the setting in ROUTERINFO: a slave router that
+  doesn't track CDU menus keeps its sim's prompts when it disconnects,
+  since it wouldn't put them back.
 
 - **Change: more than one CMC-PSX on the network is a critical error on
   the master router**, like two BACARS. Two CMC-PSX send each other's

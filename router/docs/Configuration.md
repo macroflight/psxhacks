@@ -686,7 +686,11 @@ frdp_rtt_warning = 0.5
   away.
 
   A router only knows the prompts registered through it since it
-  started. Turn it on in the master router and in the slave routers.
+  started. Turn it on in the master router and in the slave routers. A
+  router reports the setting in its ROUTERINFO; when a slave router that
+  doesn't track CDU menus disconnects, the router above it leaves that
+  sim's prompts alone (that slave wouldn't register them again when it
+  comes back), and logs that at `INFO`.
 
 - `cdu_menu_stale_timeout`: defaults to `15` (seconds). How long after a
   client disconnected its CDU menu prompts are removed, with

@@ -628,7 +628,17 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         identified itself (e.g. a port scan) logs neither.
         """
         if self.config.filtering.cdu_menu_tracking:
-            self.cdu_menus.owner_gone(client.client_id, time.perf_counter())
+            if client.is_frankenrouter and not self.routerinfo.get(client.uuid, {}).get(
+                    'cdu_menu_tracking'):
+                # It won't put them back when it reconnects: leave them
+                kept = self.cdu_menus.forget_owner(client.client_id)
+                if kept:
+                    self.logger.info(
+                        "Router %s (%s) disconnected; leaving its %d CDU menu prompt(s), "
+                        "since it doesn't track them", client.display_name,
+                        client.simulator_name, kept)
+            else:
+                self.cdu_menus.owner_gone(client.client_id, time.perf_counter())
         if client.client_id not in self._sim_events_clients_recorded:
             return
         self._sim_events_clients_recorded.discard(client.client_id)
@@ -2935,6 +2945,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             "filter_elevation": self.filter_elevation,
             "filter_traffic": self.filter_traffic,
             "observer_mode": self.observer_mode,
+            # Will this router register its clients' CDU menu prompts again
+            # after a reconnect? Only then may the router above it remove
+            # them when it drops off (see record_client_disconnected())
+            "cdu_menu_tracking": self.config.filtering.cdu_menu_tracking,
             "errors": self.get_errors(),
         }
         payload['connections'] = []

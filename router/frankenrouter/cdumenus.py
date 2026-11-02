@@ -113,6 +113,18 @@ class CduMenus:
                 self.gone.setdefault(owner_id, now)
         return hidden
 
+    def forget_owner(self, owner_id):
+        """Drop a connection's registrations without removing its prompts; return how many."""
+        count = 0
+        for key, claims in list(self.claims.items()):
+            mine = [c for c in claims if c.owner_id == owner_id]
+            if mine:
+                count += len(mine)
+                claims[:] = [c for c in claims if c.owner_id != owner_id]
+                if not claims:
+                    del self.claims[key]
+        return count
+
     def due(self, now, timeout):
         """Return the stale prompts to clean up now, removing them from the table.
 
@@ -225,6 +237,16 @@ class TestCduMenus(unittest.TestCase):
         self.assertEqual((shown.owner, line, restored.owner),
                          ('SRSL-PSX', 'cduC=21GND_SV_>', 'Orchestration'))
         self.assertEqual(m.replay(), ['cduC=21GND_SV_>'])
+
+    def test_forget_owner(self):
+        """A forgotten owner's prompts are never removed; others' stay tracked."""
+        m = CduMenus()
+        m.update('cduC', '21GND_SV_>', 5, 'CRAVE', 'router:CRAVE')
+        m.update('cduC', '22DOORS_>', 5, 'CRAVE', 'router:CRAVE')
+        m.update('cduC', '15<SRSL', 1, 'SRSL-PSX', 'SRSL-PSX')
+        self.assertEqual(m.forget_owner(5), 2)
+        self.assertEqual(m.due(1000.0, 15), [])
+        self.assertEqual(m.replay(), ['cduC=15<SRSL'])
 
     def test_third_party_removal(self):
         """A removal from a connection that never registered clears the position."""
