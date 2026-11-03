@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Fix: a slave router no longer puts `(ROUTER)` on the master sim when
+  it joins.** For its first seconds on the master, before it knew its
+  upstream was a router, a slave ran the master's own error check, found
+  no other routers yet and could write the `(ROUTER)` warning to the master
+  sim (seen on 30 October).
+
 ## 2026-11-02: version 1.35.0
 
 - **Change: turning on observer mode asks first.** The *Enable

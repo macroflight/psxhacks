@@ -3704,7 +3704,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         """
         if not self.upstream_ever_welcomed:
             return
-        if self.get_router_type() == 'master':
+        # A slave router only knows its upstream is a frankenrouter after
+        # the first FRDP PING (or name), so for the first seconds after
+        # connecting get_router_type() says "master": without the config
+        # check a slave could write (ROUTER) to the master sim on joining
+        # (seen 2026-10-30).
+        if self.config.identity.type != 'slave' and self.get_router_type() == 'master':
             # Parenthesized rather than a bare word so this doesn't look like
             # a genuine Boeing master caution message on the EICAS.
             message = "(ROUTER)"
