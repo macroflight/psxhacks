@@ -1,5 +1,15 @@
 # frankenweather changelog
 
+## 2.3.1 (2026-11-03)
+
+- **Change: a paid Open-Meteo subscription that has used up its monthly
+  calls also falls back to the free API.** Open-Meteo doesn't enforce the
+  monthly limits yet, so its reply is unknown: a refusal (also HTTP 429)
+  whose reason mentions the month, the subscription or a quota now gets
+  the same large warning and switch to the free API, until frankenweather
+  restarts, as a refused key. "Too many concurrent requests" still only
+  makes it wait.
+
 ## 2.3.0 (2026-11-03)
 
 - **New: a paid Open-Meteo subscription.** `--om-api-key KEY` (or
@@ -8,8 +18,7 @@
   lot of testing. The usage on the Weather zones page and in the log says
   "paid API". The key is never written to the log, also not in error
   messages that include the request's URL. If Open-Meteo refuses the key
-  (e.g. an expired subscription, or one that has used up its monthly
-  calls), frankenweather logs a large warning and
+  (e.g. an expired subscription), frankenweather logs a large warning and
   uses the free API until it's restarted.
 
 - **Change: one Open-Meteo request at a time.** frankenweather's wind,
