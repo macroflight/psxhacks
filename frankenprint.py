@@ -56,6 +56,13 @@ _ESC_INIT = b'\x1b@'       # ESC @ — initialise / reset the printer
 _ESC_FEED = b'\x1bd\x04'   # ESC d 4 — feed 4 lines before cutting
 _GS_CUT = b'\x1dV\x01'    # GS V 1 — partial cut
 
+# PPR ADV: PSX sends PrinterPush (Qh415) 0 when the printer's PPR ADV
+# button is pressed and -1 when it's released. Each press feeds
+# --ppr-adv-lines lines at once. Feeding while it was held, in steps, moved
+# the paper in jerks on a TM-T20III (2026-11-03): one feed per press is
+# simpler and smoother.
+PPR_ADV_LINES = 20
+
 _TEST_MESSAGE = "FrankenPrint test\nConnected to PSX OK\n"
 
 
@@ -276,6 +283,15 @@ class FrankenPrint:
         if value:
             self._print_or_pushover(value)
 
+    def _on_printer_push(self, _key: str, value: str) -> None:
+        """Feed --ppr-adv-lines lines on each press of PPR ADV (PrinterPush 0)."""
+        if self.args.pushover or not self._write or value.strip() != "0":
+            return
+        lines = max(1, min(255, self.args.ppr_adv_lines))
+        self.logger.info("PPR ADV: feeding %d lines", lines)
+        # A Windows printer's spooler call can take a moment: off the event loop
+        self._run_in_background(lambda: self._send(b'\x1bd' + bytes([lines])))
+
     def _on_addon_message(self, _key: str, value: str) -> None:
         """Print a message sent as addon=FRANKENPRINT:<sim name>:<text>.
 
@@ -311,6 +327,7 @@ class FrankenPrint:
         client.onConnect = lambda: None
         client.subscribe("version", connected)
         client.subscribe("PrinterText", self._on_printer_text)
+        client.subscribe("PrinterPush", self._on_printer_push)
         client.subscribe("addon", self._on_addon_message)
         await client.connect(self.args.psx_host, self.args.psx_port)
         self.logger.warning("PSX connection ended")
@@ -346,6 +363,9 @@ class FrankenPrint:
         parser.add_argument(
             '--lines-after', type=int, default=0, metavar='N',
             help="Blank lines to print after the message (before the cut).")
+        parser.add_argument(
+            '--ppr-adv-lines', type=int, default=PPR_ADV_LINES, metavar='N',
+            help="Lines to feed for each press of the printer's PPR ADV button (1-255).")
         parser.add_argument(
             '--test-print', action='store_true',
             help="Print a short test message on each PSX connection.")
