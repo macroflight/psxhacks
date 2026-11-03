@@ -342,6 +342,12 @@ $ClockSyncEnabled = $true
 $AerowinxNavDataCheck = $true
 $AerowinxNavData      = ""
 
+# Opt-in: start every PSX main client from a known-good situ (Write-PsxStartSitu
+# in functions.ps1, run by start_psx_main_clients.ps1). A main client that
+# was started from an old situ can hold failures of its own and later send
+# them to the master sim (seen in a shared cockpit, 2026-11-03).
+$AerowinxKnownGoodStartSitu = $false
+
 # Human-readable display names for each sim addon key used in window-positioning scripts
 $SimAddonNames = [ordered]@{
     "BACARS"               = "BACARS"

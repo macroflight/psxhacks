@@ -351,6 +351,58 @@ function Write-PsxNavDataFile {
 # been launched - not from the startsim_*.ps1/frankencontrol.py callers,
 # so positioning always happens consistently regardless of who triggered
 # the start. A no-op (with no output) if $ChangeWindowPositions is off.
+# Make every PSX main client in $AerowinxPrefFiles start from the
+# repo's known-good situ (router\known-good.situ): copy it to
+# $AerowinxDir\Situations\psxhacks-goodsitu.situ if it's missing or
+# different, and set StartSitu=psxhacks-goodsitu.situ in each .pref file
+# in $AerowinxDir\Preferences that doesn't have it, after making a
+# timestamped backup of that file. Called by start_psx_main_clients.ps1
+# when $AerowinxKnownGoodStartSitu is $true.
+function Write-PsxStartSitu {
+    $situName = "psxhacks-goodsitu.situ"
+    $source = Join-Path $PsxhacksDevel "router\known-good.situ"
+    if (-not (Test-Path $source -PathType Leaf)) {
+        Show-ErrorAndExit "Known-good situ not found: $source"
+    }
+    $situDir = Join-Path $AerowinxDir "Situations"
+    if (-not (Test-Path $situDir -PathType Container)) {
+        Show-ErrorAndExit "PSX Situations folder not found: $situDir`nCheck `$AerowinxDir in $OverrideFile."
+    }
+    $target = Join-Path $situDir $situName
+    $same = (Test-Path $target -PathType Leaf) -and
+        ((Get-FileHash $source).Hash -eq (Get-FileHash $target).Hash)
+    if (-not $same) {
+        Write-Output "Copying the known-good situ to $target"
+        Copy-Item -Path $source -Destination $target -Force
+    }
+    # Latin-1 maps every byte to one character, so the rest of the
+    # file is written back exactly as it was
+    $latin1 = [System.Text.Encoding]::GetEncoding(28591)
+    $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    foreach ($pref in $AerowinxPrefFiles) {
+        $prefPath = Join-Path $AerowinxDir "Preferences\$pref"
+        if (-not (Test-Path $prefPath -PathType Leaf)) {
+            Show-ErrorAndExit "PSX preferences file not found: $prefPath`nCheck `$AerowinxPrefFiles in $OverrideFile."
+        }
+        $text = [System.IO.File]::ReadAllText($prefPath, $latin1)
+        $wanted = "StartSitu=$situName"
+        if ($text -match "(?m)^StartSitu=(.*?)\r?$") {
+            if ($Matches[1] -eq $situName) {
+                continue
+            }
+            $new = $text -replace "(?m)^StartSitu=.*?(\r?)$", "$wanted`$1"
+        } else {
+            $newline = if ($text -match "\r\n") { "`r`n" } else { "`n" }
+            $sep = if ($text.Length -gt 0 -and -not $text.EndsWith("`n")) { $newline } else { "" }
+            $new = "$text$sep$wanted$newline"
+        }
+        $backup = "$prefPath.$stamp.bak"
+        Copy-Item -Path $prefPath -Destination $backup
+        [System.IO.File]::WriteAllText($prefPath, $new, $latin1)
+        Write-Output "Set $wanted in $prefPath (backup: $backup)"
+    }
+}
+
 function Invoke-WindowPosition([string]$addon) {
     if ($ChangeWindowPositions) {
         $name = if ($SimAddonNames.Contains($addon)) { $SimAddonNames[$addon] } else { $addon }

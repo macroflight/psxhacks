@@ -676,6 +676,20 @@ $ChangeWindowPositions = $false
 
 
 # ---------------------------------------------------------------------------
+# Known-good start situ for the PSX main clients (opt-in): when $true,
+# start_psx_main_clients.ps1 first copies router\known-good.situ from
+# psxhacks to $AerowinxDir\Situations\psxhacks-goodsitu.situ (if it's
+# missing or different) and sets StartSitu=psxhacks-goodsitu.situ in each
+# of $AerowinxPrefFiles (in $AerowinxDir\Preferences). A .pref file is
+# only changed if needed, after a backup copy named
+# <file>.pref.<YYYYMMDD-HHMMSS>.bak. A main client started from an old
+# situ can hold failures of its own and later send them to the master sim.
+# Defaults to $false in common.ps1.
+# ---------------------------------------------------------------------------
+#$AerowinxKnownGoodStartSitu = $true
+
+
+# ---------------------------------------------------------------------------
 # Confirmation prompt in stopsim_master.ps1/stopsim_slave.ps1
 # Defaults to $true in common.ps1 (asks "Are you sure?" before stopping).
 # Set to $false to stop the sim immediately with no confirmation prompt.

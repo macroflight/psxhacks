@@ -8,6 +8,10 @@ if (-not $AerowinxPrefFiles -or $AerowinxPrefFiles.Count -eq 0) {
     Show-ErrorAndExit "`$AerowinxPrefFiles is not set.`nEdit $OverrideFile and set `$AerowinxPrefFiles to the list of .pref files for your PSX main client instances."
 }
 
+if ($AerowinxKnownGoodStartSitu) {
+    Write-PsxStartSitu
+}
+
 Set-Location $AerowinxDir
 
 foreach ($pref in $AerowinxPrefFiles) {

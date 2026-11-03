@@ -1,5 +1,23 @@
 # start_scripts changelog
 
+## Unreleased
+
+- **New, opt-in: start the PSX main clients from a known-good situ.**
+  With `$AerowinxKnownGoodStartSitu = $true`, `start_psx_main_clients.ps1`
+  first copies `router\known-good.situ` to
+  `$AerowinxDir\Situations\psxhacks-goodsitu.situ` (if it's missing or
+  different) and sets `StartSitu=psxhacks-goodsitu.situ` in each of
+  `$AerowinxPrefFiles`, after a backup copy
+  (`<file>.pref.<YYYYMMDD-HHMMSS>.bak`). A file that already has it is
+  left alone. A main client started from a bad situ can carry settings
+  or failures of its own and send them to the master sim later. One
+  known case: every PSX instance computes its own collisions, so a main
+  client started from a situ with "Collision causes damage" on can break
+  the master sim (on 2026-11-03, five main clients of one slave sim
+  activated a cabin explosion, hydraulic leaks, engine FOD and compressor
+  stalls on the master at once). The known-good situ has it off. Off by
+  default. See `psxhacks-start-override-EXAMPLE.ps1`.
+
 ## 1.12.0 (2026-11-03)
 
 - **New: `$VpilotOptions`, extra vPilot.exe arguments.** E.g.
