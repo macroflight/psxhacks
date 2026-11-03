@@ -112,6 +112,9 @@ PTT_TO_GROUND_HANDLING = {
 PRINTER_PUSH_KEYWORD = 'Qh415'
 
 QUARANTINE_DEFAULT_S = 60.0
+# How often per variable a quarantined client is given the network's value
+# back (see Rules.quarantine_restore())
+QUARANTINE_MAX_RESTORES = 3
 QUARANTINE_WEATHER_S = 120.0
 QUARANTINE_WEATHER_VARIABLES = (
     ['WxAloft', 'WxBasic', 'WxClust', 'MetarsUp', 'Windshear', 'WxCorridorSel',
@@ -375,7 +378,38 @@ class Rules():  # pylint: disable=too-many-public-methods
         self.logger.info(
             "Quarantine: dropping %s from %s, connected or reset %.1f s ago (< %.0f s): %s",
             name, self.sender.display_name, age, seconds, self.line[:200])
-        return self.myreturn(RulesAction.DROP, RulesCode.POST_CONNECT_QUARANTINE)
+        restore = self.quarantine_restore(key, name)
+        return self.myreturn(RulesAction.DROP, RulesCode.POST_CONNECT_QUARANTINE,
+                             extra_data={"reply": restore} if restore else None)
+
+    def quarantine_restore(self, key, name):
+        """Return the line that gives a quarantined client the network's value back, or None.
+
+        The client has already applied the value it wrote, and PSX doesn't
+        send a client's write back, so nothing else would correct it: on
+        2026-11-03 PSX main clients kept their own empty wind corridor
+        (WxCorridorTxt=#) after the quarantine dropped it, and showed a
+        different wind, temperature and IAS. Only when the router's cache
+        has a different value, never for a DELTA (event) variable, and at
+        most QUARANTINE_MAX_RESTORES times per variable per client, in case
+        a client answers by writing its value again.
+        """
+        if key in self.router.variables.keywords_with_mode('DELTA'):
+            return None
+        try:
+            cached = self.router.cache.get_value(key)
+        except RouterCacheException:
+            return None
+        _, _, value = self.line.partition('=')
+        if str(cached) == value:
+            return None
+        done = self.sender.quarantine_restores.get(key, 0)
+        if done >= QUARANTINE_MAX_RESTORES:
+            return None
+        self.sender.quarantine_restores[key] = done + 1
+        self.logger.info("Quarantine: giving %s the network's %s back: %.100s",
+                         self.sender.display_name, name, cached)
+        return f"{key}={cached}"
 
     def handle_addon_frankenrouter_ping(self, payload):
         """Handle an FRDP PING message.
@@ -2040,6 +2074,7 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             self.client_provided_display_name = None
             self.is_frankenrouter = False
             self.quarantine_restarted_at = 0.0
+            self.quarantine_restores = {}
             self.traffic_times = []
             self.traffic_dropped_times = []
             self.frdp_subscribed = False
@@ -3434,3 +3469,25 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         peer.quarantine_restarted_at = time.perf_counter() - 31.0
         (_, code, *_) = rules.route("Qi130=1", peer)
         self.assertNotEqual(code, RulesCode.POST_CONNECT_QUARANTINE)
+
+    def test_post_connect_quarantine_restore(self):
+        """A quarantined write gets the cached value back, at most QUARANTINE_MAX_RESTORES times."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+        peer = self._quarantine_peer(router)
+        peer.connected_at = time.perf_counter()
+        sigmets = "#DOWNLOADED 22:08:46 - 03 NOV 2026 UTC"
+        router.cache.update('Qs499', sigmets)
+        for _ in range(QUARANTINE_MAX_RESTORES):
+            (_, code, _, extra) = rules.route("Qs499=#", peer)
+            self.assertEqual(code, RulesCode.POST_CONNECT_QUARANTINE)
+            self.assertEqual(extra, {"reply": f"Qs499={sigmets}"})
+        (_, code, _, extra) = rules.route("Qs499=#", peer)
+        self.assertEqual(code, RulesCode.POST_CONNECT_QUARANTINE)
+        self.assertIsNone(extra)
+        # Same value as the cache, or nothing cached: nothing to give back
+        (_, code, _, extra) = rules.route("Qs329=0;1", peer)
+        self.assertEqual(code, RulesCode.POST_CONNECT_QUARANTINE)
+        self.assertIsNone(extra)
+        router.cache.update('Qs329', '0;1')
+        self.assertIsNone(rules.route("Qs329=0;1", peer)[3])

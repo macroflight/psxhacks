@@ -72,6 +72,9 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         # When a welcome reset last restarted the post-connect quarantine
         # (0.0 = never; see Rules.post_connect_quarantine())
         self.quarantine_restarted_at = 0.0
+        # Variable -> how often the quarantine gave this client the
+        # network's value back (see Rules.quarantine_restore())
+        self.quarantine_restores = {}
         # When this client's last welcome finished, and whether the
         # automatic welcome reset has been done (see
         # Frankenrouter._housekeeping_auto_reset_clients())

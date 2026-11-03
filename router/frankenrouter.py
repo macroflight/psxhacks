@@ -1397,14 +1397,15 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         client.welcome_keywords_sent = set()
         # The client writes its startup values again after this welcome
         client.quarantine_restarted_at = time.perf_counter()
+        client.quarantine_restores = {}
         await self.client_add_to_network(client)
 
     async def _housekeeping_auto_reset_clients(self):
         """Reset each PSX main client's welcome once, a while after its first welcome.
 
-        A PSX main client that has just started gets its welcome while it
-        is still loading its own start situ, and that load then overwrites
-        part of the welcome in the client: seen 2026-11-03 as DRIVE DISC
+        A PSX main client that has just started reacts to its first welcome
+        as if it had loaded its own start situ, which overwrites part of
+        the welcome in the client: seen 2026-11-03 as DRIVE DISC
         lights on, a wrong standby horizon and IAS, no wind corridor and
         no SIGMETs, in one client or another. It writes some of those
         values for about 8 s after its welcome (most are dropped by the
@@ -4547,7 +4548,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 pass
 
         # Take actions based on RulesCode
-        if code == RulesCode.FRDP_PING:
+        if code == RulesCode.POST_CONNECT_QUARANTINE:
+            if extra_data and 'reply' in extra_data:
+                await self.client_broadcast(extra_data['reply'], include=[sender.peername])
+        elif code == RulesCode.FRDP_PING:
             # Send reply given by rules.route()
             if sender.upstream:
                 await self.send_to_upstream(extra_data['reply'], sender.peername)

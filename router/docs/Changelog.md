@@ -22,13 +22,19 @@
   traffic in it, so a PSX instance started from it doesn't send old
   traffic to the network.
 - **New: a slave router resets each PSX main client once, 15 s after it
-  joins.** A freshly started PSX main client gets its welcome while it's
-  still loading its own start situ, and that load then overwrites part
-  of the welcome inside the client: DRIVE DISC lights on, a wrong
+  joins.** A freshly started PSX main client reacts to its first welcome
+  as if it had loaded its own start situ, which overwrites part of the
+  welcome inside the client: DRIVE DISC lights on, a wrong
   standby horizon or IAS, no wind corridor or no SIGMETs, until someone
   pressed "Reset clients". Now the router does that reset itself, for
   the clients on `[filtering] client_reset_whitelist`.
   `[filtering] client_auto_reset_delay` sets the delay; `0` turns it off.
+- **Change: the quarantine gives a client the network's value back.**
+  When it drops a write and the router has a different value cached, the
+  router sends that value to the client, at most 3 times per variable.
+  The client had already applied its own value: PSX main clients kept
+  their own empty wind corridor after joining, even after a reset, and
+  showed a slightly different wind, temperature, IAS and EPR.
 - **Change: a welcome reset restarts the post-connect quarantine.** A
   PSX main client writes the same stale values (e.g. `MfEvent`, its own
   SIGMETs) after a reset as after its first welcome; they used to pass.

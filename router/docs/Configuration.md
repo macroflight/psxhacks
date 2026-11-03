@@ -583,7 +583,12 @@ the quarantine, e.g. a malfunction set from a slave sim or manual
 weather, pass. Upstream is never quarantined. A welcome reset ("Reset
 clients", or the automatic one, see `client_auto_reset_delay`) restarts
 the quarantine for that client, since a PSX main client writes the same
-values after any welcome.
+values after any welcome. When the router has a different value cached,
+it also sends that back to the client whose write it dropped (logged as
+`Quarantine: giving ... back`), at most 3 times per variable: the client
+has already applied its own value, and PSX doesn't send it the right one
+again. A PSX main client that keeps its own empty wind corridor
+(`WxCorridorTxt`) shows a different wind, temperature and IAS.
 
 The built-in table:
 
@@ -739,9 +744,9 @@ frdp_rtt_warning = 0.5
 - `client_auto_reset_delay`: defaults to `15` (seconds). Only applies to
   a router of type `slave`. That long after a `client_reset_whitelist`
   client's first welcome, the router resets it once, as the "Reset
-  clients" button does. A PSX main client that has just started gets its
-  welcome while it's still loading its own start situ, and that load
-  then overwrites part of the welcome inside the client. On 2026-11-03
+  clients" button does. A PSX main client that has just started reacts
+  to its first welcome as if it had loaded its own start situ, which
+  overwrites part of the welcome inside the client. On 2026-11-03
   this left one client or another with DRIVE DISC lights on, a wrong
   standby horizon or IAS, no wind corridor or no SIGMETs. It writes some
   of these values for about 8 s after its welcome; others never show on
