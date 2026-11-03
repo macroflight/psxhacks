@@ -2212,7 +2212,9 @@ def _om_usage_row(state: dict) -> str:
     if not usage:
         return ''
     text = (f"{usage['last_hour']:,.0f} calls last hour, {usage['last_24h']:,.0f} last 24 h "
-            "(limit 10,000 a day)")
+            f"({'paid API' if usage.get('paid') else 'limit 10,000 a day'})")
+    if usage.get('key_rejected'):
+        text += "; PAID API KEY REFUSED, using the free API until restart"
     if state.get('om_backoff_s'):
         text += f"; refused or failing, waiting {state['om_backoff_s']} s"
     elif state.get('last_om_fetch_failed'):

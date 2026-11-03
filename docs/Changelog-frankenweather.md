@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **New: a paid Open-Meteo subscription.** `--om-api-key KEY` (or
+  `--om-api-key-file FILE`) uses Open-Meteo's customer API with that key:
+  reserved servers and no daily limit, for WorldFlight or periods with a
+  lot of testing. The usage on the Weather zones page and in the log says
+  "paid API". The key is never written to the log, also not in error
+  messages that include the request's URL. If Open-Meteo refuses the key
+  (e.g. an expired subscription), frankenweather logs a large warning and
+  uses the free API until it's restarted.
+
+- **Change: one Open-Meteo request at a time.** frankenweather's wind,
+  CAPE, zone and en-route downloads now take turns instead of running at
+  the same time, and give up after 5 seconds if Open-Meteo doesn't accept
+  the connection. On 2 November, while Open-Meteo was slow and failing,
+  several requests hung at once and it refused more with "Too many
+  concurrent requests".
+
 - **Fix: no terrain turbulence from a faraway or old wind profile.** When
   Open-Meteo is down, the terrain turbulence (mechanical, mountain wave,
   rotor, shear) kept using the last wind profile it got, wherever and

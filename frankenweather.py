@@ -8631,8 +8631,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     last_usage_log = time.monotonic()
                     usage = _OM_CLIENT.usage()
                     self.logger.info(
-                        "Open-Meteo usage: %.0f calls last hour, %.0f last 24 h "
-                        "(daily limit 10,000): %s", usage["last_hour"], usage["last_24h"],
+                        "Open-Meteo usage: %.0f calls last hour, %.0f last 24 h (%s): %s",
+                        usage["last_hour"], usage["last_24h"],
+                        "paid API" if usage.get("paid") else
+                        "daily limit 10,000" + (", PAID KEY REFUSED" if usage.get("key_rejected")
+                                                else ""),
                         ", ".join(f"{k} {v:.0f}" for k, v in usage["by_kind_24h"].items()))
                 if not self._last_om_fetch_failed:
                     continue
@@ -9422,7 +9425,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
     # Startup
     # ------------------------------------------------------------------
 
-    def handle_args(self) -> None:
+    def handle_args(self) -> None:  # pylint: disable=too-many-statements
         """Parse command line arguments."""
         parser = argparse.ArgumentParser(
             prog=__MYNAME__,
@@ -9548,6 +9551,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             '--om-proxy', type=str, default=None, metavar='URL',
             help="Proxy URL for all Open-Meteo requests, e.g. socks5h://localhost:1080."
                  " Requires PySocks (pip install requests[socks]).")
+        om_key = parser.add_mutually_exclusive_group()
+        om_key.add_argument(
+            '--om-api-key', type=str, default=None, metavar='KEY',
+            help="Use a paid Open-Meteo subscription with this API key (its customer API,"
+                 " no daily limit). The key is never logged.")
+        om_key.add_argument(
+            '--om-api-key-file', type=str, default=None, metavar='FILE',
+            help="Like --om-api-key, with the key read from this file.")
         parser.add_argument(
             '--debug', action='store_true',
             help="Log PSX weather changes, every value sent to PSX, and all PSX traffic.")
@@ -9654,6 +9665,21 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     "--%s is deprecated and no longer has any effect%s",
                     name.replace('_', '-'), suffix)
 
+    def _set_om_api_key(self) -> None:
+        """Use a paid Open-Meteo subscription if --om-api-key(-file) gives a key."""
+        api_key = self.args.om_api_key
+        if self.args.om_api_key_file:
+            try:
+                with open(os.path.expanduser(self.args.om_api_key_file), encoding='utf-8') as fh:
+                    api_key = fh.read().strip()
+            except OSError as exc:
+                raise SystemExit(f"Can't read --om-api-key-file: {exc}") from exc
+            if not api_key:
+                raise SystemExit(f"--om-api-key-file {self.args.om_api_key_file} is empty")
+        _OM_CLIENT.set_api_key(api_key)
+        if _OM_CLIENT.paid:
+            self.logger.info("Open-Meteo: using the paid customer API")
+
     async def run(self) -> None:
         """Entry point."""
         self.handle_args()
@@ -9693,6 +9719,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.airports, source = get_airports(_UCAR_STATIONS_URL, _STATIONS_CACHE)
             self.logger.info("Loaded %d airports from %s", len(self.airports), source)
 
+        self._set_om_api_key()
         self._turb_engine = TurbulenceEngine(om_proxy=self.args.om_proxy,
                                              cache_max_gb=self.args.terrain_cache_gb)
         self._turb_pirep_fetcher = PirepFetcher()

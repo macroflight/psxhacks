@@ -263,6 +263,20 @@ Features:
     minutes (30 seconds after other failures).
   - The calls made in the last hour and 24 hours are shown on the
     Weather zones page and logged once an hour (kept across restarts).
+  - Only one request is sent at a time, and one that Open-Meteo doesn't
+    accept within 5 seconds fails at once.
+  - The terrain turbulence only uses an older wind profile while it's
+    less than 100 nm away and less than an hour old.
+
+- A paid Open-Meteo subscription (e.g. for WorldFlight or a lot of
+  testing; the Standard plan's 1 million calls a month is plenty): give
+  its API key with `--om-api-key KEY` or `--om-api-key-file FILE` (a
+  file holding just the key). frankenweather then uses Open-Meteo's
+  customer API (reserved servers, no daily limit), and the usage on the
+  Weather zones page and in the log says "paid API". The key is never
+  written to the log. If Open-Meteo refuses the key (e.g. the
+  subscription has expired), frankenweather logs a large warning and uses
+  the free API until it's restarted; the Weather zones page says so too.
 
 Requires `aiohttp`, `pyproj`, `numpy`, `rasterio`, and `requests`:
 

@@ -20,6 +20,7 @@ import json
 import logging
 import math
 import os
+import re
 import tempfile
 import threading
 import time
@@ -33,7 +34,19 @@ from .disk_cache import DiskCache
 log = logging.getLogger(__name__)
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
-REQUEST_TIMEOUT_S = 15
+# A paid subscription: the same API on reserved servers, with the key as an
+# "apikey" parameter (https://open-meteo.com/en/pricing)
+OPEN_METEO_CUSTOMER_URL = "https://customer-api.open-meteo.com/v1/forecast"
+_APIKEY_RE = re.compile(r'(apikey=)[^&\s\'"]+')
+# (connect, read): a server that can't take the connection fails fast; the
+# read timeout is per socket read, not for the whole reply
+REQUEST_TIMEOUT_S = (5, 15)
+# At most this many requests in flight per process. A slow or overloaded
+# Open-Meteo answered 429 "Too many concurrent requests" (2026-11-02) when
+# the wind, CAPE, zones and en-route fetchers all had one hanging.
+MAX_IN_FLIGHT = 1
+# How long a request waits for a free slot: about one request's timeout
+SLOT_WAIT_S = sum(REQUEST_TIMEOUT_S)
 RATE_LIMIT_BACKOFF_S = 300.0      # nobody asks for this long after an HTTP 429
 # ...or this long after any other failure (503, timeout, bad JSON). Without
 # it, a failure at a position that never got cached leaves e.g. the
@@ -64,10 +77,28 @@ class OpenMeteoClient:
     def __init__(self, usage_path: Optional[str] = _USAGE_PATH) -> None:
         """Start with no backoff, and the usage of the last 24 h from disk."""
         self._lock = threading.Lock()
+        self._slots = threading.BoundedSemaphore(MAX_IN_FLIGHT)
         self._backoff_until = 0.0     # wall clock, so it's comparable across threads
+        self._api_key: Optional[str] = None
+        self._key_rejected = False
         self._usage_path = usage_path
         self._usage: collections.deque = collections.deque()  # (epoch, kind, weight)
         self._load_usage()
+
+    def set_api_key(self, api_key: Optional[str]) -> None:
+        """Use a paid subscription's customer API with api_key (None: the free API).
+
+        The key is kept out of every log message, also urllib3's debug log
+        of each request URL.
+        """
+        self._api_key = api_key or None
+        if self._api_key:
+            logging.getLogger("urllib3.connectionpool").addFilter(_RedactApiKey())
+
+    @property
+    def paid(self) -> bool:
+        """Return True when using a paid subscription."""
+        return self._api_key is not None
 
     def backoff_remaining(self) -> float:
         """Return how many more seconds nobody should ask Open-Meteo, 0 if none."""
@@ -77,17 +108,30 @@ class OpenMeteoClient:
         """Return Open-Meteo's JSON reply for params, or None (failure or backing off).
 
         kind ("wind", "cape", "zones", "enroute", ...) is only for the usage
-        count and log messages.
+        count and log messages. Waits up to SLOT_WAIT_S for a free slot
+        (MAX_IN_FLIGHT).
         """
+        if not self._slots.acquire(timeout=SLOT_WAIT_S):  # pylint: disable=consider-using-with
+            log.debug("Open-Meteo %s fetch skipped — no free slot after %.0fs", kind, SLOT_WAIT_S)
+            return None
+        try:
+            return self._get(params, kind, proxy)
+        finally:
+            self._slots.release()
+
+    def _get(self, params: dict, kind: str, proxy: Optional[str]) -> Optional[Any]:  # pylint: disable=too-many-return-statements
+        """Do get()'s request, holding a slot."""
         remaining = self.backoff_remaining()
         if remaining > 0:
             log.debug("Open-Meteo %s fetch skipped — backing off (%.0fs remaining)",
                       kind, remaining)
             return None
         proxies = {'http': proxy, 'https': proxy} if proxy else None
+        url, query = OPEN_METEO_URL, params
+        if self._api_key:
+            url, query = OPEN_METEO_CUSTOMER_URL, {**params, "apikey": self._api_key}
         try:
-            r = requests.get(OPEN_METEO_URL, params=params, timeout=REQUEST_TIMEOUT_S,
-                             proxies=proxies)
+            r = requests.get(url, params=query, timeout=REQUEST_TIMEOUT_S, proxies=proxies)
         except requests.RequestException as exc:
             self._fail(GENERIC_FAILURE_BACKOFF_S, f"{kind} fetch failed: {exc}")
             return None
@@ -99,6 +143,8 @@ class OpenMeteoClient:
                 pass
             self._fail(RATE_LIMIT_BACKOFF_S, f"{kind} fetch: rate limited{reason}")
             return None
+        if self._api_key and r.status_code in (400, 401, 402, 403) and self._key_refused(r):
+            return self._get(params, kind, proxy)      # once more, on the free API
         if r.status_code != 200:
             self._fail(GENERIC_FAILURE_BACKOFF_S, f"{kind} fetch: HTTP {r.status_code}")
             return None
@@ -110,7 +156,30 @@ class OpenMeteoClient:
         self._record(kind, call_weight(params))
         return data
 
+    def _key_refused(self, r) -> bool:
+        """If Open-Meteo refused our API key, switch to the free API (until restart); return True.
+
+        Seen 2026-11-03: an invalid key gets HTTP 400 {"error": true, "reason":
+        "The supplied API key is invalid."}; no key gets 401 "API key
+        required". An expired subscription is assumed to look the same.
+        """
+        try:
+            reason = str(r.json().get("reason", ""))
+        except (ValueError, AttributeError):
+            return False
+        if "key" not in reason.lower():
+            return False
+        with self._lock:
+            self._api_key, self._key_rejected = None, True
+        line = "!" * 78
+        log.critical("\n%s\n%s\n!!! Open-Meteo REFUSED THE PAID API KEY (HTTP %d): %s\n"
+                     "!!! The subscription may have expired. frankenweather now uses the FREE\n"
+                     "!!! Open-Meteo API (10,000 calls a day) until it's restarted.\n%s\n%s",
+                     line, line, r.status_code, redact_api_key(reason), line, line)
+        return True
+
     def _fail(self, backoff_s: float, message: str) -> None:
+        message = redact_api_key(message)
         with self._lock:
             self._backoff_until = max(self._backoff_until, time.time() + backoff_s)
         log.warning("Open-Meteo %s — nobody asks again for %.0fs", message, backoff_s)
@@ -128,6 +197,8 @@ class OpenMeteoClient:
             "last_hour": round(sum(w for ts, _k, w in entries if now - ts <= 3600.0), 1),
             "last_24h": round(sum(w for _ts, _k, w in entries), 1),
             "by_kind_24h": {k: round(v, 1) for k, v in sorted(by_kind.items())},
+            "paid": self.paid,
+            "key_rejected": self._key_rejected,
         }
 
     def _record(self, kind: str, weight: float) -> None:
@@ -173,6 +244,19 @@ class OpenMeteoClient:
                 os.remove(tmp_path)
             except OSError:
                 pass
+
+
+def redact_api_key(text: str) -> str:
+    """Return text with any apikey=... value blanked out."""
+    return _APIKEY_RE.sub(r'\1***', text)
+
+
+class _RedactApiKey(logging.Filter):  # pylint: disable=too-few-public-methods
+    """Blank out apikey=... in log records (urllib3 logs each request's URL at debug)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg, record.args = redact_api_key(record.getMessage()), None
+        return True
 
 
 # The one client everybody in this process uses.
