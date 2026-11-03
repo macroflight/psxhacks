@@ -135,6 +135,8 @@ class OpenMeteoClient:
         except requests.RequestException as exc:
             self._fail(GENERIC_FAILURE_BACKOFF_S, f"{kind} fetch failed: {exc}")
             return None
+        if self._api_key and r.status_code in (400, 401, 402, 403, 429) and self._key_refused(r):
+            return self._get(params, kind, proxy)      # once more, on the free API
         if r.status_code == 429:
             reason = ""
             try:
@@ -143,8 +145,6 @@ class OpenMeteoClient:
                 pass
             self._fail(RATE_LIMIT_BACKOFF_S, f"{kind} fetch: rate limited{reason}")
             return None
-        if self._api_key and r.status_code in (400, 401, 402, 403) and self._key_refused(r):
-            return self._get(params, kind, proxy)      # once more, on the free API
         if r.status_code != 200:
             self._fail(GENERIC_FAILURE_BACKOFF_S, f"{kind} fetch: HTTP {r.status_code}")
             return None
@@ -157,23 +157,30 @@ class OpenMeteoClient:
         return data
 
     def _key_refused(self, r) -> bool:
-        """If Open-Meteo refused our API key, switch to the free API (until restart); return True.
+        """If Open-Meteo refused our paid subscription, switch to the free API (until restart).
 
-        Seen 2026-11-03: an invalid key gets HTTP 400 {"error": true, "reason":
-        "The supplied API key is invalid."}; no key gets 401 "API key
-        required". An expired subscription is assumed to look the same.
+        Returns True if it did. Seen 2026-11-03: an invalid key gets HTTP 400
+        {"error": true, "reason": "The supplied API key is invalid."}; no key
+        gets 401 "API key required". An expired subscription is assumed to
+        look the same. The monthly call limit isn't enforced yet (pricing
+        page, 2026-11-03); when it is, a refusal whose reason mentions the
+        month, the subscription or a quota counts too, also as HTTP 429 (but
+        not 429 "Too many concurrent requests", which only means wait).
         """
         try:
             reason = str(r.json().get("reason", ""))
         except (ValueError, AttributeError):
             return False
-        if "key" not in reason.lower():
+        words = ("key",) if r.status_code != 429 else ()
+        words += ("month", "subscription", "quota")
+        if not any(w in reason.lower() for w in words):
             return False
         with self._lock:
             self._api_key, self._key_rejected = None, True
         line = "!" * 78
         log.critical("\n%s\n%s\n!!! Open-Meteo REFUSED THE PAID API KEY (HTTP %d): %s\n"
-                     "!!! The subscription may have expired. frankenweather now uses the FREE\n"
+                     "!!! The subscription may have expired or used up its monthly calls.\n"
+                     "!!! frankenweather now uses the FREE\n"
                      "!!! Open-Meteo API (10,000 calls a day) until it's restarted.\n%s\n%s",
                      line, line, r.status_code, redact_api_key(reason), line, line)
         return True

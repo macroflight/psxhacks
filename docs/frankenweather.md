@@ -275,7 +275,9 @@ Features:
   customer API (reserved servers, no daily limit), and the usage on the
   Weather zones page and in the log says "paid API". The key is never
   written to the log. If Open-Meteo refuses the key (e.g. the
-  subscription has expired), frankenweather logs a large warning and uses
+  subscription has expired or used up its monthly calls; Open-Meteo
+  doesn't enforce the monthly limit yet), frankenweather logs a large
+  warning and uses
   the free API until it's restarted; the Weather zones page says so too.
 
 Requires `aiohttp`, `pyproj`, `numpy`, `rasterio`, and `requests`:

@@ -8,7 +8,8 @@
   lot of testing. The usage on the Weather zones page and in the log says
   "paid API". The key is never written to the log, also not in error
   messages that include the request's URL. If Open-Meteo refuses the key
-  (e.g. an expired subscription), frankenweather logs a large warning and
+  (e.g. an expired subscription, or one that has used up its monthly
+  calls), frankenweather logs a large warning and
   uses the free API until it's restarted.
 
 - **Change: one Open-Meteo request at a time.** frankenweather's wind,
