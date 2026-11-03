@@ -1,6 +1,6 @@
 # frankenweather changelog
 
-## Unreleased
+## 2.3.4 (2026-11-03)
 
 - **Change: log times are UTC.** frankenweather's log (console, `--log`
   and the per-run log) used the PC's local time, so on a PC set to
