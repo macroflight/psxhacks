@@ -248,14 +248,14 @@ failing all four AC buses in the shared cockpit.
 - **Request:** a main client shouldn't write values it hasn't got from
   its server, at least not until its welcome is complete.
 
-### A main client welcomed while still starting keeps parts of its start situ
+### A main client keeps parts of its start situ after its first welcome
 
 *Confirmed (2026-11-03, test setup, slave sim restarted three times in
 flight; slave router traffic logs).* A freshly started PSX main client
-connects and gets its welcome while it is still loading its own start
-situ, and that load then overwrites part of the welcome inside the
-client. The welcome itself was correct: it was identical to a later
-"Reset clients" welcome, which fixed the client every time. What we saw:
+reacts to its first welcome as if it had loaded its own start situ, and
+that overwrites part of the welcome inside the client. The welcome itself
+was correct: it was identical to a later "Reset clients" welcome, which
+fixed the client almost every time. What we saw:
 
 - DRIVE DISC lights on for all four engines (Overhead). The welcome had
   `DriveDisc1`-`4` = 96 (in flight, light off); Basic 000 has 352, which
@@ -277,10 +277,14 @@ on the network at all.
 - **Workaround:** a slave frankenrouter resets each whitelisted PSX main
   client's welcome once, 15 s after its first one
   (`client_auto_reset_delay`), and a reset restarts the post-connect
-  quarantine.
-- **Request:** a main client should finish loading its start situ before
-  it applies (or asks for) its server's welcome, or not load a start
-  situ at all when it connects to a server.
+  quarantine. When the quarantine drops a client's write, the router sends
+  it the network's value back. Holding the welcome back 10 s didn't help
+  (tested 2026-11-03): the clients wrote nothing while waiting, then the
+  same values at the same times after `load3`, so it's their reaction to
+  their first welcome, not a race with their own startup. After a reset
+  they usually don't, but one of five still wrote an empty corridor.
+- **Request:** a main client should apply its first welcome as it applies
+  later ones, without values of its own start situ.
 
 ### On the ground, an A/P disconnect press with the A/P off starts the wailer
 
