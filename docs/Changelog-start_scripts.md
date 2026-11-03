@@ -1,6 +1,6 @@
 # start_scripts changelog
 
-## Unreleased
+## 1.12.0 (2026-11-03)
 
 - **New: `$VpilotOptions`, extra vPilot.exe arguments.** E.g.
   `$VpilotOptions = @("-remote", "/novoice")` for vPilot's remote mode
