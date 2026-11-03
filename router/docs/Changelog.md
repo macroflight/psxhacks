@@ -5,8 +5,8 @@
 - **New: post-connect quarantine.** For a while after a connection is
   made, the router drops its writes of certain variables: malfunctions
   (30 s), the TAKEOFF REF no-go string (5 s), the master warning bits
-  (60 s) and, from slave routers only, the weather (120 s). Each drop is
-  logged at `INFO`. A slave sim joining the WorldFlight master had set the
+  (60 s) and, from everyone but frankenweather, the weather (120 s). Each
+  drop is logged at `INFO`. A slave sim joining the WorldFlight master had set the
   A/P disconnect wailer in the shared cockpit (the crew couldn't silence
   it at first), and slave sims sent their old weather zones, SIGMETs and
   METARs, overwriting frankenweather's. The times can be changed, and

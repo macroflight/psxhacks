@@ -101,9 +101,9 @@ PTT_TO_GROUND_HANDLING = {
 # sim, manual weather) pass. Never applied to upstream.
 #
 # Variable name (a trailing "*" matches a prefix) -> (seconds, or None for
-# QUARANTINE_DEFAULT_S; True to apply only to router links). The weather
-# entries only apply to router links: frankenweather itself is a client of
-# the master router and sends all of these right after it starts. The
+# QUARANTINE_DEFAULT_S; True if frankenweather is exempt). frankenweather
+# (client id _FRANKENWEATHER_CLIENT_ID) sends all the weather right after
+# it connects, and its name always comes first on a new connection. The
 # [quarantine] config section can change the times and add variables.
 QUARANTINE_DEFAULT_S = 60.0
 QUARANTINE_WEATHER_S = 120.0
@@ -317,9 +317,9 @@ class Rules():  # pylint: disable=too-many-public-methods
         # Reference to sender endpoint (if still connected)
         self.sender = None
         # Post-connect quarantine table, built on first use (see
-        # QUARANTINE_VARIABLES): {name: (seconds, routers_only)}, the
-        # prefix entries as [(prefix, (seconds, routers_only))] and the
-        # longest time
+        # QUARANTINE_VARIABLES): {name: (seconds, frankenweather_exempt)},
+        # the prefix entries as [(prefix, (seconds, frankenweather_exempt))]
+        # and the longest time
         self._quarantine = None
         self._quarantine_prefixes = []
         self._quarantine_max_s = 0.0
@@ -328,11 +328,11 @@ class Rules():  # pylint: disable=too-many-public-methods
         """Build the quarantine table: QUARANTINE_VARIABLES with [quarantine] applied."""
         conf = getattr(self.router.config, 'quarantine', None)
         default = conf.default_seconds if conf is not None else QUARANTINE_DEFAULT_S
-        table = {name: (default if seconds is None else seconds, routers_only)
-                 for name, (seconds, routers_only) in QUARANTINE_VARIABLES.items()}
+        table = {name: (default if seconds is None else seconds, fw_exempt)
+                 for name, (seconds, fw_exempt) in QUARANTINE_VARIABLES.items()}
         if conf is not None:
             for name, seconds in conf.variables.items():
-                # A variable added in the config applies to all connections
+                # A variable added in the config has no exemption
                 table[name] = (seconds, table.get(name, (None, False))[1])
         table = {name: entry for name, entry in table.items() if entry[0] > 0}
         self._quarantine = {name: entry for name, entry in table.items()
@@ -359,8 +359,9 @@ class Rules():  # pylint: disable=too-many-public-methods
                           if name.startswith(prefix)), None)
         if entry is None:
             return None
-        seconds, routers_only = entry
-        if age >= seconds or (routers_only and not self.sender.is_frankenrouter):
+        seconds, fw_exempt = entry
+        if age >= seconds or (
+                fw_exempt and self.sender.client_provided_id == _FRANKENWEATHER_CLIENT_ID):
             return None
         self.logger.info(
             "Quarantine: dropping %s from %s, connected %.1f s ago (< %.0f s): %s",
@@ -3239,23 +3240,26 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         self.assertNotEqual(code, quarantined)
 
     def test_post_connect_quarantine_weather(self):
-        """Weather is quarantined for 120 s, and only from router links."""
+        """Weather is quarantined for 120 s from everyone but frankenweather."""
         router = self.DummyFrankenrouter()
         rules = Rules(router)
         peer = self._quarantine_peer(router)
         quarantined = RulesCode.POST_CONNECT_QUARANTINE
-        # A PSX client or frankenweather: passes at once
+        # frankenweather: passes at once
+        peer.client_provided_id = _FRANKENWEATHER_CLIENT_ID
         for line in ("Qs499=#DOWNLOADED", "Qs329=0;44950;44950;0;0;0"):
             self.assertEqual(self._quarantine_route(rules, line, peer, 0.0),
                              RulesCode.KEYVALUE_NORMAL, line)
-        # A slave router: dropped for QUARANTINE_WEATHER_S
-        peer.is_frankenrouter = True
-        for line in ("Qs499=#DOWNLOADED", "Qs329=0;44950;44950;0;0;0"):
-            self.assertEqual(self._quarantine_route(rules, line, peer, 0.0), quarantined, line)
-            self.assertEqual(self._quarantine_route(
-                rules, line, peer, QUARANTINE_WEATHER_S - 1.0), quarantined, line)
-            self.assertEqual(self._quarantine_route(
-                rules, line, peer, QUARANTINE_WEATHER_S + 1.0), RulesCode.KEYVALUE_NORMAL, line)
+        # ...but its other quarantined variables don't
+        self.assertEqual(self._quarantine_route(rules, "Qi190=257", peer, 0.0), quarantined)
+        # A PSX instance or a slave router: dropped for QUARANTINE_WEATHER_S
+        for peer.client_provided_id, peer.is_frankenrouter in ((None, False), ('camslave', True)):
+            for line in ("Qs499=#DOWNLOADED", "Qs329=0;44950;44950;0;0;0"):
+                self.assertEqual(self._quarantine_route(rules, line, peer, 0.0), quarantined, line)
+                self.assertEqual(self._quarantine_route(
+                    rules, line, peer, QUARANTINE_WEATHER_S - 1.0), quarantined, line)
+                self.assertEqual(self._quarantine_route(
+                    rules, line, peer, QUARANTINE_WEATHER_S + 1.0), RulesCode.KEYVALUE_NORMAL, line)
 
     def test_post_connect_quarantine_config(self):
         """[quarantine] changes the default and per-variable times and adds variables."""
@@ -3281,10 +3285,9 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
                 ("Qi190=257", 9.0, quarantined),        # the default, now 10 s
                 ("Qi190=257", 11.0, normal),
                 ("Qi272=8", 14.0, quarantined),         # added: all connections
-                ("Qs329=0;1", 0.0, normal),             # weather: still router links only
+                ("Qs329=0;1", 19.0, quarantined),       # Wx1 now 20 s
         ):
             self.assertEqual(self._quarantine_route(rules, line, peer, age), expected,
                              (line, age))
-        peer.is_frankenrouter = True
         self.assertEqual(self._quarantine_route(rules, "Qs329=0;1", peer, 19.0), quarantined)
         self.assertEqual(self._quarantine_route(rules, "Qs329=0;1", peer, 21.0), normal)
