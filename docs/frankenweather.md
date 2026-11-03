@@ -679,7 +679,10 @@ In the testing profile:
   swinging from -6 to +14 degrees (SCIZ SEV TURB SIGMET, FL330). Events
   are not limited.
 - **Moderate patches**: the turbulence level goes up to 38-50% for 20
-  seconds to 10 minutes (typically a minute and a half).
+  seconds to 10 minutes (typically a minute and a half). Like real
+  clear-air turbulence, a patch starts with light chop and builds up over
+  10-20 seconds (too short to slow down first), and dies away the same
+  way.
 - **Severe clusters**: 5-30 seconds of moderate chop with one to four
   big up/down jolts of 0.5-1.2 g, at least 6 seconds apart. In PSX one
   big jolt sets off a few more swings by itself, as in real recordings.

@@ -1,5 +1,16 @@
 # frankenweather changelog
 
+## Unreleased
+
+- **Change: moderate turbulence patches build up and die away.** A
+  testing-profile moderate patch used to jump straight to its level
+  (38-50%) and stop just as abruptly. Like real clear-air turbulence it
+  now starts with light chop (40% of its level), builds up smoothly over
+  10-20 seconds (at most a third of the patch) and dies away the same way.
+  That's too short to slow down to turbulence penetration speed first,
+  which is realistic: in clear air with nothing forecast, CAT comes as a
+  surprise.
+
 ## 2.3.2 (2026-11-03)
 
 - **Change: a restart keeps the weather zones where they are.**

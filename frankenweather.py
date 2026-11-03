@@ -5459,9 +5459,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                                         event.level))
             self.logger.info("Turbulence event: %s burst %+d (about %.2f g)", event.kind, value,
                              1.25 * (abs(value) / 99.0) ** 2)
-        if event.level > intensity:
-            return TurbulenceState(intensity=event.level, kind="event",
-                                   reason=f"{event.kind} event ({area})"), event.level
+        level = event.level_at(time.monotonic())
+        if level > intensity:
+            return TurbulenceState(intensity=level, kind="event",
+                                   reason=f"{event.kind} event ({area})"), level
         return state, intensity
 
     def _log_turb_event_start(self, event) -> None:

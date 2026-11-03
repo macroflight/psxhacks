@@ -53,6 +53,13 @@ MODERATE_LEVEL = (0.38, 0.50)       # continuous level during a moderate patch
 MODERATE_MEDIAN_S = 90.0            # log-normal patch length ...
 MODERATE_SIGMA = 0.8
 MODERATE_S = (20.0, 600.0)          # ... clamped to this
+# A moderate patch builds up and dies away over this long (each), from
+# MODERATE_EDGE x its level, like real CAT: an intensity envelope varying
+# over tens of seconds with lighter chop at the edges, not a step
+# (docs/turbulence-research/notes/temporal-structure.md). Too short to
+# slow down before it; at most a third of the patch each.
+MODERATE_RAMP_S = (10.0, 20.0)
+MODERATE_EDGE = 0.4
 SEVERE_S = (5.0, 30.0)
 SEVERE_LEVEL = 0.45                 # the chop around the big bursts
 SEVERE_SPACING_S = (6.0, 10.0)
@@ -90,7 +97,20 @@ class TurbulenceEvent:  # pylint: disable=too-many-instance-attributes
     bursts: list = field(default_factory=list)
     area: str = ""
     triggered: bool = False
+    ramp_s: float = 0.0       # build-up and die-away (each), see MODERATE_RAMP_S
     _next: int = 0
+
+    def level_at(self, now: float) -> float:
+        """Return the continuous level at now: level, ramped at the start and end over ramp_s."""
+        if self.ramp_s <= 0.0:
+            return self.level
+        ramp = min(self.ramp_s, self.duration_s / 3.0)
+        edge = min(now - self.start, self.start + self.duration_s - now)
+        if edge >= ramp:
+            return self.level
+        x = max(0.0, edge) / ramp
+        x = x * x * (3.0 - 2.0 * x)        # smoothstep
+        return self.level * (MODERATE_EDGE + (1.0 - MODERATE_EDGE) * x)
 
     def active(self, now: float) -> bool:
         """Return True until the event is over."""
@@ -113,7 +133,8 @@ def make_event(kind: str, now: float, rng: random.Random, area: str = "",
         duration = rng.lognormvariate(math.log(MODERATE_MEDIAN_S), MODERATE_SIGMA)
         duration = min(MODERATE_S[1], max(MODERATE_S[0], duration))
         return TurbulenceEvent("moderate", now, duration, rng.uniform(*MODERATE_LEVEL),
-                               area=area, triggered=triggered)
+                               area=area, triggered=triggered,
+                               ramp_s=rng.uniform(*MODERATE_RAMP_S))
     if kind == "severe":
         duration = rng.uniform(*SEVERE_S)
         bursts, t, peak = [], rng.uniform(0.5, 3.0), 0.0
