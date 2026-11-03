@@ -1,11 +1,11 @@
 # frankenprint changelog
 
-## Unreleased
+## 1.2.0 (2026-11-03)
 
 - **New: the printer's PPR ADV button feeds the real paper.** Each press
   of PPR ADV in PSX (PrinterPush 0) feeds 20 lines at once (ESC/POS
   `ESC d`); `--ppr-adv-lines N` changes that (1-255). Not in Pushover
-  mode. In a shared cockpit, a slave sim's frankenrouter (next version)
+  mode. In a shared cockpit, a slave sim's frankenrouter (1.37.0 or later)
   keeps other sims' presses from feeding this sim's paper.
 
 ## 1.1.1 (2026-10-18)
