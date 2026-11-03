@@ -1,6 +1,6 @@
 # frankenweather changelog
 
-## Unreleased
+## 2.3.0 (2026-11-03)
 
 - **New: a paid Open-Meteo subscription.** `--om-api-key KEY` (or
   `--om-api-key-file FILE`) uses Open-Meteo's customer API with that key:
