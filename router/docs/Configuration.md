@@ -504,7 +504,11 @@ A crew alertness monitor in the master router, working like CMC-PSX's
 covers the whole shared cockpit). Only used by a router of type
 `master`. Every `Qh` variable a client writes counts as crew input:
 switches, knobs, levers, CDU keys, MCP, EFIS, EICAS panel, audio panel,
-PTT. With no crew input for a while, the router puts `PILOT RESPONSE` on
+PTT. Only inputs that pass through a router count: controls used on the
+PSX main server itself, or on a PSX instance connected straight to it
+rather than to a router, don't (the router only sees PSX's own changes,
+which it can't tell apart from crew input). With no crew input for a
+while, the router puts `PILOT RESPONSE` on
 the EICAS, first as an advisory, then a caution, then a warning (PSX's
 free messages `FreeMsgA`, `FreeMsgC`, `FreeMsgW`; the caution and
 warning come with PSX's master caution or warning and sound), and, if
