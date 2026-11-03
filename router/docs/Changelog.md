@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026-11-03: version 1.38.0
 
 - **New: PSX's "Collision causes damage" is always turned off.** With
   VATSIM traffic around it breaks the aircraft out of the blue, even
