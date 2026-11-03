@@ -159,6 +159,17 @@ def _enforce_qs445_atis(current):
     return "_" + rest
 
 
+def _enforce_qi202_tfcbits(current):
+    """Qi202 (TfcBits) bit 1 ("Collision causes damage") must be off.
+
+    With VATSIM traffic it breaks the aircraft out of the blue, even on
+    the ground: on 2026-11-03 five PSX instances of a slave sim parked at
+    the gate gave the master a cabin explosion, hydraulic leaks, engine
+    FOD and compressor stalls at once.
+    """
+    return current & ~2 if current & 2 else None
+
+
 # PSX settings a master-sim router must keep at a known-good value,
 # regardless of how they got changed (a situ load reverting them is the
 # main concern, but this also covers e.g. someone poking at PSX's own
@@ -170,6 +181,7 @@ def _enforce_qs445_atis(current):
 ENFORCED_SETTINGS = {
     "Qi201": _enforce_qi201_tfcmode,
     "Qs445": _enforce_qs445_atis,
+    "Qi202": _enforce_qi202_tfcbits,
 }
 
 # How long a connection may sit as "auth pending" (no access and no
@@ -3645,6 +3657,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         if self.get_router_type() != 'master':
             return
         for key, check in ENFORCED_SETTINGS.items():
+            if key == "Qi202" and not self.config.psx.collision_damage_off:
+                continue  # [psx] collision_damage_off = false: testing only
             try:
                 current = self.cache.get_value(key)
             except routercache.RouterCacheException:
@@ -3654,7 +3668,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.logger.info(
                     "%s drifted (%r), resetting to %r", key, current, corrected)
                 self.cache.update(key, corrected)
-                await self.send_to_upstream(f"{key}={corrected}")
+                # PSX doesn't echo a client's write back, so the clients
+                # (and the slave sims' PSX instances behind them) get the
+                # corrected value from us
+                await asyncio.gather(
+                    self.send_to_upstream(f"{key}={corrected}"),
+                    self.client_broadcast(f"{key}={corrected}"),
+                )
 
     async def _housekeeping_enable_psx_elevation_database(self):
         """Switch back to PSX's internal elevation database.

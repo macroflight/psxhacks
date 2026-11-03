@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- **New: PSX's "Collision causes damage" is always turned off.** With
+  VATSIM traffic around it breaks the aircraft out of the blue, even
+  parked at the gate: on 2026-11-03 five PSX instances of one slave sim
+  activated a cabin explosion, hydraulic leaks, engine FOD and
+  compressor stalls on the master at once (engines wouldn't start). A
+  master router now keeps that setting (bit 1 of `TfcBits`, `Qi202`) off,
+  with the other settings it enforces every 10 s. `[psx]
+  collision_damage_off = false` turns this off, for testing only.
+- **Change: an enforced setting is also sent to the clients.** When a
+  master router corrects one (TfcMode, ATIS off, and now collision
+  damage), it sends the corrected value to its clients as well as to
+  PSX, since PSX doesn't send a client's write back. Slave sims' PSX
+  instances now get it at once.
+- The bundled `known-good.situ` now has "Collision causes damage" off.
+
 ## 2026-11-03: version 1.37.0
 
 - **New: a slave router keeps other sims' PPR ADV presses out.** A

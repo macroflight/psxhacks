@@ -277,6 +277,14 @@ keep_hours = 168
   effects, e.g some addons react to a variable arriving even if its
   value is unchanged), so set this to false to disable it if that
   causes problems for you.
+- `collision_damage_off`: defaults to true. PSX's Instructor > Human >
+  Traffic > "Collision causes damage" (bit 1 of `TfcBits`, `Qi202`)
+  breaks the aircraft when VATSIM traffic comes close, even on the
+  ground (on 2026-11-03 it gave a cabin explosion, hydraulic leaks,
+  engine FOD and compressor stalls at the gate). A master router turns
+  it off whenever it finds it on (it's checked every 10 s with the other
+  enforced settings), on the PSX main server and on all its clients.
+  Set this to false only to test what collision damage does.
 - `known_good_situ_enabled`: defaults to false. Opt-in safety net that
   resets the router's own cached variable state to a known-good baseline
   (the bundled `router/known-good.situ`) before any client is welcomed

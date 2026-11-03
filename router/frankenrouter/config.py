@@ -203,6 +203,12 @@ class _RouterConfigPsx:  # pylint: disable=missing-class-docstring,too-few-publi
         self.jettison_resync_fix = data.get('jettison_resync_fix', True)
         if not isinstance(self.jettison_resync_fix, bool):
             raise RouterConfigError("psx jettison_resync_fix must be true or false")
+        # PSX's "Collision causes damage" (TfcBits bit 1) breaks the aircraft
+        # when VATSIM traffic comes close, even on the ground. The router
+        # always turns it off; false is only for testing that it does.
+        self.collision_damage_off = data.get('collision_damage_off', True)
+        if not isinstance(self.collision_damage_off, bool):
+            raise RouterConfigError("psx collision_damage_off must be true or false")
         # Opt-in safety net: reset the router's own cached variable state
         # to a known-good baseline (the bundled router/known-good.situ)
         # before any client gets welcomed with it -- see
@@ -985,6 +991,15 @@ keywords = ["Qs123"]
             RouterConfig(config_data=(
                 "[identity]\ntype = 'standalone'\n"
                 "[performance]\nload_marker_pause_enabled = true\n"))
+
+    def test_collision_damage_off(self):
+        """collision_damage_off defaults to on and can be disabled in [psx]."""
+        conf = RouterConfig(config_data="")
+        self.assertEqual(conf.psx.collision_damage_off, True)
+        conf = RouterConfig(config_data="[psx]\ncollision_damage_off = false\n")
+        self.assertEqual(conf.psx.collision_damage_off, False)
+        with self.assertRaises(RouterConfigError):
+            RouterConfig(config_data="[psx]\ncollision_damage_off = 'no'\n")
 
     def test_jettison_resync_fix(self):
         """jettison_resync_fix defaults to on and can be disabled in [psx]."""
