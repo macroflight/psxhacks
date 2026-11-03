@@ -262,6 +262,30 @@ real 747-400 does the same on the ground is unknown.
 - **Workaround:** none needed once the quarantine stops the stray wailer.
 - **Request:** check against the real aircraft first.
 
+### "Collision causes damage" breaks the aircraft from VATSIM traffic, in every PSX instance
+
+*Confirmed (2026-11-03, main sim and test sim).* With Instructor > Human >
+Traffic > "Collision causes damage" on (bit 1 of `TfcBits`, `Qi202`), a
+traffic aircraft (`TfcPos`) at the ownship's position damages the
+aircraft: a cabin explosion, engine FOD and compressor stalls, hydraulic
+leaks in all four systems, and a few seconds later fuel tank leaks. It
+happens parked at the gate, with the transponder in STBY, XPDR or TA/RA.
+Every PSX instance that runs the check (the main server and the main
+clients) activates the damage itself and sends it, all stamped with the
+same sim time. In a shared cockpit on VATSIM five main clients of one
+slave sim did this at once at the gate, and the engines then wouldn't
+start. Traffic in the TCAS list was never closer than 4 nm, so the
+"collision" was with an aircraft the list didn't show, or with an
+extrapolated position.
+
+- **Cost:** random, severe damage out of the blue, even on the ground;
+  in a shared cockpit it looks as if the slave sims are sending failures.
+- **Workaround:** a master frankenrouter keeps the setting off (one of its
+  enforced settings), and the bundled `known-good.situ` has it off.
+- **Request:** ignore traffic that is on the ground or far below/above,
+  or make the setting off by default; and let only the main server decide
+  on collision damage, not every instance.
+
 ## Documentation
 
 Things we had to learn from the forum, other addons' authors, or live
