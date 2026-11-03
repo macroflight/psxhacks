@@ -1,5 +1,14 @@
 # frankenweather changelog
 
+## 2.3.2 (2026-11-03)
+
+- **Change: a restart keeps the weather zones where they are.**
+  frankenweather now takes over the zones PSX already has when it starts,
+  if it placed them itself and they're all within 500 nm, instead of
+  placing all seven again, which moved the CBs on the weather radar. In a
+  new session, or after a situ somewhere else, they're placed fresh as
+  before.
+
 ## 2.3.1 (2026-11-03)
 
 - **Change: a paid Open-Meteo subscription that has used up its monthly
