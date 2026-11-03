@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026-11-03: version 1.37.0
 
 - **New: a slave router keeps other sims' PPR ADV presses out.** A
   router of type `slave` drops PrinterPush (`Qh415`, the printer's PPR ADV
