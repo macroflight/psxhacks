@@ -214,6 +214,10 @@ $FrankenpushOptions  = @()
 $FrankencontrolOptions = @()
 $FrankenboostproxyOptions = @()
 $PsxWinctrlPfpOptions = @()
+# Extra vPilot.exe command line arguments, e.g. @("-remote") when MSFS and
+# PSX are on different PCs ("/novoice" is added anyway when $RadioApp isn't
+# vPilot)
+$VpilotOptions = @()
 
 # Per-addon alternative psxhacks repo directory name.
 # Set to the name of a sibling directory to run that addon from a different

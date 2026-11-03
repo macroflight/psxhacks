@@ -1,5 +1,13 @@
 # start_scripts changelog
 
+## Unreleased
+
+- **New: `$VpilotOptions`, extra vPilot.exe arguments.** E.g.
+  `$VpilotOptions = @("-remote", "/novoice")` for vPilot's remote mode
+  when MSFS and PSX run on different PCs. `/novoice` is still added when
+  `$RadioApp` isn't `"vPilot"`, but not twice. See
+  `psxhacks-start-override-EXAMPLE.ps1`.
+
 ## 1.11.0 (2026-10-30)
 
 - **New: PSX navdata check.** `startsim_master.ps1` (before the PSX main

@@ -19,8 +19,14 @@ switch ($VpilotPlugin) {
     }
 }
 
-if ($RadioApp -ne "vPilot") {
-    Start-Process .\vPilot.exe -ArgumentList "/novoice"
+# $VpilotOptions from the override file (e.g. "-remote"), plus "/novoice"
+# when another app does the radio
+$vpilotArgs = @($VpilotOptions)
+if ($RadioApp -ne "vPilot" -and $vpilotArgs -notcontains "/novoice") {
+    $vpilotArgs += "/novoice"
+}
+if ($vpilotArgs.Count -gt 0) {
+    Start-Process .\vPilot.exe -ArgumentList $vpilotArgs
 } else {
     Start-Process .\vPilot.exe
 }

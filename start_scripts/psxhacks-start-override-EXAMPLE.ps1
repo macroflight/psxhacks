@@ -143,6 +143,9 @@
 # ---------------------------------------------------------------------------
 #$StartVpilot = $true   # vPilot VATSIM voice/text client
 #$VPilotDir    = "$SimBase\vPilot"
+# Extra vPilot.exe arguments, e.g. vPilot's remote mode when MSFS runs on
+# another PC ("/novoice" is added anyway when $RadioApp isn't "vPilot"):
+#$VpilotOptions = @("-remote", "/novoice")
 
 
 # ---------------------------------------------------------------------------
