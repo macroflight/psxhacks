@@ -1,5 +1,13 @@
 # frankenweather changelog
 
+## Unreleased
+
+- **Change: log times are UTC.** frankenweather's log (console, `--log`
+  and the per-run log) used the PC's local time, so on a PC set to
+  anything but UTC its times didn't line up with the router's and other
+  logs. The format is unchanged (`HH:MM:SS: ...`); the startup line now
+  says the times are UTC.
+
 ## 2.3.3 (2026-11-03)
 
 - **Change: moderate turbulence patches build up and die away.** A

@@ -9748,6 +9748,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             level=logging.INFO,
             datefmt="%H:%M:%S",
             handlers=handlers)
+        # Log times are UTC, like the router's and every other log in the sim
+        for handler in handlers:
+            handler.formatter.converter = time.gmtime
         self.logger = logging.getLogger(__MYNAME__)
         if self.args.debug:
             self.logger.setLevel(logging.DEBUG)
@@ -9756,7 +9759,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         else:
             self.logger.warning(
                 "Could not create a per-run event log under %s", _EVENT_LOG_DIR)
-        self.logger.info("frankenweather version %s starting", __version__)
+        self.logger.info("frankenweather version %s starting (log times are UTC)", __version__)
         self._warn_removed_args()
 
         if self.args.stations:
