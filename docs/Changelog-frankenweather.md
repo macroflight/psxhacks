@@ -1,5 +1,17 @@
 # frankenweather changelog
 
+## Unreleased
+
+- **Fix: no terrain turbulence from a faraway or old wind profile.** When
+  Open-Meteo is down, the terrain turbulence (mechanical, mountain wave,
+  rotor, shear) kept using the last wind profile it got, wherever and
+  whenever that was. On 2 November a profile from over the Gulf of Alaska
+  was still in use two hours later on final at Kamloops, 869 nm away: 50-59
+  kt of wind over the mountains gave moderate turbulence on short final,
+  with a real wind of 5 kt. Now the last profile is only used while it's
+  less than 100 nm away and less than an hour old; after that there's no
+  terrain turbulence until Open-Meteo answers again (logged once).
+
 ## 2.2.1 (2026-11-02)
 
 - **Fix: MSFS cloud sync no longer puts a cloud layer under the weather's

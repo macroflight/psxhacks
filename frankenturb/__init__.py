@@ -21,6 +21,7 @@ Quickstart
 
 import math
 import logging
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -35,6 +36,21 @@ from .cape import CapeFetcher, CapeSample, compute_cape_turbulence
 from .gairmet import GairmetFetcher, GairmetRegion, compute_gairmet_turbulence
 
 log = logging.getLogger(__name__)
+
+# When a wind fetch fails, the last profile is reused only while it's this
+# close (nm) and this fresh (s). During an Open-Meteo outage (2026-11-02) a
+# profile fetched over the Gulf of Alaska drove 50-59 kt mechanical
+# turbulence 2 h later on final at Kamloops, 869 nm away (real wind 5 kt).
+STALE_PROFILE_MAX_NM = 100.0
+STALE_PROFILE_MAX_S = 3600.0
+
+
+def _distance_nm(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Return the great circle distance in nm."""
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dlat, dlon = p2 - p1, math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlon / 2) ** 2
+    return 2 * 3440.065 * math.asin(min(1.0, math.sqrt(a)))
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +136,7 @@ class TurbulenceEngine:
         )
         self.wind_fetcher = WindFetcher(models=wind_models, proxy=om_proxy)
         self._last_profile: Optional[WindProfile] = None
+        self._last_profile_at = 0.0     # time.monotonic() when _last_profile was fetched
         self._fixed_profile: Optional[WindProfile] = None
 
     # ------------------------------------------------------------------
@@ -195,7 +212,9 @@ class TurbulenceEngine:
 
         Wind is sourced from the Open-Meteo multi-level profile (fetched
         and cached automatically).  If the wind fetch fails the previous
-        profile is reused; if none is available a calm state is returned.
+        profile is reused while it's within STALE_PROFILE_MAX_NM and
+        STALE_PROFILE_MAX_S; otherwise it's dropped and a calm state is
+        returned.
 
         Parameters
         ----------
@@ -224,6 +243,14 @@ class TurbulenceEngine:
 
         profile = self.wind_fetcher.get(lat, lon, sim_time_utc)
         if profile is None:
+            if self._last_profile is not None:
+                dist_nm = _distance_nm(lat, lon, self._last_profile.lat, self._last_profile.lon)
+                age_s = time.monotonic() - self._last_profile_at
+                if dist_nm > STALE_PROFILE_MAX_NM or age_s > STALE_PROFILE_MAX_S:
+                    log.info("Wind fetch failed and the last wind profile is %.0f nm away and "
+                             "%.0f min old: dropped, no terrain turbulence until a new one "
+                             "arrives", dist_nm, age_s / 60.0)
+                    self._last_profile = None
             if self._last_profile is None:
                 log.debug("No wind profile available — returning calm")
                 return TurbulenceState()
@@ -231,6 +258,7 @@ class TurbulenceEngine:
             profile = self._last_profile
         else:
             self._last_profile = profile
+            self._last_profile_at = time.monotonic()
 
         return self.model.compute(lat, lon, alt_ft, profile)
 
