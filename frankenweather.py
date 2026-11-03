@@ -2258,6 +2258,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self.zone_cb_close_cap: dict = {}
         self._cb_close_grace_until = time.monotonic() + _CB_CLOSE_START_GRACE_S
         self._zones_placed_before_sigmets = False   # see the zone update loop
+        # Whether the zones PSX already had at startup were checked (see
+        # _adopt_psx_zones()); once per process
+        self._psx_zones_checked = False
         self._zone_wx_pos: dict = {}
         # zone_num → distance (nm) to the aircraft captured at the moment the
         # zone was last (re)placed; consumed (popped) by _ramp_cb_wx() the
@@ -6380,6 +6383,49 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._place_all_zones()
         return True
 
+    def _adopt_psx_zones(self) -> bool:
+        """At startup, keep PSX's 7 zones if they're ours and near; return True if kept.
+
+        After a frankenweather restart PSX still has the zones of the run
+        before (WxAutoSet stays 0), and placing them all again moved the
+        CBs on the weather radar (user, 2026-11-03). They're kept only if
+        PSX isn't running its own weather, all 7 parse with one of our
+        names (an ICAO or a grid name, plus PSX's 3-character suffix) and
+        all are within _REPOSITION_DIST_NM; else they're placed as usual.
+        Each zone's Wx is kept too, so CB fades continue from it.
+        """
+        if self._psx_zones_checked or self.psx is None:
+            return False
+        self._psx_zones_checked = True
+        if self.psx.get("WxAutoSet") != "0":
+            return False
+        zones = {}
+        for zone_num in range(1, 8):
+            raw = self.psx.get(f"WxMode{zone_num}") or ""
+            pos = parse_wx_zone_position(raw)
+            fields = raw.split(';')
+            name = fields[5][:-3] if len(fields) == 6 and len(fields[5]) > 3 else ""
+            if pos is None or not re.fullmatch(r"[A-Z0-9]{3,6}", name):
+                return False
+            lat, lon, _ = pos
+            if self._dist_nm(self.ac_lat, self.ac_lon, lat, lon) > _REPOSITION_DIST_NM:
+                return False
+            zones[zone_num] = (lat, lon, name, raw)
+        self._zones_placed_before_sigmets = not self._own_sigmets_applied
+        for zone_num, (lat, lon, name, raw) in zones.items():
+            self.zone_positions[zone_num] = (lat, lon, name)
+            self.zone_mode[zone_num] = raw
+            wx = self.psx.get(f"Wx{zone_num}")
+            if wx:
+                self.zone_wx[zone_num] = wx
+            self.zone_placement_reason[zone_num] = "kept from before restart"
+            az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
+            self.zone_cb_create_dist_nm[zone_num] = dist_m / _NM_TO_M
+            self.logger.info(
+                "Zone %d: kept from before restart at %s @ %.3f/%.3f  %.0f°/%.0fnm",
+                zone_num, name, lat, lon, az % 360, dist_m / _NM_TO_M)
+        return True
+
     def _place_all_zones(self, keep_cb_turb: bool = False) -> None:
         """Place all 7 zones randomly around the aircraft (startup, reposition, maneuvering).
 
@@ -8709,7 +8755,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return True
         return self._conflict_paused()
 
-    async def weather_update_coro(self) -> None:  # pylint: disable=too-many-branches
+    async def weather_update_coro(self) -> None:  # pylint: disable=too-many-branches,too-many-statements
         """Periodically update PSX weather zones from Open-Meteo."""
         myname = inspect.currentframe().f_code.co_name
         last_update_time = 0.0
@@ -8744,7 +8790,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     if self._fw_mode == "disabled":
                         any_relocated = False
                     elif not self.zone_positions:
-                        self._place_all_zones()
+                        if not self._adopt_psx_zones():
+                            self._place_all_zones()
                         any_relocated = True
                     elif any(self._dist_nm(self.ac_lat, self.ac_lon, lat, lon) >
                              _REPOSITION_DIST_NM

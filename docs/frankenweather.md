@@ -314,6 +314,12 @@ whose CB turbulence can still reach the aircraft (its core plus flank
 zone, or plus the anvil zone above the cloud top), for any reason: the
 turbulence would stop at once.
 
+When frankenweather is restarted, it keeps the zones PSX already has, if
+frankenweather placed them (PSX isn't running its own weather) and all
+seven are within 500 nm, so the CBs on the weather radar stay where they
+are; it logs "Zone N: kept from before restart". Otherwise (a new
+session, a situ somewhere else) it places them all fresh.
+
 PSX takes the local weather (QNH, wind) from the nearest zone. When every
 zone is more than 150 nm away (zones placed far ahead, or in TS/TC SIGMET
 areas), one zone becomes an "anchor" 50 nm behind the aircraft, without
