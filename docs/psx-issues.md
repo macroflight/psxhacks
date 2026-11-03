@@ -274,9 +274,11 @@ Every PSX instance that runs the check (the main server and the main
 clients) activates the damage itself and sends it, all stamped with the
 same sim time. In a shared cockpit on VATSIM five main clients of one
 slave sim did this at once at the gate, and the engines then wouldn't
-start. Traffic in the TCAS list was never closer than 4 nm, so the
-"collision" was with an aircraft the list didn't show, or with an
-extrapolated position.
+start. No aircraft in the list was at the ownship then. One had just
+landed and was rolling towards it: 0.86 nm away, closing at about 100
+kt, when it left the list 25 s before the damage. At its last speed it
+would have passed about 300 m away at the moment of the damage (not yet
+confirmed that PSX keeps moving a target that has left the list).
 
 - **Cost:** random, severe damage out of the blue, even on the ground;
   in a shared cockpit it looks as if the slave sims are sending failures.
