@@ -115,6 +115,11 @@ FRDP_ROUTERINFO_INTERVAL = 10.0
 
 # How often to send FRDP SHAREDINFO (also sent after certain events, e.g router connects to network)
 FRDP_SHAREDINFO_INTERVAL = 10.0
+
+# A client sending TfcPos at least this often counts as a traffic sender
+# (see Frankenrouter._traffic_sender_errors())
+TRAFFIC_SENDER_WINDOW_S = 60.0
+TRAFFIC_SENDER_MIN_COUNT = 3
 # How long the crew alertness monitor's test (PILOT RESPONSE warning and
 # sound) stays up, unless crew input clears it first
 CREW_ALERTNESS_TEST_S = 30.0
@@ -3389,6 +3394,33 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         except OSError:
             self.logger.warning("Failed to launch clock sync script %s", script, exc_info=True)
 
+    def _traffic_sender_errors(self):
+        """Return errors for clients sending traffic (TfcPos) that shouldn't.
+
+        Only one client, on the traffic master sim, should send TfcPos.
+        A client counts when it sent at least TRAFFIC_SENDER_MIN_COUNT in
+        the last TRAFFIC_SENDER_WINDOW_S (vPilot sends every 5 s), so a PSX
+        main client's single write when it connects doesn't count.
+        """
+        def recent(times):
+            count = sum(1 for t in times if now - t < TRAFFIC_SENDER_WINDOW_S)
+            return count >= TRAFFIC_SENDER_MIN_COUNT
+
+        now = time.perf_counter()
+        errors = []
+        clients = list(self.clients.values())
+        local = [c.display_name for c in clients
+                 if not c.is_frankenrouter and recent(c.traffic_times)]
+        if len(local) > 1:
+            errors.append(f"More than one client is sending traffic (TfcPos): {', '.join(local)}")
+        for con in clients:
+            if con.is_frankenrouter and recent(con.traffic_dropped_times):
+                errors.append(
+                    f"Dropping traffic (TfcPos) from {con.display_name}: its sim"
+                    f" is not the traffic master"
+                    f" ({self.sharedinfo['traffic_source_simulator']})")
+        return errors
+
     def get_errors(self):  # pylint: disable=too-many-branches,too-many-locals
         """Return errors for this router (sent in FRDP ROUTERINFO)."""
         errors = []
@@ -3440,6 +3472,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             errors.append(
                 f"More than one sim is sending vPilot traffic data:"
                 f" {filterstatus['traffic']['disabled']}")
+        errors.extend(self._traffic_sender_errors())
         # "No sim is sending" is a network-wide check: only the master sim router
         # has a complete view, so only it should report these errors.
         if self.get_router_type() == 'master':

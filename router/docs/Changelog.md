@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- **Change: only the traffic master sim supplies traffic, from any
+  client.** A router whose sim isn't the traffic master used to drop
+  traffic (`TfcPos`/`TfcVel`, `Qs450`/`Qs451`) only from a client named
+  vPilot. One sim's vPilot ran the PSX.NET plugin twice, and the copy
+  that never sent a name fed the master sim for days, alongside the real
+  traffic master. Now such a router drops traffic from all its clients.
+  The master router also drops traffic from a slave router (any version)
+  whose sim isn't the traffic master, and from its own clients when
+  another sim is. With no traffic master, the master accepts all, as
+  before.
+- **New: errors for unexpected traffic senders.** "More than one client
+  is sending traffic (TfcPos)" when two clients of one router each sent
+  it at least 3 times in the last minute, and, on the master, "Dropping
+  traffic (TfcPos) from a slave router: its sim is not the traffic master".
+  A PSX main client's single write when it connects doesn't count.
+
 ## 2026-11-03: version 1.38.0
 
 - **New: PSX's "Collision causes damage" is always turned off.** With

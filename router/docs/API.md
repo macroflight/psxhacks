@@ -15,8 +15,8 @@ changed it in the config file).
 
 If you open <http://127.0.0.1:8747/filter> you get a small control panel
 that lets see the status of the filter that prevents MSFS elevation
-data from being forwarded and the filter that prevents vPilot
-traffic/TCAS data from being forwarded. You can also toggle the filters
+data from being forwarded and the filter that prevents traffic/TCAS
+data (from vPilot or any other client) from being forwarded. You can also toggle the filters
 from there.
 
 ### Mini web page: /upstream

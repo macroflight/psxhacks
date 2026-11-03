@@ -1369,6 +1369,35 @@ class Rules():  # pylint: disable=too-many-public-methods
         """
         return self.myreturn(RulesAction.DROP, RulesCode.EXIT)
 
+    def traffic_drop_reason(self):
+        """Return why traffic (TfcPos/TfcVel) from self.sender must be dropped, or None.
+
+        Only the traffic master sim may supply traffic, from any of its
+        clients. Checking names is not enough: on 2026-11-03 one sim's
+        vPilot ran the PSX.NET plugin twice, and the copy that never sent
+        name= fed the master sim while another sim was traffic master.
+        - A router that isn't the traffic master's (filter_traffic) drops
+          traffic from all its own clients, named or not.
+        - The SHAREDINFO authority also drops traffic from a router of
+          another sim than the traffic master (covers older slave routers),
+          and from its own clients when another sim is the traffic master.
+        No traffic master (NOSIM) lets the master accept all, as before.
+        """
+        if not self.sender.is_frankenrouter and self.router.filter_traffic:
+            return "this sim is not the traffic master"
+        if not self.router.is_sharedinfo_authority():
+            return None
+        source = self.router.sharedinfo.get('traffic_source_simulator', 'NOSIM')
+        if source in (None, 'NOSIM'):
+            return None
+        if self.sender.is_frankenrouter:
+            sender_sim = self.sender.simulator_name
+        else:
+            sender_sim = self.router.config.identity.simulator
+        if sender_sim != source:
+            return f"{sender_sim} is not the traffic master ({source})"
+        return None
+
     def myreturn(self, action, code, message=None, extra_data=None):
         """Return a routing decision."""
         return (action, code, message, extra_data)
@@ -1705,14 +1734,18 @@ class Rules():  # pylint: disable=too-many-public-methods
                 pass
 
         if not self.sender.upstream and key in TRAFFIC_KEYWORDS:
-            # Filter traffic injection from vPilot if filter is enabled
-            # We use SILENT filtering since this will happen often
-            if self.router.filter_traffic:
-                if "vPilot" in self.sender.display_name:
-                    return self.myreturn(
-                        RulesAction.DROP,
-                        RulesCode.KEYVALUE_FILTERED_INGRESS_SILENT,
-                        message=f"filtered {key} as filter_traffic is set")
+            # Only the traffic master sim may supply traffic. We use
+            # SILENT filtering since vPilot keeps sending while filtered.
+            reason = self.traffic_drop_reason()
+            if key == 'Qs450':
+                self.sender.traffic_times.append(time.perf_counter())
+                if reason:
+                    self.sender.traffic_dropped_times.append(time.perf_counter())
+            if reason:
+                return self.myreturn(
+                    RulesAction.DROP,
+                    RulesCode.KEYVALUE_FILTERED_INGRESS_SILENT,
+                    message=f"filtered {key}: {reason}")
 
         # A real upstream's (or another frankenrouter relaying its own
         # upstream's) welcome message includes a "Lexicon" -- raw entries
@@ -1965,6 +1998,7 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             self.observer_session_password = None
             self.observer_mode = False
             self.sharedinfo = {"pilot_flying_simulator": "NO_CONTROL_LOCKS"}
+            self.filter_traffic = False
             self.load_marker_pause_enabled = False
             self.load_marker_pause_delay = 0.1
 
@@ -2002,6 +2036,8 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             self.client_provided_id = None
             self.client_provided_display_name = None
             self.is_frankenrouter = False
+            self.traffic_times = []
+            self.traffic_dropped_times = []
             self.frdp_subscribed = False
             self.auth_nonce = None
             self.upstream = False
@@ -2010,7 +2046,7 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             # the post-connect quarantine unless they opt in.
             self.connected_at = time.perf_counter() - 3600
 
-    class DummyClientConnection(DummyConnection):  # pylint: disable=too-few-public-methods
+    class DummyClientConnection(DummyConnection):  # pylint: disable=too-few-public-methods,too-many-instance-attributes
         """Implement small parts of the router for unit testing."""
 
         def __init__(self, peername):
@@ -3329,3 +3365,53 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
                              (line, age))
         self.assertEqual(self._quarantine_route(rules, "Qs329=0;1", peer, 19.0), quarantined)
         self.assertEqual(self._quarantine_route(rules, "Qs329=0;1", peer, 21.0), normal)
+
+    def test_traffic_only_from_traffic_master(self):
+        """Only the traffic master sim's clients may send TfcPos/TfcVel."""
+        tfc = "Qs450=0.22817;-1.03845;1961;7559"
+
+        def route(rules, peer):
+            return rules.route(tfc, peer)[0]
+
+        # Slave, not the traffic master: drop from all clients, named or not
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+        router.filter_traffic = True
+        named = self.DummyClientConnection(('127.0.0.1', 62205))
+        named.display_name = 'vPilot Plugin'
+        unnamed = self.DummyClientConnection(('127.0.0.1', 62215))
+        for peer in (named, unnamed):
+            self.assertEqual(route(rules, peer), RulesAction.DROP)
+            self.assertEqual(len(peer.traffic_times), 1)
+            self.assertEqual(len(peer.traffic_dropped_times), 1)
+        self.assertEqual(rules.route("Qs451=0;1;2", unnamed)[0], RulesAction.DROP)
+        self.assertEqual(len(unnamed.traffic_times), 1)  # only Qs450 counts
+        # Slave that is the traffic master: forward
+        router.filter_traffic = False
+        self.assertNotEqual(route(rules, unnamed), RulesAction.DROP)
+
+        # Master
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+        router.config.identity.type = 'master'
+        slave = self.DummyClientConnection(('10.0.0.2', 50000))
+        slave.is_frankenrouter = True
+        slave.simulator_name = 'OtherSim'
+        local = self.DummyClientConnection(('127.0.0.1', 50001))
+        # No traffic master: accept all
+        router.sharedinfo['traffic_source_simulator'] = 'NOSIM'
+        self.assertNotEqual(route(rules, slave), RulesAction.DROP)
+        self.assertNotEqual(route(rules, local), RulesAction.DROP)
+        # Another sim is traffic master: drop from this slave and own clients
+        router.sharedinfo['traffic_source_simulator'] = 'ThirdSim'
+        self.assertEqual(route(rules, slave), RulesAction.DROP)
+        self.assertEqual(route(rules, local), RulesAction.DROP)
+        self.assertEqual(len(slave.traffic_dropped_times), 1)
+        # The slave's sim is traffic master
+        router.sharedinfo['traffic_source_simulator'] = 'OtherSim'
+        self.assertNotEqual(route(rules, slave), RulesAction.DROP)
+        self.assertEqual(route(rules, local), RulesAction.DROP)
+        # The master's own sim is traffic master
+        router.sharedinfo['traffic_source_simulator'] = 'MySim'
+        self.assertEqual(route(rules, slave), RulesAction.DROP)
+        self.assertNotEqual(route(rules, local), RulesAction.DROP)

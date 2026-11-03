@@ -96,6 +96,11 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         self.bytes_sent = 0
         self.bytes_received = 0
 
+        # When this connection last sent TfcPos (Qs450), and when one was
+        # dropped as not from the traffic master (see get_errors())
+        self.traffic_times = collections.deque(maxlen=20)
+        self.traffic_dropped_times = collections.deque(maxlen=20)
+
         # Set to true if the connection is to another frankenrouter
         self.is_frankenrouter = False
 
