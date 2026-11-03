@@ -580,7 +580,10 @@ wailer, and slave sims sent their old weather up to two minutes after
 joining. Every router type does this (on the master it catches slave
 sims joining; on a slave, its own PSX instances restarting). Writes after
 the quarantine, e.g. a malfunction set from a slave sim or manual
-weather, pass. Upstream is never quarantined.
+weather, pass. Upstream is never quarantined. A welcome reset ("Reset
+clients", or the automatic one, see `client_auto_reset_delay`) restarts
+the quarantine for that client, since a PSX main client writes the same
+values after any welcome.
 
 The built-in table:
 
@@ -730,7 +733,19 @@ frdp_rtt_warning = 0.5
   since many clients put a version number in their name: `"PSX FO"`
   matches `PSX FO 10.195`. Empty by default, so nothing is pre-selected;
   you can always tick clients by hand on the page. Replaces
-  `client_reset_blacklist`, which is now ignored with a warning.
+  `client_reset_blacklist`, which is now ignored with a warning. These
+  clients also get the automatic reset, see `client_auto_reset_delay`.
+
+- `client_auto_reset_delay`: defaults to `15` (seconds). Only applies to
+  a router of type `slave`. That long after a `client_reset_whitelist`
+  client's first welcome, the router resets it once, as the "Reset
+  clients" button does. A PSX main client that has just started gets its
+  welcome while it's still loading its own start situ, and that load
+  then overwrites part of the welcome inside the client. On 2026-11-03
+  this left one client or another with DRIVE DISC lights on, a wrong
+  standby horizon or IAS, no wind corridor or no SIGMETs. It writes some
+  of these values for about 8 s after its welcome; others never show on
+  the network. A reset after that fixed every case. `0` turns this off.
 
 - `master_drop_check_switches`: defaults to `true`. Only applies to a
   router of type `master`. MSROUTER, an MCP bridge in a slave sim, shows
@@ -796,6 +811,7 @@ Example:
 ```text
 [filtering]
 client_reset_whitelist = ["PSX Captain", "PSX FO"]
+client_auto_reset_delay = 15
 notify_filtered_non_q_keywords = ["addon", "cduC"]
 ```
 

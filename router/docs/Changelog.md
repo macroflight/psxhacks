@@ -21,6 +21,17 @@
   enforces (traffic under external control, PSX's ATIS off) and has no
   traffic in it, so a PSX instance started from it doesn't send old
   traffic to the network.
+- **New: a slave router resets each PSX main client once, 15 s after it
+  joins.** A freshly started PSX main client gets its welcome while it's
+  still loading its own start situ, and that load then overwrites part
+  of the welcome inside the client: DRIVE DISC lights on, a wrong
+  standby horizon or IAS, no wind corridor or no SIGMETs, until someone
+  pressed "Reset clients". Now the router does that reset itself, for
+  the clients on `[filtering] client_reset_whitelist`.
+  `[filtering] client_auto_reset_delay` sets the delay; `0` turns it off.
+- **Change: a welcome reset restarts the post-connect quarantine.** A
+  PSX main client writes the same stale values (e.g. `MfEvent`, its own
+  SIGMETs) after a reset as after its first welcome; they used to pass.
 
 ## 2026-11-03: version 1.38.0
 

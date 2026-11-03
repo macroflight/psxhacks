@@ -254,7 +254,7 @@ _DEFAULT_GROUND_HANDLING_FORWARD_NAMES = [
 
 
 class _RouterConfigFiltering:  # pylint: disable=missing-class-docstring,too-few-public-methods,too-many-instance-attributes
-    def __init__(self, data):
+    def __init__(self, data):  # pylint: disable=too-many-branches
         # display_name values of clients that addon=GROUND.HANDLING
         # (PSX.NET Orchestration ground-handling protocol) messages should
         # be forwarded to, in addition to upstream/downstream
@@ -287,6 +287,15 @@ class _RouterConfigFiltering:  # pylint: disable=missing-class-docstring,too-few
             raise RouterConfigError("filtering client_reset_whitelist entries must be strings")
         if not all(k.strip() for k in self.client_reset_whitelist):
             raise RouterConfigError("filtering client_reset_whitelist entries must not be empty")
+        # Seconds after a whitelisted client's first welcome before a slave
+        # router resets it once by itself (see Frankenrouter.
+        # _housekeeping_auto_reset_clients()); 0 turns that off.
+        self.client_auto_reset_delay = data.get('client_auto_reset_delay', 15.0)
+        delay = self.client_auto_reset_delay
+        if isinstance(delay, bool) or not isinstance(delay, (int, float)) or delay < 0:
+            raise RouterConfigError(
+                "filtering client_auto_reset_delay must be a number of seconds, 0 or more")
+        self.client_auto_reset_delay = float(self.client_auto_reset_delay)
         # Replaced by client_reset_whitelist: still accepted (so old config
         # files load), but ignored with a warning.
         self.client_reset_blacklist_present = 'client_reset_blacklist' in data
@@ -1060,6 +1069,16 @@ keywords = ["Qs123"]
             RouterConfig(config_data="[filtering]\nnotify_filtered_non_q_keywords = 'nope'\n")
         with self.assertRaises(RouterConfigError):
             RouterConfig(config_data="[filtering]\nnotify_filtered_non_q_keywords = [1, 2]\n")
+
+    def test_client_auto_reset_delay(self):
+        """client_auto_reset_delay defaults to 15 s; 0 turns it off; must be a number >= 0."""
+        conf = RouterConfig(config_data="")
+        self.assertEqual(conf.filtering.client_auto_reset_delay, 15.0)
+        conf = RouterConfig(config_data="[filtering]\nclient_auto_reset_delay = 0\n")
+        self.assertEqual(conf.filtering.client_auto_reset_delay, 0.0)
+        for bad in ("-1", "true", "'15'"):
+            with self.assertRaises(RouterConfigError):
+                RouterConfig(config_data=f"[filtering]\nclient_auto_reset_delay = {bad}\n")
 
     def test_client_reset_whitelist(self):
         """client_reset_whitelist entries are case-insensitive display name prefixes."""

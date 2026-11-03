@@ -1347,6 +1347,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             await send_line(f"name=frankenrouter:{self.config.identity.simulator}")
 
         client.welcome_sent = True
+        client.welcome_done_at = time.perf_counter()
         welcome_keyword_count = len(client.welcome_keywords_sent)
         client.welcome_keywords_sent = set()
         send_time = max(time.perf_counter() - start_time, 1e-9)  # protect against div by 0
@@ -1394,7 +1395,39 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         """
         client.welcome_sent = False
         client.welcome_keywords_sent = set()
+        # The client writes its startup values again after this welcome
+        client.quarantine_restarted_at = time.perf_counter()
         await self.client_add_to_network(client)
+
+    async def _housekeeping_auto_reset_clients(self):
+        """Reset each PSX main client's welcome once, a while after its first welcome.
+
+        A PSX main client that has just started gets its welcome while it
+        is still loading its own start situ, and that load then overwrites
+        part of the welcome in the client: seen 2026-11-03 as DRIVE DISC
+        lights on, a wrong standby horizon and IAS, no wind corridor and
+        no SIGMETs, in one client or another. It writes some of those
+        values for about 8 s after its welcome (most are dropped by the
+        post-connect quarantine), others never show on the network. A
+        welcome reset after that fixes the client, as the /utils "Reset
+        clients" button does. Slave routers only, like that button, and
+        only clients on client_reset_whitelist.
+        """
+        delay = self.config.filtering.client_auto_reset_delay
+        if delay <= 0 or self.config.identity.type != 'slave':
+            return
+        now = time.perf_counter()
+        whitelisted = self.config.filtering.client_reset_whitelisted
+        due = [client for client in self.resettable_clients()
+               if not client.auto_reset_done and client.welcome_done_at is not None
+               if now - client.welcome_done_at >= delay and whitelisted(client.display_name)]
+        for client in due:
+            client.auto_reset_done = True
+            self.logger.info(
+                "Automatic welcome reset of %s, %.0f s after its first welcome",
+                client.display_name, now - client.welcome_done_at)
+        if due:
+            await self.reset_client_welcomes(due)
 
     def resettable_clients(self):
         """Return locally-connected, non-frankenrouter clients eligible for a welcome reset.
@@ -4264,6 +4297,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 await self._housekeeping_cdu_menus()
                 await self._housekeeping_crew_alertness()
                 await self._housekeeping_no_upstream_warning()
+                await self._housekeeping_auto_reset_clients()
                 if time.perf_counter() - last_run > HOUSEKEEPING_INTERVAL:
                     last_run = time.perf_counter()
                     self.logger.debug("Performing housekeeping")

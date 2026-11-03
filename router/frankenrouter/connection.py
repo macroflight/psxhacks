@@ -69,6 +69,14 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
 
         # Connection time
         self.connected_at = time.perf_counter()
+        # When a welcome reset last restarted the post-connect quarantine
+        # (0.0 = never; see Rules.post_connect_quarantine())
+        self.quarantine_restarted_at = 0.0
+        # When this client's last welcome finished, and whether the
+        # automatic welcome reset has been done (see
+        # Frankenrouter._housekeeping_auto_reset_clients())
+        self.welcome_done_at = None
+        self.auto_reset_done = False
 
         # Set to True if the connection is being closed
         self.is_closing = False

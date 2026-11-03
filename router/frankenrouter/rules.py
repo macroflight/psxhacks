@@ -350,12 +350,15 @@ class Rules():  # pylint: disable=too-many-public-methods
     def post_connect_quarantine(self, key):
         """Drop a quarantined variable from a connection that has only just connected.
 
-        Returns the DROP result, or None if the write may pass. See
-        QUARANTINE_VARIABLES.
+        A welcome reset (Frankenrouter.reset_client_welcome()) restarts
+        the quarantine: a PSX main client writes the same values after a
+        reset welcome as after its first one. Returns the DROP result, or
+        None if the write may pass. See QUARANTINE_VARIABLES.
         """
         if self._quarantine is None:
             self._build_quarantine()
-        age = time.perf_counter() - self.sender.connected_at
+        age = time.perf_counter() - max(self.sender.connected_at,
+                                        self.sender.quarantine_restarted_at)
         if age >= self._quarantine_max_s:
             return None
         name = self.router.variables.get_variable_name(key)
@@ -370,7 +373,7 @@ class Rules():  # pylint: disable=too-many-public-methods
                 fw_exempt and self.sender.client_provided_id == _FRANKENWEATHER_CLIENT_ID):
             return None
         self.logger.info(
-            "Quarantine: dropping %s from %s, connected %.1f s ago (< %.0f s): %s",
+            "Quarantine: dropping %s from %s, connected or reset %.1f s ago (< %.0f s): %s",
             name, self.sender.display_name, age, seconds, self.line[:200])
         return self.myreturn(RulesAction.DROP, RulesCode.POST_CONNECT_QUARANTINE)
 
@@ -2036,6 +2039,7 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             self.client_provided_id = None
             self.client_provided_display_name = None
             self.is_frankenrouter = False
+            self.quarantine_restarted_at = 0.0
             self.traffic_times = []
             self.traffic_dropped_times = []
             self.frdp_subscribed = False
@@ -3415,3 +3419,18 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         router.sharedinfo['traffic_source_simulator'] = 'MySim'
         self.assertEqual(route(rules, slave), RulesAction.DROP)
         self.assertNotEqual(route(rules, local), RulesAction.DROP)
+
+    def test_post_connect_quarantine_restarts_on_reset(self):
+        """A welcome reset restarts the quarantine of an old connection."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+        peer = self._quarantine_peer(router)
+        peer.connected_at = time.perf_counter() - 3600
+        (_, code, *_) = rules.route("Qi130=1", peer)
+        self.assertNotEqual(code, RulesCode.POST_CONNECT_QUARANTINE)
+        peer.quarantine_restarted_at = time.perf_counter() - 1.0
+        (_, code, *_) = rules.route("Qi130=1", peer)
+        self.assertEqual(code, RulesCode.POST_CONNECT_QUARANTINE)
+        peer.quarantine_restarted_at = time.perf_counter() - 31.0
+        (_, code, *_) = rules.route("Qi130=1", peer)
+        self.assertNotEqual(code, RulesCode.POST_CONNECT_QUARANTINE)
