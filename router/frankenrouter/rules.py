@@ -105,6 +105,12 @@ PTT_TO_GROUND_HANDLING = {
 # (client id _FRANKENWEATHER_CLIENT_ID) sends all the weather right after
 # it connects, and its name always comes first on a new connection. The
 # [quarantine] config section can change the times and add variables.
+# PrinterPush: the printer's PPR ADV button (0 pressed, -1 released). A
+# slave router drops it from upstream ([filtering] slave_drop_printer_push):
+# frankenprint feeds the real paper on a press, and other sims' crews don't
+# want theirs fed (2026-11-03).
+PRINTER_PUSH_KEYWORD = 'Qh415'
+
 QUARANTINE_DEFAULT_S = 60.0
 QUARANTINE_WEATHER_S = 120.0
 QUARANTINE_WEATHER_VARIABLES = (
@@ -1469,6 +1475,15 @@ class Rules():  # pylint: disable=too-many-public-methods
         if key == 'layout':
             return self.handle_layout()
 
+        if (
+                key == PRINTER_PUSH_KEYWORD and
+                self.sender.upstream and
+                self.router.config.identity.type == 'slave' and
+                self.router.config.filtering.slave_drop_printer_push
+        ):
+            self.logger.debug("Dropping %s from upstream (printer PPR ADV)", self.line)
+            return self.myreturn(RulesAction.DROP, RulesCode.KEYVALUE_FILTERED_INGRESS_SIM_LOCAL)
+
         if not self.sender.upstream:
             quarantined = self.post_connect_quarantine(key)
             if quarantined is not None:
@@ -1918,6 +1933,7 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
                 'PSX.NET EFB For Windows', 'PSX.NET.Orchestration', 'BA ACARS Simulation']
             self.ptt_ground_handling_translation = True
             self.master_drop_check_switches = True
+            self.slave_drop_printer_push = True
 
     class DummyConfig():  # pylint: disable=too-few-public-methods
         """Implement small parts of the router for unit testing."""
@@ -3128,6 +3144,28 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         router.config.filtering.master_drop_check_switches = False
         (action, code, *_) = rules.route("Qs419=CHECK SWITCHES", testpeer)
         self.assertEqual(action, RulesAction.NORMAL)
+
+    def test_slave_drop_printer_push(self):
+        """A slave drops PrinterPush (PPR ADV) from upstream only, unless turned off."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+        router.upstream = self.DummyUpstreamConnection()
+        router.clients = {
+            ('127.0.0.1', 12345): self.DummyClientConnection(('127.0.0.1', 12345)),
+        }
+        local = router.clients[('127.0.0.1', 12345)]
+        dropped = (RulesAction.DROP, RulesCode.KEYVALUE_FILTERED_INGRESS_SIM_LOCAL)
+        for value in ('0', '-1'):
+            self.assertEqual(rules.route(f"Qh415={value}", router.upstream)[:2], dropped)
+        # From this sim's own clients: passes
+        self.assertEqual(rules.route("Qh415=0", local)[:2],
+                         (RulesAction.NORMAL, RulesCode.KEYVALUE_NORMAL))
+        # Not on a master, and not when turned off
+        router.config.identity.type = 'master'
+        self.assertNotEqual(rules.route("Qh415=0", router.upstream)[:2], dropped)
+        router.config.identity.type = 'slave'
+        router.config.filtering.slave_drop_printer_push = False
+        self.assertNotEqual(rules.route("Qh415=0", router.upstream)[:2], dropped)
 
     def test_ptt_ground_handling_translation(self):
         """Test that a cross-sim PTT drop synthesizes an addon=GROUND.HANDLING PTT event."""

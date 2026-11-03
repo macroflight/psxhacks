@@ -733,6 +733,13 @@ frdp_rtt_warning = 0.5
   reach PSX or the other sims, which may have identical MCPs. Each drop
   is logged at `INFO`. The clear (`Qs419=`) and any other `Qs419` text are
   forwarded as usual. Set to `false` to forward CHECK SWITCHES too.
+- `slave_drop_printer_push`: defaults to `true`. Only applies to a router
+  of type `slave`. It drops PrinterPush (`Qh415`, the printer's PPR ADV
+  button: `0` pressed, `-1` released) coming from the upstream, i.e. from
+  the master and the other sims. frankenprint feeds the real paper on a
+  press, so another sim's press would feed this sim's paper too. This
+  sim's own presses still reach its frankenprint and the master. Set to
+  `false` to let other sims' presses through.
 
 - `cdu_menu_tracking`: defaults to `false`. Set to `true` to keep track
   of the menu prompts addons put on a CDU's MENU page (`cduL`, `cduC`,

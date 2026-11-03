@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **New: a slave router keeps other sims' PPR ADV presses out.** A
+  router of type `slave` drops PrinterPush (`Qh415`, the printer's PPR ADV
+  button) coming from its upstream: frankenprint feeds the real paper on a
+  press, and another sim's press shouldn't feed this sim's paper. On by
+  default; `[filtering] slave_drop_printer_push = false` turns it off.
+
 ## 2026-11-03: version 1.36.0
 
 - **New: post-connect quarantine.** For a while after a program

@@ -290,6 +290,12 @@ class _RouterConfigFiltering:  # pylint: disable=missing-class-docstring,too-few
         self.master_drop_check_switches = data.get('master_drop_check_switches', True)
         if not isinstance(self.master_drop_check_switches, bool):
             raise RouterConfigError("filtering master_drop_check_switches must be true or false")
+        # A slave router drops PrinterPush (Qh415, the printer's PPR ADV
+        # button) from its upstream: frankenprint feeds the real paper on a
+        # press, and another sim's press shouldn't feed this sim's paper.
+        self.slave_drop_printer_push = data.get('slave_drop_printer_push', True)
+        if not isinstance(self.slave_drop_printer_push, bool):
+            raise RouterConfigError("filtering slave_drop_printer_push must be true or false")
 
         # Track addon CDU menu prompts (cduL/cduC/cduR, see cdumenus.py):
         # a critical error when two addons register the same position,
@@ -1059,6 +1065,14 @@ keywords = ["Qs123"]
         conf = RouterConfig(config_data="[filtering]\nclient_reset_blacklist = ['PSX Sound']\n")
         self.assertTrue(conf.filtering.client_reset_blacklist_present)
         self.assertFalse(conf.filtering.client_reset_whitelisted('PSX Sound'))
+
+    def test_slave_drop_printer_push(self):
+        """Slave_drop_printer_push defaults to true and can be turned off."""
+        self.assertTrue(RouterConfig(config_data="").filtering.slave_drop_printer_push)
+        conf = RouterConfig(config_data="[filtering]\nslave_drop_printer_push = false\n")
+        self.assertFalse(conf.filtering.slave_drop_printer_push)
+        with self.assertRaises(RouterConfigError):
+            RouterConfig(config_data="[filtering]\nslave_drop_printer_push = 'no'\n")
 
     def test_master_drop_check_switches(self):
         """master_drop_check_switches defaults to true and can be turned off."""
