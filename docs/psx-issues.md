@@ -221,6 +221,47 @@ oscillated at ~117 messages/s and flooded every client.
 - **Request:** a timeout on held momentary switches, or edge-triggered
   variants.
 
+## Networking and shared cockpit
+
+### A PSX main client sends some of its own values right after connecting
+
+*Confirmed (2026-11-02, WorldFlight; slave router traffic logs).* A PSX
+main client that has just connected (here through a slave sim's router
+to the shared cockpit) writes a few of its own values within 0.1-0.3 s,
+before it has taken over the server's. Not its whole state: three to
+eight variables per client, from this set: `Qi272`, `Qi225` CrashInhib,
+`Qi130` MfEvent, `Qi190` MaweaBits, `Qs546` TkofRefNg, `Qs497`
+WxCorridorSel, `Qs498` WxCorridorTxt and `Qs499` WxSigmet. One of a sim's
+two main clients sent `Qi190` every time, the other never did. At the
+CYVR gate this set `Qi190` to 257 (the A/P disconnect wailer bit) and
+`Qs499` to `#` (no SIGMETs) in the shared cockpit; the same client did it
+again after a restart (`Qi190` 257 then 2305). In a similar case
+(2026-10-22) a slave sim's PSX instances sent `MfAcBus1`-`4`,
+`ElecSysBitsMain`, CDU lines and Wx zones 20-40 s after connecting,
+failing all four AC buses in the shared cockpit.
+
+- **Cost:** a crew joining or restarting a PSX instance can start the
+  wailer, wipe the SIGMETs or set malfunctions for everyone.
+- **Workaround:** frankenrouter's post-connect quarantine drops these
+  variables from new connections (malfunctions 30 s, TkofRefNg 5 s,
+  MaweaBits 60 s, weather 120 s).
+- **Request:** a main client shouldn't write values it hasn't got from
+  its server, at least not until its welcome is complete.
+
+### On the ground, an A/P disconnect press with the A/P off starts the wailer
+
+*Confirmed (2026-11-03, test sim).* On the ground with the autopilot not
+engaged, each A/P disconnect press (`Qh400`) toggles the wailer: a press
+with it off turns it on, with AUTOPILOT DISC and the master warning
+lights. In flight with the A/P off a press does nothing, and with the A/P
+engaged the usual double press (disconnect, silence) works. Whether a
+real 747-400 does the same on the ground is unknown.
+
+- **Cost:** with a wailer already sounding (see above), a crew's quick
+  presses kept starting it again at the gate.
+- **Workaround:** none needed once the quarantine stops the stray wailer.
+- **Request:** check against the real aircraft first.
+
 ## Documentation
 
 Things we had to learn from the forum, other addons' authors, or live
