@@ -1,6 +1,6 @@
 # start_scripts changelog
 
-## Unreleased
+## 1.13.0 (2026-11-03)
 
 - **New, opt-in: start the PSX main clients from a known-good situ.**
   With `$AerowinxKnownGoodStartSitu = $true`, `start_psx_main_clients.ps1`
