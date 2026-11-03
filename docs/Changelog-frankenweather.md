@@ -1,6 +1,6 @@
 # frankenweather changelog
 
-## Unreleased
+## 2.3.3 (2026-11-03)
 
 - **Change: moderate turbulence patches build up and die away.** A
   testing-profile moderate patch used to jump straight to its level
