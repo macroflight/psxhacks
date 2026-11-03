@@ -556,6 +556,45 @@ sound = "addon=CABINT;;;;Help.mp3"
 - `sound_repeat`: send `sound` again every this many seconds while an
   alert is up; `0` (the default) sends it once per level.
 
+### `[quarantine]`
+
+The post-connect quarantine: for a while after a downstream connection
+is made, the router drops that connection's writes of certain variables
+and logs each one at `INFO` (`Quarantine: dropping ...`). PSX instances
+and addons that have just connected, or a slave sim that has just joined
+the master, send their own stale state for a while: a stale malfunction
+failed all AC buses in the shared cockpit, a slave set the A/P disconnect
+wailer, and slave sims sent their old weather up to two minutes after
+joining. Every router type does this (on the master it catches slave
+sims joining; on a slave, its own PSX instances restarting). Writes after
+the quarantine, e.g. a malfunction set from a slave sim or manual
+weather, pass. Upstream is never quarantined.
+
+The built-in table:
+
+| Variables | Time | From |
+|---|---|---|
+| `Mf*` (every malfunction, e.g. `MfAcBus1`) | 30 s | all connections |
+| `TkofRefNg` (TAKEOFF REF CG/TRIM and RWY/POS) | 5 s | all connections |
+| `MaweaBits` (master warning bits, incl. the A/P disconnect wailer) | `default_seconds` | all connections |
+| Weather: `WxAloft`, `WxBasic`, `Wx1`-`Wx7`, `WxMode1`-`WxMode7`, `WxClust`, `Metar1`-`Metar7`, `MetarsUp`, `Windshear`, `WxCorridorSel`, `WxCorridorTxt`, `WxSigmet`, `SigmetOn`, `WxAutoSet`, `WxBurst`, `WxSlowTransit`, `WxBits` | 120 s | router links only (frankenweather is a client of the master router and sets all of these when it starts) |
+
+```toml
+[quarantine]
+default_seconds = 60
+
+[quarantine.variables]
+WxSigmet = 0      # don't quarantine WxSigmet
+"Mf*" = 45        # a trailing * matches a prefix
+CfgPin3Prog = 30  # add a variable (all connections)
+```
+
+- `default_seconds`: the time for built-in entries without their own,
+  default `60`.
+- `[quarantine.variables]`: variable name to seconds. Changes a built-in
+  entry's time (`0` turns it off) or adds a variable, which then applies
+  to all connections. An unknown name is a warning at startup.
+
 ### `[performance]`
 
 Various limits that control when the router prints warning messages

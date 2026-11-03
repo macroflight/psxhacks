@@ -5271,6 +5271,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             [m * 60 for m in cam_conf.cruise_minutes],
             [m * 60 for m in cam_conf.descent_minutes], ignore, cam_conf.min_altitude)
 
+        for name in self.config.quarantine.variables:
+            if not name.endswith('*') and self.variables.get_keyword_for_name(name) is None:
+                self.logger.warning("Config: [quarantine.variables]: unknown variable %s", name)
+
         # Initialize the router cache
         self.cache = routercache.RouterCache()
 

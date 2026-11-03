@@ -84,24 +84,42 @@ PTT_TO_GROUND_HANDLING = {
     'Qh93': ('RIGHT', {'1': 'DOWN', '0': 'UP'}),
 }
 
-# How long after a connection is established we drop any Qs546
-# ("TkofRefNg", the TAKEOFF REF page's CG/TRIM & RWY/POS no-go string) it
-# sends. A PSX client that joins with a different situ than the host it
-# connects to sends its own locally-computed, stale/default Qs546 right
-# after connecting; forwarded unfiltered, this silently resets valid
-# CG/TRIM and RWY/POS entries elsewhere in the shared cockpit. A genuine
-# route/perf change entered later (i.e. after this window) is unaffected.
-# Never applied to upstream, whose Qs546 is authoritative.
-QS546_CONNECT_FILTER_WINDOW_S = 5.0
-
-# How long after a client connects we drop any malfunction variable
-# (name starting with "Mf", e.g MfAcBus1-4, MfStrike, MfEvent) it sends.
-# A PSX instance that starts from a situ containing a stale malfunction
-# state (seen after a lightning strike) briefly simulates on its own
-# after connecting and sends e.g "MfAcBus1=0;6;<now>", failing all AC
-# buses in the shared cockpit. Malfunctions deliberately triggered from
-# a slave sim later on are unaffected. Never applied to upstream.
-MALFUNCTION_CONNECT_FILTER_WINDOW_S = 30.0
+# Post-connect quarantine: for a while after a downstream connection is
+# made, the router drops writes of these variables from it. PSX instances
+# and addons that have just connected (or whose slave router has just
+# joined the master) send their own, stale state for a while, e.g.:
+# - Mf* (malfunctions, e.g. MfAcBus1-4): a PSX instance starting from a situ
+#   with a stale malfunction failed all AC buses in the shared cockpit
+#   (2026-10-22).
+# - TkofRefNg (Qs546, TAKEOFF REF CG/TRIM & RWY/POS no-go string): a PSX
+#   client with another situ resets valid entries elsewhere.
+# - MaweaBits (Qi190): a slave sim joining the WorldFlight master set the
+#   A/P disconnect wailer bit in the shared cockpit (2026-11-02).
+# - Weather (zones, METARs, SIGMETs, corridor): slave sims sent their old
+#   weather up to ~110 s after joining, overwriting frankenweather's.
+# Deliberate writes after the quarantine (a malfunction set from a slave
+# sim, manual weather) pass. Never applied to upstream.
+#
+# Variable name (a trailing "*" matches a prefix) -> (seconds, or None for
+# QUARANTINE_DEFAULT_S; True to apply only to router links). The weather
+# entries only apply to router links: frankenweather itself is a client of
+# the master router and sends all of these right after it starts. The
+# [quarantine] config section can change the times and add variables.
+QUARANTINE_DEFAULT_S = 60.0
+QUARANTINE_WEATHER_S = 120.0
+QUARANTINE_WEATHER_VARIABLES = (
+    ['WxAloft', 'WxBasic', 'WxClust', 'MetarsUp', 'Windshear', 'WxCorridorSel',
+     'WxCorridorTxt', 'WxSigmet', 'SigmetOn', 'WxAutoSet', 'WxBurst', 'WxSlowTransit',
+     'WxBits'] +
+    [f'Wx{i}' for i in range(1, 8)] +
+    [f'WxMode{i}' for i in range(1, 8)] +
+    [f'Metar{i}' for i in range(1, 8)])
+QUARANTINE_VARIABLES = {
+    'Mf*': (30.0, False),
+    'TkofRefNg': (5.0, False),
+    'MaweaBits': (None, False),
+    **{name: (QUARANTINE_WEATHER_S, True) for name in QUARANTINE_WEATHER_VARIABLES},
+}
 
 # Addon names that are expected to produce regular addon= traffic; their
 # forwarded messages are logged at debug rather than info. FRANKENWEATHER is
@@ -269,8 +287,7 @@ class RulesCode(enum.Enum):
     PBSKAQ = enum.auto()
     LAYOUT = enum.auto()
     PTT = enum.auto()
-    QS546_CONNECT_FILTER = enum.auto()
-    MALFUNCTION_CONNECT_FILTER = enum.auto()
+    POST_CONNECT_QUARANTINE = enum.auto()
     PSXNETVATSIM = enum.auto()
     CDUPROXY = enum.auto()
     KEYVALUE_FILTERED_INGRESS_SIM_LOCAL = enum.auto()
@@ -299,6 +316,56 @@ class Rules():  # pylint: disable=too-many-public-methods
         self.line = None
         # Reference to sender endpoint (if still connected)
         self.sender = None
+        # Post-connect quarantine table, built on first use (see
+        # QUARANTINE_VARIABLES): {name: (seconds, routers_only)}, the
+        # prefix entries as [(prefix, (seconds, routers_only))] and the
+        # longest time
+        self._quarantine = None
+        self._quarantine_prefixes = []
+        self._quarantine_max_s = 0.0
+
+    def _build_quarantine(self):
+        """Build the quarantine table: QUARANTINE_VARIABLES with [quarantine] applied."""
+        conf = getattr(self.router.config, 'quarantine', None)
+        default = conf.default_seconds if conf is not None else QUARANTINE_DEFAULT_S
+        table = {name: (default if seconds is None else seconds, routers_only)
+                 for name, (seconds, routers_only) in QUARANTINE_VARIABLES.items()}
+        if conf is not None:
+            for name, seconds in conf.variables.items():
+                # A variable added in the config applies to all connections
+                table[name] = (seconds, table.get(name, (None, False))[1])
+        table = {name: entry for name, entry in table.items() if entry[0] > 0}
+        self._quarantine = {name: entry for name, entry in table.items()
+                            if not name.endswith('*')}
+        self._quarantine_prefixes = [(name[:-1], entry) for name, entry in table.items()
+                                     if name.endswith('*')]
+        self._quarantine_max_s = max((entry[0] for entry in table.values()), default=0.0)
+
+    def post_connect_quarantine(self, key):
+        """Drop a quarantined variable from a connection that has only just connected.
+
+        Returns the DROP result, or None if the write may pass. See
+        QUARANTINE_VARIABLES.
+        """
+        if self._quarantine is None:
+            self._build_quarantine()
+        age = time.perf_counter() - self.sender.connected_at
+        if age >= self._quarantine_max_s:
+            return None
+        name = self.router.variables.get_variable_name(key)
+        entry = self._quarantine.get(name)
+        if entry is None:
+            entry = next((e for prefix, e in self._quarantine_prefixes
+                          if name.startswith(prefix)), None)
+        if entry is None:
+            return None
+        seconds, routers_only = entry
+        if age >= seconds or (routers_only and not self.sender.is_frankenrouter):
+            return None
+        self.logger.info(
+            "Quarantine: dropping %s from %s, connected %.1f s ago (< %.0f s): %s",
+            name, self.sender.display_name, age, seconds, self.line[:200])
+        return self.myreturn(RulesAction.DROP, RulesCode.POST_CONNECT_QUARANTINE)
 
     def handle_addon_frankenrouter_ping(self, payload):
         """Handle an FRDP PING message.
@@ -1401,25 +1468,10 @@ class Rules():  # pylint: disable=too-many-public-methods
         if key == 'layout':
             return self.handle_layout()
 
-        if key == 'Qs546' and not self.sender.upstream:
-            age = time.perf_counter() - self.sender.connected_at
-            if age < QS546_CONNECT_FILTER_WINDOW_S:
-                self.logger.info(
-                    "Dropping Qs546 from %s: connection is only %.1fs old (< %.0fs)",
-                    self.sender.display_name, age, QS546_CONNECT_FILTER_WINDOW_S)
-                return self.myreturn(RulesAction.DROP, RulesCode.QS546_CONNECT_FILTER)
-
         if not self.sender.upstream:
-            age = time.perf_counter() - self.sender.connected_at
-            if (
-                    age < MALFUNCTION_CONNECT_FILTER_WINDOW_S and
-                    self.router.variables.get_variable_name(key).startswith('Mf')
-            ):
-                self.logger.warning(
-                    "Dropping malfunction %s from %s: connection is only %.1fs old (< %.0fs): %s",
-                    self.router.variables.get_variable_name(key), self.sender.display_name,
-                    age, MALFUNCTION_CONNECT_FILTER_WINDOW_S, self.line)
-                return self.myreturn(RulesAction.DROP, RulesCode.MALFUNCTION_CONNECT_FILTER)
+            quarantined = self.post_connect_quarantine(key)
+            if quarantined is not None:
+                return quarantined
 
         if (
                 key in PTT_KEYWORDS and
@@ -1819,7 +1871,8 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
 
         def get_variable_name(self, keyword):
             """Return a fake variable name for a few keywords."""
-            return {'Qs196': 'MfAcBus1', 'Qi130': 'MfEvent'}.get(keyword, keyword)
+            return {'Qs196': 'MfAcBus1', 'Qi130': 'MfEvent', 'Qs546': 'TkofRefNg',
+                    'Qi190': 'MaweaBits', 'Qs499': 'WxSigmet', 'Qs329': 'Wx1'}.get(keyword, keyword)
 
     class DummyCache():  # pylint: disable=too-few-public-methods
         """Implement small parts of the router for unit testing."""
@@ -1874,6 +1927,7 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             self.identity = TestRules.DummyConfigIdentity()
             self.filtering = TestRules.DummyConfigFiltering()
             self.access = []
+            self.quarantine = None
 
     class DummyFrankenrouter():  # pylint: disable=too-few-public-methods,too-many-instance-attributes
         """Implement small parts of the router for unit testing."""
@@ -1936,7 +1990,7 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             self.upstream = False
             self.peername = None
             # Default to "long connected" so existing tests are unaffected by
-            # the Qs546 connect-window filter unless they opt in.
+            # the post-connect quarantine unless they opt in.
             self.connected_at = time.perf_counter() - 3600
 
     class DummyClientConnection(DummyConnection):  # pylint: disable=too-few-public-methods
@@ -3143,70 +3197,94 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         self.assertEqual(code, RulesCode.PTT)
         self.assertIsNone(extra_data)
 
-    def test_qs546_connect_filter(self):
-        """Test the Qs546 (TkofRefNg) connect-window ingress filter."""
-        router = self.DummyFrankenrouter()
-        rules = Rules(router)
-
+    def _quarantine_peer(self, router):
+        """Return a downstream client connection for the quarantine tests."""
         router.upstream = self.DummyUpstreamConnection()
         router.clients = {
             ('127.0.0.1', 12345): self.DummyClientConnection(('127.0.0.1', 12345)),
         }
-        testpeer = router.clients[('127.0.0.1', 12345)]
+        return router.clients[('127.0.0.1', 12345)]
 
-        # Freshly connected: Qs546 is dropped
-        testpeer.connected_at = time.perf_counter()
-        (action, code, *_) = rules.route("Qs546=avsfc-1;;;-1;-99;-1;-1;999;", testpeer)
-        self.assertEqual(action, RulesAction.DROP)
-        self.assertEqual(code, RulesCode.QS546_CONNECT_FILTER)
+    def _quarantine_route(self, rules, line, peer, age):
+        """Route line from peer, connected age seconds ago; return the result code."""
+        peer.connected_at = time.perf_counter() - age
+        (_, code, *_) = rules.route(line, peer)
+        return code
 
-        # Still within the window: still dropped
-        testpeer.connected_at = (
-            time.perf_counter() - QS546_CONNECT_FILTER_WINDOW_S + 1.0)
-        (action, code, *_) = rules.route("Qs546=avsfc-1;;;-1;-99;-1;-1;999;", testpeer)
-        self.assertEqual(action, RulesAction.DROP)
-        self.assertEqual(code, RulesCode.QS546_CONNECT_FILTER)
-
-        # Past the window: a genuine change (e.g. route entered from that CDU) passes
-        testpeer.connected_at = (
-            time.perf_counter() - QS546_CONNECT_FILTER_WINDOW_S - 1.0)
-        (action, code, *_) = rules.route("Qs546=avsfC200;11;-2625;-1;-99;-1;-1;8;", testpeer)
-        self.assertEqual(action, RulesAction.NORMAL)
-        self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
-
-        # Never applied to upstream, even right after connecting
-        router.upstream.connected_at = time.perf_counter()
-        (action, code, *_) = rules.route("Qs546=avsfC200;11;-2625;-1;-99;-1;-1;8;", router.upstream)
-        self.assertNotEqual(code, RulesCode.QS546_CONNECT_FILTER)
-
-    def test_malfunction_connect_filter(self):
-        """Test the malfunction (Mf*) connect-window ingress filter."""
+    def test_post_connect_quarantine(self):
+        """Test the post-connect quarantine's built-in table."""
         router = self.DummyFrankenrouter()
         rules = Rules(router)
-
-        router.upstream = self.DummyUpstreamConnection()
-        router.clients = {
-            ('127.0.0.1', 12345): self.DummyClientConnection(('127.0.0.1', 12345)),
-        }
-        testpeer = router.clients[('127.0.0.1', 12345)]
-
-        # Freshly connected: malfunctions are dropped, other variables pass
-        testpeer.connected_at = time.perf_counter()
-        for line in ("Qs196=0;6;035427", "Qi130=1"):
-            (action, code, *_) = rules.route(line, testpeer)
-            self.assertEqual(action, RulesAction.DROP)
-            self.assertEqual(code, RulesCode.MALFUNCTION_CONNECT_FILTER)
-        (action, code, *_) = rules.route("Qs197=0;6;-99", testpeer)
-        self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
-
-        # Past the window: a malfunction deliberately set from that sim passes
-        testpeer.connected_at = (
-            time.perf_counter() - MALFUNCTION_CONNECT_FILTER_WINDOW_S - 1.0)
-        (action, code, *_) = rules.route("Qs196=0;6;035427", testpeer)
-        self.assertEqual(action, RulesAction.NORMAL)
-        self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
-
+        peer = self._quarantine_peer(router)
+        quarantined = RulesCode.POST_CONNECT_QUARANTINE
+        for line, seconds in (
+                ("Qs546=avsfc-1;;;-1;-99;-1;-1;999;", 5.0),     # TkofRefNg
+                ("Qs196=0;6;035427", 30.0),                     # MfAcBus1 (Mf*)
+                ("Qi130=1", 30.0),                              # MfEvent (Mf*)
+                ("Qi190=257", QUARANTINE_DEFAULT_S),            # MaweaBits
+        ):
+            # Freshly connected and just inside the time: dropped
+            self.assertEqual(self._quarantine_route(rules, line, peer, 0.0), quarantined, line)
+            self.assertEqual(
+                self._quarantine_route(rules, line, peer, seconds - 1.0), quarantined, line)
+            # Past it: a deliberate write passes
+            self.assertEqual(self._quarantine_route(rules, line, peer, seconds + 1.0),
+                             RulesCode.KEYVALUE_NORMAL, line)
+        # Other variables pass at once
+        self.assertEqual(self._quarantine_route(rules, "Qs197=0;6;-99", peer, 0.0),
+                         RulesCode.KEYVALUE_NORMAL)
         # Never applied to upstream, even right after connecting
         router.upstream.connected_at = time.perf_counter()
-        (action, code, *_) = rules.route("Qs196=0;6;-99", router.upstream)
-        self.assertNotEqual(code, RulesCode.MALFUNCTION_CONNECT_FILTER)
+        (_, code, *_) = rules.route("Qi190=257", router.upstream)
+        self.assertNotEqual(code, quarantined)
+
+    def test_post_connect_quarantine_weather(self):
+        """Weather is quarantined for 120 s, and only from router links."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+        peer = self._quarantine_peer(router)
+        quarantined = RulesCode.POST_CONNECT_QUARANTINE
+        # A PSX client or frankenweather: passes at once
+        for line in ("Qs499=#DOWNLOADED", "Qs329=0;44950;44950;0;0;0"):
+            self.assertEqual(self._quarantine_route(rules, line, peer, 0.0),
+                             RulesCode.KEYVALUE_NORMAL, line)
+        # A slave router: dropped for QUARANTINE_WEATHER_S
+        peer.is_frankenrouter = True
+        for line in ("Qs499=#DOWNLOADED", "Qs329=0;44950;44950;0;0;0"):
+            self.assertEqual(self._quarantine_route(rules, line, peer, 0.0), quarantined, line)
+            self.assertEqual(self._quarantine_route(
+                rules, line, peer, QUARANTINE_WEATHER_S - 1.0), quarantined, line)
+            self.assertEqual(self._quarantine_route(
+                rules, line, peer, QUARANTINE_WEATHER_S + 1.0), RulesCode.KEYVALUE_NORMAL, line)
+
+    def test_post_connect_quarantine_config(self):
+        """[quarantine] changes the default and per-variable times and adds variables."""
+        class Quarantine:  # pylint: disable=too-few-public-methods
+            """A [quarantine] config section."""
+
+            default_seconds = 10
+            variables = {'TkofRefNg': 0, 'Mf*': 100, 'MfAcBus1': 2, 'Wx1': 20,
+                         'CfgPin3Prog': 15}
+        router = self.DummyFrankenrouter()
+        router.config.quarantine = Quarantine()
+        router.variables.get_variable_name = lambda key: {
+            'Qs546': 'TkofRefNg', 'Qi130': 'MfEvent', 'Qs196': 'MfAcBus1', 'Qi190': 'MaweaBits',
+            'Qs329': 'Wx1', 'Qi272': 'CfgPin3Prog'}.get(key, key)
+        rules = Rules(router)
+        peer = self._quarantine_peer(router)
+        quarantined = RulesCode.POST_CONNECT_QUARANTINE
+        normal = RulesCode.KEYVALUE_NORMAL
+        for line, age, expected in (
+                ("Qs546=avsfc-1;", 0.0, normal),        # turned off
+                ("Qi130=1", 99.0, quarantined),         # Mf* now 100 s
+                ("Qs196=0;6;035427", 3.0, normal),      # an exact name beats the prefix
+                ("Qi190=257", 9.0, quarantined),        # the default, now 10 s
+                ("Qi190=257", 11.0, normal),
+                ("Qi272=8", 14.0, quarantined),         # added: all connections
+                ("Qs329=0;1", 0.0, normal),             # weather: still router links only
+        ):
+            self.assertEqual(self._quarantine_route(rules, line, peer, age), expected,
+                             (line, age))
+        peer.is_frankenrouter = True
+        self.assertEqual(self._quarantine_route(rules, "Qs329=0;1", peer, 19.0), quarantined)
+        self.assertEqual(self._quarantine_route(rules, "Qs329=0;1", peer, 21.0), normal)

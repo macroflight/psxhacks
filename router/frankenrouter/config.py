@@ -399,6 +399,29 @@ class _RouterConfigCrewAlertness:  # pylint: disable=missing-class-docstring,too
             raise RouterConfigError("crew_alertness sound_repeat must be 0 or more seconds")
 
 
+class _RouterConfigQuarantine:  # pylint: disable=missing-class-docstring,too-few-public-methods
+    def __init__(self, data):
+        # The post-connect quarantine (rules.py QUARANTINE_VARIABLES): how
+        # long after a downstream connection is made its writes of certain
+        # variables are dropped. default_seconds is for built-in entries
+        # without their own time; [quarantine.variables] maps a variable
+        # name (a trailing "*" matches a prefix) to seconds, changing a
+        # built-in entry or adding one (0 turns it off).
+        unknown = set(data) - {'default_seconds', 'variables'}
+        if unknown:
+            raise RouterConfigError(f"quarantine: unknown setting(s) {', '.join(sorted(unknown))}")
+        self.default_seconds = data.get('default_seconds', 60)
+        if (isinstance(self.default_seconds, bool) or
+                not isinstance(self.default_seconds, (int, float)) or self.default_seconds < 0):
+            raise RouterConfigError("quarantine default_seconds must be 0 or more seconds")
+        self.variables = data.get('variables', {})
+        if not isinstance(self.variables, dict) or not all(
+                isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0
+                for v in self.variables.values()):
+            raise RouterConfigError(
+                "quarantine variables must map variable names to 0 or more seconds")
+
+
 class _RouterConfigPerformance:  # pylint: disable=missing-class-docstring,too-few-public-methods,too-many-instance-attributes
     def __init__(self, data):  # pylint: disable=too-many-branches
         self.write_buffer_critical_limit = data.get('write_buffer_critical_limit', 100000)
@@ -697,6 +720,7 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
                 "compressed, kept for keep_hours (default 48) or up to keep_gb",
                 ", ".join(self.log.deprecated_keys_present))
         self.crew_alertness = _RouterConfigCrewAlertness(config.get('crew_alertness', {}))
+        self.quarantine = _RouterConfigQuarantine(config.get('quarantine', {}))
         if self.filtering.client_reset_blacklist_present:
             self.logger.warning(
                 "Config: [filtering] client_reset_blacklist is no longer used; list "
@@ -1075,6 +1099,21 @@ keywords = ["Qs123"]
                     'ignore = "Tiller"', 'sound_repeat = -1'):
             with self.assertRaises(RouterConfigError):
                 RouterConfig(config_data=f"[crew_alertness]\n{bad}\n")
+
+    def test_quarantine(self):
+        """Quarantine defaults to 60 s with no overrides, and validates its options."""
+        conf = RouterConfig(config_data="")
+        self.assertEqual((conf.quarantine.default_seconds, conf.quarantine.variables), (60, {}))
+        conf = RouterConfig(config_data=(
+            "[quarantine]\ndefault_seconds = 90\n[quarantine.variables]\n"
+            "WxSigmet = 0\nMaweaBits = 30.5\n\"Mf*\" = 45\n"))
+        self.assertEqual(conf.quarantine.default_seconds, 90)
+        self.assertEqual(conf.quarantine.variables, {'WxSigmet': 0, 'MaweaBits': 30.5, 'Mf*': 45})
+        for bad in ('default_seconds = -1', 'default_seconds = true', 'seconds = 5',
+                    'variables = 5', '[quarantine.variables]\nWxSigmet = "60"',
+                    '[quarantine.variables]\nWxSigmet = -5'):
+            with self.assertRaises(RouterConfigError):
+                RouterConfig(config_data=f"[quarantine]\n{bad}\n")
 
     def test_log_defaults(self):
         """Traffic logging on, 48 hours kept, no size limit; old settings flagged."""
