@@ -1,24 +1,32 @@
 # Changelog
 
-## Unreleased
+## 2026-11-03: version 1.36.0
 
-- **New: post-connect quarantine.** For a while after a connection is
-  made, the router drops its writes of certain variables: malfunctions
-  (30 s), the TAKEOFF REF no-go string (5 s), the master warning bits
-  (60 s) and, from everyone but frankenweather, the weather (120 s). Each
-  drop is logged at `INFO`. A slave sim joining the WorldFlight master had set the
-  A/P disconnect wailer in the shared cockpit (the crew couldn't silence
-  it at first), and slave sims sent their old weather zones, SIGMETs and
-  METARs, overwriting frankenweather's. The times can be changed, and
-  variables added, in the new `[quarantine]` section. This replaces the
-  malfunction and TAKEOFF REF connect filters (same times; malfunction
-  drops are now logged at `INFO`, not `WARNING`).
+- **New: post-connect quarantine.** For a while after a program
+  connects, the router drops its writes of certain variables:
+  malfunctions (30 s), the TAKEOFF REF no-go string (5 s), the master
+  warning bits (60 s) and, from everything but frankenweather, the
+  weather (120 s). Each drop is logged at `INFO`. A PSX instance that has
+  just started sends a few of its own values first: during WorldFlight
+  one on a slave sim started the A/P disconnect wailer in the shared
+  cockpit at the gate and wiped the SIGMETs, and slave sims sent their
+  old weather zones, SIGMETs and METARs, overwriting frankenweather's.
+  This works on every router type, so a slave router catches its own
+  programs as they start and the master catches a slave sim joining. The
+  times can be changed, and variables added, in the new `[quarantine]`
+  section. It replaces the malfunction and TAKEOFF REF connect filters
+  (same times; malfunction drops are now logged at `INFO`, not
+  `WARNING`).
 
 - **Fix: a slave router no longer puts `(ROUTER)` on the master sim when
   it joins.** For its first seconds on the master, before it knew its
   upstream was a router, a slave ran the master's own error check, found
   no other routers yet and could write the `(ROUTER)` warning to the master
   sim (seen on 30 October).
+
+- **Docs: the crew alertness monitor only sees inputs that pass through a
+  router.** Controls used on the PSX main server itself, or on a PSX
+  instance connected straight to it, don't count as crew input.
 
 ## 2026-11-02: version 1.35.0
 
