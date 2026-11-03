@@ -127,6 +127,11 @@ QUARANTINE_VARIABLES = {
     'Mf*': (30.0, False),
     'TkofRefNg': (5.0, False),
     'MaweaBits': (None, False),
+    # Centre tank pump switches (with their PRESS light): a starting PSX main
+    # client writes 1/257 for ~4.5 s after its welcome; five of them
+    # ping-ponged it, and every write reached the master (2026-11-03)
+    'FuelCtrL': (10.0, False),
+    'FuelCtrR': (10.0, False),
     **{name: (QUARANTINE_WEATHER_S, True) for name in QUARANTINE_WEATHER_VARIABLES},
 }
 

@@ -35,6 +35,10 @@
   The client had already applied its own value: PSX main clients kept
   their own empty wind corridor after joining, even after a reset, and
   showed a slightly different wind, temperature, IAS and EPR.
+- **Change: the centre tank pump switches are quarantined for 10 s.**
+  Starting PSX main clients wrote `FuelCtrL`/`FuelCtrR` (1 or 257, the
+  switch with its PRESS light) for about 4.5 s after their welcome, five
+  of them back and forth, and every write reached the master.
 - **Change: a welcome reset restarts the post-connect quarantine.** A
   PSX main client writes the same stale values (e.g. `MfEvent`, its own
   SIGMETs) after a reset as after its first welcome; they used to pass.

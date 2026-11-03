@@ -597,6 +597,7 @@ The built-in table:
 | `Mf*` (every malfunction, e.g. `MfAcBus1`) | 30 s | all connections |
 | `TkofRefNg` (TAKEOFF REF CG/TRIM and RWY/POS) | 5 s | all connections |
 | `MaweaBits` (master warning bits, incl. the A/P disconnect wailer) | `default_seconds` | all connections |
+| `FuelCtrL`, `FuelCtrR` (centre tank pump switches) | 10 s | all connections |
 | Weather: `WxAloft`, `WxBasic`, `Wx1`-`Wx7`, `WxMode1`-`WxMode7`, `WxClust`, `Metar1`-`Metar7`, `MetarsUp`, `Windshear`, `WxCorridorSel`, `WxCorridorTxt`, `WxSigmet`, `SigmetOn`, `WxAutoSet`, `WxBurst`, `WxSlowTransit`, `WxBits` | 120 s | all connections except frankenweather (it sets all of these when it starts) |
 
 ```toml
