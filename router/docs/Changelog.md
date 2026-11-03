@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026-11-03: version 1.39.0
 
 - **Change: only the traffic master sim supplies traffic, from any
   client.** A router whose sim isn't the traffic master used to drop
