@@ -17,6 +17,10 @@
   it at least 3 times in the last minute, and, on the master, "Dropping
   traffic (TfcPos) from a slave router: its sim is not the traffic master".
   A PSX main client's single write when it connects doesn't count.
+- The bundled `known-good.situ` now matches what a master router
+  enforces (traffic under external control, PSX's ATIS off) and has no
+  traffic in it, so a PSX instance started from it doesn't send old
+  traffic to the network.
 
 ## 2026-11-03: version 1.38.0
 
