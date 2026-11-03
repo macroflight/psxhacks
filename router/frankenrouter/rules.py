@@ -115,6 +115,9 @@ QUARANTINE_DEFAULT_S = 60.0
 # How often per variable a quarantined client is given the network's value
 # back (see Rules.quarantine_restore())
 QUARANTINE_MAX_RESTORES = 3
+# A client writing MfEvent this soon after its first welcome is a PSX main
+# client (see Rules.detect_psx_main_client())
+PSX_MAIN_CLIENT_DETECT_S = 1.0
 QUARANTINE_WEATHER_S = 120.0
 QUARANTINE_WEATHER_VARIABLES = (
     ['WxAloft', 'WxBasic', 'WxClust', 'MetarsUp', 'Windshear', 'WxCorridorSel',
@@ -386,6 +389,27 @@ class Rules():  # pylint: disable=too-many-public-methods
         restore = self.quarantine_restore(key, name)
         return self.myreturn(RulesAction.DROP, RulesCode.POST_CONNECT_QUARANTINE,
                              extra_data={"reply": restore} if restore else None)
+
+    def detect_psx_main_client(self, key):
+        """Mark the sender as a PSX main client if it writes MfEvent right after its first welcome.
+
+        On 2026-11-03 every PSX main client wrote MfEvent (Qi130) 0.1-0.3 s
+        after the load3 of its first welcome, and no other client (addons,
+        vPilot, MSFS Router, EFB, ...) did. Its name doesn't tell: other
+        clients use clientName= too. Used for the automatic welcome reset
+        (Frankenrouter._housekeeping_auto_reset_clients()).
+        """
+        if key != 'Qi130' or self.sender.looks_like_psx_main or self.sender.is_frankenrouter:
+            return
+        first = self.sender.first_welcome_done_at
+        if first is None:
+            return
+        after = time.perf_counter() - first
+        if after <= PSX_MAIN_CLIENT_DETECT_S:
+            self.sender.looks_like_psx_main = True
+            self.logger.info(
+                "%s looks like a PSX main client (MfEvent %.1f s after its first welcome)",
+                self.sender.display_name, after)
 
     def quarantine_restore(self, key, name):
         """Return the line that gives a quarantined client the network's value back, or None.
@@ -1556,6 +1580,7 @@ class Rules():  # pylint: disable=too-many-public-methods
             return self.myreturn(RulesAction.DROP, RulesCode.KEYVALUE_FILTERED_INGRESS_SIM_LOCAL)
 
         if not self.sender.upstream:
+            self.detect_psx_main_client(key)
             quarantined = self.post_connect_quarantine(key)
             if quarantined is not None:
                 return quarantined
@@ -2080,6 +2105,8 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             self.is_frankenrouter = False
             self.quarantine_restarted_at = 0.0
             self.quarantine_restores = {}
+            self.first_welcome_done_at = None
+            self.looks_like_psx_main = False
             self.traffic_times = []
             self.traffic_dropped_times = []
             self.frdp_subscribed = False
@@ -3496,3 +3523,22 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         self.assertIsNone(extra)
         router.cache.update('Qs329', '0;1')
         self.assertIsNone(rules.route("Qs329=0;1", peer)[3])
+
+    def test_detect_psx_main_client(self):
+        """A client writing MfEvent soon after its first welcome is marked a PSX main client."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+        peer = self._quarantine_peer(router)
+        rules.route("Qi130=1", peer)            # no welcome yet
+        self.assertFalse(peer.looks_like_psx_main)
+        peer.first_welcome_done_at = time.perf_counter() - 5.0
+        rules.route("Qi130=1", peer)            # too late
+        self.assertFalse(peer.looks_like_psx_main)
+        peer.first_welcome_done_at = time.perf_counter() - 0.2
+        rules.route("Qi190=0", peer)            # another variable
+        self.assertFalse(peer.looks_like_psx_main)
+        rules.route("Qi130=1", peer)
+        self.assertTrue(peer.looks_like_psx_main)
+        router.upstream.first_welcome_done_at = time.perf_counter() - 0.2
+        rules.route("Qi130=1", router.upstream)  # never upstream
+        self.assertFalse(router.upstream.looks_like_psx_main)

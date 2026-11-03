@@ -1347,7 +1347,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             await send_line(f"name=frankenrouter:{self.config.identity.simulator}")
 
         client.welcome_sent = True
-        client.welcome_done_at = time.perf_counter()
+        if not bang_reply:
+            client.welcome_done_at = time.perf_counter()
+            if client.first_welcome_done_at is None:
+                client.first_welcome_done_at = client.welcome_done_at
         welcome_keyword_count = len(client.welcome_keywords_sent)
         client.welcome_keywords_sent = set()
         send_time = max(time.perf_counter() - start_time, 1e-9)  # protect against div by 0
@@ -1412,7 +1415,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         post-connect quarantine), others never show on the network. A
         welcome reset after that fixes the client, as the /utils "Reset
         clients" button does. Slave routers only, like that button, and
-        only clients on client_reset_whitelist.
+        only clients on client_reset_whitelist or that look like a PSX main
+        client (Rules.detect_psx_main_client()).
         """
         delay = self.config.filtering.client_auto_reset_delay
         if delay <= 0 or self.config.identity.type != 'slave':
@@ -1421,7 +1425,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         whitelisted = self.config.filtering.client_reset_whitelisted
         due = [client for client in self.resettable_clients()
                if not client.auto_reset_done and client.welcome_done_at is not None
-               if now - client.welcome_done_at >= delay and whitelisted(client.display_name)]
+               if now - client.welcome_done_at >= delay
+               if client.looks_like_psx_main or whitelisted(client.display_name)]
         for client in due:
             client.auto_reset_done = True
             self.logger.info(

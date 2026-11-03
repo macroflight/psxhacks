@@ -29,6 +29,11 @@
   pressed "Reset clients". Now the router does that reset itself, for
   the clients on `[filtering] client_reset_whitelist`.
   `[filtering] client_auto_reset_delay` sets the delay; `0` turns it off.
+- **New: a slave router recognises PSX main clients by their behaviour.**
+  A client that writes `MfEvent` within 1 s of its first welcome is a PSX
+  main client: it gets the automatic reset even if it's not on
+  `[filtering] client_reset_whitelist`, and is pre-selected on the
+  "Reset clients" page.
 - **Change: the quarantine gives a client the network's value back.**
   When it drops a write and the router has a different value cached, the
   router sends that value to the client, at most 3 times per variable.

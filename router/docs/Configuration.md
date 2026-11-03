@@ -743,15 +743,21 @@ frdp_rtt_warning = 0.5
   clients also get the automatic reset, see `client_auto_reset_delay`.
 
 - `client_auto_reset_delay`: defaults to `15` (seconds). Only applies to
-  a router of type `slave`. That long after a `client_reset_whitelist`
-  client's first welcome, the router resets it once, as the "Reset
-  clients" button does. A PSX main client that has just started reacts
-  to its first welcome as if it had loaded its own start situ, which
-  overwrites part of the welcome inside the client. On 2026-11-03
-  this left one client or another with DRIVE DISC lights on, a wrong
-  standby horizon or IAS, no wind corridor or no SIGMETs. It writes some
-  of these values for about 8 s after its welcome; others never show on
-  the network. A reset after that fixed every case. `0` turns this off.
+  a router of type `slave`. That long after a PSX main client's first
+  welcome, the router resets it once, as the "Reset clients" button
+  does. A PSX main client is one on `client_reset_whitelist`, or one the
+  router recognises by its behaviour: it writes `MfEvent` within 1 s of
+  its first welcome (logged as `... looks like a PSX main client`). On
+  2026-11-03 every PSX main client did and no other client did; its name
+  doesn't tell, since other clients use `clientName=` too. Detected
+  clients are also pre-selected on the "Reset clients" page. A PSX main
+  client that has just started reacts to its first welcome as if it had
+  loaded its own start situ, which overwrites part of the welcome inside
+  the client. On 2026-11-03 this left one client or another with DRIVE
+  DISC lights on, a wrong standby horizon or IAS, no wind corridor or no
+  SIGMETs. It writes some of these values for about 8 s after its
+  welcome; others never show on the network. A reset after that fixed
+  every case. `0` turns this off.
 
 - `master_drop_check_switches`: defaults to `true`. Only applies to a
   router of type `master`. MSROUTER, an MCP bridge in a slave sim, shows

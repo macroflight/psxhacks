@@ -2782,10 +2782,13 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 candidates = router.resettable_clients()
                 whitelisted = router.config.filtering.client_reset_whitelisted
                 if candidates:
+                    # Whitelisted, or detected as a PSX main client
+                    preselected = {c.client_id for c in candidates
+                                   if c.looks_like_psx_main or whitelisted(c.display_name)}
                     checkbox_rows = ''.join(
                         _RESET_CLIENTS_CHECKBOX_ROW.format(
                             client_id=client.client_id,
-                            checked=' checked' if whitelisted(client.display_name) else '',
+                            checked=' checked' if client.client_id in preselected else '',
                             display_name=html.escape(client.display_name),
                         )
                         for client in candidates

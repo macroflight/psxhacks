@@ -35,7 +35,7 @@ class ConnectionClosed(ConnectionException):  # pylint: disable=too-few-public-m
 class Connection():  # pylint: disable=too-many-instance-attributes,too-few-public-methods
     """A connection to the PSX router."""
 
-    def __init__(self, reader, writer, router):
+    def __init__(self, reader, writer, router):  # pylint: disable=too-many-statements
         """Initialize the instance."""
         self.logger = logging.getLogger(__name__)
         # Reference to main router object
@@ -80,6 +80,10 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         # Frankenrouter._housekeeping_auto_reset_clients())
         self.welcome_done_at = None
         self.auto_reset_done = False
+        # When this client's first welcome finished, and whether it then
+        # behaved like a PSX main client (see Rules.detect_psx_main_client())
+        self.first_welcome_done_at = None
+        self.looks_like_psx_main = False
 
         # Set to True if the connection is being closed
         self.is_closing = False
