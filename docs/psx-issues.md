@@ -248,6 +248,40 @@ failing all four AC buses in the shared cockpit.
 - **Request:** a main client shouldn't write values it hasn't got from
   its server, at least not until its welcome is complete.
 
+### A main client welcomed while still starting keeps parts of its start situ
+
+*Confirmed (2026-11-03, test setup, slave sim restarted three times in
+flight; slave router traffic logs).* A freshly started PSX main client
+connects and gets its welcome while it is still loading its own start
+situ, and that load then overwrites part of the welcome inside the
+client. The welcome itself was correct: it was identical to a later
+"Reset clients" welcome, which fixed the client every time. What we saw:
+
+- DRIVE DISC lights on for all four engines (Overhead). The welcome had
+  `DriveDisc1`-`4` = 96 (in flight, light off); Basic 000 has 352, which
+  is most likely the light bit (cold and dark).
+- A wrong IAS (322 kt against 315-317 kt), and a wrong standby horizon
+  with a low airspeed. Each client computes these itself.
+- No wind corridor or no SIGMETs: for about 8 s after its welcome the
+  client writes its own `WxCorridorTxt`/`WxSigmet` (`#`), `MaweaBits`
+  (2048, as in Basic 000), `CrashInhib` 2000 and `FuelCtrL`/`FuelCtrR`.
+  The router drops most of these, but the client keeps them, since PSX
+  doesn't send a client's write back. The five main clients also
+  ping-ponged `FuelCtrL`/`FuelCtrR` between 1 and 257 for about 4 s.
+
+Other state that's wrong inside a client but never sent can't be seen
+on the network at all.
+
+- **Cost:** after a sim restart, one main client or another shows
+  subtly wrong state until someone notices and resets it.
+- **Workaround:** a slave frankenrouter resets each whitelisted PSX main
+  client's welcome once, 15 s after its first one
+  (`client_auto_reset_delay`), and a reset restarts the post-connect
+  quarantine.
+- **Request:** a main client should finish loading its start situ before
+  it applies (or asks for) its server's welcome, or not load a start
+  situ at all when it connects to a server.
+
 ### On the ground, an A/P disconnect press with the A/P off starts the wailer
 
 *Confirmed (2026-11-03, test sim).* On the ground with the autopilot not
