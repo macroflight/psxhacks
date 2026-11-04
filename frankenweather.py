@@ -7407,7 +7407,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     if here != self._cb_motion_here:
                         self._cb_motion_here = here
                         self._state_changed_event.set()
-                await asyncio.sleep(120.0)
+                # Soon after a start (no aircraft position or wind yet): try again soon
+                await asyncio.sleep(120.0 if self._cb_motion_here else 10.0)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
             self.logger.critical(traceback.format_exc())
