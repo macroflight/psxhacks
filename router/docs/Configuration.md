@@ -736,11 +736,14 @@ frdp_rtt_warning = 0.5
   (`Wx1`-`Wx7`, `WxMode1`-`WxMode7`, `Metar1`-`Metar7`) that many seconds
   late, so a CB appears, moves and goes in MSFS when PSX's weather radar
   shows it; everyone else (PSX, its main clients, other addons) gets them
-  at once. A drifting zone's `WxMode` comes from the same messages, once
-  a second (computed for when the client gets it, and with the
-  `TimeEarth` it's for, as PSX sends that only every ~3.5 s; PSX's own
-  `TimeEarth` doesn't reach them meanwhile), instead of frankenweather's
-  15 s writes, so its CB moves smoothly in MSFS. The
+  at once. frankenweather also describes each drifting CB in those
+  messages (position, drift, the bearing to hold), every 5 s and on any
+  change, and every router with such clients works out the zone's
+  `WxMode` itself (`frankenrouter/orchestration.py`), at the rate
+  frankenweather announces (`--orchestration-rate`, 1-20 Hz, default 5),
+  each with the `TimeEarth` it's for (PSX sends that only every ~3.5 s,
+  and PSX's own doesn't reach them meanwhile), instead of
+  frankenweather's 15 s writes, so the CB moves smoothly in MSFS. The
   messages themselves only go to frankenrouters. Without them for 90 s,
   no delay.
 

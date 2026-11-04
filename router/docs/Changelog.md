@@ -15,10 +15,12 @@
   the clients in the new `[filtering] orchestration_names` (default
   `PSX.NET.Orchestration`), every router delays `Wx`/`WxMode`/`Metar`
   1-7 by the delay frankenweather announces (with `--advanced-zones`,
-  default 10 s), and gives them a drifting zone's `WxMode` once a second
-  from frankenweather's new `FRANKENWEATHER:WXMODES` messages (frankenrouters
-  only), with the `TimeEarth` it's for: PSX sends that only every ~3.5 s,
-  and between those a drifting CB hopped back in MSFS. PSX and every other client get the writes as before. MSFS showed
+  default 10 s), and works out a drifting zone's `WxMode` for them itself,
+  5 times a second by default, from frankenweather's new
+  `FRANKENWEATHER:CBFEED` messages (each drifting CB's position and drift,
+  every 5 s; frankenrouters only), each with the `TimeEarth` it's for: PSX
+  sends that only every ~3.5 s, and between those a drifting CB hopped
+  back in MSFS. PSX and every other client get the writes as before. MSFS showed
   the CBs at once, well before the radar, and a drifting CB jumped back
   every 15 s.
 - **`CfgPin3Prog` is quarantined** (`default_seconds`, all connections).

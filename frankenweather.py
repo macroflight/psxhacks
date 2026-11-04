@@ -2426,7 +2426,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # Delay (s) for the weather-zone writes PSX.NET.Orchestration gets (the
         # routers apply it; see orchestration_feed_coro()), set in run()
         self._orch_delay_s = 0.0
-        self._orch_announced = (None, 0.0)   # (delay, time.monotonic()) last sent
+        self._orch_rate_hz = 5.0   # how often the routers send them the drifting zones
+        self._orch_announced = (None, 0.0)   # (what was sent, time.monotonic())
         self._orch_ever_announced = False
         self._sigmet_place_last: float = 0.0  # see _place_sigmet_zones()
         # zone -> label of the SIGMET that gave its current CB (e.g. "TS
@@ -7176,7 +7177,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             cells.append(entry)
         return {"why_not": self._cb_test_unavailable(), "cells": cells,
                 "distances_nm": list(self._CB_TEST_DISTANCES_NM),
-                "advanced_zones": self._advanced_zones, "orch_delay_s": self._orch_delay_s}
+                "advanced_zones": self._advanced_zones, "orch_delay_s": self._orch_delay_s,
+                "orch_rate_hz": self._orch_rate_hz}
 
     async def handle_cb_test(self, cmd: dict) -> str:  # pylint: disable=too-many-locals,too-many-return-statements,too-many-branches,too-many-statements
         """Do a /weather/cbtest command; return what happened, for the page."""
@@ -7190,6 +7192,16 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return await self._cb_test_set_speed(cmd.get("speed") if action == "speed" else None)
         if action == "advanced":
             return self._set_advanced_zones(cmd.get("on") == "1")
+        if action == "rate":
+            try:
+                rate = float(cmd.get("rate", ""))
+            except ValueError:
+                return f"Not a rate: {cmd.get('rate')!r}"
+            if not 1.0 <= rate <= 20.0:
+                return "The rate must be 1-20 Hz"
+            self._orch_rate_hz = rate
+            self.logger.info("CB test: Orchestration rate now %.1f Hz", rate)
+            return f"The routers now send PSX.NET.Orchestration drifting CBs at {rate:g} Hz"
         if action == "delay":
             try:
                 delay = float(cmd.get("delay", ""))
@@ -7294,49 +7306,52 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._state_changed_event.set()
         return f"Advanced zones {'on' if on else 'off'}"
 
-    def _orchestration_feed(self) -> Optional[dict]:
-        """Return the WXMODES message to send now, or None (see orchestration_feed_coro())."""
+    def _orchestration_feed(self) -> Optional[dict]:  # pylint: disable=too-many-locals
+        """Return the CBFEED message to send now, or None (see orchestration_feed_coro())."""
         now = time.monotonic()
-        delay = self._orch_delay_s if self._drift_enabled() else 0.0
-        zones = {}
+        enabled = self._drift_enabled()
+        delay = self._orch_delay_s if enabled else 0.0
         sim_ms = self.sim_time_ms()
-        at_ms = None
-        if delay or self._drift:
+        zones = {}
+        if enabled and sim_ms is not None:
             moving = (self.ac_alt_ft is not None and self.ac_alt_ft >= _DRIFT_MIN_ALT_FT and
                       not self._maneuvering)
             for zone_num, cell in sorted(self._drift.items()):
-                if sim_ms is None or not self._drift_enabled():
-                    break
-                # Orchestration gets it delay s from now; the radar then shows
-                # where the CB is now
-                lat, lon = cell.position_at(self.geod, now, moving or bool(cell.test))
-                at_ms = int(sim_ms + delay * 1000.0)
-                zones[str(zone_num)] = cell.mode_for(self.geod, at_ms, lat, lon)
-        last_delay, last_at = self._orch_announced
-        if not zones and last_delay == delay and (delay == 0.0 or now - last_at < 30.0):
-            return None   # unchanged: a delay every 30 s, no delay just once
+                if cell.bearing is None:
+                    continue
+                drifts = moving or bool(cell.test)
+                lat, lon = cell.position_at(self.geod, now, drifts)
+                zones[str(zone_num)] = {
+                    "lat": round(lat, 6), "lon": round(lon, 6),
+                    "hdg": round(cell.heading_deg, 2),
+                    "kt": round(cell.speed_kt, 2) if drifts else 0.0,
+                    "bearing": round(cell.bearing, 3), "elev0": cell.elev0_ft, "mode": cell.mode}
+        # Sent at once when anything but the positions changes, else every 5 s
+        # (with drifting zones) or 30 s (just the delay); no delay just once
+        sig = (delay, self._orch_rate_hz,
+               tuple((z, v["hdg"], v["kt"], v["bearing"], v["mode"].split(";")[5])
+                     for z, v in zones.items()))
+        last_sig, last_at = self._orch_announced
+        if sig == last_sig and (not zones and delay == 0.0 or
+                                now - last_at < (5.0 if zones else 30.0)):
+            return None
         if not zones and delay == 0.0 and not self._orch_ever_announced:
             return None   # never on: nothing to tell the routers (no delay is their default)
         self._orch_ever_announced = True
-        self._orch_announced = (delay, now)
-        feed = {"delay_s": delay, "zones": zones}
+        self._orch_announced = (sig, now)
+        feed = {"delay_s": delay, "rate_hz": self._orch_rate_hz, "zones": zones}
         if zones:
-            # The PSX clock the positions are for: Orchestration gets it with
-            # them. PSX itself sends TimeEarth only every ~3.5 s; between
-            # those, a client without a running clock draws the CBs up to
-            # 0.35 deg short on their circles, then hops back (seen in MSFS at
-            # 50 kt, 2026-11-04)
-            feed["time_earth_ms"] = at_ms
+            feed["time_earth_ms"] = int(sim_ms)   # the PSX clock the positions are for
         return feed
 
     async def orchestration_feed_coro(self) -> None:
-        """--advanced-zones: tell the routers the Orchestration delay; drifting zones every 1 s.
+        """--advanced-zones: tell the routers the drifting CBs and the Orchestration delay and rate.
 
         The routers give PSX.NET.Orchestration (it draws PSX's CBs in MSFS)
         every weather-zone write delay_s late, as late as PSX's weather radar
-        shows a change, and each drifting zone's WxMode from this feed instead
-        of the 15 s writes PSX gets, with the TimeEarth it's for, so its CB
-        moves smoothly in MSFS.
+        shows a change, and each drifting zone's WxMode rate_hz times a
+        second, worked out from these messages (router's orchestration.py),
+        instead of the 15 s writes PSX gets, so its CB moves smoothly in MSFS.
         """
         myname = inspect.currentframe().f_code.co_name
         try:
@@ -7347,7 +7362,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     continue
                 feed = self._orchestration_feed()
                 if feed is not None:
-                    self._psx_send("addon", "FRANKENWEATHER:WXMODES:" +
+                    self._psx_send("addon", "FRANKENWEATHER:CBFEED:" +
                                    json.dumps(feed, separators=(",", ":")))
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
@@ -10198,7 +10213,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             help="With --advanced-zones: the routers give PSX.NET.Orchestration "
                  "(which draws PSX's CBs in MSFS) every weather-zone change this "
                  "many seconds late, as late as PSX's weather radar shows it, and "
-                 "the drifting zones' positions every second (0-60, default 10). "
+                 "the drifting zones' positions --orchestration-rate times a "
+                 "second (0-60, default 10). Settable on the CB test page.")
+        parser.add_argument(
+            '--orchestration-rate', type=float, default=5.0, metavar='HZ',
+            help="With --advanced-zones: how many times a second the routers send "
+                 "PSX.NET.Orchestration the drifting zones (1-20, default 5). "
                  "Settable on the CB test page.")
         parser.add_argument(
             '--advanced-zones', action='store_true',
@@ -10364,6 +10384,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._sigmet_enabled = self.args.sigmet
         self._advanced_zones = bool(self.args.advanced_zones)
         self._orch_delay_s = min(max(float(self.args.orchestration_delay), 0.0), 60.0)
+        self._orch_rate_hz = min(max(float(self.args.orchestration_rate), 1.0), 20.0)
 
     # (arg_name, replacement_hint or None for the generic "just remove it" message)
     _REMOVED_ARGS = (

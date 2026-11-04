@@ -16,7 +16,8 @@
   smiley, and sets their drift speed. With advanced zones, the routers
   give PSX.NET.Orchestration every weather-zone change
   `--orchestration-delay` (default 10 s) late, to match PSX's radar, and
-  drifting zones' positions every second, so CBs move smoothly in MSFS.
+  drifting zones' positions `--orchestration-rate` times a second (default
+  5), so CBs move smoothly in MSFS.
   See
   [CBs drifting with the wind](frankenweather.md#cbs-drifting-with-the-wind---advanced-zones-testing).
 

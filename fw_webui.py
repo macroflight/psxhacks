@@ -3011,10 +3011,16 @@ def _build_cb_test_page(ctx, message: str = '') -> str:
              'PSX.NET.Orchestration delay <input type="number" name="delay" min="0" max="60" '
              f'step="0.5" value="{state.get("orch_delay_s", 0):g}" style="width:5em"> s '
              '<button type="submit" class="btn btn-blue btn-sm" style="width:auto">Set</button>'
+             '</form>'
+             '<form action="/api/weather/cbtest" method="post" style="display:inline-flex;'
+             'gap:0.3em;align-items:center"><input type="hidden" name="action" value="rate">'
+             'rate <input type="number" name="rate" min="1" max="20" step="1" '
+             f'value="{state.get("orch_rate_hz", 5):g}" style="width:4em"> Hz '
+             '<button type="submit" class="btn btn-blue btn-sm" style="width:auto">Set</button>'
              '</form></div>\n<p style="margin:0.5em 0 0">Advanced zones: CBs drift with the '
              'wind (started with --advanced-zones). The routers give PSX.NET.Orchestration '
              'every weather-zone change this many seconds late, to match PSX\'s weather radar, '
-             'and drifting CBs every second.</p></div>\n')
+             'and drifting CBs this many times a second.</p></div>\n')
     body += ('<div class="card"><p style="margin:0 0 0.5em">Testing only. Each test CB takes a '
              'weather zone, gets a fake 8/8 CB (3,000-40,000 ft) and stays until removed; the '
              'other zones keep at least 12 nm from its zone centre, so its echo shows at full '

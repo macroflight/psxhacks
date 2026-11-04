@@ -518,14 +518,15 @@ is usually the better side.
   between frankenweather's 15 s writes it follows PSX's turning CB (three
   small steps one way, one back). So frankenweather tells the routers a
   delay (`--orchestration-delay`, default 10 s), and they give
-  Orchestration every weather-zone change that late; and every second
-  frankenweather sends each drifting zone's position, worked out for when
-  Orchestration gets it, which the routers give Orchestration instead of
-  the 15 s writes. Needs a router with `[filtering] orchestration_names`
+  Orchestration every weather-zone change that late; and frankenweather
+  describes each drifting CB to them (position, drift, every 5 s), from
+  which each router works out the zone's position for Orchestration,
+  `--orchestration-rate` times a second (1-20, default 5), instead of the
+  15 s writes. Needs a router with `[filtering] orchestration_names`
   (on by default); an older router passes the writes on as before.
 - **CB test page** (`/weather/cbtest`, frankenweather's own web UI only):
   switches advanced zones on and off (it starts as `--advanced-zones`
-  says) and sets the Orchestration delay; and puts test CBs where you ask, for checking how
+  says) and sets the Orchestration delay and rate; and puts test CBs where you ask, for checking how
   they look on the radar and in MSFS. Each takes a weather zone and gets a
   fake 8/8 CB (3,000-40,000 ft) that stays until removed, fixed to the
   ground (or drifting) as the aircraft flies on. Buttons: remove the test

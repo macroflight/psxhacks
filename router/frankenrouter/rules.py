@@ -113,32 +113,45 @@ PRINTER_PUSH_KEYWORD = 'Qh415'
 
 # The weather-zone variables (see Rules.route()'s orchestration egress)
 _WEATHER_ZONE_VAR_RE = re.compile(r'^(Wx|WxMode|Metar)([1-7])$')
-# frankenweather's WXMODES feed: at most this delay (s), zones 1-7
+# frankenweather's CBFEED: at most this delay (s) and rate (Hz), zones 1-7
 ORCHESTRATION_MAX_DELAY_S = 60.0
 
 
-def parse_orchestration_wxmodes(text):
-    """Parse a FRANKENWEATHER:WXMODES payload; return {'delay_s', 'zones'} or None.
+ORCHESTRATION_MAX_RATE_HZ = 20.0
+_CBFEED_ZONE_FIELDS = ('lat', 'lon', 'hdg', 'kt', 'bearing', 'elev0')
 
-    The payload is JSON: {"delay_s": <s>, "zones": {"<1-7>": "<WxMode string>"},
-    "time_earth_ms": <PSX TimeEarth the WxModes are for>} (time_earth_ms
-    optional; returned as None without it).
+
+def parse_orchestration_cbfeed(text):
+    """Parse a FRANKENWEATHER:CBFEED payload; return it, checked, or None.
+
+    JSON: {"delay_s": <0-60>, "rate_hz": <1-20>, "time_earth_ms": <PSX
+    TimeEarth the zones are for>, "zones": {"<1-7>": {"lat", "lon" (the CB
+    then), "hdg", "kt" (its drift), "bearing" (from the zone centre, held),
+    "elev0" (the zone's own elevation, ft), "mode" (its WxMode string)}}}.
+    See frankenrouter/orchestration.py.
     """
     try:
         data = json.loads(text)
-        delay = float(data.get('delay_s', 0.0))
-        zones = {int(z): str(m) for z, m in (data.get('zones') or {}).items()}
-        time_earth_ms = data.get('time_earth_ms')
-        time_earth_ms = None if time_earth_ms is None else int(time_earth_ms)
-    except (ValueError, TypeError, AttributeError):
+        feed = {'delay_s': float(data.get('delay_s', 0.0)),
+                'rate_hz': float(data.get('rate_hz', 5.0)),
+                'time_earth_ms': int(data.get('time_earth_ms') or 0), 'zones': {}}
+        for z, zone in (data.get('zones') or {}).items():
+            entry = {k: float(zone[k]) for k in _CBFEED_ZONE_FIELDS}
+            entry['mode'] = str(zone['mode'])
+            feed['zones'][int(z)] = entry
+    except (ValueError, TypeError, AttributeError, KeyError):
         return None
-    if time_earth_ms is not None and time_earth_ms <= 0:
+    if not (0.0 <= feed['delay_s'] <= ORCHESTRATION_MAX_DELAY_S and
+            1.0 <= feed['rate_hz'] <= ORCHESTRATION_MAX_RATE_HZ):
         return None
-    if not 0.0 <= delay <= ORCHESTRATION_MAX_DELAY_S:
+    if feed['zones'] and feed['time_earth_ms'] <= 0:
         return None
-    if any(not 1 <= z <= 7 or m.count(';') < 5 or '\n' in m for z, m in zones.items()):
-        return None
-    return {'delay_s': delay, 'zones': zones, 'time_earth_ms': time_earth_ms}
+    for z, zone in feed['zones'].items():
+        if not (1 <= z <= 7 and -90.0 <= zone['lat'] <= 90.0 and
+                -180.0 <= zone['lon'] <= 180.0 and 0.0 <= zone['kt'] <= 1000.0 and
+                zone['mode'].count(';') >= 5 and '\n' not in zone['mode']):
+            return None
+    return feed
 
 
 QUARANTINE_DEFAULT_S = 60.0
@@ -1157,21 +1170,21 @@ class Rules():  # pylint: disable=too-many-public-methods
         if addon == 'FRANKENWEATHER':
             if not self.allow_write():
                 return self.myreturn(RulesAction.DROP, RulesCode.NOWRITE)
-            # WXMODES: frankenweather's 1 s WxMode feed for the clients that
-            # draw PSX's CBs elsewhere ([filtering] orchestration_names), with
-            # the delay all their weather-zone writes get. Frankenrouters only;
-            # each router hands it to its own such clients (see
-            # Frankenrouter.orchestration_wxmodes()).
-            if payload.startswith('WXMODES:'):
-                feed = parse_orchestration_wxmodes(payload[len('WXMODES:'):])
+            # CBFEED: frankenweather's drifting CBs, the delay all weather-zone
+            # writes get and the rate for the clients that draw PSX's CBs
+            # elsewhere ([filtering] orchestration_names). Frankenrouters only;
+            # each router works out its own such clients' WxModes from it (see
+            # Frankenrouter.orchestration_cbfeed()).
+            if payload.startswith('CBFEED:'):
+                feed = parse_orchestration_cbfeed(payload[len('CBFEED:'):])
                 if feed is None:
                     return self.myreturn(
                         RulesAction.FILTER, RulesCode.FRANKENWEATHER_FILTERED,
                         extra_data={'frankenrouters_only': True},
-                        message="malformed FRANKENWEATHER:WXMODES, only forwarded")
+                        message="malformed FRANKENWEATHER:CBFEED, only forwarded")
                 return self.myreturn(
                     RulesAction.FILTER, RulesCode.FRANKENWEATHER_FILTERED,
-                    extra_data={'orchestration_wxmodes': feed})
+                    extra_data={'orchestration_cbfeed': feed})
             # SIGMETJSON (the parsed SIGMET download, ~30 KB) is only for
             # the routers' own /api/sigmet/latest/json, so frankenrouters only.
             if payload.startswith('SIGMETJSON:'):
@@ -3041,26 +3054,29 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
         self.assertIsNone(extra_data)
 
-    def test_orchestration_wxmodes(self):
-        """FRANKENWEATHER:WXMODES is parsed for the Orchestration feed; bad ones only forwarded."""
+    def test_orchestration_cbfeed(self):
+        """FRANKENWEATHER:CBFEED is parsed for the Orchestration feed; bad ones only forwarded."""
         router = self.DummyFrankenrouter()
         rules = Rules(router)
         router.upstream = self.DummyUpstreamConnection()
-        mode = "0.82;-0.43;320;12;11;X90101p"
+        zone = ('{"lat": 47.3, "lon": -25.0, "hdg": 90, "kt": 20, "bearing": 123, '
+                '"elev0": 0, "mode": "0.82;-0.43;320;12;11;X90101p"}')
         (action, code, _, extra_data) = rules.route(
-            'addon=FRANKENWEATHER:WXMODES:{"delay_s": 10, "zones": {"3": "%s"}, '
-            '"time_earth_ms": 1793800000123}' % mode, router.upstream)
+            'addon=FRANKENWEATHER:CBFEED:{"delay_s": 10, "rate_hz": 5, '
+            '"time_earth_ms": 1793800000123, "zones": {"3": %s}}' % zone, router.upstream)
         self.assertEqual((action, code), (RulesAction.FILTER, RulesCode.FRANKENWEATHER_FILTERED))
-        self.assertEqual(extra_data, {'orchestration_wxmodes': {
-            'delay_s': 10.0, 'zones': {3: mode}, 'time_earth_ms': 1793800000123}})
-        (_, _, _, extra_data) = rules.route(
-            'addon=FRANKENWEATHER:WXMODES:{"delay_s": 10, "zones": {}}', router.upstream)
-        self.assertIsNone(extra_data['orchestration_wxmodes']['time_earth_ms'])
-        for bad in ('{"delay_s": 999, "zones": {}}',
-                    '{"delay_s": 5, "zones": {"8": "%s"}}' % mode,
-                    '{"delay_s": 5, "zones": {"1": "no;fields"}}', 'not json',
-                    '{"delay_s": 5, "zones": {}, "time_earth_ms": -1}'):
-            (_, _, _, extra_data) = rules.route(f'addon=FRANKENWEATHER:WXMODES:{bad}',
+        feed = extra_data['orchestration_cbfeed']
+        self.assertEqual((feed['delay_s'], feed['rate_hz'], feed['time_earth_ms']),
+                         (10.0, 5.0, 1793800000123))
+        self.assertEqual(feed['zones'][3]['bearing'], 123.0)
+        self.assertEqual(feed['zones'][3]['mode'], "0.82;-0.43;320;12;11;X90101p")
+        for bad in ('{"delay_s": 999, "rate_hz": 5, "zones": {}}',
+                    '{"delay_s": 5, "rate_hz": 50, "zones": {}}',
+                    '{"delay_s": 5, "rate_hz": 5, "time_earth_ms": 1, "zones": {"8": %s}}' % zone,
+                    '{"delay_s": 5, "rate_hz": 5, "zones": {"1": %s}}' % zone,   # no time
+                    '{"delay_s": 5, "rate_hz": 5, "time_earth_ms": 1, "zones": {"1": {}}}',
+                    'not json'):
+            (_, _, _, extra_data) = rules.route(f'addon=FRANKENWEATHER:CBFEED:{bad}',
                                                 router.upstream)
             self.assertEqual(extra_data, {'frankenrouters_only': True}, bad)
 

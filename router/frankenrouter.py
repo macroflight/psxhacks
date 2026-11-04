@@ -34,6 +34,7 @@ from frankenrouter import connection
 from frankenrouter import variables
 from frankenrouter import routercache
 from frankenrouter import navdata
+from frankenrouter import orchestration
 from frankenrouter import cdumenus
 from frankenrouter import crewalertness
 from frankenrouter import logcompress
@@ -76,7 +77,7 @@ HOUSEKEEPING_INTERVAL = 10
 # Weather-zone writes to Orchestration clients ([filtering] orchestration_names):
 # frankenweather's announced delay counts this long, its WxMode feed for a zone this long
 ORCHESTRATION_DELAY_STALE_S = 90.0
-ORCHESTRATION_FEED_FRESH_S = 5.0
+ORCHESTRATION_FEED_FRESH_S = 15.0   # frankenweather sends CBFEED every 5 s
 
 # Command line options that have been removed. Each is still registered
 # with argparse (hidden from --help via SUPPRESS) purely so scripts/configs
@@ -418,16 +419,24 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 'func': self.orchestration_delay_task,
                 'kwargs': {},
             },
+            'Orchestration Feed': {
+                'func': self.orchestration_feed_task,
+                'kwargs': {},
+            },
         }
         self.clients = {}
         self.upstream = None
         self.upstream_connections = 0
         # Clients that draw PSX's CBs elsewhere ([filtering] orchestration_names):
-        # the delay frankenweather last announced (s, time.perf_counter()), when
-        # each zone's WxMode feed last came, and the delayed lines for them
-        # (time.perf_counter() due, line), sent in order by orchestration_delay_task()
-        self._orchestration_delay = (0.0, 0.0)
+        # the delay and rate frankenweather last announced (s, Hz,
+        # time.perf_counter()), when each zone's CBFEED last came, the drifting
+        # zones (zone -> (CBFEED zone, its TimeEarth ms, time.perf_counter() it
+        # came, time.perf_counter() first seen)), and the delayed lines for
+        # them (time.perf_counter() due, line), sent in order by
+        # orchestration_delay_task()
+        self._orchestration_delay = (0.0, 5.0, 0.0)
         self._orchestration_feed_at = {}
+        self._orchestration_zones = {}
         self._orchestration_queue = collections.deque()
         self._orchestration_queued = asyncio.Event()
         # Addon CDU menu prompts registered through us ([filtering] cdu_menu_tracking)
@@ -4309,7 +4318,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         frankenweather announces it in every FRANKENWEATHER:WXMODES message
         (at least every 30 s); none for ORCHESTRATION_DELAY_STALE_S: 0.
         """
-        delay, at = self._orchestration_delay
+        delay, _, at = self._orchestration_delay
         if time.perf_counter() - at > ORCHESTRATION_DELAY_STALE_S:
             return 0.0
         return delay
@@ -4345,22 +4354,62 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self._orchestration_queue.append((time.perf_counter() + self.orchestration_delay_s(), line))
         self._orchestration_queued.set()
 
-    def orchestration_wxmodes(self, feed):
-        """Take a FRANKENWEATHER:WXMODES feed: the delay, and each zone's WxMode for later."""
+    def orchestration_cbfeed(self, feed):
+        """Take a FRANKENWEATHER:CBFEED: the delay and rate, and each drifting zone's CB."""
         now = time.perf_counter()
-        self._orchestration_delay = (feed['delay_s'], now)
-        if feed.get('time_earth_ms') and feed['zones'] and self.orchestration_peernames():
-            # The PSX clock the positions are for, just before them: PSX sends
-            # TimeEarth only every ~3.5 s, and a client without a running clock
-            # would draw the CBs short of where they are between those
-            keyword = self.variables.get_keyword_for_name("TimeEarth")
-            if keyword:
-                self.orchestration_enqueue(f"{keyword}={feed['time_earth_ms']}")
-        for zone, mode in sorted(feed['zones'].items()):
+        self._orchestration_delay = (feed['delay_s'], feed['rate_hz'], now)
+        for zone, entry in feed['zones'].items():
+            first = self._orchestration_zones.get(zone, (None, None, None, now))[3]
+            if not self.orchestration_feed_fresh(zone):
+                first = now
             self._orchestration_feed_at[zone] = now
+            self._orchestration_zones[zone] = (entry, feed['time_earth_ms'], now, first)
+
+    def orchestration_feed_lines(self, now):
+        """Return the lines the Orchestration clients get now: TimeEarth, then each zone's WxMode.
+
+        Each drifting zone's CB as it was the delay ago (where PSX's radar
+        shows it), drawn at the PSX clock sent with it: a client that uses
+        the last TimeEarth it got still draws it there. A zone starts the
+        delay after its first CBFEED, like its other weather-zone writes.
+        """
+        delay = self.orchestration_delay_s()
+        zones = [(zone, data) for zone, data in sorted(self._orchestration_zones.items())
+                 if self.orchestration_feed_fresh(zone) and now - data[3] >= delay]
+        if not zones:
+            return []
+        te_keyword = self.variables.get_keyword_for_name("TimeEarth")
+        # The PSX clock now, run on from the newest CBFEED's
+        _, base_ms, base_at, _ = max((data for _, data in zones), key=lambda d: d[2])
+        time_earth_ms = int(base_ms + (now - base_at) * 1000.0)
+        lines = [f"{te_keyword}={time_earth_ms}"] if te_keyword else []
+        for zone, (entry, msg_ms, _, _) in zones:
             keyword = self.variables.get_keyword_for_name(f"WxMode{zone}")
-            if keyword and self.orchestration_peernames():
-                self.orchestration_enqueue(f"{keyword}={mode}")
+            if keyword:
+                elapsed_s = (time_earth_ms - msg_ms) / 1000.0 - delay
+                mode = orchestration.wxmode_for(entry, time_earth_ms, elapsed_s)
+                lines.append(f"{keyword}={mode}")
+        return lines
+
+    async def orchestration_feed_task(self, name):
+        """Send the Orchestration clients each drifting zone's WxMode, rate_hz times a second."""
+        try:
+            while True:
+                _, rate_hz, _ = self._orchestration_delay
+                await asyncio.sleep(1.0 / min(max(rate_hz, 1.0), 20.0))
+                if not self._orchestration_zones:
+                    continue
+                for zone in [z for z in self._orchestration_zones
+                             if not self.orchestration_feed_fresh(z)]:
+                    del self._orchestration_zones[zone]   # frankenweather stopped feeding it
+                peernames = self.orchestration_peernames()
+                if not peernames:
+                    continue
+                for line in self.orchestration_feed_lines(time.perf_counter()):
+                    await self.client_broadcast(line, include=peernames)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in %s, shutting down", exc, name)
+            self.logger.critical(traceback.format_exc())
 
     async def orchestration_delay_task(self, name):
         """Send the delayed weather-zone lines to the Orchestration clients, in order."""
@@ -5111,10 +5160,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     if self.is_upstream_connected() and self.upstream.is_frankenrouter:
                         tasks.append(self.send_to_upstream(line, sender.peername))
                     await asyncio.gather(*tasks)
-            elif 'orchestration_wxmodes' in extra_data:
-                # frankenweather's WxMode feed: to the other frankenrouters as it
-                # is; to our own Orchestration clients as WxMode writes, late
-                self.orchestration_wxmodes(extra_data['orchestration_wxmodes'])
+            elif 'orchestration_cbfeed' in extra_data:
+                # frankenweather's drifting CBs: to the other frankenrouters as
+                # they are; our own Orchestration clients get WxModes from them
+                # (orchestration_feed_task())
+                self.orchestration_cbfeed(extra_data['orchestration_cbfeed'])
                 if sender.upstream:
                     await self.client_broadcast(line, exclude_non_frankenrouter=True)
                 else:
