@@ -1808,6 +1808,27 @@ class RouterFWContext:
         await self._router.client_broadcast(line)
         await asyncio.sleep(1)
 
+    @property
+    def cb_test_enabled(self):
+        """Return True once frankenweather reports its CB test page state (in its STATE)."""
+        return bool((self._router.frankenweather_state or {}).get('cb_test'))
+
+    def cb_test_state(self):
+        """Return frankenweather's CB test page state, from its last STATE."""
+        return (self._router.frankenweather_state or {}).get('cb_test') or {}
+
+    async def send_cbtest_cmd(self, cmd):
+        """Send a CB test command to frankenweather; return its result from its next STATE."""
+        before = self._router.frankenweather_received_at
+        line = f"addon=FRANKENWEATHER:CBTESTCOMMAND:{json.dumps(cmd)}"
+        await self._router.send_to_upstream(line)
+        await self._router.client_broadcast(line)
+        for _ in range(50):   # its STATE goes out within a second or so
+            await asyncio.sleep(0.1)
+            if self._router.frankenweather_received_at != before:
+                break
+        return self.cb_test_state().get('message') or "Sent to frankenweather"
+
     async def send_turb_cmd(self, cmd):
         """Send a TURBCOMMAND to PSX and all clients."""
         line = f"addon=FRANKENWEATHER:TURBCOMMAND:{json.dumps(cmd)}"
@@ -2481,6 +2502,8 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
             _efb_ctx = RouterFWContext(router, router.config.listen.rest_api_color_scheme)
 
             _fw_webui.register_weather_routes(routes, _efb_ctx)
+            # frankenweather's CB test page, through its STATE and CBTESTCOMMAND
+            _fw_webui.register_cb_test_routes(routes, _efb_ctx)
 
             @routes.get('/efb')
             async def handle_efb_get(request):

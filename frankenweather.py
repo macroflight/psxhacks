@@ -2192,7 +2192,9 @@ class StandaloneFWContext:
 
     async def send_cbtest_cmd(self, cmd):
         """Do a CB test page command; return what happened."""
-        return await self._fw.handle_cb_test(cmd)
+        message = await self._fw.handle_cb_test(cmd)
+        self._fw._cb_test_message = message  # pylint: disable=protected-access
+        return message
 
 
 # ---------------------------------------------------------------------------
@@ -2429,6 +2431,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._orch_rate_hz = 5.0   # how often the routers send them the drifting zones
         self._orch_announced = (None, 0.0)   # (what was sent, time.monotonic())
         self._orch_ever_announced = False
+        self._cb_test_message = ""   # the last CB test command's result (STATE "cb_test")
+        self._cb_test_tasks: set = set()
         self._sigmet_place_last: float = 0.0  # see _place_sigmet_zones()
         # zone -> label of the SIGMET that gave its current CB (e.g. "TS
         # SIGMET MPZL 03 EMBD"), or None; shown in the log and the web UI.
@@ -3549,6 +3553,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return
         if rest.startswith("MANUALWXCOMMAND:"):
             self._handle_manual_wx_command(rest[len("MANUALWXCOMMAND:"):])
+            return
+        if rest.startswith("CBTESTCOMMAND:"):
+            self._handle_cb_test_addon(rest[len("CBTESTCOMMAND:"):])
             return
         if rest.startswith("DIAG:simulate_openmeteo_download_failure:"):
             flag = rest[len("DIAG:simulate_openmeteo_download_failure:"):]
@@ -7187,6 +7194,28 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 "advanced_zones": self._advanced_zones, "orch_delay_s": self._orch_delay_s,
                 "orch_rate_hz": self._orch_rate_hz}
 
+    def _handle_cb_test_addon(self, json_str: str) -> None:
+        """Do a CB test page command from a router's web UI (FRANKENWEATHER:CBTESTCOMMAND)."""
+        try:
+            cmd = json.loads(json_str)
+            if not isinstance(cmd, dict):
+                raise ValueError("not an object")
+        except ValueError:
+            self.logger.warning("Malformed CBTESTCOMMAND: %s", json_str[:80])
+            return
+        task = asyncio.get_running_loop().create_task(self._cb_test_from_router(cmd))
+        self._cb_test_tasks.add(task)
+        task.add_done_callback(self._cb_test_tasks.discard)
+
+    async def _cb_test_from_router(self, cmd: dict) -> None:
+        """Run a router's CB test command; its result goes out in the next STATE."""
+        try:
+            self._cb_test_message = await self.handle_cb_test(cmd)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self._cb_test_message = f"Error: {exc}"
+            self.logger.error("CB test command %s failed: %s", cmd, exc)
+        self._state_changed_event.set()
+
     async def handle_cb_test(self, cmd: dict) -> str:  # pylint: disable=too-many-locals,too-many-return-statements,too-many-branches,too-many-statements
         """Do a /weather/cbtest command; return what happened, for the page."""
         action = cmd.get("action")
@@ -9195,6 +9224,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "ac_hdg": round(self.ac_hdg, 1) if self.ac_hdg is not None else None,
             "ac_alt_ft": round(self.ac_alt_ft) if self.ac_alt_ft is not None else None,
             "zones": zones,
+            # The CB test page's state (also served by the routers' web UI)
+            "cb_test": dict(self.cb_test_state(), message=self._cb_test_message),
             "config": config,
             "sigmets": sigmets,
             "gairmets": gairmets,
