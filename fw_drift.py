@@ -222,8 +222,8 @@ class DriftCell:  # pylint: disable=too-many-instance-attributes
 def pos_text(lat: float, lon: float) -> str:
     """Return a position as degrees and decimal minutes, e.g. "N10 00.7 W067 39.6"."""
     def dm(value, pos, neg, width):
-        deg, minutes = divmod(abs(value) * 60.0, 60.0)
-        return f"{pos if value >= 0 else neg}{int(deg):0{width}d} {minutes:04.1f}"
+        deg, tenths = divmod(round(abs(value) * 600.0), 600)   # rounded first: no "60.0"
+        return f"{pos if value >= 0 else neg}{deg:0{width}d} {tenths / 10.0:04.1f}"
     return f"{dm(lat, 'N', 'S', 2)} {dm(lon, 'E', 'W', 3)}"
 
 
