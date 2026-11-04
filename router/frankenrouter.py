@@ -3519,12 +3519,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 errors.append("No sim is sending MSFS elevation to PSX")
             if len(filterstatus['traffic']['disabled']) < 1:
                 errors.append("No sim is sending vPilot traffic data")
-            critical_s = self.config.performance.clock_skew_critical
-            for name, skew in self._clock_skews():
-                if abs(skew) > critical_s:
-                    errors.append(
-                        f"Router {name}'s clock is off by {skew:+.1f}s"
-                        f" (limit {critical_s:.0f}s)")
+            # Clock skew is only a warning (get_warnings()), however large: an
+            # error is a red (ROUTER) on every sim's EICAS, and a joining sim
+            # an hour off forced a disconnect just before takeoff (2026-11-04)
             errors.extend(self._navdata_check()[0])
         if self.config.identity.type == 'master':
             for pattern in MASTER_ADDON_PATTERNS:
@@ -3570,7 +3567,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     f" limit {perf.sent_messages_per_second_warning_limit})")
         if self.get_router_type() == 'master':
             for name, skew in self._clock_skews():
-                if perf.clock_skew_warning < abs(skew) <= perf.clock_skew_critical:
+                if abs(skew) > perf.clock_skew_warning:
                     warnings.append(
                         f"Router {name}'s clock is off by {skew:+.1f}s"
                         f" (limit {perf.clock_skew_warning:.0f}s)")

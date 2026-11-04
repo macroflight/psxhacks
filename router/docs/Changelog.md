@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **Change: a router's clock difference is only a warning.** The master
+  router used to raise a critical error once another router's clock was
+  more than `clock_skew_critical` (120 s) off, which puts a red
+  `(ROUTER)` on every sim's EICAS. A sim joining with its PC clock an
+  hour off did that just before takeoff, and the crew had to disconnect
+  it. Now any difference over `clock_skew_warning` (30 s) is a warning,
+  shown on the router console and on every sim's `/efb` page, never on
+  the EICAS. `clock_skew_critical` is no longer used.
+
 ## 2026-11-03: version 1.39.0
 
 - **Change: only the traffic master sim supplies traffic, from any

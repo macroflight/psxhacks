@@ -663,12 +663,14 @@ need to change any of these settings.
   router's clock (as self-reported in its own FRDP ROUTERINFO, and
   corrected for network delay using the measured FRDP PING/PONG round
   trip time where available) differs from the master's own clock by
-  more than this many seconds, a local warning is printed. Default: 30.0.
+  more than this many seconds, a warning is shown on the router
+  console and on every sim's `/efb` web page (Router errors and
+  warnings), however large the difference. It never puts a message on
+  the EICAS. Default: 30.0.
 
-- `clock_skew_critical`: only checked by the master router. Same check
-  as `clock_skew_warning`, but at this level a critical error is
-  raised and included in ROUTERINFO, so it is visible network-wide and
-  can trigger a master caution. Default: 120.0.
+- `clock_skew_critical`: no longer used: a clock difference is only
+  ever a warning (see `clock_skew_warning`). Still accepted, so
+  existing configs keep loading.
 
 - `clock_sync_script`: local path to `start_scripts/sync_clock.ps1` (or
   an equivalent script). Checked by every router (not just master): the

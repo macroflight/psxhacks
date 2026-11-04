@@ -491,11 +491,14 @@ class _RouterConfigPerformance:  # pylint: disable=missing-class-docstring,too-f
 
         # How far another router's clock (self-reported in its own FRDP
         # ROUTERINFO "timestamp" field) may differ from ours before the
-        # master router flags it -- see Frankenrouter._clock_skews().
+        # master router warns (console and web UI, never the EICAS) -- see
+        # Frankenrouter._clock_skews().
         self.clock_skew_warning = data.get('clock_skew_warning', 30.0)
         if not isinstance(self.clock_skew_warning, float):
             raise RouterConfigError("performance clock_skew_warning must be an float")
 
+        # No longer used (clock skew is only ever a warning, 2026-11-04);
+        # still read so existing configs that set it keep loading
         self.clock_skew_critical = data.get('clock_skew_critical', 120.0)
         if not isinstance(self.clock_skew_critical, float):
             raise RouterConfigError("performance clock_skew_critical must be an float")
