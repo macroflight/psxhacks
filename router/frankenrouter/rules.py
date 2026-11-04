@@ -2006,7 +2006,15 @@ class Rules():  # pylint: disable=too-many-public-methods
         # (PSX.NET.Orchestration) late, as late as PSX's own radar shows them,
         # and a drifting zone's WxMode from frankenweather's feed instead (see
         # Frankenrouter.orchestration_*). Everyone else gets them now.
-        zone_var = _WEATHER_ZONE_VAR_RE.match(self.router.variables.get_variable_name(key) or '')
+        var_name = self.router.variables.get_variable_name(key) or ''
+        # While frankenweather's feed runs they get TimeEarth with it, every
+        # second; PSX's own (every ~3.5 s) would move their clock past the
+        # positions they have
+        if var_name == 'TimeEarth' and self.router.orchestration_egress_needed(None):
+            return self.myreturn(
+                RulesAction.FILTER, RulesCode.KEYVALUE_FILTER_EGRESS,
+                extra_data={'orchestration_egress': {'zone': None, 'wxmode': False}})
+        zone_var = _WEATHER_ZONE_VAR_RE.match(var_name)
         if zone_var and self.router.orchestration_egress_needed(int(zone_var.group(2))):
             return self.myreturn(
                 RulesAction.FILTER, RulesCode.KEYVALUE_FILTER_EGRESS,
@@ -2049,7 +2057,8 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             """Return a fake variable name for a few keywords."""
             return {'Qs196': 'MfAcBus1', 'Qi130': 'MfEvent', 'Qs546': 'TkofRefNg',
                     'Qi190': 'MaweaBits', 'Qs499': 'WxSigmet', 'Qs329': 'Wx1',
-                    'Qi272': 'CfgPin3Prog', 'Qs336': 'WxMode1'}.get(keyword, keyword)
+                    'Qi272': 'CfgPin3Prog', 'Qs336': 'WxMode1',
+                    'Qs123': 'TimeEarth'}.get(keyword, keyword)
 
     class DummyCache():  # pylint: disable=too-few-public-methods
         """Implement small parts of the router for unit testing."""
@@ -3071,6 +3080,8 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         self.assertEqual(extra_data, {'orchestration_egress': {'zone': 1, 'wxmode': False}})
         (action, _, _, _) = rules.route("Qh33=4", router.upstream)   # not a weather-zone variable
         self.assertEqual(action, RulesAction.NORMAL)
+        (_, _, _, extra_data) = rules.route("Qs123=1793800000000", router.upstream)
+        self.assertEqual(extra_data, {'orchestration_egress': {'zone': None, 'wxmode': False}})
 
     def test_addon_frankenweather_filter(self):
         """FRANKENWEATHER addon messages must be filtered to frankenrouters only."""

@@ -4315,7 +4315,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         return delay
 
     def orchestration_feed_fresh(self, zone):
-        """Return True while frankenweather's WxMode feed for zone is current."""
+        """Return True while frankenweather's WxMode feed for zone (None: any zone) is current."""
+        if zone is None:
+            return any(self.orchestration_feed_fresh(z) for z in list(self._orchestration_feed_at))
         at = self._orchestration_feed_at.get(zone)
         return at is not None and time.perf_counter() - at < ORCHESTRATION_FEED_FRESH_S
 
@@ -4326,8 +4328,15 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 if c.display_name in names and not c.is_frankenrouter and c.peername != exclude]
 
     def orchestration_egress_needed(self, zone):
-        """Return True if a weather-zone write for zone must reach Orchestration clients late."""
-        if self.orchestration_delay_s() <= 0.0 and not self.orchestration_feed_fresh(zone):
+        """Return True if a write for weather zone (None: TimeEarth) needs the Orchestration filter.
+
+        A weather-zone write: while frankenweather announces a delay, or
+        feeds that zone. TimeEarth: while it feeds any zone (they get its).
+        """
+        if zone is None:
+            if not self.orchestration_feed_fresh(None):
+                return False
+        elif self.orchestration_delay_s() <= 0.0 and not self.orchestration_feed_fresh(zone):
             return False
         return bool(self.orchestration_peernames())
 
@@ -5126,8 +5135,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         self.send_to_upstream(line, sender.peername),
                         self.client_broadcast(line, exclude=late + [sender.peername]),
                     )
-                if late and not (zone_info['wxmode'] and
-                                 self.orchestration_feed_fresh(zone_info['zone'])):
+                fed = zone_info['zone'] is None or (   # TimeEarth: from the feed
+                    zone_info['wxmode'] and self.orchestration_feed_fresh(zone_info['zone']))
+                if late and not fed:
                     self.orchestration_enqueue(line)
             elif 'frankenrouters_only' in extra_data:
                 self.logger.debug("sending with frankenrouters_only: %s", line[:80])
