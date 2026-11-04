@@ -437,6 +437,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self._orchestration_delay = (0.0, 5.0, 0.0)
         self._orchestration_feed_at = {}
         self._orchestration_zones = {}
+        self._orchestration_accel = 1.0   # PSX's time acceleration, from the CBFEED
         self._orchestration_queue = collections.deque()
         self._orchestration_queued = asyncio.Event()
         # Addon CDU menu prompts registered through us ([filtering] cdu_menu_tracking)
@@ -4358,6 +4359,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         """Take a FRANKENWEATHER:CBFEED: the delay and rate, and each drifting zone's CB."""
         now = time.perf_counter()
         self._orchestration_delay = (feed['delay_s'], feed['rate_hz'], now)
+        self._orchestration_accel = feed['accel']
         for zone, entry in feed['zones'].items():
             first = self._orchestration_zones.get(zone, (None, None, None, now))[3]
             if not self.orchestration_feed_fresh(zone):
@@ -4365,7 +4367,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self._orchestration_feed_at[zone] = now
             self._orchestration_zones[zone] = (entry, feed['time_earth_ms'], now, first)
 
-    def orchestration_feed_lines(self, now):
+    def orchestration_feed_lines(self, now):  # pylint: disable=too-many-locals
         """Return the lines the Orchestration clients get now: TimeEarth, then each zone's WxMode.
 
         Each drifting zone's CB as it was the delay ago (where PSX's radar
@@ -4379,14 +4381,17 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         if not zones:
             return []
         te_keyword = self.variables.get_keyword_for_name("TimeEarth")
-        # The PSX clock now, run on from the newest CBFEED's
+        # The PSX clock now, run on from the newest CBFEED's (at PSX's time
+        # acceleration); the delay (real seconds, like PSX's radar lag) is
+        # that much more sim time
+        accel = self._orchestration_accel
         _, base_ms, base_at, _ = max((data for _, data in zones), key=lambda d: d[2])
-        time_earth_ms = int(base_ms + (now - base_at) * 1000.0)
+        time_earth_ms = int(base_ms + (now - base_at) * 1000.0 * accel)
         lines = [f"{te_keyword}={time_earth_ms}"] if te_keyword else []
         for zone, (entry, msg_ms, _, _) in zones:
             keyword = self.variables.get_keyword_for_name(f"WxMode{zone}")
             if keyword:
-                elapsed_s = (time_earth_ms - msg_ms) / 1000.0 - delay
+                elapsed_s = (time_earth_ms - msg_ms) / 1000.0 - delay * accel
                 mode = orchestration.wxmode_for(entry, time_earth_ms, elapsed_s)
                 lines.append(f"{keyword}={mode}")
         return lines

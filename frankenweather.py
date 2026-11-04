@@ -6884,15 +6884,19 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         except (TypeError, ValueError):
             pass
 
+    def time_accel(self) -> float:
+        """Return PSX's time acceleration (TimeAccel 100 = 1x)."""
+        try:
+            return min(max(int(self.psx.get("TimeAccel") or 100) / 100.0, 0.25), 64.0)
+        except (TypeError, ValueError, AttributeError):
+            return 1.0
+
     def sim_time_ms(self) -> Optional[float]:
         """Return PSX's TimeEarth now (ms), run on from its last update at TimeAccel, or None."""
         if self._time_earth_rx is None:
             return None
         value, received = self._time_earth_rx
-        try:
-            accel = int(self.psx.get("TimeAccel") or 100) / 100.0
-        except (TypeError, ValueError):
-            accel = 1.0
+        accel = self.time_accel()
         # PSX sends it every few seconds while time runs; none for longer:
         # paused, so the clock stands still
         elapsed = min(time.monotonic() - received, 60.0)
@@ -6919,7 +6923,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         for zone_num, cell in self._drift.items():
             i = zone_num - 1
             if sim_ms is not None:
-                cell.place(self.geod, sim_ms, _DRIFT_TICK_S * 500.0)
+                cell.place(self.geod, sim_ms, _DRIFT_TICK_S * 500.0 * self.time_accel())
                 self.zone_positions[zone_num] = (cell.clat, cell.clon,
                                                  self.zone_positions[zone_num][2])
             new_wxs[i] = _fw_drift.with_oktas(cell.wx, cell.decayed_oktas(now))
@@ -7074,24 +7078,27 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 zone_num, _fw_drift.pos_text(new_lat, new_lon), aside_nm, cell.zone,
                 ", which takes its weather" if local else "")
 
-    def _drift_tick(self, dt_s: float) -> None:
+    def _drift_tick(self, dt_s: float) -> None:  # pylint: disable=too-many-locals,too-many-statements
         """Move every drifting cell one step; decay and end them; put airport zones back."""
         now = time.monotonic()
         moving = (self.ac_alt_ft is not None and self.ac_alt_ft >= _DRIFT_MIN_ALT_FT and
                   not self._maneuvering)
         self._inject_wx_slow_transit()
         sim_ms = self.sim_time_ms()
+        accel = self.time_accel()
+        lead_ms = _DRIFT_TICK_S * 500.0 * accel   # half a tick, in sim time
         for zone_num, cell in list(self._drift.items()):
             cur = self.zone_positions.get(zone_num)
             if cur is None or abs(cur[0] - cell.clat) > 1e-9 or abs(cur[1] - cell.clon) > 1e-9:
                 self._end_drift(zone_num, "the zone was moved elsewhere", retire=False)
                 continue
-            if not cell.test and cell.decay_from is None and now >= cell.started + cell.lifetime_s:
+            cell.advance(dt_s * accel)
+            if cell.decay_from is None and cell.life_over():
                 cell.start_decay(now, f"end of its {cell.lifetime_s / 60.0:.0f} min life")
                 self.logger.info("CB drift: Zone %d starts to decay (%s)", zone_num, cell.decay_why)
             if moving or cell.test:
                 old = (cell.lat, cell.lon, cell.moved_nm)
-                cell.step(self.geod, dt_s)
+                cell.step(self.geod, dt_s * accel)   # the drift is in sim time
                 cell.stepped_at = now
                 removed_for = self._cb_removed_near_airport(cell.lat, cell.lon)
                 if removed_for:
@@ -7105,7 +7112,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 self._end_drift(zone_num, f"CB gone: {cell.decay_why}", retire=True)
                 continue
             if sim_ms is not None:
-                cell.place(self.geod, sim_ms, _DRIFT_TICK_S * 500.0)
+                cell.place(self.geod, sim_ms, lead_ms)
             self._drift_keep_clear(cell, now)
             self.zone_positions[zone_num] = (cell.clat, cell.clon, cur[2])
             self.zone_mode[zone_num] = _fw_drift.wxmode_at(cell.mode, cell.clat, cell.clon)
@@ -7320,7 +7327,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 if cell.bearing is None:
                     continue
                 drifts = moving or bool(cell.test)
-                lat, lon = cell.position_at(self.geod, now, drifts)
+                lat, lon = cell.position_at(self.geod, now, drifts, self.time_accel())
                 zones[str(zone_num)] = {
                     "lat": round(lat, 6), "lon": round(lon, 6),
                     "hdg": round(cell.heading_deg, 2),
@@ -7328,7 +7335,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     "bearing": round(cell.bearing, 3), "elev0": cell.elev0_ft, "mode": cell.mode}
         # Sent at once when anything but the positions changes, else every 5 s
         # (with drifting zones) or 30 s (just the delay); no delay just once
-        sig = (delay, self._orch_rate_hz,
+        sig = (delay, self._orch_rate_hz, self.time_accel(),
                tuple((z, v["hdg"], v["kt"], v["bearing"], v["mode"].split(";")[5])
                      for z, v in zones.items()))
         last_sig, last_at = self._orch_announced
@@ -7339,7 +7346,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return None   # never on: nothing to tell the routers (no delay is their default)
         self._orch_ever_announced = True
         self._orch_announced = (sig, now)
-        feed = {"delay_s": delay, "rate_hz": self._orch_rate_hz, "zones": zones}
+        # accel: the routers run PSX's clock on at it, and take the delay
+        # (real seconds, like PSX's radar lag) as that much more sim time
+        feed = {"delay_s": delay, "rate_hz": self._orch_rate_hz, "zones": zones,
+                "accel": self.time_accel()}
         if zones:
             feed["time_earth_ms"] = int(sim_ms)   # the PSX clock the positions are for
         return feed
@@ -7419,7 +7429,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         cell = _fw_drift.DriftCell(zone=zone_num, lat=lat, lon=lon, heading_deg=moves,
                                    speed_kt=speed, wx=_apply_fake_cb(wx, 8, 3000, 40000),
                                    mode=mode, icao=name, started=now, test=label, stepped_at=now)
-        cell.place(self.geod, self.sim_time_ms(), _DRIFT_TICK_S * 500.0)
+        cell.place(self.geod, self.sim_time_ms(), _DRIFT_TICK_S * 500.0 * self.time_accel())
         self._drift[zone_num] = cell
         self._cb_test_motion[zone_num] = (moves, speed)
         self._zone_pinned.pop(zone_num, None)

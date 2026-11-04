@@ -119,8 +119,11 @@ class DriftCell:  # pylint: disable=too-many-instance-attributes
     wind_motion: Optional[tuple] = None   # test CB: (heading, kt) the mean wind would give it
     elev0_ft: float = math.nan  # the zone's own WxMode elevation (mode's is raised from it)
     bearing: Optional[float] = None   # the CB's bearing from the zone centre, held
+    # Times are sim time (real time x PSX's time acceleration): age_s is the
+    # cell's, advanced by advance(); lifetime_s and _DECAY_S are compared with it
     lifetime_s: float = field(default_factory=lambda: random.uniform(_LIFE_MIN_S, _LIFE_MAX_S))
-    decay_from: Optional[float] = None   # time.monotonic() the decay started
+    age_s: float = 0.0
+    decay_from: Optional[float] = None   # age_s when the decay started
     decay_why: str = ""
     start_oktas: int = 0
     moved_nm: float = 0.0
@@ -131,28 +134,36 @@ class DriftCell:  # pylint: disable=too-many-instance-attributes
         if math.isnan(self.elev0_ft):
             self.elev0_ft = self.elev_ft
 
-    def minutes_left(self, now: float) -> float:
-        """Return the minutes until the decay starts (0 once decaying)."""
+    def advance(self, dt_sim_s: float) -> None:
+        """Age the cell by dt_sim_s seconds of sim time."""
+        self.age_s += max(0.0, dt_sim_s)
+
+    def life_over(self) -> bool:
+        """Return True once the cell has lived its lifetime (a test CB never does)."""
+        return not self.test and self.age_s >= self.lifetime_s
+
+    def minutes_left(self, _now: float = 0.0) -> float:
+        """Return the sim minutes until the decay starts (0 once decaying)."""
         if self.decay_from is not None:
             return 0.0
         if self.test:
             return math.inf   # a test CB stays until it's removed
-        return max(0.0, (self.started + self.lifetime_s - now) / 60.0)
+        return max(0.0, (self.lifetime_s - self.age_s) / 60.0)
 
-    def start_decay(self, now: float, why: str) -> bool:
+    def start_decay(self, _now: float, why: str) -> bool:
         """Start the CB's decay (once); return True if it started now."""
         if self.decay_from is not None:
             return False
-        self.decay_from = now
+        self.decay_from = self.age_s
         self.decay_why = why
         self.start_oktas = cb_oktas(self.wx)
         return True
 
-    def decayed_oktas(self, now: float) -> int:
-        """Return the CB coverage the decay has reached by now."""
+    def decayed_oktas(self, _now: float = 0.0) -> int:
+        """Return the CB coverage the decay has reached (in sim time)."""
         if self.decay_from is None:
             return cb_oktas(self.wx)
-        frac = max(0.0, 1.0 - (now - self.decay_from) / _DECAY_S)
+        frac = max(0.0, 1.0 - (self.age_s - self.decay_from) / _DECAY_S)
         return int(math.ceil(self.start_oktas * frac)) if frac > 0 else 0
 
     @property
@@ -199,11 +210,14 @@ class DriftCell:  # pylint: disable=too-many-instance-attributes
                                  dist=CB_OFFSET_NM * _NM_TO_M)
         return wxmode_at(self.mode, clat, ((clon + 180.0) % 360.0) - 180.0, elev_ft)
 
-    def position_at(self, geod, now: float, moving: bool) -> tuple:
-        """Return where the CB is at time.monotonic() now: the last step, run on if moving."""
+    def position_at(self, geod, now: float, moving: bool, accel: float = 1.0) -> tuple:
+        """Return where the CB is at time.monotonic() now: the last step, run on if moving.
+
+        accel: PSX's time acceleration since then (the drift is in sim time).
+        """
         if not moving or self.speed_kt <= 0.0 or math.isnan(self.stepped_at):
             return self.lat, self.lon
-        dist_nm = self.speed_kt * max(0.0, now - self.stepped_at) / 3600.0
+        dist_nm = self.speed_kt * max(0.0, now - self.stepped_at) * accel / 3600.0
         lon, lat, _ = geod.fwd(lons=self.lon, lats=self.lat, az=self.heading_deg,
                                dist=dist_nm * _NM_TO_M)
         return lat, ((lon + 180.0) % 360.0) - 180.0

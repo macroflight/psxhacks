@@ -124,7 +124,8 @@ _CBFEED_ZONE_FIELDS = ('lat', 'lon', 'hdg', 'kt', 'bearing', 'elev0')
 def parse_orchestration_cbfeed(text):
     """Parse a FRANKENWEATHER:CBFEED payload; return it, checked, or None.
 
-    JSON: {"delay_s": <0-60>, "rate_hz": <1-20>, "time_earth_ms": <PSX
+    JSON: {"delay_s": <0-60>, "rate_hz": <1-20>, "accel": <PSX's time
+    acceleration, 0.25-64; default 1>, "time_earth_ms": <PSX
     TimeEarth the zones are for>, "zones": {"<1-7>": {"lat", "lon" (the CB
     then), "hdg", "kt" (its drift), "bearing" (from the zone centre, held),
     "elev0" (the zone's own elevation, ft), "mode" (its WxMode string)}}}.
@@ -134,6 +135,7 @@ def parse_orchestration_cbfeed(text):
         data = json.loads(text)
         feed = {'delay_s': float(data.get('delay_s', 0.0)),
                 'rate_hz': float(data.get('rate_hz', 5.0)),
+                'accel': float(data.get('accel', 1.0)),
                 'time_earth_ms': int(data.get('time_earth_ms') or 0), 'zones': {}}
         for z, zone in (data.get('zones') or {}).items():
             entry = {k: float(zone[k]) for k in _CBFEED_ZONE_FIELDS}
@@ -142,7 +144,8 @@ def parse_orchestration_cbfeed(text):
     except (ValueError, TypeError, AttributeError, KeyError):
         return None
     if not (0.0 <= feed['delay_s'] <= ORCHESTRATION_MAX_DELAY_S and
-            1.0 <= feed['rate_hz'] <= ORCHESTRATION_MAX_RATE_HZ):
+            1.0 <= feed['rate_hz'] <= ORCHESTRATION_MAX_RATE_HZ and
+            0.25 <= feed['accel'] <= 64.0):
         return None
     if feed['zones'] and feed['time_earth_ms'] <= 0:
         return None
@@ -3066,12 +3069,13 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             '"time_earth_ms": 1793800000123, "zones": {"3": %s}}' % zone, router.upstream)
         self.assertEqual((action, code), (RulesAction.FILTER, RulesCode.FRANKENWEATHER_FILTERED))
         feed = extra_data['orchestration_cbfeed']
-        self.assertEqual((feed['delay_s'], feed['rate_hz'], feed['time_earth_ms']),
-                         (10.0, 5.0, 1793800000123))
+        self.assertEqual((feed['delay_s'], feed['rate_hz'], feed['time_earth_ms'], feed['accel']),
+                         (10.0, 5.0, 1793800000123, 1.0))
         self.assertEqual(feed['zones'][3]['bearing'], 123.0)
         self.assertEqual(feed['zones'][3]['mode'], "0.82;-0.43;320;12;11;X90101p")
         for bad in ('{"delay_s": 999, "rate_hz": 5, "zones": {}}',
                     '{"delay_s": 5, "rate_hz": 50, "zones": {}}',
+                    '{"delay_s": 5, "rate_hz": 5, "accel": 100, "zones": {}}',
                     '{"delay_s": 5, "rate_hz": 5, "time_earth_ms": 1, "zones": {"8": %s}}' % zone,
                     '{"delay_s": 5, "rate_hz": 5, "zones": {"1": %s}}' % zone,   # no time
                     '{"delay_s": 5, "rate_hz": 5, "time_earth_ms": 1, "zones": {"1": {}}}',
