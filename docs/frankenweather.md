@@ -462,6 +462,72 @@ pages. The console's per-zone log line gains a `[CB ramp: ...]` suffix
 with the signed oktas/min and ft/min rate and the target whenever that
 zone's CB is actively changing.
 
+### CBs drifting with the wind (`--advanced-zones`, testing)
+
+`--advanced-zones` is a temporary option for testing, off by default.
+With it, CBs move with the wind, as real thunderstorm cells do, so a
+pilot deviating around one has to think about where it's going: upwind
+is usually the better side.
+
+- **Which CBs drift:** a zone that gets a CB while the aircraft is at or
+  above 10,000 ft (not in maneuvering mode) starts drifting, if it's a
+  grid zone or an airport zone other than the departure or destination,
+  and more than 50 nm from both. The anchor zone and the dep/dst airport
+  zones never drift.
+- **How it moves:** steadily, with the 850-300 hPa mean wind (about
+  5,000-30,000 ft, from Open-Meteo at the cell's position when the drift
+  starts), turned 5 degrees to the right, at its speed. Below 10,000 ft,
+  or while maneuvering, the cells stand still.
+- **Where the CB is:** PSX always draws a zone's CB 7 nm from the zone
+  centre, on a bearing that goes round clockwise once an hour (see
+  [PSX issues](psx-issues.md#a-zones-cb-circles-its-centre-once-an-hour)).
+  The zone elevation adds to that bearing (1 ft = 1 degree), so every 15
+  seconds frankenweather sets a drifting zone's elevation (`WxMode<n>`)
+  0-359 ft above its own, to keep the bearing the CB had when the drift
+  started (6 ft lower each minute, 360 ft higher once an hour), and puts
+  the zone centre 7 nm from the CB, opposite it. The CB moves only with
+  the wind (or stands still), and its zone centre with it. The raised
+  elevation lifts the zone's clouds and CB by the same 0-359 ft and warms
+  the air aloft a little (+500 ft: OAT +0.6 C, PFD altitude unchanged, on
+  the test sim); the dep/dst airport zones never drift. Not more often
+  than every 15 s: with zone positions written every 5 s, PSX stopped
+  redrawing the radar picture. The radar echo, the CB turbulence and the
+  weather map follow the CB.
+- **What it carries:** the weather the zone had when the drift started,
+  never refreshed on the way (no new Open-Meteo data, no snapping to a
+  nearby airport, the METAR left as it was, so PSX doesn't rebuild it).
+- **How long:** 30-60 minutes (random), then the CB fades out over 5
+  minutes. The zone stays where it ended, without a CB, until normal
+  placement moves it (usually once it's behind the aircraft). A drift also
+  ends when something else moves the zone, and the CB fades early instead
+  of entering a "Remove CB near dep/arr" circle.
+- **Other zones in the way:** a CB shrinks on the radar the closer its
+  zone centre is to another zone (PSX sizes the echo by that distance:
+  small within about 5 nm, still growing beyond 12 nm). If a drifting
+  zone's centre comes within 10 nm of the anchor or a dep/dst airport
+  zone, that zone steps aside to 12 nm from it, and the cell takes its
+  weather (keeping its CB), so the local QNH and wind are the same
+  whichever of the two PSX treats as nearest. An airport zone goes at
+  most 15 nm from its field (otherwise the cell fades instead) and goes
+  back as soon as no drifting zone is within 12 nm of the field.
+- **Where to see it:** the log has a `CB drift:` line for every start,
+  step-aside and end, and the web UI's zone reason shows e.g. "drifting
+  095°/40kt, 23min left".
+- **CB test page** (`/weather/cbtest`, frankenweather's own web UI only,
+  with `--advanced-zones`): puts test CBs where you ask, for checking how
+  they look on the radar and in MSFS. Each takes a weather zone and gets a
+  fake 8/8 CB (3,000-40,000 ft) that stays until removed, fixed to the
+  ground (or drifting) as the aircraft flies on. Buttons: remove the test
+  CBs; one dead ahead at 10, 20, 40, 80 or 160 nm; one 40 nm ahead and
+  20 nm to the side of the track the wind comes from, drifting with the
+  850-300 hPa mean wind (at least 20 kt; with the wind along the track it
+  hardly closes on it); one each at 315 and 045 degrees relative, 30 nm;
+  a CB smiley (two eyes and a three-CB smile, 40 nm ahead, upright on the
+  ND); a drift speed for all test CBs (static ones then move with the
+  mean wind's direction) and a reset to the motion they were placed with.
+  Every other zone keeps 30 nm from a test CB's zone, so its echo shows at
+  full size (except between the smiley's own CBs).
+
 ### SIGMETs
 
 `--sigmet` (experimental, off by default) turns on frankenweather's

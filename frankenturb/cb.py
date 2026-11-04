@@ -29,6 +29,7 @@ from typing import Optional
 
 # CB is always 7 nm from the weather zone center.
 _CB_OFFSET_NM = 7.0
+CB_OFFSET_NM = _CB_OFFSET_NM   # public, for frankenweather's drifting CBs (fw_drift.py)
 _EARTH_RADIUS_M = 6_371_000.0
 _NM_TO_M = 1_852.0
 _M_TO_NM = 1.0 / _NM_TO_M
@@ -154,7 +155,7 @@ def find_nearest_cb(  # pylint: disable=too-many-arguments,too-many-positional-a
             continue
 
         coverage, top_agl, base_agl = cb_data
-        bearing = _cb_bearing(time_earth_ms, zone_elev)
+        bearing = cb_bearing_deg(time_earth_ms, zone_elev)
         cb_lat, cb_lon = _translate(zone_lat, zone_lon, bearing, _CB_OFFSET_NM * _NM_TO_M)
 
         # Centred on the CB cell, where PSX draws it on the radar -- not on
@@ -211,12 +212,16 @@ def find_nearest_cb(  # pylint: disable=too-many-arguments,too-many-positional-a
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _cb_bearing(time_earth_ms: int, elev_ft: float) -> float:
+def cb_bearing_deg(time_earth_ms: int, elev_ft: float) -> float:
     """Return CB bearing (degrees) from zone centre at the given sim time.
 
-    Replicates the PSX formula:
+    Replicates the PSX formula, as given by Hardy Heinlin
+    (https://aerowinx.com/board/index.php/topic,4287.msg45487.html#msg45487):
       bearing = (minutes × 6 + seconds × 0.1 + elevFt + 2000) % 360
-    The CB completes one revolution around its zone centre per minute.
+    with the sim time from TimeEarth and elevFt the zone's WxMode elevation.
+    The CB, always 7 nm from the zone centre, goes round it clockwise once
+    per hour. Verified on the ND (test sim, 2026-11-04): within ~3 deg
+    through a full turn, and +90/+180 ft of elevation turned it +90/+180 deg.
     """
     dt = datetime.fromtimestamp(time_earth_ms / 1000.0, tz=timezone.utc)
     sim_min = dt.minute

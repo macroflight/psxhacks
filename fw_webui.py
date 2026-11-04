@@ -281,6 +281,8 @@ def _weather_nav(ctx, current: str) -> str:
     pages += [('turb', '/weather/turbulence', 'Extra turbulence'),
               ('config', '/weather/config', _config_page_title(ctx)),
               ('efb', '/efb', 'EFB page')]
+    if getattr(ctx, 'cb_test_enabled', False):   # standalone, --advanced-zones
+        pages.append(('cbtest', '/weather/cbtest', 'CB test'))
     here = next((url for key, url, _ in pages if key == current), '')
     # In the router's web UI: a way back to the router's own start page
     home = getattr(ctx, 'router_home', None)
@@ -499,7 +501,7 @@ def _zone_cb_position(wxmode: str, time_earth_ms: int):
     PSX puts a local zone's CB 7 nm from the zone centre, at a bearing that
     turns once an hour with sim time (Aerowinx/Hardy):
     (minutes * 6 + seconds * 0.1 + zone elevation ft + 2000) % 360. Same
-    formula as frankenturb/cb.py's _cb_bearing(), repeated here because the
+    formula as frankenturb/cb.py's cb_bearing_deg(), repeated here because the
     router's web UI doesn't include frankenturb.
     """
     try:
@@ -2978,6 +2980,90 @@ def _event_logs_html(ctx) -> str:
         '</table></div>\n'
     )
     return _page(body)
+
+
+def _build_cb_test_page(ctx, message: str = '') -> str:
+    """Render the CB test page (standalone, --advanced-zones): test CBs placed on request."""
+    state = ctx.cb_test_state()
+
+    def button(action, label, extra=''):
+        return (f'<form action="/api/weather/cbtest" method="post" style="display:inline">'
+                f'<input type="hidden" name="action" value="{action}">{extra}'
+                '<button type="submit" class="btn btn-blue btn-sm" style="width:auto">'
+                f'{_esc(label)}</button></form>\n')
+    body = ''
+    if message:
+        body += f'<div class="card"><p style="margin:0">{_esc(message)}</p></div>\n'
+    if state.get('why_not'):
+        body += (f'<div class="card warn"><p style="margin:0">Test CBs can\'t be placed now: '
+                 f'{_esc(state["why_not"])}.</p></div>\n')
+    body += ('<div class="card"><p style="margin:0 0 0.5em">Testing only. Each test CB takes a '
+             'weather zone, gets a fake 8/8 CB (3,000-40,000 ft) and stays until removed; the '
+             'other zones keep at least 12 nm from its zone centre, so its echo shows at full '
+             'size. Positions and bearings are from the aircraft now (bearings relative to the '
+             'nose); a placed CB stays fixed to the ground (or drifts) as the aircraft flies '
+             'on.</p>\n<div style="display:flex;gap:0.5em;flex-wrap:wrap">\n')
+    body += button('remove', 'Remove test CBs')
+    for dist in state.get('distances_nm', []):
+        body += button('ahead', f'Dead ahead {dist} nm',
+                       f'<input type="hidden" name="dist" value="{dist}">')
+    body += button('upwind', 'Upwind of track, moving downwind')
+    body += button('pair', '315° and 045°, 30 nm')
+    body += button('smiley', 'CB smiley')
+    body += '</div>\n<div style="display:flex;gap:0.5em;flex-wrap:wrap;margin-top:0.5em">\n'
+    body += ('<form action="/api/weather/cbtest" method="post" style="display:inline-flex;'
+             'gap:0.3em;align-items:center"><input type="hidden" name="action" value="speed">'
+             'Drift speed <input type="number" name="speed" min="0" max="200" step="1" '
+             'value="20" style="width:5em"> kt '
+             '<button type="submit" class="btn btn-blue btn-sm" style="width:auto">Set</button>'
+             '</form>\n')
+    body += button('reset_speed', 'Reset drift speed')
+    body += '</div></div>\n'
+    cells = state.get('cells', [])
+
+    def moving(c):
+        return f'{c["heading_deg"]:03d}°/{c["speed_kt"]}kt' if c['speed_kt'] else 'static'
+    if cells:
+        rows = ''.join(
+            f'<tr><td>{c["zone"]}</td><td>{_esc(c["label"])}</td><td>{_esc(c["pos"])}</td>'
+            f'<td>{c.get("dist_nm", "—")}</td><td>{c.get("brg_rel", "—")}</td>'
+            f'<td>{moving(c)}</td>'
+            f'<td>{c["moved_nm"]}</td></tr>\n' for c in cells)
+        body += ('<div class="card"><table><tr><th>Zone</th><th>Test CB</th><th>CB position</th>'
+                 '<th>Distance (nm)</th><th>Rel. bearing</th><th>Moving</th>'
+                 '<th>Moved (nm)</th></tr>\n'
+                 f'{rows}</table></div>\n')
+    else:
+        body += '<div class="card"><p style="margin:0">No test CBs.</p></div>\n'
+    return _page_shell(
+        ctx.color_scheme, 'FrankenWeather: CB test', _weather_nav(ctx, 'cbtest'), body,
+        '<script>setTimeout(function(){location.href="/weather/cbtest";},15000);</script>\n')
+
+
+def register_cb_test_routes(routes, ctx):
+    """Register the CB test page (standalone only; it exists with --advanced-zones).
+
+    ctx must provide cb_test_enabled, cb_test_state() and the coroutine
+    send_cbtest_cmd(cmd) -> str (see StandaloneFWContext in frankenweather.py).
+    """
+
+    @routes.get('/weather/cbtest')
+    async def _cb_test_get(request):
+        if not ctx.cb_test_enabled:
+            return web.Response(text="The CB test page needs frankenweather --advanced-zones",
+                                status=404)
+        return web.Response(text=_build_cb_test_page(ctx, request.query.get('msg', '')),
+                            content_type='text/html')
+
+    @routes.post('/api/weather/cbtest')
+    async def _cb_test_post(request):
+        if not ctx.cb_test_enabled:
+            return web.Response(text="The CB test page needs frankenweather --advanced-zones",
+                                status=404)
+        form = await request.post()
+        message = await ctx.send_cbtest_cmd({k: str(v) for k, v in form.items()})
+        from urllib.parse import quote  # pylint: disable=import-outside-toplevel
+        raise web.HTTPFound('/weather/cbtest?msg=' + quote(message))
 
 
 def register_weather_logs_routes(routes, ctx):

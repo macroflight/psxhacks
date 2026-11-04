@@ -147,6 +147,44 @@ lightning, turbulence), but:
   aircraft is in; more cells, a profile per cell, and a documented range
   limit (or no replacement of client-set cells).
 
+### A zone's CB circles its centre once an hour
+
+*Confirmed (Hardy, [forum](https://aerowinx.com/board/index.php/topic,4287.msg45487.html#msg45487);
+measured on the ND 2026-11-04).* PSX draws a weather zone's CB always 7 nm
+from the zone centre, on the bearing
+`(sim minutes × 6 + sim seconds × 0.1 + zone elevation in ft + 2000) % 360`,
+from `TimeEarth`. So every CB goes
+round its zone clockwise once an hour, at about 44 kt. Measured: within
+about 3 degrees through a full turn; writing `TimeEarth` moves it at once;
++90 ft of zone elevation turns it +90 degrees.
+
+- **Consequences:** an addon can't place a CB where it wants by placing
+  the zone, and a CB meant to stand still (or drift with the wind) moves
+  in a 14 nm circle. Changing a zone's elevation (e.g. snapping it to an
+  airport) turns its CB to another bearing at once.
+- **Workaround:** frankenweather's drifting CBs (`--advanced-zones`) hold
+  the bearing with the zone elevation (0-359 ft above the zone's own,
+  6 ft lower each minute), and put the zone centre 7 nm from where the CB
+  should be, every 15 seconds. That lifts the zone's clouds by as much and
+  warms the air aloft a little (+500 ft: OAT +0.6 C, PFD altitude
+  unchanged); +60 ft over 10 minutes moved the OAT 0.1 C. Moving the
+  centre round the CB instead would swing the other zones' distances to it
+  by 7 nm.
+- **Request:** a way to set a zone's CB position (or bearing and
+  distance), or to stop the rotation.
+
+### Moving a zone every few seconds freezes the weather radar picture
+
+*Confirmed (test sim, 2026-11-04, motion freeze).* With a zone's `WxMode`
+(its position) written every 5 seconds, the weather radar picture stopped
+changing altogether: not one pixel in 12 minutes, though the zone's CB
+moved. Every 15 or 30 seconds, it redrew normally (about 15 s after a
+change). `WxSlowTransit` before each write made no difference.
+
+- **Workaround:** frankenweather moves its drifting zones every 15 seconds.
+- **Request:** redraw the radar picture regardless of how often zones move,
+  or document the minimum interval.
+
 ### Zone names PSX rewrites
 
 *Confirmed (2026-10-27).* A WxMode zone named like `Z1X` was rewritten by

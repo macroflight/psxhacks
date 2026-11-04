@@ -73,6 +73,7 @@ from fw_cb import (
 import fw_efb as _fw_efb  # pylint: disable=wrong-import-order
 import fw_webui as _fw_webui  # pylint: disable=wrong-import-order
 import fw_sigmet as _fw_sigmet  # pylint: disable=wrong-import-order
+import fw_drift as _fw_drift  # pylint: disable=wrong-import-order
 from psxhacks_version import get_version
 
 
@@ -303,6 +304,29 @@ _OWN_SIGMET_TIMEOUT = aiohttp.ClientTimeout(total=30)
 _ANCHOR_TRIGGER_NM = 150.0
 _ANCHOR_BEHIND_NM = 50.0
 _ANCHOR_RELOCATE_NM = 100.0
+# --advanced-zones (testing): CB zones drifting with the wind, see
+# cb_drift_coro() and fw_drift.py. A cell is the CB itself; every
+# _DRIFT_TICK_S it moves, and its zone's elevation and centre are set so PSX
+# draws the CB there (fw_drift.DriftCell.place(): the elevation holds PSX's
+# CB orbit, 1.5 deg = 0.18 nm per tick between writes). Not more often: with
+# WxMode written every 5 s PSX stopped redrawing the weather radar picture
+# (15 and 30 s were fine; test sim, 2026-11-04). Drifts start only with the
+# aircraft at or above _DRIFT_MIN_ALT_FT (they also stop moving below it)
+# and more than _DRIFT_ARPT_EXCL_NM from dep/dst. A CB shrinks on the radar
+# the closer its zone centre is to another zone (small within ~5nm; it
+# still grows beyond 12nm), so the anchor or a dep/dst airport zone whose
+# centre comes within _DRIFT_KEEP_CLEAR_NM of the cell's steps aside to
+# _DRIFT_STEP_ASIDE_NM from it -- an airport zone at most
+# _DRIFT_ARPT_MAX_OFFSET_NM from its field (otherwise the cell decays) --
+# and the cell takes its weather. Every zone keeps _CB_TEST_CLEAR_NM from a
+# test CB's zone (the CB test page), so its echo shows at full size.
+_DRIFT_TICK_S = 15.0
+_DRIFT_MIN_ALT_FT = 10000.0
+_DRIFT_ARPT_EXCL_NM = 50.0
+_DRIFT_KEEP_CLEAR_NM = 10.0
+_DRIFT_STEP_ASIDE_NM = 12.0
+_CB_TEST_CLEAR_NM = 30.0
+_DRIFT_ARPT_MAX_OFFSET_NM = 15.0
 # --sigmet: weather zones placed inside TS/TC SIGMET areas, so the CBs
 # frankenweather depicts there (instead of PSX) show up on the radar. See
 # _place_sigmet_zones().
@@ -454,7 +478,7 @@ _AIRPORT_SNAP_NM = 25.0               # snap zone to a real airport if within th
 # CB-near-airport avoidance (self._cb_airport_mode, see _CB_AIRPORT_MODES):
 # PSX always places a zone's CB exactly _CB_TO_ZONE_OFFSET_NM from the zone centre
 # (bearing varies with sim time/zone elevation, but the radius never does -- see
-# frankenturb/cb.py's _cb_bearing()/_CB_OFFSET_NM, same figure). So either
+# frankenturb/cb.py's cb_bearing_deg()/_CB_OFFSET_NM, same figure). So either
 # - "move": offset the dep/dst zone centre itself by at least
 #   _CB_AIRPORT_CLEARANCE_NM + _CB_TO_ZONE_OFFSET_NM from the real airport, in any
 #   fixed direction (_arpt_coverage_needed()), or
@@ -2157,6 +2181,19 @@ class StandaloneFWContext:
         """Apply MSFS settings toggles directly to the running frankenweather instance."""
         self._fw._handle_fw_command(json.dumps(cmd))  # pylint: disable=protected-access
 
+    @property
+    def cb_test_enabled(self):
+        """Return True if the CB test page exists (--advanced-zones; standalone only)."""
+        return bool(self._fw.args.advanced_zones)
+
+    def cb_test_state(self):
+        """Return the CB test page's state, from the running frankenweather instance."""
+        return self._fw.cb_test_state()
+
+    async def send_cbtest_cmd(self, cmd):
+        """Do a CB test page command; return what happened."""
+        return await self._fw.handle_cb_test(cmd)
+
 
 # ---------------------------------------------------------------------------
 # Main script class
@@ -2374,6 +2411,16 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # It stops being CB-free when released or moved anywhere else.
         self._anchor_zone: Optional[int] = None
         self._cb_free_zones: dict = {}
+        # --advanced-zones (testing): zone -> fw_drift.DriftCell for every
+        # CB zone drifting with the wind; zone -> (lat, lon) for an anchor or
+        # dep/dst airport zone stepped aside from a passing cell; zone ->
+        # (lat, lon) where a drift ended (no new drift there, no CB, until
+        # the zone is moved). See cb_drift_coro().
+        self._drift: dict = {}
+        self._zone_pinned: dict = {}
+        self._drift_retired: dict = {}
+        self._time_earth_rx: Optional[tuple] = None   # (TimeEarth ms, time.monotonic())
+        self._cb_test_motion: dict = {}   # test CB zone -> (heading, speed) it was placed with
         self._sigmet_place_last: float = 0.0  # see _place_sigmet_zones()
         # zone -> label of the SIGMET that gave its current CB (e.g. "TS
         # SIGMET MPZL 03 EMBD"), or None; shown in the log and the web UI.
@@ -6445,6 +6492,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self.zone_positions.update(kept)
         self._anchor_zone = None
         self._cb_free_zones.clear()
+        for per_zone in (self._drift, self._zone_pinned, self._drift_retired):
+            for zone_num in [zn for zn in per_zone if zn not in kept]:
+                del per_zone[zone_num]
         for per_zone in (self.zone_relocated_time, self.zone_cb_ramp, self.zone_cb_create_dist_nm):
             for zone_num in [zn for zn in per_zone if zn not in kept]:
                 del per_zone[zone_num]
@@ -6815,6 +6865,473 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._anchor_zone = None
         self._cb_free_zones.clear()
 
+    # ------------------------------------------------------------------
+    # --advanced-zones: CB zones drifting with the wind (fw_drift.py)
+    # ------------------------------------------------------------------
+
+    def handle_time_earth(self, _key: str, value: str) -> None:
+        """Remember when PSX's clock last arrived, for sim_time_ms()."""
+        try:
+            self._time_earth_rx = (int(value), time.monotonic())
+        except (TypeError, ValueError):
+            pass
+
+    def sim_time_ms(self) -> Optional[float]:
+        """Return PSX's TimeEarth now (ms), run on from its last update at TimeAccel, or None."""
+        if self._time_earth_rx is None:
+            return None
+        value, received = self._time_earth_rx
+        try:
+            accel = int(self.psx.get("TimeAccel") or 100) / 100.0
+        except (TypeError, ValueError):
+            accel = 1.0
+        # PSX sends it every few seconds while time runs; none for longer:
+        # paused, so the clock stands still
+        elapsed = min(time.monotonic() - received, 60.0)
+        return value + elapsed * 1000.0 * accel
+
+    def _drift_enabled(self) -> bool:
+        """Return True if CB zones may drift now (--advanced-zones, automatic weather)."""
+        return bool(self.args.advanced_zones) and self._fw_mode == "enabled"
+
+    def _dep_dst_zone_nums(self) -> set:
+        """Return the zones that are the dep/dst airport zones."""
+        icaos = {self.fmc_dep_icao, self.fmc_dst_icao} - {None, ""}
+        return {zn for zn, (_, _, icao) in self.zone_positions.items() if icao in icaos}
+
+    def _drift_override(self, new_modes: list, new_wxs: list, new_metars: list,  # pylint: disable=too-many-arguments,too-many-positional-arguments
+                        snap_positions: list, snap_icaos: list, _month: int) -> None:
+        """In _update_zones(): drifting zones keep weather and position, pinned ones position."""
+        now = time.monotonic()
+        for zone_num, cell in list(self._drift.items()):
+            cur = self.zone_positions.get(zone_num)
+            if cur is None or abs(cur[0] - cell.clat) > 1e-9 or abs(cur[1] - cell.clon) > 1e-9:
+                self._end_drift(zone_num, "the zone was moved elsewhere", retire=False)
+        sim_ms = self.sim_time_ms()
+        for zone_num, cell in self._drift.items():
+            i = zone_num - 1
+            if sim_ms is not None:
+                cell.place(self.geod, sim_ms)
+                self.zone_positions[zone_num] = (cell.clat, cell.clon,
+                                                 self.zone_positions[zone_num][2])
+            new_wxs[i] = _fw_drift.with_oktas(cell.wx, cell.decayed_oktas(now))
+            new_metars[i] = None   # keeps the METAR PSX has (no rebuild)
+            new_modes[i] = _fw_drift.wxmode_at(cell.mode, cell.clat, cell.clon)
+            self.zone_mode[zone_num] = new_modes[i]
+            snap_positions[i] = (cell.clat, cell.clon)
+            snap_icaos[i] = cell.icao
+            left = ("test CB" if cell.test else
+                    f"{cell.minutes_left(now):.0f}min left" if cell.decay_from is None
+                    else "decaying")
+            note = f" drifting {cell.heading_deg:03.0f}°/{cell.speed_kt:.0f}kt, {left}"
+            self.zone_reason[zone_num] = (self.zone_reason.get(zone_num, "") + note)[:100]
+        for zone_num, pos in list(self._zone_pinned.items()):
+            if zone_num in self._drift:
+                continue
+            cur = self.zone_positions.get(zone_num)
+            if cur is None or (cur[0], cur[1]) != pos:
+                del self._zone_pinned[zone_num]       # moved elsewhere since
+                self._drift_retired.pop(zone_num, None)
+                continue
+            i = zone_num - 1
+            new_modes[i] = _fw_drift.wxmode_at(new_modes[i], *pos)
+            snap_positions[i] = pos
+            if zone_num in self._drift_retired:
+                new_wxs[i] = _strip_cb(new_wxs[i])   # a drift ended here: no new CB until moved
+
+    async def _start_drifts(self, new_modes: list, new_wxs: list) -> None:  # pylint: disable=too-many-locals
+        """At the end of _update_zones(): CB zones that may drift start drifting."""
+        if not self._drift_enabled() or self._turb_engine is None:
+            return
+        if self.ac_alt_ft is None or self.ac_alt_ft < _DRIFT_MIN_ALT_FT or self._maneuvering:
+            return
+        if self.sim_time_ms() is None:
+            return   # no TimeEarth yet: can't tell where PSX draws the CBs
+        arpt = [self.airports[icao] for icao in (self.fmc_dep_icao, self.fmc_dst_icao)
+                if icao and icao in self.airports]
+        excluded = self._dep_dst_zone_nums() | {self._anchor_zone}
+        loop = asyncio.get_running_loop()
+        for i, wx in enumerate(new_wxs):
+            zone_num = i + 1
+            skip = (zone_num in self._drift or zone_num in excluded or
+                    zone_num in self._zone_pinned or zone_num not in self.zone_positions)
+            if skip or self._is_cb_free_zone(zone_num) or _fw_drift.cb_oktas(wx) <= 0:
+                continue
+            centre = _fw_drift.wxmode_pos(new_modes[i])
+            pos = _fw_drift.cb_position(self.geod, new_modes[i], self.sim_time_ms())
+            if centre is None or pos is None:
+                continue
+            lat, lon = pos   # the CB, where PSX draws it now
+            if any(self._dist_nm(lat, lon, alat, alon) < _DRIFT_ARPT_EXCL_NM
+                   for alat, alon in arpt):
+                continue
+            if self._cb_removed_near_airport(lat, lon):
+                continue
+            profile = await loop.run_in_executor(
+                None, self._turb_engine.wind_fetcher.get, lat, lon, datetime.now(timezone.utc))
+            motion = _fw_drift.mean_wind_motion(profile)
+            if motion is None:
+                self.logger.debug("CB drift: Zone %d stays put (no or calm 850-300hPa wind)",
+                                  zone_num)
+                continue
+            parts = new_modes[i].split(';')
+            name = (parts[5][:-3] if len(parts) > 5 and len(parts[5]) > 3
+                    else self.zone_positions[zone_num][2])
+            cell = _fw_drift.DriftCell(zone=zone_num, lat=lat, lon=lon, heading_deg=motion[0],
+                                       speed_kt=motion[1], wx=wx, mode=new_modes[i], icao=name,
+                                       started=time.monotonic(), clat=centre[0], clon=centre[1])
+            self._drift[zone_num] = cell
+            self.zone_positions[zone_num] = (centre[0], centre[1],
+                                             self.zone_positions[zone_num][2])
+            self.logger.info(
+                "CB drift: Zone %d (%s) CB at %s starts drifting %03.0f°/%.0fkt"
+                " (850-300hPa mean wind +5°), CB %d oktas, life %.0f min",
+                zone_num, name, _fw_drift.pos_text(lat, lon), cell.heading_deg, cell.speed_kt,
+                cell.start_oktas, cell.lifetime_s / 60.0)
+            self._state_changed_event.set()
+
+    def _end_drift(self, zone_num: int, why: str, retire: bool) -> None:
+        """Stop zone_num drifting; with retire it stays where it is, CB-free, until moved."""
+        cell = self._drift.pop(zone_num)
+        self.logger.info("CB drift: Zone %d CB stops at %s after %.0fnm (%s)",
+                         zone_num, _fw_drift.pos_text(cell.lat, cell.lon), cell.moved_nm, why)
+        if retire:
+            self._drift_retired[zone_num] = (cell.clat, cell.clon)
+            self._zone_pinned[zone_num] = (cell.clat, cell.clon)
+
+    def _write_zone_pos(self, zone_num: int, lat: float, lon: float) -> None:
+        """Move zone_num's WxMode to (lat, lon), keeping its elevation and name."""
+        mode = self.zone_mode.get(zone_num)
+        if not mode and self.psx:
+            mode = self.psx.get(f"WxMode{zone_num}")
+        if not mode:
+            return
+        mode = _fw_drift.wxmode_at(mode, lat, lon)
+        self.zone_mode[zone_num] = mode
+        self.psx_send_and_set(f"WxMode{zone_num}", mode)
+
+    def _write_zone_wx(self, zone_num: int, wx: str) -> None:
+        """Send zone_num's weather if it changed."""
+        if self.zone_wx.get(zone_num) == wx:
+            return
+        self.zone_wx[zone_num] = wx
+        self.psx_send_and_set(f"Wx{zone_num}", wx)
+
+    def _drift_keep_clear(self, cell, now: float) -> None:  # pylint: disable=too-many-locals
+        """Make the anchor or a dep/dst airport zone near the cell step aside; take its weather."""
+        if cell.decayed_oktas(now) <= 0:
+            return
+        dep_dst = self._dep_dst_zone_nums()
+        targets = set(dep_dst)
+        if self._anchor_zone is not None:
+            targets.add(self._anchor_zone)
+        if cell.test:   # a test CB gets full size: every other zone keeps clear
+            targets |= set(self.zone_positions) - set(self._drift)
+        for zone_num in sorted(targets):
+            if zone_num == cell.zone or zone_num not in self.zone_positions:
+                continue
+            lat, lon, icao = self.zone_positions[zone_num]
+            clear_nm, aside_nm = ((_CB_TEST_CLEAR_NM, _CB_TEST_CLEAR_NM + 2.0) if cell.test else
+                                  (_DRIFT_KEEP_CLEAR_NM, _DRIFT_STEP_ASIDE_NM))
+            if self._dist_nm(cell.clat, cell.clon, lat, lon) >= clear_nm:
+                continue
+            az, _, dist_m = self.geod.inv(cell.clon, cell.clat, lon, lat)
+            if dist_m < 100.0:
+                az = cell.heading_deg + 90.0
+            new_lon, new_lat, _ = self.geod.fwd(lons=cell.clon, lats=cell.clat, az=az,
+                                                dist=aside_nm * _NM_TO_M)
+            new_lon = ((new_lon + 180.0) % 360.0) - 180.0
+            is_anchor = zone_num == self._anchor_zone
+            if zone_num in dep_dst and icao in self.airports:
+                flat, flon = self.airports[icao]
+                if self._dist_nm(new_lat, new_lon, flat, flon) > _DRIFT_ARPT_MAX_OFFSET_NM:
+                    if cell.start_decay(now, f"would push the {icao} zone more than"
+                                             f" {_DRIFT_ARPT_MAX_OFFSET_NM:.0f}nm from the field"):
+                        self.logger.info("CB drift: Zone %d starts to decay (%s)", cell.zone,
+                                         cell.decay_why)
+                    continue
+            self.zone_positions[zone_num] = (new_lat, new_lon, icao)
+            self._zone_pinned[zone_num] = (new_lat, new_lon)
+            if is_anchor:
+                self._cb_free_zones[zone_num] = (new_lat, new_lon)
+            self._write_zone_pos(zone_num, new_lat, new_lon)
+            other_wx = self.zone_wx.get(zone_num)
+            local = is_anchor or zone_num in dep_dst   # PSX's local weather may come from it
+            if other_wx and local:
+                cell.wx = _fw_drift.with_cb_of(other_wx, cell.wx)
+            self.logger.info(
+                "CB drift: %s Zone %d steps aside to %s, %.0fnm from the Zone %d CB's zone%s",
+                "anchor" if is_anchor else f"{icao} airport" if zone_num in dep_dst else icao,
+                zone_num, _fw_drift.pos_text(new_lat, new_lon), aside_nm, cell.zone,
+                ", which takes its weather" if local else "")
+
+    def _drift_tick(self, dt_s: float) -> None:
+        """Move every drifting cell one step; decay and end them; put airport zones back."""
+        now = time.monotonic()
+        moving = (self.ac_alt_ft is not None and self.ac_alt_ft >= _DRIFT_MIN_ALT_FT and
+                  not self._maneuvering)
+        self._inject_wx_slow_transit()
+        sim_ms = self.sim_time_ms()
+        for zone_num, cell in list(self._drift.items()):
+            cur = self.zone_positions.get(zone_num)
+            if cur is None or abs(cur[0] - cell.clat) > 1e-9 or abs(cur[1] - cell.clon) > 1e-9:
+                self._end_drift(zone_num, "the zone was moved elsewhere", retire=False)
+                continue
+            if not cell.test and cell.decay_from is None and now >= cell.started + cell.lifetime_s:
+                cell.start_decay(now, f"end of its {cell.lifetime_s / 60.0:.0f} min life")
+                self.logger.info("CB drift: Zone %d starts to decay (%s)", zone_num, cell.decay_why)
+            if moving or cell.test:
+                old = (cell.lat, cell.lon, cell.moved_nm)
+                cell.step(self.geod, dt_s)
+                removed_for = self._cb_removed_near_airport(cell.lat, cell.lon)
+                if removed_for:
+                    cell.lat, cell.lon, cell.moved_nm = old
+                    if cell.start_decay(now, f"reached the Remove CB circle of {removed_for}"):
+                        self.logger.info("CB drift: Zone %d starts to decay (%s)", zone_num,
+                                         cell.decay_why)
+            oktas = cell.decayed_oktas(now)
+            if oktas <= 0 and cell.decay_from is not None:
+                self._write_zone_wx(zone_num, _fw_drift.with_oktas(cell.wx, 0))
+                self._end_drift(zone_num, f"CB gone: {cell.decay_why}", retire=True)
+                continue
+            if sim_ms is not None:
+                cell.place(self.geod, sim_ms)
+            self._drift_keep_clear(cell, now)
+            self.zone_positions[zone_num] = (cell.clat, cell.clon, cur[2])
+            self.zone_mode[zone_num] = _fw_drift.wxmode_at(cell.mode, cell.clat, cell.clon)
+            self.psx_send_and_set(f"WxMode{zone_num}", self.zone_mode[zone_num])
+            self._zone_wx_pos[zone_num] = self.zone_positions[zone_num]
+            self._write_zone_wx(zone_num, _fw_drift.with_oktas(cell.wx, oktas))
+        # Airport zones that stepped aside go back to their field once no cell is near it
+        for zone_num, pos in list(self._zone_pinned.items()):
+            cur = self.zone_positions.get(zone_num)
+            if cur is None or (cur[0], cur[1]) != pos:
+                del self._zone_pinned[zone_num]
+                self._drift_retired.pop(zone_num, None)
+                continue
+            icao = cur[2]
+            if zone_num not in self._dep_dst_zone_nums() or icao not in self.airports:
+                continue
+            flat, flon = self.airports[icao]
+            if any(self._dist_nm(c.clat, c.clon, flat, flon) < _DRIFT_STEP_ASIDE_NM
+                   for c in self._drift.values()):
+                continue
+            del self._zone_pinned[zone_num]
+            self.zone_positions[zone_num] = (flat, flon, icao)
+            self._write_zone_pos(zone_num, flat, flon)
+            self.logger.info("CB drift: %s airport Zone %d back at its field", icao, zone_num)
+        self._state_changed_event.set()
+
+    def _drift_clear(self, why: str) -> None:
+        """Forget every drift and pin (the zones stay where they are until the next update)."""
+        if self._drift or self._zone_pinned:
+            self.logger.info("CB drift: all drifts ended (%s)", why)
+        self._drift.clear()
+        self._zone_pinned.clear()
+        self._drift_retired.clear()
+
+    # --advanced-zones: the /weather/cbtest page (fw_webui.py's
+    # register_cb_test_routes()) puts test CBs where the tester asks. A test CB
+    # is a drift cell (fw_drift.DriftCell.test) in a borrowed zone, with a fake
+    # 8/8 CB, that never decays, and that every other zone keeps clear of.
+    _CB_TEST_DISTANCES_NM = (10, 20, 40, 80, 160)
+
+    def _cb_test_unavailable(self) -> Optional[str]:
+        """Return why test CBs can't be placed now, or None."""
+        if not self.args.advanced_zones:
+            return "frankenweather runs without --advanced-zones"
+        if self._fw_mode != "enabled":
+            return f"the weather zones aren't automatic (mode {self._fw_mode})"
+        if not self.psx_connected or self.ac_lat is None or self.ac_hdg is None:
+            return "no aircraft position from PSX yet"
+        if self.sim_time_ms() is None:
+            return "no TimeEarth from PSX yet"
+        return None
+
+    def cb_test_state(self) -> dict:
+        """Return what the /weather/cbtest page shows: whether it works now, and the test CBs."""
+        cells = []
+        for zone_num, cell in sorted(self._drift.items()):
+            if not cell.test:
+                continue
+            entry = {"zone": zone_num, "label": cell.test,
+                     "pos": _fw_drift.pos_text(cell.lat, cell.lon),
+                     "heading_deg": round(cell.heading_deg), "speed_kt": round(cell.speed_kt),
+                     "moved_nm": round(cell.moved_nm, 1)}
+            if self.ac_lat is not None and self.ac_hdg is not None:
+                az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, cell.lon, cell.lat)
+                entry["dist_nm"] = round(dist_m / _NM_TO_M, 1)
+                entry["brg_rel"] = round((az - self.ac_hdg) % 360) % 360
+            cells.append(entry)
+        return {"why_not": self._cb_test_unavailable(), "cells": cells,
+                "distances_nm": list(self._CB_TEST_DISTANCES_NM)}
+
+    async def handle_cb_test(self, cmd: dict) -> str:  # pylint: disable=too-many-locals,too-many-return-statements,too-many-branches
+        """Do a /weather/cbtest command; return what happened, for the page."""
+        action = cmd.get("action")
+        if action == "remove":
+            count = self._cb_test_remove()
+            return f"Removed {count} test CB(s)" if count else "There were no test CBs"
+        if action in ("speed", "reset_speed"):
+            return await self._cb_test_set_speed(cmd.get("speed") if action == "speed" else None)
+        why_not = self._cb_test_unavailable()
+        if why_not:
+            return f"Can't place test CBs: {why_not}"
+        hdg, now = self.ac_hdg, time.monotonic()
+        here = (self.ac_lat, self.ac_lon)
+        if action == "ahead":
+            try:
+                dist = int(cmd.get("dist", 0))
+            except (TypeError, ValueError):
+                dist = 0
+            if dist not in self._CB_TEST_DISTANCES_NM:
+                return f"Unknown distance {cmd.get('dist')!r}"
+            targets = [(f"dead ahead {dist}nm", self._fwd(*here, hdg, dist), 0.0, 0.0)]
+        elif action == "pair":
+            targets = [(f"{rel:03d}° {30}nm", self._fwd(*here, hdg + rel, 30), 0.0, 0.0)
+                       for rel in (315, 45)]
+        elif action == "smiley":
+            # Upright on the ND, 40 nm ahead: eyes up (farther), the mouth's corners
+            # higher than its middle; (ahead, right) nm from the face's centre
+            centre = self._fwd(*here, hdg, 40)
+            parts = [("smiley left eye", 10, -8), ("smiley right eye", 10, 8),
+                     ("smiley mouth left", -6, -15), ("smiley mouth middle", -12, 0),
+                     ("smiley mouth right", -6, 15)]
+            targets = [(label, self._fwd(*self._fwd(*centre, hdg, ahead), hdg + 90.0, right),
+                        0.0, 0.0) for label, ahead, right in parts]
+        elif action == "upwind":
+            profile = await asyncio.get_running_loop().run_in_executor(
+                None, self._turb_engine.wind_fetcher.get, *here, datetime.now(timezone.utc))
+            motion = _fw_drift.mean_wind_motion(profile)
+            moves, speed = (motion if motion else ((hdg + 90.0) % 360.0, 20.0))
+            speed = max(speed, 20.0)
+            # 40 nm ahead, 20 nm to the side of the track the wind comes from
+            across = math.sin(math.radians(moves - hdg))   # > 0: the wind blows left to right
+            side = -90.0 if across >= 0 else 90.0
+            start = self._fwd(*self._fwd(*here, hdg, 40), hdg + side, 20)
+            label = f"upwind, moving {moves:03.0f}°/{speed:.0f}kt"
+            if abs(across) < 0.25:
+                label += " (wind along the track: it hardly closes on it)"
+            targets = [(label, start, moves, speed)]
+        else:
+            return f"Unknown action {action!r}"
+        self._cb_test_remove()
+        placed = []
+        for label, (lat, lon), moves, speed in targets:
+            zone_num = self._expendable_for_anchor()
+            if zone_num is None:
+                break
+            self._cb_test_place(zone_num, label, lat, lon, moves, speed, now)
+            placed.append(f"{label} (zone {zone_num})")
+        self._state_changed_event.set()
+        if not placed:
+            return "No zone free for a test CB"
+        return "Placed " + ", ".join(placed)
+
+    async def _cb_test_set_speed(self, speed) -> str:
+        """Give every test CB this drift speed (kt), or (None) the motion it was placed with."""
+        cells = {zn: c for zn, c in self._drift.items() if c.test}
+        if not cells:
+            return "There are no test CBs"
+        if speed is None:
+            for zone_num, cell in cells.items():
+                cell.heading_deg, cell.speed_kt = self._cb_test_motion.get(zone_num, (0.0, 0.0))
+            return f"{len(cells)} test CB(s) back to the motion they were placed with"
+        try:
+            kt = float(speed)
+        except (TypeError, ValueError):
+            return f"Not a speed: {speed!r}"
+        if not 0.0 <= kt <= 200.0:
+            return "The speed must be 0-200 kt"
+        moves = None
+        for cell in cells.values():
+            if cell.speed_kt <= 0.0 < kt:
+                if moves is None:   # static ones get the cloud-layer wind's direction
+                    lat, lon = ((self.ac_lat, self.ac_lon) if self.ac_lat is not None
+                                else (cell.lat, cell.lon))
+                    profile = await asyncio.get_running_loop().run_in_executor(
+                        None, self._turb_engine.wind_fetcher.get, lat, lon,
+                        datetime.now(timezone.utc))
+                    motion = _fw_drift.mean_wind_motion(profile)
+                    moves = motion[0] if motion else 0.0
+                cell.heading_deg = moves
+            cell.speed_kt = kt
+        self.logger.info("CB test: %d test CB(s) now move at %.0fkt", len(cells), kt)
+        return f"{len(cells)} test CB(s) now move at {kt:.0f} kt"
+
+    def _fwd(self, lat: float, lon: float, az: float, dist_nm: float) -> tuple:
+        """Return (lat, lon) dist_nm from (lat, lon) on true bearing az."""
+        new_lon, new_lat, _ = self.geod.fwd(lons=lon, lats=lat, az=az % 360.0,
+                                            dist=dist_nm * _NM_TO_M)
+        return new_lat, ((new_lon + 180.0) % 360.0) - 180.0
+
+    def _cb_test_place(self, zone_num: int, label: str, lat: float, lon: float,  # pylint: disable=too-many-arguments,too-many-positional-arguments
+                       moves: float, speed: float, now: float) -> None:
+        """Turn zone_num into a test CB at (lat, lon) moving towards moves at speed (kt)."""
+        mode = self.zone_mode.get(zone_num) or (
+            self.psx.get(f"WxMode{zone_num}") if self.psx else None)
+        wx = self.zone_wx.get(zone_num) or (self.psx.get(f"Wx{zone_num}") if self.psx else None)
+        if not mode or not wx:
+            return
+        parts = mode.split(';')
+        name = (parts[5][:-3] if len(parts) > 5 and len(parts[5]) > 3
+                else self.zone_positions[zone_num][2])
+        cell = _fw_drift.DriftCell(zone=zone_num, lat=lat, lon=lon, heading_deg=moves,
+                                   speed_kt=speed, wx=_apply_fake_cb(wx, 8, 3000, 40000),
+                                   mode=mode, icao=name, started=now, test=label)
+        cell.place(self.geod, self.sim_time_ms())
+        self._drift[zone_num] = cell
+        self._cb_test_motion[zone_num] = (moves, speed)
+        self._zone_pinned.pop(zone_num, None)
+        self._drift_retired.pop(zone_num, None)
+        self.zone_positions[zone_num] = (cell.clat, cell.clon, self.zone_positions[zone_num][2])
+        self.zone_mode[zone_num] = cell.mode
+        self._inject_wx_slow_transit()
+        self.psx_send_and_set(f"WxMode{zone_num}", self.zone_mode[zone_num])
+        self._write_zone_wx(zone_num, cell.wx)
+        self._drift_keep_clear(cell, now)
+        self.logger.info("CB test: Zone %d is a test CB, %s, at %s", zone_num, label,
+                         _fw_drift.pos_text(lat, lon))
+
+    def _cb_test_remove(self) -> int:
+        """Remove every test CB (their zones keep their place, without a CB); return how many."""
+        zones = [zn for zn, cell in self._drift.items() if cell.test]
+        for zone_num in zones:
+            cell = self._drift.pop(zone_num)
+            self._cb_test_motion.pop(zone_num, None)
+            self._write_zone_wx(zone_num, _strip_cb(cell.wx))
+            self.logger.info("CB test: Zone %d test CB (%s) removed", zone_num, cell.test)
+        if zones:
+            # Zones that stepped aside for them: normal placement again
+            dep_dst = self._dep_dst_zone_nums()
+            for zone_num in [zn for zn in self._zone_pinned if zn not in dep_dst]:
+                del self._zone_pinned[zone_num]
+                self._drift_retired.pop(zone_num, None)
+            self._state_changed_event.set()
+        return len(zones)
+
+    async def cb_drift_coro(self) -> None:
+        """--advanced-zones: move the drifting CB zones every _DRIFT_TICK_S."""
+        myname = inspect.currentframe().f_code.co_name
+        try:
+            self.logger.debug("Starting %s", myname)
+            last = time.monotonic()
+            while True:
+                await asyncio.sleep(_DRIFT_TICK_S)
+                now = time.monotonic()
+                dt_s, last = now - last, now
+                if not self._drift and not self._zone_pinned:
+                    continue
+                if not self._drift_enabled():
+                    self._drift_clear("advanced zones off or weather not automatic")
+                    continue
+                if not self.psx_connected or self.psx_paused:
+                    continue
+                self._drift_tick(min(dt_s, 2 * _DRIFT_TICK_S))
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
+            self.logger.critical(traceback.format_exc())
+
     def _expendable_for_anchor(self) -> Optional[int]:
         """Return the zone to turn into a new anchor zone, or None.
 
@@ -6825,6 +7342,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         """
         arpt_icaos = {icao for icao, _, _ in self._arpt_coverage_needed()}
         protected = {self._nearest_zone_num(), self.focused_zone, self._anchor_zone}
+        protected |= set(self._drift)   # --advanced-zones: drifting CB zones
         best, best_key = None, None
         for zone_num, (lat, lon, icao) in self.zone_positions.items():
             if (zone_num in protected or icao in arpt_icaos or
@@ -6921,6 +7439,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         """Return the zone _place_sigmet_zones() may move, or None (see there)."""
         arpt_icaos = {icao for icao, _, _ in self._arpt_coverage_needed()}
         protected = {self._nearest_zone_num(), self.focused_zone, self._anchor_zone}
+        protected |= set(self._drift)   # --advanced-zones: drifting CB zones
         best, best_key = None, None
         for zone_num, (lat, lon, icao) in self.zone_positions.items():
             if (zone_num in protected or icao in arpt_icaos or
@@ -8268,6 +8787,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 detail += f"; CBs removed (Remove CB near dep/arr: {pz['cb_removed_for']})"
             self.zone_weather_detail[i + 1] = detail
 
+        self._drift_override(new_modes, new_wxs, new_metars, snap_positions, snap_icaos, month)
         self._inject_wx_slow_transit()
         self.psx_send_and_set("WxAutoSet", "0")
 
@@ -8322,6 +8842,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if self.args.sync_tropopause:
             self._write_tropopause()
         self.logger.info("Zone update complete")
+        await self._start_drifts(new_modes, new_wxs)
 
     # ------------------------------------------------------------------
     # API state broadcast
@@ -8436,6 +8957,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 # this is the CB-free anchor zone
                 "cb_sigmet": self.zone_cb_sigmet.get(zone_num),
                 "anchor": zone_num == self._anchor_zone,
+                # --advanced-zones: how the zone's CB drifts (None if it doesn't)
+                "drift": ({
+                    "heading_deg": round(self._drift[zone_num].heading_deg),
+                    "speed_kt": round(self._drift[zone_num].speed_kt),
+                    "min_left": (None if self._drift[zone_num].test else
+                                 round(self._drift[zone_num].minutes_left(time.monotonic()))),
+                    "test": self._drift[zone_num].test or None,
+                    "decaying": self._drift[zone_num].decay_from is not None,
+                } if zone_num in self._drift else None),
                 "cb_turb": self._cb_turb_area(zone_num, all_positions),
                 "cb_rate": ({
                     "oktas_per_min": round(
@@ -9403,7 +9933,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
             # Turbulence subsystem subscriptions
             self.psx.subscribe("WxBurst", self.handle_other_wxburst)
-            self.psx.subscribe("TimeEarth")
+            self.psx.subscribe("TimeEarth", self.handle_time_earth)
+            self.psx.subscribe("TimeAccel")
             self.psx.subscribe("WxClust")
             self.psx.subscribe("AcftHeight")
             self.psx.subscribe("OnGround")
@@ -9456,6 +9987,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     ("TurbBroadcast", self.turb_state_broadcast_coro),
                     ("PirepLevels", self.pirep_levels_coro),
                 ]
+                if self.args.advanced_zones:
+                    coros.append(("CbDrift", self.cb_drift_coro))
                 for name, coro_fn in coros:
                     if name not in running:
                         self.logger.info("Starting %s...", name)
@@ -9535,6 +10068,16 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "SIGMETs it could parse. Off by default: frankenweather "
                  "then doesn't use SIGMETs at all and only has PSX download "
                  "them regularly.")
+        parser.add_argument(
+            '--advanced-zones', action='store_true',
+            help="TEMPORARY, for testing: CB zones drift with the wind. A zone "
+                 "that gets a CB in cruise (not the anchor or a dep/dst airport "
+                 "zone, not below 10,000 ft or within 50nm of dep/dst) keeps the "
+                 "weather it had and moves with the 850-300 hPa mean wind, 5 "
+                 "degrees right of it, for 30-60 minutes; then its CB fades out. "
+                 "When a cell comes within 10nm of the anchor or a dep/dst "
+                 "airport zone, that zone steps aside and the cell takes its "
+                 "weather. Off by default.")
         parser.add_argument(
             '--sync-tropopause', action='store_true',
             help="EXPERIMENTAL: keep PSX's Planet Weather page tropopause "
@@ -9907,6 +10450,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # Standalone-only: the router UI has no need to browse/download
         # frankenweather's own per-run event logs (see the Config and logs page).
         _fw_webui.register_weather_logs_routes(routes, ctx)
+        # Standalone-only, --advanced-zones: test CBs placed on request
+        _fw_webui.register_cb_test_routes(routes, ctx)
         self._register_sigmet_text_routes(routes)
 
         static_path = pathlib.Path(__file__).parent / 'router' / 'frankenrouter' / 'static'

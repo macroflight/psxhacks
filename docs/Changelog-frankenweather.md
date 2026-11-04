@@ -1,5 +1,20 @@
 # frankenweather changelog
 
+## Unreleased
+
+- **New (testing): CBs drift with the wind, `--advanced-zones`.** A
+  temporary option, off by default. A zone that gets a CB in cruise keeps
+  the weather it had and moves with the 850-300 hPa mean wind (5 degrees
+  right of it) for 30-60 minutes, then its CB fades out. PSX circles a
+  zone's CB round the zone centre once an hour; frankenweather raises the
+  drifting zone's elevation by up to 359 ft to hold it, so the CB moves
+  only with the wind. The anchor and dep/dst airport zones never drift;
+  when a drifting zone comes within 10 nm of one of them, that zone steps
+  aside and the cell takes its weather. A CB test page (`/weather/cbtest`,
+  own web UI) puts test CBs dead ahead, upwind of the track, either side
+  of the nose or as a smiley, and sets their drift speed. See
+  [CBs drifting with the wind](frankenweather.md#cbs-drifting-with-the-wind---advanced-zones-testing).
+
 ## 2.3.4 (2026-11-03)
 
 - **Change: log times are UTC.** frankenweather's log (console, `--log`
