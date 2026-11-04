@@ -2432,6 +2432,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._orch_announced = (None, 0.0)   # (what was sent, time.monotonic())
         self._orch_ever_announced = False
         self._cb_test_message = ""   # the last CB test command's result (STATE "cb_test")
+        self._cb_motion_here: Optional[dict] = None   # {"hdg", "kt"}: cb_motion_coro()
         self._cb_test_tasks: set = set()
         self._sigmet_place_last: float = 0.0  # see _place_sigmet_zones()
         # zone -> label of the SIGMET that gave its current CB (e.g. "TS
@@ -7383,6 +7384,34 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             feed["time_earth_ms"] = int(sim_ms)   # the PSX clock the positions are for
         return feed
 
+    async def cb_motion_coro(self) -> None:
+        """Advanced zones: every 2 min, how CBs drift at the aircraft (/efb's "CBs move").
+
+        The 850-300 hPa mean wind there, 5 degrees right, as a drift would
+        get it (fw_drift.mean_wind_motion()); from the cached Open-Meteo
+        profile. Not the wind at the aircraft's level.
+        """
+        myname = inspect.currentframe().f_code.co_name
+        try:
+            self.logger.debug("Starting %s", myname)
+            loop = asyncio.get_running_loop()
+            while True:
+                if (self._advanced_zones and self.ac_lat is not None and
+                        self._turb_engine is not None):
+                    profile = await loop.run_in_executor(
+                        None, self._turb_engine.wind_fetcher.get, self.ac_lat, self.ac_lon,
+                        datetime.now(timezone.utc))
+                    motion = _fw_drift.mean_wind_motion(profile)
+                    here = ({"hdg": round(motion[0]) % 360, "kt": round(motion[1])}
+                            if motion else None)
+                    if here != self._cb_motion_here:
+                        self._cb_motion_here = here
+                        self._state_changed_event.set()
+                await asyncio.sleep(120.0)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
+            self.logger.critical(traceback.format_exc())
+
     async def orchestration_feed_coro(self) -> None:
         """--advanced-zones: tell the routers the drifting CBs and the Orchestration delay and rate.
 
@@ -9226,6 +9255,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "zones": zones,
             # The CB test page's state (also served by the routers' web UI)
             "cb_test": dict(self.cb_test_state(), message=self._cb_test_message),
+            # Advanced zones: how CBs drift at the aircraft (the /efb page)
+            "cb_motion": self._cb_motion_here if self._advanced_zones else None,
             "config": config,
             "sigmets": sigmets,
             "gairmets": gairmets,
@@ -10170,6 +10201,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 ]
                 coros.append(("CbDrift", self.cb_drift_coro))   # idle unless advanced zones are on
                 coros.append(("OrchestrationFeed", self.orchestration_feed_coro))
+                coros.append(("CbMotion", self.cb_motion_coro))
                 for name, coro_fn in coros:
                     if name not in running:
                         self.logger.info("Starting %s...", name)

@@ -562,6 +562,11 @@ def location_wx_card(loc, w, sigmet_hazards=()):
                 'In SIGMET area', '#f4d100' if sigmet_hazards else '#64748b',
                 ', '.join(sigmet_hazards) if sigmet_hazards else 'No')
         )
+        motion = w.get('cb_motion')
+        if motion:   # FrankenWeather with advanced zones: how CBs drift here
+            body += src_row('CBs move', '#3b82f6',
+                            f"{motion['hdg']:03d}° / {motion['kt']}kt "
+                            "(850-300 hPa mean wind)")
     return (
         '<div class="efb-card" id="efb-location-card">\n' +
         turb_section(w) +
@@ -668,6 +673,8 @@ def weather_status(ctx, now=None):  # pylint: disable=too-many-locals
             bool(cfg.get('disable_psx_sigmets', False)),
             {h for h, on in (cfg.get('sigmet_handle') or {}).items() if on}),
         'sigmet_hazards': list((state or {}).get('sigmet_hazards', [])),
+        # FrankenWeather with advanced zones: {"hdg", "kt"} CBs drift with here
+        'cb_motion': (state or {}).get('cb_motion'),
         'src_router_color': fw_color, 'src_router_label': fw_label, 'src_router_age': fw_age,
         'src_msfs_color': msfs_color,
         'src_msfs_label': 'connected' if msfs_active else 'not connected',

@@ -13,7 +13,8 @@
   aside and the cell takes its weather. A CB test page (`/weather/cbtest`,
   own web UI) switches advanced zones on and off at runtime, puts test
   CBs dead ahead, upwind of the track, either side of the nose or as a
-  smiley, and sets their drift speed. With advanced zones, the routers
+  smiley, and sets their drift speed; it's in the routers' web UI too.
+  `/efb` shows how CBs move at the aircraft. With advanced zones, the routers
   give PSX.NET.Orchestration every weather-zone change
   `--orchestration-delay` (default 10 s) late, to match PSX's radar, and
   drifting zones' positions `--orchestration-rate` times a second (default
