@@ -728,6 +728,20 @@ frdp_rtt_warning = 0.5
 
 ### `[filtering]`
 
+- `orchestration_names`: display names of the clients that draw PSX's
+  CBs in another simulator, default `["PSX.NET.Orchestration"]` (it puts
+  them into MSFS); `[]` turns this off. While frankenweather (with
+  `--advanced-zones`) announces a delay in its `FRANKENWEATHER:WXMODES`
+  messages, every router gives these clients each weather-zone write
+  (`Wx1`-`Wx7`, `WxMode1`-`WxMode7`, `Metar1`-`Metar7`) that many seconds
+  late, so a CB appears, moves and goes in MSFS when PSX's weather radar
+  shows it; everyone else (PSX, its main clients, other addons) gets them
+  at once. A drifting zone's `WxMode` comes from the same messages, once
+  a second (computed for when the client gets it), instead of
+  frankenweather's 15 s writes, so its CB moves smoothly in MSFS. The
+  messages themselves only go to frankenrouters. Without them for 90 s,
+  no delay.
+
 - `client_reset_whitelist`: display names of the clients the `/utils`
   "Reset clients" page pre-selects. That page is a slave-router-only
   feature: it re-sends `load1`/`load2`/`load3` and a full state refresh

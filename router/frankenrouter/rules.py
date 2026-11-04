@@ -111,6 +111,30 @@ PTT_TO_GROUND_HANDLING = {
 # want theirs fed (2026-11-03).
 PRINTER_PUSH_KEYWORD = 'Qh415'
 
+# The weather-zone variables (see Rules.route()'s orchestration egress)
+_WEATHER_ZONE_VAR_RE = re.compile(r'^(Wx|WxMode|Metar)([1-7])$')
+# frankenweather's WXMODES feed: at most this delay (s), zones 1-7
+ORCHESTRATION_MAX_DELAY_S = 60.0
+
+
+def parse_orchestration_wxmodes(text):
+    """Parse a FRANKENWEATHER:WXMODES payload; return {'delay_s', 'zones'} or None.
+
+    The payload is JSON: {"delay_s": <s>, "zones": {"<1-7>": "<WxMode string>"}}.
+    """
+    try:
+        data = json.loads(text)
+        delay = float(data.get('delay_s', 0.0))
+        zones = {int(z): str(m) for z, m in (data.get('zones') or {}).items()}
+    except (ValueError, TypeError, AttributeError):
+        return None
+    if not 0.0 <= delay <= ORCHESTRATION_MAX_DELAY_S:
+        return None
+    if any(not 1 <= z <= 7 or m.count(';') < 5 or '\n' in m for z, m in zones.items()):
+        return None
+    return {'delay_s': delay, 'zones': zones}
+
+
 QUARANTINE_DEFAULT_S = 60.0
 # How often per variable a quarantined client is given the network's value
 # back (see Rules.quarantine_restore())
@@ -1127,6 +1151,21 @@ class Rules():  # pylint: disable=too-many-public-methods
         if addon == 'FRANKENWEATHER':
             if not self.allow_write():
                 return self.myreturn(RulesAction.DROP, RulesCode.NOWRITE)
+            # WXMODES: frankenweather's 1 s WxMode feed for the clients that
+            # draw PSX's CBs elsewhere ([filtering] orchestration_names), with
+            # the delay all their weather-zone writes get. Frankenrouters only;
+            # each router hands it to its own such clients (see
+            # Frankenrouter.orchestration_wxmodes()).
+            if payload.startswith('WXMODES:'):
+                feed = parse_orchestration_wxmodes(payload[len('WXMODES:'):])
+                if feed is None:
+                    return self.myreturn(
+                        RulesAction.FILTER, RulesCode.FRANKENWEATHER_FILTERED,
+                        extra_data={'frankenrouters_only': True},
+                        message="malformed FRANKENWEATHER:WXMODES, only forwarded")
+                return self.myreturn(
+                    RulesAction.FILTER, RulesCode.FRANKENWEATHER_FILTERED,
+                    extra_data={'orchestration_wxmodes': feed})
             # SIGMETJSON (the parsed SIGMET download, ~30 KB) is only for
             # the routers' own /api/sigmet/latest/json, so frankenrouters only.
             if payload.startswith('SIGMETJSON:'):
@@ -1957,6 +1996,17 @@ class Rules():  # pylint: disable=too-many-public-methods
                 self.logger.info("A/P disconnect pressed, sending the MY_CONTROLS message")
                 return self.myreturn(RulesAction.NORMAL, RulesCode.FRDP_MY_CONTROLS)
 
+        # Weather-zone writes reach the clients that draw PSX's CBs elsewhere
+        # (PSX.NET.Orchestration) late, as late as PSX's own radar shows them,
+        # and a drifting zone's WxMode from frankenweather's feed instead (see
+        # Frankenrouter.orchestration_*). Everyone else gets them now.
+        zone_var = _WEATHER_ZONE_VAR_RE.match(self.router.variables.get_variable_name(key) or '')
+        if zone_var and self.router.orchestration_egress_needed(int(zone_var.group(2))):
+            return self.myreturn(
+                RulesAction.FILTER, RulesCode.KEYVALUE_FILTER_EGRESS,
+                extra_data={'orchestration_egress': {
+                    'zone': int(zone_var.group(2)), 'wxmode': zone_var.group(1) == 'WxMode'}})
+
         #
         # Send normally
         #
@@ -1993,7 +2043,7 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             """Return a fake variable name for a few keywords."""
             return {'Qs196': 'MfAcBus1', 'Qi130': 'MfEvent', 'Qs546': 'TkofRefNg',
                     'Qi190': 'MaweaBits', 'Qs499': 'WxSigmet', 'Qs329': 'Wx1',
-                    'Qi272': 'CfgPin3Prog'}.get(keyword, keyword)
+                    'Qi272': 'CfgPin3Prog', 'Qs336': 'WxMode1'}.get(keyword, keyword)
 
     class DummyCache():  # pylint: disable=too-few-public-methods
         """Implement small parts of the router for unit testing."""
@@ -2073,10 +2123,15 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             self.filter_traffic = False
             self.load_marker_pause_enabled = False
             self.load_marker_pause_delay = 0.1
+            self.orchestration_needed = False   # what orchestration_egress_needed() says
 
         def is_upstream_connected(self):
             """Return dummy value."""
             return False
+
+        def orchestration_egress_needed(self, _zone):
+            """Return whether weather-zone writes go to Orchestration clients late."""
+            return self.orchestration_needed
 
         def is_sharedinfo_authority(self):
             """Mirror the real router's own is_sharedinfo_authority method."""
@@ -2970,6 +3025,42 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         self.assertEqual(action, RulesAction.NORMAL)
         self.assertEqual(code, RulesCode.KEYVALUE_NORMAL)
         self.assertIsNone(extra_data)
+
+    def test_orchestration_wxmodes(self):
+        """FRANKENWEATHER:WXMODES is parsed for the Orchestration feed; bad ones only forwarded."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+        router.upstream = self.DummyUpstreamConnection()
+        mode = "0.82;-0.43;320;12;11;X90101p"
+        (action, code, _, extra_data) = rules.route(
+            'addon=FRANKENWEATHER:WXMODES:{"delay_s": 10, "zones": {"3": "%s"}}' % mode,
+            router.upstream)
+        self.assertEqual((action, code), (RulesAction.FILTER, RulesCode.FRANKENWEATHER_FILTERED))
+        self.assertEqual(extra_data,
+                         {'orchestration_wxmodes': {'delay_s': 10.0, 'zones': {3: mode}}})
+        for bad in ('{"delay_s": 999, "zones": {}}',
+                    '{"delay_s": 5, "zones": {"8": "%s"}}' % mode,
+                    '{"delay_s": 5, "zones": {"1": "no;fields"}}', 'not json'):
+            (_, _, _, extra_data) = rules.route(f'addon=FRANKENWEATHER:WXMODES:{bad}',
+                                                router.upstream)
+            self.assertEqual(extra_data, {'frankenrouters_only': True}, bad)
+
+    def test_orchestration_egress(self):
+        """Weather-zone writes get the Orchestration egress filter only when it's needed."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+        router.upstream = self.DummyUpstreamConnection()
+        (action, code, _, _) = rules.route("Qs329=0;1;2", router.upstream)
+        self.assertEqual((action, code), (RulesAction.NORMAL, RulesCode.KEYVALUE_NORMAL))
+        router.orchestration_needed = True
+        (action, code, _, extra_data) = rules.route("Qs336=0.8;-0.4;320;0;11;X90101p",
+                                                    router.upstream)
+        self.assertEqual((action, code), (RulesAction.FILTER, RulesCode.KEYVALUE_FILTER_EGRESS))
+        self.assertEqual(extra_data, {'orchestration_egress': {'zone': 1, 'wxmode': True}})
+        (_, _, _, extra_data) = rules.route("Qs329=0;1;2", router.upstream)
+        self.assertEqual(extra_data, {'orchestration_egress': {'zone': 1, 'wxmode': False}})
+        (action, _, _, _) = rules.route("Qh33=4", router.upstream)   # not a weather-zone variable
+        self.assertEqual(action, RulesAction.NORMAL)
 
     def test_addon_frankenweather_filter(self):
         """FRANKENWEATHER addon messages must be filtered to frankenrouters only."""

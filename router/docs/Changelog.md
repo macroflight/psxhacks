@@ -10,6 +10,16 @@
   it. Now any difference over `clock_skew_warning` (30 s) is a warning,
   shown on the router console and on every sim's `/efb` page, never on
   the EICAS. `clock_skew_critical` is no longer used.
+- **New: weather-zone writes reach PSX.NET.Orchestration as late as
+  PSX's radar shows them, and drifting CBs move smoothly in MSFS.** For
+  the clients in the new `[filtering] orchestration_names` (default
+  `PSX.NET.Orchestration`), every router delays `Wx`/`WxMode`/`Metar`
+  1-7 by the delay frankenweather announces (with `--advanced-zones`,
+  default 10 s), and gives them a drifting zone's `WxMode` once a second
+  from frankenweather's new `FRANKENWEATHER:WXMODES` messages (frankenrouters
+  only). PSX and every other client get the writes as before. MSFS showed
+  the CBs at once, well before the radar, and a drifting CB jumped back
+  every 15 s.
 - **`CfgPin3Prog` is quarantined** (`default_seconds`, all connections).
   A joining sim's PSX main client wrote its own aircraft model pin
   programming (88) over the master's (8) as it connected.

@@ -73,6 +73,10 @@ READ_BUFFER_SIZE = 1048576
 
 # How often to perform housekeeping tasks (s)
 HOUSEKEEPING_INTERVAL = 10
+# Weather-zone writes to Orchestration clients ([filtering] orchestration_names):
+# frankenweather's announced delay counts this long, its WxMode feed for a zone this long
+ORCHESTRATION_DELAY_STALE_S = 90.0
+ORCHESTRATION_FEED_FRESH_S = 5.0
 
 # Command line options that have been removed. Each is still registered
 # with argparse (hidden from --help via SUPPRESS) purely so scripts/configs
@@ -410,10 +414,22 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 'func': self.api_task,
                 'kwargs': {},
             },
+            'Orchestration Delay': {
+                'func': self.orchestration_delay_task,
+                'kwargs': {},
+            },
         }
         self.clients = {}
         self.upstream = None
         self.upstream_connections = 0
+        # Clients that draw PSX's CBs elsewhere ([filtering] orchestration_names):
+        # the delay frankenweather last announced (s, time.perf_counter()), when
+        # each zone's WxMode feed last came, and the delayed lines for them
+        # (time.perf_counter() due, line), sent in order by orchestration_delay_task()
+        self._orchestration_delay = (0.0, 0.0)
+        self._orchestration_feed_at = {}
+        self._orchestration_queue = collections.deque()
+        self._orchestration_queued = asyncio.Event()
         # Addon CDU menu prompts registered through us ([filtering] cdu_menu_tracking)
         self.cdu_menus = cdumenus.CduMenus()
         # Crew alertness monitor ([crew_alertness], master only), set up in main()
@@ -4287,6 +4303,70 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             self.cache.update('Qs355', '102000;102000;102000')
             self._irs_fix_sent = True
 
+    def orchestration_delay_s(self):
+        """Return the delay (s) for weather-zone writes to Orchestration clients.
+
+        frankenweather announces it in every FRANKENWEATHER:WXMODES message
+        (at least every 30 s); none for ORCHESTRATION_DELAY_STALE_S: 0.
+        """
+        delay, at = self._orchestration_delay
+        if time.perf_counter() - at > ORCHESTRATION_DELAY_STALE_S:
+            return 0.0
+        return delay
+
+    def orchestration_feed_fresh(self, zone):
+        """Return True while frankenweather's WxMode feed for zone is current."""
+        at = self._orchestration_feed_at.get(zone)
+        return at is not None and time.perf_counter() - at < ORCHESTRATION_FEED_FRESH_S
+
+    def orchestration_peernames(self, exclude=None):
+        """Return the peernames of the local clients named in [filtering] orchestration_names."""
+        names = set(self.config.filtering.orchestration_names)
+        return [c.peername for c in self.clients.values()
+                if c.display_name in names and not c.is_frankenrouter and c.peername != exclude]
+
+    def orchestration_egress_needed(self, zone):
+        """Return True if a weather-zone write for zone must reach Orchestration clients late."""
+        if self.orchestration_delay_s() <= 0.0 and not self.orchestration_feed_fresh(zone):
+            return False
+        return bool(self.orchestration_peernames())
+
+    def orchestration_enqueue(self, line):
+        """Send line to the Orchestration clients after the current delay."""
+        self._orchestration_queue.append((time.perf_counter() + self.orchestration_delay_s(), line))
+        self._orchestration_queued.set()
+
+    def orchestration_wxmodes(self, feed):
+        """Take a FRANKENWEATHER:WXMODES feed: the delay, and each zone's WxMode for later."""
+        now = time.perf_counter()
+        self._orchestration_delay = (feed['delay_s'], now)
+        for zone, mode in sorted(feed['zones'].items()):
+            self._orchestration_feed_at[zone] = now
+            keyword = self.variables.get_keyword_for_name(f"WxMode{zone}")
+            if keyword and self.orchestration_peernames():
+                self.orchestration_enqueue(f"{keyword}={mode}")
+
+    async def orchestration_delay_task(self, name):
+        """Send the delayed weather-zone lines to the Orchestration clients, in order."""
+        try:
+            while True:
+                if not self._orchestration_queue:
+                    self._orchestration_queued.clear()
+                    await self._orchestration_queued.wait()
+                    continue
+                due, line = self._orchestration_queue[0]
+                wait = due - time.perf_counter()
+                if wait > 0:
+                    await asyncio.sleep(min(wait, 1.0))
+                    continue
+                self._orchestration_queue.popleft()
+                peernames = self.orchestration_peernames()
+                if peernames:
+                    await self.client_broadcast(line, include=peernames)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in %s, shutting down", exc, name)
+            self.logger.critical(traceback.format_exc())
+
     async def housekeeping_task(self, name):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
         """Miscellaneous housekeeping Task."""
         try:  # pylint: disable=too-many-nested-blocks
@@ -5015,6 +5095,33 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     if self.is_upstream_connected() and self.upstream.is_frankenrouter:
                         tasks.append(self.send_to_upstream(line, sender.peername))
                     await asyncio.gather(*tasks)
+            elif 'orchestration_wxmodes' in extra_data:
+                # frankenweather's WxMode feed: to the other frankenrouters as it
+                # is; to our own Orchestration clients as WxMode writes, late
+                self.orchestration_wxmodes(extra_data['orchestration_wxmodes'])
+                if sender.upstream:
+                    await self.client_broadcast(line, exclude_non_frankenrouter=True)
+                else:
+                    tasks = [self.client_broadcast(
+                        line, exclude=[sender.peername], exclude_non_frankenrouter=True)]
+                    if self.is_upstream_connected() and self.upstream.is_frankenrouter:
+                        tasks.append(self.send_to_upstream(line, sender.peername))
+                    await asyncio.gather(*tasks)
+            elif 'orchestration_egress' in extra_data:
+                # A weather-zone write: everyone now, Orchestration clients late
+                # (a drifting zone's WxMode not at all: they get the feed)
+                zone_info = extra_data['orchestration_egress']
+                late = self.orchestration_peernames(exclude=sender.peername)
+                if sender.upstream:
+                    await self.client_broadcast(line, exclude=late + [sender.peername])
+                else:
+                    await asyncio.gather(
+                        self.send_to_upstream(line, sender.peername),
+                        self.client_broadcast(line, exclude=late + [sender.peername]),
+                    )
+                if late and not (zone_info['wxmode'] and
+                                 self.orchestration_feed_fresh(zone_info['zone'])):
+                    self.orchestration_enqueue(line)
             elif 'frankenrouters_only' in extra_data:
                 self.logger.debug("sending with frankenrouters_only: %s", line[:80])
                 if sender.upstream:

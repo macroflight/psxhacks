@@ -248,6 +248,12 @@ class _RouterConfigSharedinfo:  # pylint: disable=missing-class-docstring,too-fe
             key for key in _DEPRECATED_SHAREDINFO_KEYS if key in data]
 
 
+# display_name values of clients that draw PSX's CBs in another simulator
+# (PSX.NET.Orchestration puts them into MSFS): they get the weather-zone
+# writes late and frankenweather's smooth WxMode feed (see rules.py's
+# handle_addon() FRANKENWEATHER:WXMODES case and Frankenrouter.orchestration_*)
+_DEFAULT_ORCHESTRATION_NAMES = ['PSX.NET.Orchestration']
+
 _DEFAULT_GROUND_HANDLING_FORWARD_NAMES = [
     'PSX.NET EFB For Windows', 'PSX.NET.Orchestration', 'BA ACARS Simulation',
 ]
@@ -268,6 +274,14 @@ class _RouterConfigFiltering:  # pylint: disable=missing-class-docstring,too-few
         if not all(isinstance(n, str) for n in self.ground_handling_forward_names):
             raise RouterConfigError(
                 "filtering ground_handling_forward_names entries must be strings")
+
+        # display_name values of clients that draw PSX's CBs in another
+        # simulator: see _DEFAULT_ORCHESTRATION_NAMES. Empty: none.
+        self.orchestration_names = data.get(
+            'orchestration_names', list(_DEFAULT_ORCHESTRATION_NAMES))
+        if not isinstance(self.orchestration_names, list) or not all(
+                isinstance(n, str) for n in self.orchestration_names):
+            raise RouterConfigError("filtering orchestration_names must be a list of strings")
 
         # display_name values the /utils "Reset clients" page (a
         # slave-router-only feature -- see
@@ -1044,6 +1058,15 @@ keywords = ["Qs123"]
             RouterConfig(config_data=(
                 "[[upstream]]\nname = 'test upstream'\n"
                 "on_forced_disconnect = 'bogus'\n"))
+
+    def test_orchestration_names(self):
+        """orchestration_names defaults to PSX.NET.Orchestration and can be overridden."""
+        conf = RouterConfig(config_data="")
+        self.assertEqual(conf.filtering.orchestration_names, ['PSX.NET.Orchestration'])
+        conf = RouterConfig(config_data="[filtering]\norchestration_names = []\n")
+        self.assertEqual(conf.filtering.orchestration_names, [])
+        with self.assertRaises(RouterConfigError):
+            RouterConfig(config_data="[filtering]\norchestration_names = 'x'\n")
 
     def test_ground_handling_forward_names(self):
         """ground_handling_forward_names has sane defaults and can be overridden in [filtering]."""
