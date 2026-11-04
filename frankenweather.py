@@ -7300,6 +7300,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         delay = self._orch_delay_s if self._drift_enabled() else 0.0
         zones = {}
         sim_ms = self.sim_time_ms()
+        at_ms = None
         if delay or self._drift:
             moving = (self.ac_alt_ft is not None and self.ac_alt_ft >= _DRIFT_MIN_ALT_FT and
                       not self._maneuvering)
@@ -7309,7 +7310,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 # Orchestration gets it delay s from now; the radar then shows
                 # where the CB is now
                 lat, lon = cell.position_at(self.geod, now, moving or bool(cell.test))
-                zones[str(zone_num)] = cell.mode_for(self.geod, sim_ms + delay * 1000.0, lat, lon)
+                at_ms = int(sim_ms + delay * 1000.0)
+                zones[str(zone_num)] = cell.mode_for(self.geod, at_ms, lat, lon)
         last_delay, last_at = self._orch_announced
         if not zones and last_delay == delay and (delay == 0.0 or now - last_at < 30.0):
             return None   # unchanged: a delay every 30 s, no delay just once
@@ -7317,7 +7319,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return None   # never on: nothing to tell the routers (no delay is their default)
         self._orch_ever_announced = True
         self._orch_announced = (delay, now)
-        return {"delay_s": delay, "zones": zones}
+        feed = {"delay_s": delay, "zones": zones}
+        if zones:
+            # The PSX clock the positions are for: Orchestration gets it with
+            # them. PSX itself sends TimeEarth only every ~3.5 s; between
+            # those, a client without a running clock draws the CBs up to
+            # 0.35 deg short on their circles, then hops back (seen in MSFS at
+            # 50 kt, 2026-11-04)
+            feed["time_earth_ms"] = at_ms
+        return feed
 
     async def orchestration_feed_coro(self) -> None:
         """--advanced-zones: tell the routers the Orchestration delay; drifting zones every 1 s.
@@ -7325,7 +7335,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         The routers give PSX.NET.Orchestration (it draws PSX's CBs in MSFS)
         every weather-zone write delay_s late, as late as PSX's weather radar
         shows a change, and each drifting zone's WxMode from this feed instead
-        of the 15 s writes PSX gets, so its CB moves smoothly in MSFS.
+        of the 15 s writes PSX gets, with the TimeEarth it's for, so its CB
+        moves smoothly in MSFS.
         """
         myname = inspect.currentframe().f_code.co_name
         try:

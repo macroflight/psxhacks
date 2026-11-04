@@ -17,7 +17,8 @@
   1-7 by the delay frankenweather announces (with `--advanced-zones`,
   default 10 s), and gives them a drifting zone's `WxMode` once a second
   from frankenweather's new `FRANKENWEATHER:WXMODES` messages (frankenrouters
-  only). PSX and every other client get the writes as before. MSFS showed
+  only), with the `TimeEarth` it's for: PSX sends that only every ~3.5 s,
+  and between those a drifting CB hopped back in MSFS. PSX and every other client get the writes as before. MSFS showed
   the CBs at once, well before the radar, and a drifting CB jumped back
   every 15 s.
 - **`CfgPin3Prog` is quarantined** (`default_seconds`, all connections).

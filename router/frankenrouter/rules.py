@@ -120,19 +120,25 @@ ORCHESTRATION_MAX_DELAY_S = 60.0
 def parse_orchestration_wxmodes(text):
     """Parse a FRANKENWEATHER:WXMODES payload; return {'delay_s', 'zones'} or None.
 
-    The payload is JSON: {"delay_s": <s>, "zones": {"<1-7>": "<WxMode string>"}}.
+    The payload is JSON: {"delay_s": <s>, "zones": {"<1-7>": "<WxMode string>"},
+    "time_earth_ms": <PSX TimeEarth the WxModes are for>} (time_earth_ms
+    optional; returned as None without it).
     """
     try:
         data = json.loads(text)
         delay = float(data.get('delay_s', 0.0))
         zones = {int(z): str(m) for z, m in (data.get('zones') or {}).items()}
+        time_earth_ms = data.get('time_earth_ms')
+        time_earth_ms = None if time_earth_ms is None else int(time_earth_ms)
     except (ValueError, TypeError, AttributeError):
+        return None
+    if time_earth_ms is not None and time_earth_ms <= 0:
         return None
     if not 0.0 <= delay <= ORCHESTRATION_MAX_DELAY_S:
         return None
     if any(not 1 <= z <= 7 or m.count(';') < 5 or '\n' in m for z, m in zones.items()):
         return None
-    return {'delay_s': delay, 'zones': zones}
+    return {'delay_s': delay, 'zones': zones, 'time_earth_ms': time_earth_ms}
 
 
 QUARANTINE_DEFAULT_S = 60.0
@@ -3033,14 +3039,18 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         router.upstream = self.DummyUpstreamConnection()
         mode = "0.82;-0.43;320;12;11;X90101p"
         (action, code, _, extra_data) = rules.route(
-            'addon=FRANKENWEATHER:WXMODES:{"delay_s": 10, "zones": {"3": "%s"}}' % mode,
-            router.upstream)
+            'addon=FRANKENWEATHER:WXMODES:{"delay_s": 10, "zones": {"3": "%s"}, '
+            '"time_earth_ms": 1793800000123}' % mode, router.upstream)
         self.assertEqual((action, code), (RulesAction.FILTER, RulesCode.FRANKENWEATHER_FILTERED))
-        self.assertEqual(extra_data,
-                         {'orchestration_wxmodes': {'delay_s': 10.0, 'zones': {3: mode}}})
+        self.assertEqual(extra_data, {'orchestration_wxmodes': {
+            'delay_s': 10.0, 'zones': {3: mode}, 'time_earth_ms': 1793800000123}})
+        (_, _, _, extra_data) = rules.route(
+            'addon=FRANKENWEATHER:WXMODES:{"delay_s": 10, "zones": {}}', router.upstream)
+        self.assertIsNone(extra_data['orchestration_wxmodes']['time_earth_ms'])
         for bad in ('{"delay_s": 999, "zones": {}}',
                     '{"delay_s": 5, "zones": {"8": "%s"}}' % mode,
-                    '{"delay_s": 5, "zones": {"1": "no;fields"}}', 'not json'):
+                    '{"delay_s": 5, "zones": {"1": "no;fields"}}', 'not json',
+                    '{"delay_s": 5, "zones": {}, "time_earth_ms": -1}'):
             (_, _, _, extra_data) = rules.route(f'addon=FRANKENWEATHER:WXMODES:{bad}',
                                                 router.upstream)
             self.assertEqual(extra_data, {'frankenrouters_only': True}, bad)

@@ -4340,6 +4340,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         """Take a FRANKENWEATHER:WXMODES feed: the delay, and each zone's WxMode for later."""
         now = time.perf_counter()
         self._orchestration_delay = (feed['delay_s'], now)
+        if feed.get('time_earth_ms') and feed['zones'] and self.orchestration_peernames():
+            # The PSX clock the positions are for, just before them: PSX sends
+            # TimeEarth only every ~3.5 s, and a client without a running clock
+            # would draw the CBs short of where they are between those
+            keyword = self.variables.get_keyword_for_name("TimeEarth")
+            if keyword:
+                self.orchestration_enqueue(f"{keyword}={feed['time_earth_ms']}")
         for zone, mode in sorted(feed['zones'].items()):
             self._orchestration_feed_at[zone] = now
             keyword = self.variables.get_keyword_for_name(f"WxMode{zone}")
