@@ -2184,7 +2184,7 @@ class StandaloneFWContext:
     @property
     def cb_test_enabled(self):
         """Return True if the CB test page exists (--advanced-zones; standalone only)."""
-        return bool(self._fw.args.advanced_zones)
+        return True   # the page also has the switch that turns --advanced-zones on
 
     def cb_test_state(self):
         """Return the CB test page's state, from the running frankenweather instance."""
@@ -2421,6 +2421,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._drift_retired: dict = {}
         self._time_earth_rx: Optional[tuple] = None   # (TimeEarth ms, time.monotonic())
         self._cb_test_motion: dict = {}   # test CB zone -> (heading, speed) it was placed with
+        # --advanced-zones, switchable at runtime on the CB test page (set in run())
+        self._advanced_zones = False
+        # Delay (s) for the weather-zone writes PSX.NET.Orchestration gets (the
+        # routers apply it; see orchestration_feed_coro()), set in run()
+        self._orch_delay_s = 0.0
+        self._orch_announced = (None, 0.0)   # (delay, time.monotonic()) last sent
+        self._orch_ever_announced = False
         self._sigmet_place_last: float = 0.0  # see _place_sigmet_zones()
         # zone -> label of the SIGMET that gave its current CB (e.g. "TS
         # SIGMET MPZL 03 EMBD"), or None; shown in the log and the web UI.
@@ -6892,7 +6899,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
     def _drift_enabled(self) -> bool:
         """Return True if CB zones may drift now (--advanced-zones, automatic weather)."""
-        return bool(self.args.advanced_zones) and self._fw_mode == "enabled"
+        return self._advanced_zones and self._fw_mode == "enabled"
 
     def _dep_dst_zone_nums(self) -> set:
         """Return the zones that are the dep/dst airport zones."""
@@ -6911,7 +6918,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         for zone_num, cell in self._drift.items():
             i = zone_num - 1
             if sim_ms is not None:
-                cell.place(self.geod, sim_ms)
+                cell.place(self.geod, sim_ms, _DRIFT_TICK_S * 500.0)
                 self.zone_positions[zone_num] = (cell.clat, cell.clon,
                                                  self.zone_positions[zone_num][2])
             new_wxs[i] = _fw_drift.with_oktas(cell.wx, cell.decayed_oktas(now))
@@ -6979,7 +6986,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     else self.zone_positions[zone_num][2])
             cell = _fw_drift.DriftCell(zone=zone_num, lat=lat, lon=lon, heading_deg=motion[0],
                                        speed_kt=motion[1], wx=wx, mode=new_modes[i], icao=name,
-                                       started=time.monotonic(), clat=centre[0], clon=centre[1])
+                                       started=time.monotonic(), clat=centre[0], clon=centre[1],
+                                       stepped_at=time.monotonic())
             self._drift[zone_num] = cell
             self.zone_positions[zone_num] = (centre[0], centre[1],
                                              self.zone_positions[zone_num][2])
@@ -7083,6 +7091,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             if moving or cell.test:
                 old = (cell.lat, cell.lon, cell.moved_nm)
                 cell.step(self.geod, dt_s)
+                cell.stepped_at = now
                 removed_for = self._cb_removed_near_airport(cell.lat, cell.lon)
                 if removed_for:
                     cell.lat, cell.lon, cell.moved_nm = old
@@ -7095,7 +7104,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 self._end_drift(zone_num, f"CB gone: {cell.decay_why}", retire=True)
                 continue
             if sim_ms is not None:
-                cell.place(self.geod, sim_ms)
+                cell.place(self.geod, sim_ms, _DRIFT_TICK_S * 500.0)
             self._drift_keep_clear(cell, now)
             self.zone_positions[zone_num] = (cell.clat, cell.clon, cur[2])
             self.zone_mode[zone_num] = _fw_drift.wxmode_at(cell.mode, cell.clat, cell.clon)
@@ -7138,8 +7147,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
     def _cb_test_unavailable(self) -> Optional[str]:
         """Return why test CBs can't be placed now, or None."""
-        if not self.args.advanced_zones:
-            return "frankenweather runs without --advanced-zones"
+        if not self._advanced_zones:
+            return "advanced zones are off"
         if self._fw_mode != "enabled":
             return f"the weather zones aren't automatic (mode {self._fw_mode})"
         if not self.psx_connected or self.ac_lat is None or self.ac_hdg is None:
@@ -7157,23 +7166,41 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             entry = {"zone": zone_num, "label": cell.test,
                      "pos": _fw_drift.pos_text(cell.lat, cell.lon),
                      "heading_deg": round(cell.heading_deg), "speed_kt": round(cell.speed_kt),
-                     "moved_nm": round(cell.moved_nm, 1)}
+                     "moved_nm": round(cell.moved_nm, 1),
+                     "wind": (f"{cell.wind_motion[0]:03.0f}°/{cell.wind_motion[1]:.0f}kt"
+                              if cell.wind_motion else None)}
             if self.ac_lat is not None and self.ac_hdg is not None:
                 az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, cell.lon, cell.lat)
                 entry["dist_nm"] = round(dist_m / _NM_TO_M, 1)
                 entry["brg_rel"] = round((az - self.ac_hdg) % 360) % 360
             cells.append(entry)
         return {"why_not": self._cb_test_unavailable(), "cells": cells,
-                "distances_nm": list(self._CB_TEST_DISTANCES_NM)}
+                "distances_nm": list(self._CB_TEST_DISTANCES_NM),
+                "advanced_zones": self._advanced_zones, "orch_delay_s": self._orch_delay_s}
 
-    async def handle_cb_test(self, cmd: dict) -> str:  # pylint: disable=too-many-locals,too-many-return-statements,too-many-branches
+    async def handle_cb_test(self, cmd: dict) -> str:  # pylint: disable=too-many-locals,too-many-return-statements,too-many-branches,too-many-statements
         """Do a /weather/cbtest command; return what happened, for the page."""
         action = cmd.get("action")
         if action == "remove":
             count = self._cb_test_remove()
             return f"Removed {count} test CB(s)" if count else "There were no test CBs"
+        if action == "wind":
+            return await self._cb_test_with_wind()
         if action in ("speed", "reset_speed"):
             return await self._cb_test_set_speed(cmd.get("speed") if action == "speed" else None)
+        if action == "advanced":
+            return self._set_advanced_zones(cmd.get("on") == "1")
+        if action == "delay":
+            try:
+                delay = float(cmd.get("delay", ""))
+            except ValueError:
+                return f"Not a delay: {cmd.get('delay')!r}"
+            if not 0.0 <= delay <= 60.0:
+                return "The delay must be 0-60 s"
+            self._orch_delay_s = delay
+            self._orch_announced = (None, 0.0)   # announce it now
+            self.logger.info("CB test: Orchestration delay now %.1f s", delay)
+            return f"PSX.NET.Orchestration now gets weather-zone changes {delay:g} s late"
         why_not = self._cb_test_unavailable()
         if why_not:
             return f"Can't place test CBs: {why_not}"
@@ -7223,10 +7250,97 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 break
             self._cb_test_place(zone_num, label, lat, lon, moves, speed, now)
             placed.append(f"{label} (zone {zone_num})")
+        await self._cb_test_wind_motions()
         self._state_changed_event.set()
         if not placed:
             return "No zone free for a test CB"
         return "Placed " + ", ".join(placed)
+
+    async def _cb_test_wind_motions(self) -> None:
+        """Work out, for every test CB, how the 850-300 hPa mean wind would move it."""
+        loop = asyncio.get_running_loop()
+        for cell in [c for c in self._drift.values() if c.test]:
+            profile = await loop.run_in_executor(
+                None, self._turb_engine.wind_fetcher.get, cell.lat, cell.lon,
+                datetime.now(timezone.utc))
+            cell.wind_motion = _fw_drift.mean_wind_motion(profile)
+
+    async def _cb_test_with_wind(self) -> str:
+        """Make every test CB move as a drifting CB would, with the mean wind where it is."""
+        await self._cb_test_wind_motions()
+        cells = [c for c in self._drift.values() if c.test]
+        if not cells:
+            return "There are no test CBs"
+        moved = 0
+        for cell in cells:
+            if cell.wind_motion:
+                cell.heading_deg, cell.speed_kt = cell.wind_motion
+                moved += 1
+        self.logger.info("CB test: %d of %d test CB(s) now move with the mean wind", moved,
+                         len(cells))
+        rest = "" if moved == len(cells) else " (no wind data, or calm, for the rest)"
+        return f"{moved} of {len(cells)} test CB(s) now move with the 850-300 hPa mean wind{rest}"
+
+    def _set_advanced_zones(self, on: bool) -> str:
+        """Switch --advanced-zones on or off at runtime (the CB test page)."""
+        if on == self._advanced_zones:
+            return f"Advanced zones are already {'on' if on else 'off'}"
+        self._advanced_zones = on
+        if not on:
+            self._cb_test_remove()
+            self._drift_clear("advanced zones switched off")
+        self._orch_announced = (None, 0.0)   # announce the delay (0 when off) now
+        self.logger.info("Advanced zones switched %s", "on" if on else "off")
+        self._state_changed_event.set()
+        return f"Advanced zones {'on' if on else 'off'}"
+
+    def _orchestration_feed(self) -> Optional[dict]:
+        """Return the WXMODES message to send now, or None (see orchestration_feed_coro())."""
+        now = time.monotonic()
+        delay = self._orch_delay_s if self._drift_enabled() else 0.0
+        zones = {}
+        sim_ms = self.sim_time_ms()
+        if delay or self._drift:
+            moving = (self.ac_alt_ft is not None and self.ac_alt_ft >= _DRIFT_MIN_ALT_FT and
+                      not self._maneuvering)
+            for zone_num, cell in sorted(self._drift.items()):
+                if sim_ms is None or not self._drift_enabled():
+                    break
+                # Orchestration gets it delay s from now; the radar then shows
+                # where the CB is now
+                lat, lon = cell.position_at(self.geod, now, moving or bool(cell.test))
+                zones[str(zone_num)] = cell.mode_for(self.geod, sim_ms + delay * 1000.0, lat, lon)
+        last_delay, last_at = self._orch_announced
+        if not zones and last_delay == delay and (delay == 0.0 or now - last_at < 30.0):
+            return None   # unchanged: a delay every 30 s, no delay just once
+        if not zones and delay == 0.0 and not self._orch_ever_announced:
+            return None   # never on: nothing to tell the routers (no delay is their default)
+        self._orch_ever_announced = True
+        self._orch_announced = (delay, now)
+        return {"delay_s": delay, "zones": zones}
+
+    async def orchestration_feed_coro(self) -> None:
+        """--advanced-zones: tell the routers the Orchestration delay; drifting zones every 1 s.
+
+        The routers give PSX.NET.Orchestration (it draws PSX's CBs in MSFS)
+        every weather-zone write delay_s late, as late as PSX's weather radar
+        shows a change, and each drifting zone's WxMode from this feed instead
+        of the 15 s writes PSX gets, so its CB moves smoothly in MSFS.
+        """
+        myname = inspect.currentframe().f_code.co_name
+        try:
+            self.logger.debug("Starting %s", myname)
+            while True:
+                await asyncio.sleep(1.0)
+                if not self.psx_connected or self.psx is None:
+                    continue
+                feed = self._orchestration_feed()
+                if feed is not None:
+                    self._psx_send("addon", "FRANKENWEATHER:WXMODES:" +
+                                   json.dumps(feed, separators=(",", ":")))
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
+            self.logger.critical(traceback.format_exc())
 
     async def _cb_test_set_speed(self, speed) -> str:
         """Give every test CB this drift speed (kt), or (None) the motion it was placed with."""
@@ -7278,8 +7392,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 else self.zone_positions[zone_num][2])
         cell = _fw_drift.DriftCell(zone=zone_num, lat=lat, lon=lon, heading_deg=moves,
                                    speed_kt=speed, wx=_apply_fake_cb(wx, 8, 3000, 40000),
-                                   mode=mode, icao=name, started=now, test=label)
-        cell.place(self.geod, self.sim_time_ms())
+                                   mode=mode, icao=name, started=now, test=label, stepped_at=now)
+        cell.place(self.geod, self.sim_time_ms(), _DRIFT_TICK_S * 500.0)
         self._drift[zone_num] = cell
         self._cb_test_motion[zone_num] = (moves, speed)
         self._zone_pinned.pop(zone_num, None)
@@ -9987,8 +10101,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     ("TurbBroadcast", self.turb_state_broadcast_coro),
                     ("PirepLevels", self.pirep_levels_coro),
                 ]
-                if self.args.advanced_zones:
-                    coros.append(("CbDrift", self.cb_drift_coro))
+                coros.append(("CbDrift", self.cb_drift_coro))   # idle unless advanced zones are on
+                coros.append(("OrchestrationFeed", self.orchestration_feed_coro))
                 for name, coro_fn in coros:
                     if name not in running:
                         self.logger.info("Starting %s...", name)
@@ -10068,6 +10182,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "SIGMETs it could parse. Off by default: frankenweather "
                  "then doesn't use SIGMETs at all and only has PSX download "
                  "them regularly.")
+        parser.add_argument(
+            '--orchestration-delay', type=float, default=10.0, metavar='S',
+            help="With --advanced-zones: the routers give PSX.NET.Orchestration "
+                 "(which draws PSX's CBs in MSFS) every weather-zone change this "
+                 "many seconds late, as late as PSX's weather radar shows it, and "
+                 "the drifting zones' positions every second (0-60, default 10). "
+                 "Settable on the CB test page.")
         parser.add_argument(
             '--advanced-zones', action='store_true',
             help="TEMPORARY, for testing: CB zones drift with the wind. A zone "
@@ -10230,6 +10351,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                       f"overrides --psx-port={self.args.psx_port}", file=sys.stderr)
             self.args.psx_port = self.args.psx_port_override
         self._sigmet_enabled = self.args.sigmet
+        self._advanced_zones = bool(self.args.advanced_zones)
+        self._orch_delay_s = min(max(float(self.args.orchestration_delay), 0.0), 60.0)
 
     # (arg_name, replacement_hint or None for the generic "just remove it" message)
     _REMOVED_ARGS = (

@@ -2997,12 +2997,33 @@ def _build_cb_test_page(ctx, message: str = '') -> str:
     if state.get('why_not'):
         body += (f'<div class="card warn"><p style="margin:0">Test CBs can\'t be placed now: '
                  f'{_esc(state["why_not"])}.</p></div>\n')
+    on = state.get('advanced_zones')
+    body += ('<div class="card"><div style="display:flex;gap:0.5em;flex-wrap:wrap;'
+             'align-items:center">'
+             f'<b>Advanced zones: {"on" if on else "off"}</b>'
+             '<form action="/api/weather/cbtest" method="post" style="display:inline">'
+             f'<input type="hidden" name="action" value="advanced">'
+             f'<input type="hidden" name="on" value="{"0" if on else "1"}">'
+             '<button type="submit" class="btn btn-blue btn-sm" style="width:auto">'
+             f'Turn {"off" if on else "on"}</button></form>'
+             '<form action="/api/weather/cbtest" method="post" style="display:inline-flex;'
+             'gap:0.3em;align-items:center"><input type="hidden" name="action" value="delay">'
+             'PSX.NET.Orchestration delay <input type="number" name="delay" min="0" max="60" '
+             f'step="0.5" value="{state.get("orch_delay_s", 0):g}" style="width:5em"> s '
+             '<button type="submit" class="btn btn-blue btn-sm" style="width:auto">Set</button>'
+             '</form></div>\n<p style="margin:0.5em 0 0">Advanced zones: CBs drift with the '
+             'wind (started with --advanced-zones). The routers give PSX.NET.Orchestration '
+             'every weather-zone change this many seconds late, to match PSX\'s weather radar, '
+             'and drifting CBs every second.</p></div>\n')
     body += ('<div class="card"><p style="margin:0 0 0.5em">Testing only. Each test CB takes a '
              'weather zone, gets a fake 8/8 CB (3,000-40,000 ft) and stays until removed; the '
              'other zones keep at least 12 nm from its zone centre, so its echo shows at full '
              'size. Positions and bearings are from the aircraft now (bearings relative to the '
              'nose); a placed CB stays fixed to the ground (or drifts) as the aircraft flies '
-             'on.</p>\n<div style="display:flex;gap:0.5em;flex-wrap:wrap">\n')
+             'on. "Wind would move it": how a drifting CB moves there, with the 850-300 hPa '
+             'mean wind (frankenweather\'s Open-Meteo profile, not PSX\'s zone wind) turned 5° '
+             'right; "Move with the wind" gives every test CB that motion.</p>\n'
+             '<div style="display:flex;gap:0.5em;flex-wrap:wrap">\n')
     body += button('remove', 'Remove test CBs')
     for dist in state.get('distances_nm', []):
         body += button('ahead', f'Dead ahead {dist} nm',
@@ -3018,6 +3039,7 @@ def _build_cb_test_page(ctx, message: str = '') -> str:
              '<button type="submit" class="btn btn-blue btn-sm" style="width:auto">Set</button>'
              '</form>\n')
     body += button('reset_speed', 'Reset drift speed')
+    body += button('wind', 'Move with the wind')
     body += '</div></div>\n'
     cells = state.get('cells', [])
 
@@ -3027,11 +3049,11 @@ def _build_cb_test_page(ctx, message: str = '') -> str:
         rows = ''.join(
             f'<tr><td>{c["zone"]}</td><td>{_esc(c["label"])}</td><td>{_esc(c["pos"])}</td>'
             f'<td>{c.get("dist_nm", "—")}</td><td>{c.get("brg_rel", "—")}</td>'
-            f'<td>{moving(c)}</td>'
+            f'<td>{moving(c)}</td><td>{_esc(c.get("wind") or "—")}</td>'
             f'<td>{c["moved_nm"]}</td></tr>\n' for c in cells)
         body += ('<div class="card"><table><tr><th>Zone</th><th>Test CB</th><th>CB position</th>'
                  '<th>Distance (nm)</th><th>Rel. bearing</th><th>Moving</th>'
-                 '<th>Moved (nm)</th></tr>\n'
+                 '<th>Wind would move it</th><th>Moved (nm)</th></tr>\n'
                  f'{rows}</table></div>\n')
     else:
         body += '<div class="card"><p style="margin:0">No test CBs.</p></div>\n'

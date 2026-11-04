@@ -115,6 +115,8 @@ class DriftCell:  # pylint: disable=too-many-instance-attributes
     clat: float = 0.0           # the zone centre last placed (see place())
     clon: float = 0.0
     test: str = ""              # a test CB (frankenweather's /weather/cbtest): what it is
+    stepped_at: float = math.nan   # time.monotonic() of the last step (position_at())
+    wind_motion: Optional[tuple] = None   # test CB: (heading, kt) the mean wind would give it
     elev0_ft: float = math.nan  # the zone's own WxMode elevation (mode's is raised from it)
     bearing: Optional[float] = None   # the CB's bearing from the zone centre, held
     lifetime_s: float = field(default_factory=lambda: random.uniform(_LIFE_MIN_S, _LIFE_MAX_S))
@@ -161,26 +163,50 @@ class DriftCell:  # pylint: disable=too-many-instance-attributes
         except (IndexError, ValueError):
             return 0.0
 
-    def place(self, geod, time_earth_ms: float) -> tuple:
-        """Set the zone's elevation and centre so PSX draws its CB at the cell now.
+    def place(self, geod, time_earth_ms: float, lead_ms: float = 0.0) -> tuple:
+        """Set the zone's elevation and centre so PSX draws its CB at the cell lead_ms from now.
 
         The elevation keeps the CB's bearing from the zone centre (see the
         module docstring); the centre is then CB_OFFSET_NM from the cell,
         opposite that bearing (as PSX computes it from the whole-foot
-        elevation written). Returns the centre (lat, lon); self.mode gets
-        both.
+        elevation written). PSX turns the CB on between writes (6 deg a
+        minute), so a lead of half the write interval puts the CB on the
+        cell in the middle of it: it swings either side instead of creeping
+        away and jumping back (seen in MSFS, 2026-11-04: three small steps,
+        then one back). Returns the centre (lat, lon); self.mode gets both.
+        """
+        if self.bearing is None:   # the bearing the CB has now, where it is
+            self.bearing = cb_bearing_deg(int(time_earth_ms), self.elev0_ft)
+        self.mode = self.mode_for(geod, time_earth_ms + lead_ms, self.lat, self.lon)
+        self.clat, self.clon = wxmode_pos(self.mode)
+        return self.clat, self.clon
+
+    def mode_for(self, geod, time_earth_ms: float, lat: float, lon: float) -> str:
+        """Return the WxMode that makes PSX draw this zone's CB at (lat, lon) at time_earth_ms.
+
+        Doesn't change the cell (place() does, for PSX itself); also used
+        for the feed to PSX.NET.Orchestration, which draws the CBs in MSFS
+        from the zones it's given (frankenweather's WXMODES messages).
         """
         if self.bearing is None:
             self.bearing = cb_bearing_deg(int(time_earth_ms), self.elev0_ft)
-        time_term = cb_bearing_deg(int(time_earth_ms), 0.0)
+        at_ms = int(time_earth_ms)
+        time_term = cb_bearing_deg(at_ms, 0.0)
         raise_ft = round((self.bearing - time_term - self.elev0_ft) % 360.0) % 360
         elev_ft = round(self.elev0_ft) + raise_ft
-        bearing = cb_bearing_deg(int(time_earth_ms), elev_ft)
-        lon, lat, _ = geod.fwd(lons=self.lon, lats=self.lat, az=(bearing + 180.0) % 360.0,
-                               dist=CB_OFFSET_NM * _NM_TO_M)
-        self.clat, self.clon = lat, ((lon + 180.0) % 360.0) - 180.0
-        self.mode = wxmode_at(self.mode, self.clat, self.clon, elev_ft)
-        return self.clat, self.clon
+        bearing = cb_bearing_deg(at_ms, elev_ft)
+        clon, clat, _ = geod.fwd(lons=lon, lats=lat, az=(bearing + 180.0) % 360.0,
+                                 dist=CB_OFFSET_NM * _NM_TO_M)
+        return wxmode_at(self.mode, clat, ((clon + 180.0) % 360.0) - 180.0, elev_ft)
+
+    def position_at(self, geod, now: float, moving: bool) -> tuple:
+        """Return where the CB is at time.monotonic() now: the last step, run on if moving."""
+        if not moving or self.speed_kt <= 0.0 or math.isnan(self.stepped_at):
+            return self.lat, self.lon
+        dist_nm = self.speed_kt * max(0.0, now - self.stepped_at) / 3600.0
+        lon, lat, _ = geod.fwd(lons=self.lon, lats=self.lat, az=self.heading_deg,
+                               dist=dist_nm * _NM_TO_M)
+        return lat, ((lon + 180.0) % 360.0) - 180.0
 
     def step(self, geod, dt_s: float) -> None:
         """Move the cell along its heading for dt_s seconds."""

@@ -11,8 +11,13 @@
   only with the wind. The anchor and dep/dst airport zones never drift;
   when a drifting zone comes within 10 nm of one of them, that zone steps
   aside and the cell takes its weather. A CB test page (`/weather/cbtest`,
-  own web UI) puts test CBs dead ahead, upwind of the track, either side
-  of the nose or as a smiley, and sets their drift speed. See
+  own web UI) switches advanced zones on and off at runtime, puts test
+  CBs dead ahead, upwind of the track, either side of the nose or as a
+  smiley, and sets their drift speed. With advanced zones, the routers
+  give PSX.NET.Orchestration every weather-zone change
+  `--orchestration-delay` (default 10 s) late, to match PSX's radar, and
+  drifting zones' positions every second, so CBs move smoothly in MSFS.
+  See
   [CBs drifting with the wind](frankenweather.md#cbs-drifting-with-the-wind---advanced-zones-testing).
 
 ## 2.3.4 (2026-11-03)

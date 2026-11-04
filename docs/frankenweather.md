@@ -513,8 +513,19 @@ is usually the better side.
 - **Where to see it:** the log has a `CB drift:` line for every start,
   step-aside and end, and the web UI's zone reason shows e.g. "drifting
   095°/40kt, 23min left".
-- **CB test page** (`/weather/cbtest`, frankenweather's own web UI only,
-  with `--advanced-zones`): puts test CBs where you ask, for checking how
+- **PSX.NET.Orchestration (CBs in MSFS):** it moves a CB at once when a
+  zone changes, while PSX's weather radar takes several seconds, and
+  between frankenweather's 15 s writes it follows PSX's turning CB (three
+  small steps one way, one back). So frankenweather tells the routers a
+  delay (`--orchestration-delay`, default 10 s), and they give
+  Orchestration every weather-zone change that late; and every second
+  frankenweather sends each drifting zone's position, worked out for when
+  Orchestration gets it, which the routers give Orchestration instead of
+  the 15 s writes. Needs a router with `[filtering] orchestration_names`
+  (on by default); an older router passes the writes on as before.
+- **CB test page** (`/weather/cbtest`, frankenweather's own web UI only):
+  switches advanced zones on and off (it starts as `--advanced-zones`
+  says) and sets the Orchestration delay; and puts test CBs where you ask, for checking how
   they look on the radar and in MSFS. Each takes a weather zone and gets a
   fake 8/8 CB (3,000-40,000 ft) that stays until removed, fixed to the
   ground (or drifting) as the aircraft flies on. Buttons: remove the test
