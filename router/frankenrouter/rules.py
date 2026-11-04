@@ -135,6 +135,10 @@ QUARANTINE_VARIABLES = {
     # ping-ponged it, and every write reached the master (2026-11-03)
     'FuelCtrL': (10.0, False),
     'FuelCtrR': (10.0, False),
+    # Aircraft model pin programming (Instructor > Model > Programming): a
+    # joining sim's PSX main client wrote its own 88 over the master's 8,
+    # at Addis Ababa just before takeoff (2026-11-04)
+    'CfgPin3Prog': (None, False),
     **{name: (QUARANTINE_WEATHER_S, True) for name in QUARANTINE_WEATHER_VARIABLES},
 }
 
@@ -1988,7 +1992,8 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         def get_variable_name(self, keyword):
             """Return a fake variable name for a few keywords."""
             return {'Qs196': 'MfAcBus1', 'Qi130': 'MfEvent', 'Qs546': 'TkofRefNg',
-                    'Qi190': 'MaweaBits', 'Qs499': 'WxSigmet', 'Qs329': 'Wx1'}.get(keyword, keyword)
+                    'Qi190': 'MaweaBits', 'Qs499': 'WxSigmet', 'Qs329': 'Wx1',
+                    'Qi272': 'CfgPin3Prog'}.get(keyword, keyword)
 
     class DummyCache():  # pylint: disable=too-few-public-methods
         """Implement small parts of the router for unit testing."""
@@ -3368,6 +3373,7 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
                 ("Qs196=0;6;035427", 30.0),                     # MfAcBus1 (Mf*)
                 ("Qi130=1", 30.0),                              # MfEvent (Mf*)
                 ("Qi190=257", QUARANTINE_DEFAULT_S),            # MaweaBits
+                ("Qi272=88", QUARANTINE_DEFAULT_S),             # CfgPin3Prog
         ):
             # Freshly connected and just inside the time: dropped
             self.assertEqual(self._quarantine_route(rules, line, peer, 0.0), quarantined, line)
@@ -3413,12 +3419,12 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
 
             default_seconds = 10
             variables = {'TkofRefNg': 0, 'Mf*': 100, 'MfAcBus1': 2, 'Wx1': 20,
-                         'CfgPin3Prog': 15}
+                         'CfgPin2Prog': 15}
         router = self.DummyFrankenrouter()
         router.config.quarantine = Quarantine()
         router.variables.get_variable_name = lambda key: {
             'Qs546': 'TkofRefNg', 'Qi130': 'MfEvent', 'Qs196': 'MfAcBus1', 'Qi190': 'MaweaBits',
-            'Qs329': 'Wx1', 'Qi272': 'CfgPin3Prog'}.get(key, key)
+            'Qs329': 'Wx1', 'Qi248': 'CfgPin2Prog'}.get(key, key)
         rules = Rules(router)
         peer = self._quarantine_peer(router)
         quarantined = RulesCode.POST_CONNECT_QUARANTINE
@@ -3429,7 +3435,7 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
                 ("Qs196=0;6;035427", 3.0, normal),      # an exact name beats the prefix
                 ("Qi190=257", 9.0, quarantined),        # the default, now 10 s
                 ("Qi190=257", 11.0, normal),
-                ("Qi272=8", 14.0, quarantined),         # added: all connections
+                ("Qi248=8", 14.0, quarantined),         # added: all connections
                 ("Qs329=0;1", 19.0, quarantined),       # Wx1 now 20 s
         ):
             self.assertEqual(self._quarantine_route(rules, line, peer, age), expected,

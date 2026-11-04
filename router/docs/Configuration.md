@@ -598,6 +598,7 @@ The built-in table:
 | `TkofRefNg` (TAKEOFF REF CG/TRIM and RWY/POS) | 5 s | all connections |
 | `MaweaBits` (master warning bits, incl. the A/P disconnect wailer) | `default_seconds` | all connections |
 | `FuelCtrL`, `FuelCtrR` (centre tank pump switches) | 10 s | all connections |
+| `CfgPin3Prog` (aircraft model pin programming) | `default_seconds` | all connections |
 | Weather: `WxAloft`, `WxBasic`, `Wx1`-`Wx7`, `WxMode1`-`WxMode7`, `WxClust`, `Metar1`-`Metar7`, `MetarsUp`, `Windshear`, `WxCorridorSel`, `WxCorridorTxt`, `WxSigmet`, `SigmetOn`, `WxAutoSet`, `WxBurst`, `WxSlowTransit`, `WxBits` | 120 s | all connections except frankenweather (it sets all of these when it starts) |
 
 ```toml
@@ -607,7 +608,7 @@ default_seconds = 60
 [quarantine.variables]
 WxSigmet = 0      # don't quarantine WxSigmet
 "Mf*" = 45        # a trailing * matches a prefix
-CfgPin3Prog = 30  # add a variable (all connections)
+CfgPin2Prog = 30  # add a variable (all connections)
 ```
 
 - `default_seconds`: the time for built-in entries without their own,

@@ -10,6 +10,9 @@
   it. Now any difference over `clock_skew_warning` (30 s) is a warning,
   shown on the router console and on every sim's `/efb` page, never on
   the EICAS. `clock_skew_critical` is no longer used.
+- **`CfgPin3Prog` is quarantined** (`default_seconds`, all connections).
+  A joining sim's PSX main client wrote its own aircraft model pin
+  programming (88) over the master's (8) as it connected.
 
 ## 2026-11-03: version 1.39.0
 
