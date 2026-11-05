@@ -765,7 +765,11 @@ frdp_rtt_warning = 0.5
   vPilot's original line (`DATA FROM`) and shows what was sent on
   (`DATA TO`). It only works where the traffic is used: on a master or
   standalone router, or on a slave router whose sim is the traffic
-  master. See `frankenrouter/stale_traffic.py`.
+  master. It can also be switched on and off, and the time changed, on
+  the router's Utils page ("Stale traffic filter"), until the router
+  restarts. That page also shows the 7 traffic slots and what the fix
+  does with each, refreshed every 5 s, and the recent changes. See
+  `frankenrouter/stale_traffic.py`.
 - `stale_traffic_client_names`: the clients the stale traffic fix
   applies to, matched on the id or the display name they send with
   `name=`. Default `["VPLG"]`, the PSX.NET.vPilot plugin.

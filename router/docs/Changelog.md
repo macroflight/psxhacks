@@ -17,6 +17,11 @@
     stops.
   - It's off by default, and only a workaround: the real fix belongs
     in vPilot.
+  - **Utils → Stale traffic filter** switches it on and off at runtime
+    and sets its time, until the router restarts. It shows the 7 traffic
+    slots (position, altitude, range and bearing), which of them are
+    dead-reckoned or removed, and the recent changes, refreshed every
+    5 s. It's for checking the fix while the problem is happening.
 
 ## 2026-11-05: version 1.40.0
 

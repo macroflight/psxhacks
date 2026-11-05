@@ -100,6 +100,10 @@ class StaleTrafficFilter:  # pylint: disable=too-few-public-methods
         """Dead-reckon a frozen target for up to dead_reckon_s, then remove it."""
         self.dead_reckon_s = dead_reckon_s
         self.targets = []
+        # what happened to each slot of the last value: dicts with lat, lon
+        # (radians, as vPilot sent it), alt_ft, state (live / repeated /
+        # dead-reckoned / removed), frozen_s, out_lat/out_lon (as passed on)
+        self.last_slots = []
 
     def process(self, value, now):  # pylint: disable=too-many-locals
         """Return (new value, [log lines]) for a TfcPos value received at now (seconds).
@@ -115,7 +119,11 @@ class StaleTrafficFilter:  # pylint: disable=too-few-public-methods
         current = []
         out_slots = []
         changed = False
+        self.last_slots = []
         for raw, lat, lon, alt_ft, rest in slots:
+            info = {'lat': lat, 'lon': lon, 'alt_ft': alt_ft, 'state': 'live', 'frozen_s': 0.0,
+                    'out_lat': lat, 'out_lon': lon}
+            self.last_slots.append(info)
             target = self._match(old, raw, lat, lon, alt_ft, now)
             if target is None:
                 target = _Target(raw, lat, lon, alt_ft, now)
@@ -132,6 +140,15 @@ class StaleTrafficFilter:  # pylint: disable=too-few-public-methods
             target.alt_ft = alt_ft
             slot, slot_logs = self._frozen(target, rest, now)
             logs += slot_logs
+            info['frozen_s'] = target.frozen_s(now)
+            if slot is None:
+                info['state'] = 'removed'
+                info['out_lat'] = info['out_lon'] = None
+            elif slot != f"{raw[0]};{raw[1]};{rest}":
+                info['state'] = 'dead-reckoned'
+                info['out_lat'], info['out_lon'] = (float(x) for x in slot.split(';')[:2])
+            else:
+                info['state'] = 'repeated'      # no speed known yet: passed on as it is
             if slot != f"{raw[0]};{raw[1]};{rest}":
                 changed = True
             if slot is not None:
@@ -146,6 +163,11 @@ class StaleTrafficFilter:  # pylint: disable=too-few-public-methods
             return value, logs
         out_slots += [EMPTY] * (max(SLOTS, len(slots)) - len(out_slots))
         return ";".join(out_slots) + ";", logs
+
+    def counts(self):
+        """Return (targets being dead-reckoned, targets removed) right now."""
+        return (sum(1 for t in self.targets if t.logged and not t.removed),
+                sum(1 for t in self.targets if t.removed))
 
     @staticmethod
     def _parse(value):
@@ -317,6 +339,19 @@ class TestStaleTraffic(unittest.TestCase):
         out, lg = f.process(back, 2105.0)
         self.assertEqual(len(_slots(out)), 2)
         self.assertTrue(any("moving again" in x and "removed" in x for x in lg), lg)
+
+    def test_counts(self):
+        """counts() tells how many targets are dead-reckoned and removed now."""
+        f = StaleTrafficFilter(dead_reckon_s=12)
+        f.process(_tfcpos((41.29, -5.10, 30000, 293.0)), 0.0)
+        f.process(_tfcpos((41.30, -5.10, 30000, 293.0)), 5.0)
+        f.process(_tfcpos((41.30, -5.10, 30000, 293.0)), 10.0)
+        self.assertEqual(f.counts(), (1, 0))
+        self.assertEqual(f.last_slots[0]['state'], 'dead-reckoned')
+        self.assertNotEqual(f.last_slots[0]['out_lat'], f.last_slots[0]['lat'])
+        f.process(_tfcpos((41.30, -5.10, 30000, 293.0)), 20.0)
+        self.assertEqual(f.counts(), (0, 1))
+        self.assertEqual(f.last_slots[0]['state'], 'removed')
 
     def test_gone(self):
         """A logged frozen target that disappears is logged as gone."""

@@ -194,6 +194,8 @@ _UTILS_PAGE = (
     '{crew_alertness_button}'
     '{reset_clients_link}'
     '{load_marker_pause_link}'
+    '<a href="/utils/stale_traffic" class="btn btn-gray">'
+    'Stale traffic filter (vPilot workaround)</a>\n'
     '</body>\n</html>\n'
 )
 
@@ -320,6 +322,117 @@ _LOAD_MARKER_PAUSE_ERROR_SECTION = (
     '<p style="margin:0">{message}</p>\n'
     '</div>\n'
 )
+
+
+_STALE_TRAFFIC_PAGE = (
+    '<!DOCTYPE html>\n<html>\n<head>\n'
+    '<meta name="color-scheme" content="{rest_api_color_scheme}" />\n' +
+    _COMMON_CSS +
+    '<style>.st-table td,.st-table th{{padding:0.25em 0.6em;text-align:left;white-space:nowrap}}'
+    '.st-dr{{color:#f59e0b;font-weight:600}}.st-rm{{color:#ef4444;font-weight:600}}'
+    '.st-live{{color:#22c55e}}'
+    '.st-log{{font-family:monospace;font-size:0.85em;white-space:pre-wrap}}'
+    '</style>\n'
+    '\n</head>\n<body>\n'
+    '<div class="page-title">'
+    '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
+    '<h1>Stale traffic filter</h1>'
+    '<div style="margin-left:auto">'
+    '<a href="/utils" class="btn btn-gray btn-sm">Back</a>'
+    '</div>'
+    '</div>\n'
+    '<div class="card">\n'
+    '<p style="margin:0">Temporary workaround for frozen vPilot traffic: vPilot sometimes '
+    'repeats an aircraft\'s last position while its altitude keeps changing, so the target '
+    'stops on TCAS, then jumps. When on, this router moves a frozen target along its last '
+    'track and speed, and removes it if it stays frozen longer than the time below, until '
+    'it moves again. The real fix belongs in vPilot. Changes here apply at once and last '
+    'until the router restarts (config: <code>[filtering] '
+    'stale_traffic_dead_reckon_seconds</code> = {config_seconds}).</p>\n'
+    '</div>\n'
+    '{result_section}'
+    '<form method="post" action="/api/utils/stale_traffic">\n'
+    '<label class="toggle-row">'
+    '<span class="toggle-switch">'
+    '<input type="checkbox" name="enabled" value="1"{enabled_checked}>'
+    '<span class="toggle-track"></span>'
+    '</span>'
+    '<span>On</span>'
+    '</label>\n'
+    '<label for="st_seconds">'
+    'Dead-reckon a frozen target for up to (seconds), then remove it</label>\n'
+    '<input type="text" id="st_seconds" name="seconds" value="{seconds}">\n'
+    '<div class="btn-row">\n'
+    '<button type="submit" class="btn btn-green">Save</button>\n'
+    '</div>\n'
+    '</form>\n'
+    '<div id="st-live">{live}</div>\n'
+    '<script>\n'
+    'setInterval(function() {{\n'
+    '  fetch("/utils/stale_traffic/live", {{cache: "no-store"}})\n'
+    '    .then(function(r) {{ return r.ok ? r.text() : null; }})\n'
+    '    .then(function(t) {{\n'
+    '      if (t !== null) document.getElementById("st-live").innerHTML = t;\n'
+    '    }})\n'
+    '    .catch(function() {{}});\n'
+    '}}, 5000);\n'
+    '</script>\n'
+    '</body>\n</html>\n'
+)
+
+
+def _stale_traffic_live_html(status):  # pylint: disable=too-many-locals
+    """Return the auto-refreshed part of /utils/stale_traffic: the 7 slots and recent changes."""
+    esc = html.escape
+    on = bool(status['seconds'])
+    if not status['applies']:
+        state = ('Not acting on this router: its sim is not the traffic master, so its '
+                 'clients\' traffic is dropped anyway.')
+    elif not on:
+        state = 'Off: traffic passes unmodified.'
+    else:
+        state = f"On: frozen targets dead-reckoned for up to {status['seconds']:g} s, then removed."
+    parts = [f'<div class="card {"ok" if on and status["applies"] else ""}"><p style="margin:0">'
+             f'{esc(state)}</p></div>\n']
+    names = ', '.join(status['client_names']) or '(none)'
+    groups = [(c['name'], c['slots'], f"{c['dead_reckoned']} dead-reckoned, {c['removed']} removed")
+              for c in status['clients'] if on]
+    if not groups:
+        connected = [c['name'] for c in status['clients']]
+        label = (f"vPilot plugin client connected: {', '.join(connected)}" if connected else
+                 f"No vPilot plugin client connected here (looking for: {names})")
+        groups = [(label + ' - traffic as last forwarded', status['cached_slots'], '')]
+    for title, slots, summary in groups:
+        rows = []
+        for n in range(7):
+            if n >= len(slots):
+                rows.append(f'<tr><td>{n + 1}</td>'
+                            '<td colspan="5" style="opacity:0.5">empty</td></tr>')
+                continue
+            r = slots[n]
+            css = {'dead-reckoned': 'st-dr', 'removed': 'st-rm',
+                   'live': 'st-live'}.get(r['state'], '')
+            if r['state'] == 'dead-reckoned':
+                what = (f"dead-reckoned: frozen {r['frozen_s']} s, "
+                        f"sent {r['moved_nm']:.2f} nm ahead ({esc(r['out_pos'])})")
+            elif r['state'] == 'removed':
+                what = f"removed: frozen {r['frozen_s']} s"
+            elif r['state'] == 'repeated':
+                what = f"repeated position, no speed known yet: passed on ({r['frozen_s']} s)"
+            else:
+                what = r['state']
+            where = ''
+            if r['range_nm'] is not None:
+                where = f"{r['range_nm']:.1f} nm / {r['bearing']:03d}\u00b0"
+            rows.append(f'<tr><td>{n + 1}</td><td>{esc(r["pos"])}</td><td>{r["alt_ft"]:,} ft</td>'
+                        f'<td>{where}</td><td class="{css}">{esc(what)}</td></tr>')
+        parts.append(f'<h2>{esc(title)}</h2>' + (f'<p>{esc(summary)}</p>' if summary else '') +
+                     '<table class="st-table"><tr><th>#</th><th>Position (from vPilot)</th>'
+                     '<th>Altitude</th><th>Range / bearing</th><th>Filter</th></tr>' +
+                     ''.join(rows) + '</table>\n')
+    log = '\n'.join(esc(x) for x in reversed(status['log'])) or '(nothing yet)'
+    parts.append(f'<h2>Recent changes (newest first)</h2><div class="card st-log">{log}</div>\n')
+    return ''.join(parts)
 
 
 def _service_action_buttons(key, display_name, running):
@@ -2925,6 +3038,53 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                         enabled_checked=' checked' if enabled else '',
                         delay=f"{delay:.3f}"),
                     content_type='text/html')
+
+            def _stale_traffic_page(result_section='', seconds_text=None, status=200):
+                st = router.stale_traffic_status()
+                cs = router.config.listen.rest_api_color_scheme
+                seconds = (st['seconds'] or router.stale_traffic_last_on or
+                           st['config_seconds'] or 60)
+                return web.Response(
+                    text=_STALE_TRAFFIC_PAGE.format(
+                        rest_api_color_scheme=cs,
+                        config_seconds=html.escape(f"{st['config_seconds']:g}"),
+                        result_section=result_section,
+                        enabled_checked=' checked' if st['seconds'] else '',
+                        seconds=html.escape(seconds_text if seconds_text is not None
+                                            else f"{seconds:g}"),
+                        live=_stale_traffic_live_html(st)),
+                    content_type='text/html', status=status,
+                    headers={'Cache-Control': 'no-store'})
+
+            @routes.get('/utils/stale_traffic')
+            async def handle_stale_traffic_get(_):
+                return _stale_traffic_page()
+
+            @routes.get('/utils/stale_traffic/live')
+            async def handle_stale_traffic_live_get(_):
+                return web.Response(text=_stale_traffic_live_html(router.stale_traffic_status()),
+                                    content_type='text/html', headers={'Cache-Control': 'no-store'})
+
+            @routes.post('/api/utils/stale_traffic')
+            async def handle_stale_traffic_post(request):
+                post = await request.post()
+                enabled = post.get('enabled') == '1'
+                raw = post.get('seconds', '')
+                try:
+                    seconds = float(raw)
+                except (TypeError, ValueError):
+                    seconds = -1.0
+                if enabled and not 5 <= seconds <= 3600:
+                    return _stale_traffic_page(
+                        _LOAD_MARKER_PAUSE_ERROR_SECTION.format(
+                            message="Seconds must be a number from 5 to 3600"),
+                        seconds_text=raw, status=400)
+                if enabled:
+                    router.stale_traffic_last_on = seconds
+                router.set_stale_traffic_seconds(seconds if enabled else 0)
+                return _stale_traffic_page(
+                    '<div class="card ok">\n<p style="margin:0">Saved (until the router '
+                    'restarts).</p>\n</div>\n')
 
             @routes.get('/services')
             async def handle_services_get(_):

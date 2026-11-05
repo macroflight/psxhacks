@@ -588,6 +588,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.writes_counter = collections.deque(maxlen=60)
         self.message_counter = collections.deque(maxlen=60)
 
+        # Stale traffic fix (temporary vPilot workaround): None = the
+        # config's value, else set at runtime on /utils/stale_traffic (not
+        # saved), see stale_traffic_limit()
+        self.stale_traffic_seconds = None
+        self.stale_traffic_last_on = None   # the last value it was switched on with, for the form
+        self.stale_traffic_log = collections.deque(maxlen=20)
+
         # Status of local traffic and elevation ingress filters - safe defaults set
         self.filter_traffic = True
         self.filter_elevation = True
@@ -4341,22 +4348,112 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         keeps vPilot's original line (DATA FROM), and shows what we sent
         on (DATA TO).
         """
-        seconds = self.config.filtering.stale_traffic_dead_reckon_seconds
+        seconds = self.stale_traffic_limit()
         if not seconds or sender.is_frankenrouter or self.filter_traffic:
             # (filter_traffic: not the traffic master's sim, its traffic is dropped anyway)
             return line
-        names = self.config.filtering.stale_traffic_client_names
-        if sender.client_provided_id not in names and sender.display_name not in names:
+        if not self.is_stale_traffic_client(sender):
             return line
         if sender.stale_traffic is None:
             sender.stale_traffic = stale_traffic.StaleTrafficFilter(dead_reckon_s=seconds)
             self.logger.warning("Stale traffic filter (temporary vPilot workaround) on for %s: "
                                 "frozen targets dead-reckoned for up to %s s, then removed",
                                 sender.display_name, seconds)
+        sender.stale_traffic.dead_reckon_s = seconds
         value, logs = sender.stale_traffic.process(line.split('=', 1)[1], time.monotonic())
         for text in logs:
             self.logger.warning("%s (from %s)", text, sender.display_name)
+            self.stale_traffic_log.append(f"{time.strftime('%H:%M:%S', time.gmtime())}Z {text}")
         return 'Qs450=' + value
+
+    def stale_traffic_limit(self):
+        """Return the stale traffic fix's dead-reckoning limit in seconds (0: off)."""
+        if self.stale_traffic_seconds is None:
+            return self.config.filtering.stale_traffic_dead_reckon_seconds
+        return self.stale_traffic_seconds
+
+    def is_stale_traffic_client(self, client):
+        """Return True if client is one the stale traffic fix applies to (its vPilot plugin)."""
+        names = self.config.filtering.stale_traffic_client_names
+        return (not client.is_frankenrouter and
+                (client.client_provided_id in names or client.display_name in names))
+
+    def set_stale_traffic_seconds(self, seconds):
+        """Change the stale traffic fix at runtime (0: off; not saved to the config)."""
+        prev = self.stale_traffic_limit()
+        self.stale_traffic_seconds = seconds
+        if seconds == prev:
+            return
+        self.logger.warning("Stale traffic filter changed via /utils: %s (was %s)",
+                            f"{seconds:g} s" if seconds else "off",
+                            f"{prev:g} s" if prev else "off")
+        self.stale_traffic_log.append(
+            f"{time.strftime('%H:%M:%S', time.gmtime())}Z Changed via /utils: "
+            f"{f'{seconds:g} s' if seconds else 'off'} (was {f'{prev:g} s' if prev else 'off'})")
+        if not seconds:
+            # Off: forget every client's state, traffic passes untouched from now on
+            for client in self.clients.values():
+                client.stale_traffic = None
+
+    def stale_traffic_status(self):  # pylint: disable=too-many-locals
+        """Return the stale traffic fix's state for /utils/stale_traffic.
+
+        slots: the 7 TfcPos slots, nearest first, as vPilot sent them and
+        what the fix did with each (from the filter while it's on, else
+        from the cached TfcPos, all "not filtered").
+        """
+        own = None
+        try:
+            fields = str(self.cache.get_value('Qs121')).split(';')
+            own = (float(fields[5]), float(fields[6]))
+        except (routercache.RouterCacheException, ValueError, IndexError):
+            pass
+
+        def describe(info):
+            """Return one table row for a slot (a StaleTrafficFilter.last_slots entry)."""
+            lat, lon, out_lat, out_lon = info['lat'], info['lon'], info['out_lat'], info['out_lon']
+            row = {'pos': stale_traffic.pos_text(lat, lon), 'alt_ft': round(info['alt_ft']),
+                   'state': info['state'], 'frozen_s': round(info['frozen_s']),
+                   'range_nm': None, 'bearing': None, 'out_pos': None, 'moved_nm': None}
+            if out_lat is not None:
+                row['out_pos'] = stale_traffic.pos_text(out_lat, out_lon)
+                row['moved_nm'] = round(stale_traffic.distance_nm(lat, lon, out_lat, out_lon), 2)
+            if own:
+                row['range_nm'] = round(stale_traffic.distance_nm(own[0], own[1], lat, lon), 1)
+                row['bearing'] = round(
+                    math.degrees(stale_traffic.course_rad(own[0], own[1], lat, lon)) % 360)
+            return row
+
+        clients = []
+        for client in self.clients.values():
+            if not self.is_stale_traffic_client(client):
+                continue
+            dr, removed = client.stale_traffic.counts() if client.stale_traffic else (0, 0)
+            last = client.stale_traffic.last_slots if client.stale_traffic else []
+            slots = [describe(i) for i in last]
+            clients.append({'name': client.display_name, 'dead_reckoned': dr,
+                            'removed': removed, 'slots': slots})
+        cached = []
+        try:
+            f = str(self.cache.get_value('Qs450')).strip().rstrip(';').split(';')
+            for i in range(0, len(f) - 3, 4):
+                lat, lon = float(f[i]), float(f[i + 1])
+                if lat or lon:
+                    alt_ft = float(f[i + 2]) / 10.0
+                    cached.append(describe({'lat': lat, 'lon': lon, 'alt_ft': alt_ft,
+                                            'state': 'not filtered', 'frozen_s': 0.0,
+                                            'out_lat': lat, 'out_lon': lon}))
+        except (routercache.RouterCacheException, ValueError):
+            pass
+        return {
+            'cached_slots': cached,
+            'seconds': self.stale_traffic_limit(),
+            'config_seconds': self.config.filtering.stale_traffic_dead_reckon_seconds,
+            'applies': not self.filter_traffic,
+            'client_names': list(self.config.filtering.stale_traffic_client_names),
+            'clients': clients,
+            'log': list(self.stale_traffic_log),
+        }
 
     def orchestration_peernames(self, exclude=None):
         """Return the peernames of the local clients named in [filtering] orchestration_names."""
