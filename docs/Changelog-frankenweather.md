@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Fix: the periodic clock sync no longer rewrites PSX's clock about
+  every other minute.** PSX only broadcasts its clock (TimeEarth) every
+  3.5 s, and the check compared that last value with the current time, so
+  it measured the value's age (0–3.5 s) as drift. Over 1 s it logged
+  "PSX clock 2.8s behind real time — resyncing" and wrote the time; 728
+  times on 2026-11-05 on the main sim, each changing PSX's clock by about
+  20 ms. It now runs the last value on to the moment of the check, and
+  resyncs only when PSX is more than 5 s off. Syncs at connect and situ
+  load are unchanged.
+
 - **New: switch single SIGMET types off on /efb.** Below the Off / Normal /
   PSX presets, a row of toggles: TS, TC, TURB, MTW, VA, ICE.
   - In the Normal preset, a type switched off is used by nobody:

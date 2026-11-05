@@ -924,7 +924,7 @@ three independent toggles on the Config and logs web page (or the
   flying on VATSIM or with MSFS Live Weather, where the situ's own time
   may matter more than your PC's clock.
 - **`periodic`** (default off) — every 60 seconds, resync if PSX's clock
-  has drifted more than 1 second from your computer's clock. Useful when
+  has drifted more than 5 seconds from your computer's clock. Useful when
   flying with time acceleration: leave this on and the clock snaps back
   in sync automatically once you return to 1x, instead of staying however
   far ahead the acceleration left it.

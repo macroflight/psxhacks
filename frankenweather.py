@@ -1913,6 +1913,8 @@ _CONFIG_ENROUTE_WIND_FIELDS = (
     ("enabled", "_enroute_wind_enabled", bool),
     ("deviation", "_enroute_wind_deviation", int),
 )
+# Periodic clock sync: resync only when PSX's clock is this far from real time
+_TIMESYNC_DRIFT_S = 5.0
 _CONFIG_TIMESYNC_FIELDS = (
     ("on_startup", "_timesync_on_startup", bool),
     ("on_situ_load", "_timesync_on_situ_load", bool),
@@ -2490,7 +2492,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # Runtime toggles for PSX clock sync (see _sync_psx_clock/time_sync_coro)
         self._timesync_on_startup: bool = True    # on every PSX connect/reconnect
         self._timesync_on_situ_load: bool = True  # on every PSX situ load (load1..load3)
-        self._timesync_periodic: bool = False     # every 60s if drifted >1s from real time
+        self._timesync_periodic: bool = False     # every 60s if drifted >_TIMESYNC_DRIFT_S
         # Whether to periodically tell PSX to (re)download its own SIGMET
         # data (see sigmet_refresh_coro). Needed because frankenweather
         # disabling PSX's own METAR downloads also silently disables its
@@ -9292,13 +9294,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         return f"FRANKENWEATHER:STATE:{self._instance_uuid}:{payload}"
 
     async def time_sync_coro(self) -> None:
-        """Every 60s, resync PSX's clock if it has drifted >1s from real time.
+        """Every 60s, resync PSX's clock if it has drifted over _TIMESYNC_DRIFT_S from real time.
 
         Opt-in via _timesync_periodic. Reads the live TimeEarth value PSX
-        broadcasts (already subscribed for the turbulence subsystem) rather
-        than tracking our own last-sent value, so this also catches drift
-        caused by anything else writing the PSX clocks, not just the passage
-        of time under acceleration.
+        broadcasts rather than tracking our own last-sent value, so this
+        also catches drift caused by anything else writing the PSX clocks,
+        not just the passage of time under acceleration. PSX only
+        broadcasts TimeEarth every 3.5 s, so the last value is run on to
+        now (sim_time_ms()); comparing the raw value measured its age, not
+        drift, and rewrote the clock about every other minute by ~20 ms.
         """
         myname = inspect.currentframe().f_code.co_name
         try:
@@ -9309,15 +9313,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     continue
                 if not self.psx_connected or self.psx_paused:
                     continue
-                raw = self.psx.get("TimeEarth")
-                if not raw:
+                psx_ms = self.sim_time_ms()
+                if psx_ms is None:
                     continue
-                try:
-                    psx_ms = int(raw)
-                except ValueError:
-                    continue
-                drift_ms = psx_ms - int(time.time() * 1000)
-                if abs(drift_ms) > 1000:
+                drift_ms = psx_ms - time.time() * 1000.0
+                if abs(drift_ms) > _TIMESYNC_DRIFT_S * 1000.0:
                     self.logger.info(
                         "Time sync: PSX clock %.1fs %s real time — resyncing",
                         abs(drift_ms) / 1000.0, "ahead of" if drift_ms > 0 else "behind")

@@ -1498,7 +1498,7 @@ def _build_weather_config_page(ctx):
         '</td></tr>\n'
         '<tr><td style="padding-right:0.8em">Periodic resync<br>'
         '<span style="font-size:0.82em;color:#64748b">Every minute, resync if PSX\'s clock '
-        "has drifted more than 1 second from your computer's clock. Useful after flying with "
+        "has drifted more than 5 seconds from your computer's clock. Useful after flying with "
         'time acceleration, to catch back up once you return to 1x.</span></td><td>' +
         _toggle('timesync_periodic', 'false' if periodic else 'true',
                 'ON' if periodic else 'OFF', periodic) +
