@@ -590,6 +590,11 @@ has already applied its own value, and PSX doesn't send it the right one
 again. A PSX main client that keeps its own empty wind corridor
 (`WxCorridorTxt`) shows a different wind, temperature and IAS.
 
+A client can exempt itself by sending
+`addon=FRANKENROUTER:1:NO_QUARANTINE` (logged as a `WARNING`). It's for
+test tools that connect and load a situ at once; nothing in normal use
+should send it.
+
 The built-in table:
 
 | Variables | Time | From |

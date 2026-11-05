@@ -5065,6 +5065,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         elif code == RulesCode.FRDP_ACCESS_LEVEL:
             self.logger.debug(
                 "Upstream access level: '%s'", sender.access_level)
+        elif code == RulesCode.FRDP_NO_QUARANTINE:
+            self.logger.warning(
+                "Client %s is exempt from the post-connect quarantine (FRDP NO_QUARANTINE)",
+                sender_hr)
         elif code == RulesCode.NAME_FROM_FRANKENROUTER:
             self.logger.info("Client %s is a frankenrouter: %s", sender_hr, line)
             if (sender.client_id not in self._sim_events_clients_recorded and

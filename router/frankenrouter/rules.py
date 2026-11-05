@@ -330,6 +330,7 @@ class RulesCode(enum.Enum):
     FRDP_AUTH_OK = enum.auto()
     FRDP_AUTH_ALREADY_HAS_ACCESS = enum.auto()
     FRDP_ACCESS_LEVEL = enum.auto()
+    FRDP_NO_QUARANTINE = enum.auto()
     NAME_FROM_FRANKENROUTER = enum.auto()
     NAME_LEARNED = enum.auto()
     NAME_NOCHANGE = enum.auto()
@@ -420,7 +421,7 @@ class Rules():  # pylint: disable=too-many-public-methods
             self._build_quarantine()
         age = time.perf_counter() - max(self.sender.connected_at,
                                         self.sender.quarantine_restarted_at)
-        if age >= self._quarantine_max_s:
+        if age >= self._quarantine_max_s or self.sender.no_quarantine:
             return None
         name = self.router.variables.get_variable_name(key)
         entry = self._quarantine.get(name)
@@ -1077,6 +1078,23 @@ class Rules():  # pylint: disable=too-many-public-methods
             self.router.status_display_requested = True
         return self.myreturn(RulesAction.DROP, RulesCode.FRDP_ACCESS_LEVEL)
 
+    def handle_addon_frankenrouter_no_quarantine(self):
+        """Handle FRDP NO_QUARANTINE: exempt this client from the post-connect quarantine.
+
+        Format: addon=FRANKENROUTER:<protocol version>:NO_QUARANTINE
+
+        For test tools that connect and load a situ (or write weather or
+        malfunctions) at once, instead of waiting out QUARANTINE_WEATHER_S.
+        Only a downstream client exempts itself, for this connection only;
+        the message goes no further.
+        """
+        if self.sender.upstream:
+            return self.myreturn(
+                RulesAction.DROP, RulesCode.MESSAGE_INVALID,
+                message=f"Got NO_QUARANTINE from upstream: {self.line}")
+        self.sender.no_quarantine = True
+        return self.myreturn(RulesAction.DROP, RulesCode.FRDP_NO_QUARANTINE)
+
     def handle_addon_frankenrouter(self, rest):  # pylint: disable=too-many-return-statements,too-many-branches
         """Handle FRANKENROUTER addon message."""
         (message_type, _, payload) = rest.partition(":")
@@ -1127,6 +1145,8 @@ class Rules():  # pylint: disable=too-many-public-methods
             return self.handle_addon_frankenrouter_auth_challenge(payload)
         if message_type == 'ACCESS_LEVEL':
             return self.handle_addon_frankenrouter_access_level(payload)
+        if message_type == 'NO_QUARANTINE':
+            return self.handle_addon_frankenrouter_no_quarantine()
         # Drop unknown FRDP messages
         return self.myreturn(
             RulesAction.DROP, RulesCode.MESSAGE_INVALID,
@@ -2195,6 +2215,7 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             self.client_provided_display_name = None
             self.is_frankenrouter = False
             self.quarantine_restarted_at = 0.0
+            self.no_quarantine = False
             self.quarantine_restores = {}
             self.first_welcome_done_at = None
             self.looks_like_psx_main = False
@@ -3543,6 +3564,23 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
                     rules, line, peer, QUARANTINE_WEATHER_S - 1.0), quarantined, line)
                 self.assertEqual(self._quarantine_route(
                     rules, line, peer, QUARANTINE_WEATHER_S + 1.0), RulesCode.KEYVALUE_NORMAL, line)
+
+    def test_post_connect_quarantine_exempt(self):
+        """FRDP NO_QUARANTINE exempts the sending client from the quarantine."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+        peer = self._quarantine_peer(router)
+        quarantined = RulesCode.POST_CONNECT_QUARANTINE
+        self.assertEqual(self._quarantine_route(rules, "Qs499=#DOWNLOADED", peer, 0.0), quarantined)
+        (action, code, *_) = rules.route("addon=FRANKENROUTER:1:NO_QUARANTINE", peer)
+        self.assertEqual((action, code), (RulesAction.DROP, RulesCode.FRDP_NO_QUARANTINE))
+        self.assertTrue(peer.no_quarantine)
+        for line in ("Qs499=#DOWNLOADED", "Qs196=0;6;035427", "Qi190=257"):
+            self.assertEqual(self._quarantine_route(rules, line, peer, 0.0),
+                             RulesCode.KEYVALUE_NORMAL, line)
+        # Not from upstream
+        (action, code, *_) = rules.route("addon=FRANKENROUTER:1:NO_QUARANTINE", router.upstream)
+        self.assertEqual((action, code), (RulesAction.DROP, RulesCode.MESSAGE_INVALID))
 
     def test_post_connect_quarantine_config(self):
         """[quarantine] changes the default and per-variable times and adds variables."""

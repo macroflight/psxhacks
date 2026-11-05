@@ -122,6 +122,10 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         # Set to true if the connection is to another frankenrouter
         self.is_frankenrouter = False
 
+        # Set by FRDP NO_QUARANTINE: this client's writes skip the
+        # post-connect quarantine (test tools that load a situ at once)
+        self.no_quarantine = False
+
         # Set to true once this connection has sent FRDP SUBSCRIBE (see
         # rules.py's handle_addon_frankenrouter_subscribe()). Grants
         # receipt of FRDP broadcasts (ROUTERINFO/SHAREDINFO/SIMEVENTS)

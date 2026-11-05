@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **New: a client can opt out of the post-connect quarantine** by
+  sending `addon=FRANKENROUTER:1:NO_QUARANTINE`. For test tools that load
+  a situ right after connecting; the router logs a warning for each such
+  client.
 - **New: SIGMET type toggles on /efb**, below the SIGMET presets: TS, TC,
   TURB, MTW, VA, ICE. A type switched off is used by neither frankenweather
   nor PSX (Normal preset). They're greyed out with Off and PSX. VA is off

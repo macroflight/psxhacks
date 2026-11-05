@@ -397,6 +397,15 @@ than `is_frankenrouter`, so the client is not FRDP-pinged and none of
 those other behaviors apply. It can be sent on the same connection as
 normal PSX traffic.
 
+### FRDP NO_QUARANTINE
+
+`addon=FRANKENROUTER:<protocol version>:NO_QUARANTINE` (no payload),
+sent by a downstream client, exempts that connection from the
+post-connect quarantine (see `[quarantine]` in Configuration.md). It
+goes no further than the router it's sent to, and lasts for the
+connection. For test tools that connect and load a situ, weather or
+malfunctions at once, instead of waiting two minutes.
+
 ## Shared cockpit support
 
 These setups need to work with the router:
