@@ -217,13 +217,29 @@ A VA SIGMET whose area covers the aircraft does give the same damage there
 sims "inside" the ash is unknown. A PSX that has been running for hours
 may hold state that a fresh situ load doesn't.
 
+Suspected trigger: a write to PSX's clock. PSX did nothing for 101 s
+after the SIGMET arrived. The first failure (MfFlameOut3, 13:41:54.953Z)
+came 61 ms after frankenweather's periodic clock sync wrote `TimeEarth`,
+`TimeClockL` and `TimeClockR` (13:41:54.892Z), the first clock write after
+the SIGMET. The write changed the clock by only a few milliseconds, and
+nothing else unusual was written to PSX in between. frankenweather wrote
+the clock about 45 times an hour then, so a failure that close to one by
+chance is under 0.1 %. Perhaps a clock write makes PSX re-evaluate its
+SIGMETs, and on the main sim that put the aircraft inside this one. The
+same clock write on the test sim, with the main sim's autosave from just
+after the failures loaded (both a 5 h and a millisecond-sized change), did
+nothing.
+
 - **Workaround:** frankenweather no longer uses VA SIGMETs by default, so
   PSX gets none from it. A toggle on the router's /efb page (SIGMET types,
   Normal preset) switches them back on if wanted. The SIGMET texts
   themselves are passed on unchanged.
+- frankenweather also no longer writes PSX's clock every minute or two
+  (only when it's more than 5 s off), which removes the suspected trigger.
 - **Request:** ignore a SIGMET whose text has no area, or use the
   position with a small radius, and respect its level (here "ABV FL060");
-  and if possible say what makes PSX apply a VA SIGMET to the aircraft.
+  and if possible say what makes PSX apply a VA SIGMET to the aircraft,
+  and whether a write to `TimeEarth` makes it re-evaluate its SIGMETs.
 
 ### Zone names PSX rewrites
 
