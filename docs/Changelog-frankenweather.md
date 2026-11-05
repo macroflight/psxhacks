@@ -1,6 +1,6 @@
 # frankenweather changelog
 
-## Unreleased
+## 2.4.0 (2026-11-05)
 
 - **New (testing): CBs drift with the wind, `--advanced-zones`.** A
   temporary option, off by default. A zone that gets a CB in cruise keeps
