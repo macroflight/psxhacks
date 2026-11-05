@@ -32,9 +32,24 @@ import unittest
 SLOTS = 7
 EMPTY = "0;0;0;0"
 EARTH_NM_PER_RAD = 3440.065
-MAX_KT = 700.0           # faster than this is a bad match, not an aircraft
 MATCH_NM = 3.0           # how far a moved target may be from where we expected it
 MATCH_ALT_FT = 3000.0
+# A move within this time is a normal update; longer: a catch-up after a freeze
+NORMAL_DT_S = 12.0
+
+
+def typical_kt(alt_ft):
+    """Return a typical ground speed for an aircraft at alt_ft (for a target never seen moving)."""
+    if alt_ft < 10000:
+        return 250.0
+    return 300.0 if alt_ft < 25000 else 450.0
+
+
+def max_kt(alt_ft):
+    """Return the fastest plausible ground speed at alt_ft (faster: a bad match or a catch-up)."""
+    if alt_ft < 10000:
+        return 350.0
+    return 480.0 if alt_ft < 25000 else 650.0
 
 
 def pos_text(lat_rad, lon_rad):
@@ -71,14 +86,16 @@ def project(lat, lon, course, dist_nm):
 class _Target:  # pylint: disable=too-few-public-methods,too-many-instance-attributes
     """One traffic target followed from message to message."""
 
-    def __init__(self, raw, lat, lon, alt_ft, now):  # pylint: disable=too-many-arguments,too-many-positional-arguments
-        """Start following a target vPilot sent at (lat, lon) at time now."""
+    def __init__(self, raw, lat, lon, alt_ft, now, track):  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        """Start following a target vPilot sent at (lat, lon) at now (track: radians or None)."""
         self.raw = raw              # (lat text, lon text) as last sent by vPilot
         self.lat, self.lon = lat, lon
         self.alt_ft = alt_ft
+        self.track = track          # the track vPilot sends with it (radians), if any
         self.real_t = now           # when vPilot last sent a new position
-        self.speed_kt = None        # last real ground speed and course, when known
+        self.speed_kt = None        # measured ground speed and course, once seen moving normally
         self.course = None
+        self.moves = []             # the last 3 normal moves: (seconds, nm)
         self.logged = False         # a WARNING said we are dead-reckoning or removing it
         self.removed = False
 
@@ -86,11 +103,26 @@ class _Target:  # pylint: disable=too-few-public-methods,too-many-instance-attri
         """Return how long vPilot has repeated the same position."""
         return now - self.real_t
 
+    def motion(self):
+        """Return (speed kt, course radians, measured?) to dead-reckon with, or None.
+
+        The measured speed and course once the target has moved normally;
+        before that (it appeared frozen) a typical speed for its altitude
+        along the track vPilot sends.
+        """
+        if self.speed_kt is not None and self.course is not None:
+            return self.speed_kt, self.course, True
+        course = self.course if self.course is not None else self.track
+        if course is None:
+            return None
+        return typical_kt(self.alt_ft), course, False
+
     def expected(self, now):
         """Return where the target should be by now (radians)."""
-        if self.speed_kt is None:
+        m = self.motion()
+        if m is None:
             return self.lat, self.lon
-        return project(self.lat, self.lon, self.course, self.speed_kt * self.frozen_s(now) / 3600.0)
+        return project(self.lat, self.lon, m[1], m[0] * self.frozen_s(now) / 3600.0)
 
 
 class StaleTrafficFilter:  # pylint: disable=too-few-public-methods
@@ -105,7 +137,7 @@ class StaleTrafficFilter:  # pylint: disable=too-few-public-methods
         # dead-reckoned / removed), frozen_s, out_lat/out_lon (as passed on)
         self.last_slots = []
 
-    def process(self, value, now):  # pylint: disable=too-many-locals
+    def process(self, value, now):  # pylint: disable=too-many-locals,too-many-branches
         """Return (new value, [log lines]) for a TfcPos value received at now (seconds).
 
         The value is returned unchanged (the same string) when no target
@@ -125,13 +157,16 @@ class StaleTrafficFilter:  # pylint: disable=too-few-public-methods
                     'out_lat': lat, 'out_lon': lon}
             self.last_slots.append(info)
             target = self._match(old, raw, lat, lon, alt_ft, now)
+            track = self._track(rest)
             if target is None:
-                target = _Target(raw, lat, lon, alt_ft, now)
+                target = _Target(raw, lat, lon, alt_ft, now, track)
                 current.append(target)
                 out_slots.append(f"{raw[0]};{raw[1]};{rest}")
                 continue
             old.remove(target)
             current.append(target)
+            if track is not None:
+                target.track = track
             if target.raw != raw:
                 logs += self._moved(target, raw, lat, lon, now)
                 target.alt_ft = alt_ft
@@ -170,6 +205,14 @@ class StaleTrafficFilter:  # pylint: disable=too-few-public-methods
                 sum(1 for t in self.targets if t.removed))
 
     @staticmethod
+    def _track(rest):
+        """Return the track (radians) in a slot's 'alt;track x100' text, or None."""
+        try:
+            return math.radians(int(rest.split(';')[1]) / 100.0)
+        except (ValueError, IndexError):
+            return None
+
+    @staticmethod
     def _parse(value):
         """Return [((lat text, lon text), lat, lon, alt ft, 'alt;track'), ...] or None."""
         fields = value.strip().rstrip(";").split(";")
@@ -200,7 +243,9 @@ class StaleTrafficFilter:  # pylint: disable=too-few-public-methods
             exp = target.expected(now)
             d = min(distance_nm(lat, lon, *exp), distance_nm(lat, lon, target.lat, target.lon))
             # after a long freeze the aircraft can be far from where it froze
-            reach = max(MATCH_NM, (target.speed_kt or 500.0) * target.frozen_s(now) / 3600.0 * 1.2)
+            m = target.motion()
+            speed = m[0] if m else 500.0
+            reach = max(MATCH_NM, speed * target.frozen_s(now) / 3600.0 * 1.5)
             if d <= reach and (best_d is None or d < best_d):
                 best, best_d = target, d
         return best
@@ -220,11 +265,16 @@ class StaleTrafficFilter:  # pylint: disable=too-few-public-methods
         if dt > 0.5:
             dist = distance_nm(target.lat, target.lon, lat, lon)
             speed = dist / dt * 3600.0
-            if speed <= MAX_KT:
-                target.speed_kt = speed
+            cap = max_kt(target.alt_ft)
+            if dist > 0.05 and speed <= cap * 1.3:
+                # a plausible move: its direction is the course from now on
                 target.course = course_rad(target.lat, target.lon, lat, lon)
-            else:
-                target.speed_kt = target.course = None
+            if dt <= NORMAL_DT_S and speed <= cap * 1.3:
+                # a normal update (not the catch-up jump after a freeze, not a mismatch):
+                # the speed is the average over the last 3 of these, capped
+                target.moves = (target.moves + [(dt, dist)])[-3:]
+                total_s = sum(m[0] for m in target.moves)
+                target.speed_kt = min(cap, sum(m[1] for m in target.moves) / total_s * 3600.0)
         target.raw, target.lat, target.lon, target.real_t = raw, lat, lon, now
         target.logged = target.removed = False
         return logs
@@ -240,14 +290,16 @@ class StaleTrafficFilter:  # pylint: disable=too-few-public-methods
                             f"removing it until it moves again")
                 target.removed = target.logged = True
             return None, logs
-        if target.speed_kt is None:
+        motion = target.motion()
+        if motion is None:
             return f"{target.raw[0]};{target.raw[1]};{rest}", []
         lat, lon = target.expected(now)
         logs = []
         if not target.logged:
+            how = "" if motion[2] else " (typical for its altitude: not seen moving yet)"
             logs.append(f"Stale traffic target {where}: position unchanged for {frozen:.0f} s, "
-                        f"dead-reckoning it at {target.speed_kt:.0f} kt "
-                        f"track {math.degrees(target.course) % 360:03.0f}")
+                        f"dead-reckoning it at {motion[0]:.0f} kt{how} "
+                        f"track {math.degrees(motion[1]) % 360:03.0f}")
             target.logged = True
         return f"{lat:.5f};{lon:.5f};{rest}", logs
 
@@ -281,11 +333,10 @@ class TestStaleTraffic(unittest.TestCase):
         """Values with only moving targets come back as the very same string."""
         f = StaleTrafficFilter()
         for k in range(5):
-            v = _tfcpos((41.3 + k * 0.01, -5.1 - k * 0.03, 30000, 293.0), self.OTHER)
-            # OTHER repeats: but it has no speed yet, so it's passed through as it is
+            v = _tfcpos((41.3 + k * 0.01, -5.1 - k * 0.03, 30000, 293.0),
+                        (41.5 + k * 0.005, -5.5, 35000, 0.0))
             out, logs = f.process(v, 100.0 + 5 * k)
-            if k < 2:
-                self.assertIs(out, v)
+            self.assertIs(out, v)
             self.assertEqual(logs, [])
 
     def test_chc26_dead_reckoned(self):
@@ -339,6 +390,37 @@ class TestStaleTraffic(unittest.TestCase):
         out, lg = f.process(back, 2105.0)
         self.assertEqual(len(_slots(out)), 2)
         self.assertTrue(any("moving again" in x and "removed" in x for x in lg), lg)
+
+    def test_frozen_from_first_sight(self):
+        """A target that arrives frozen moves along its track at a typical speed (BAW47C)."""
+        f = StaleTrafficFilter()
+        logs, outs = [], []
+        for k in range(4):              # 7 times the same position at FL210, track 073
+            out, lg = f.process(_tfcpos((51.185, -0.582, 21000 - 150 * k, 73.0)), 5.0 * k)
+            outs.append(_slots(out)[0])
+            logs += lg
+        step = distance_nm(*map(math.radians, outs[1]), *map(math.radians, outs[3]))
+        self.assertAlmostEqual(step, 300.0 * 10 / 3600, delta=0.05)    # 300 kt below FL250
+        self.assertIn("typical for its altitude", logs[0])
+        a, b = map(math.radians, outs[1]), map(math.radians, outs[3])
+        brg = math.degrees(course_rad(*a, *b)) % 360
+        self.assertAlmostEqual(brg, 73.0, delta=1.0)
+
+    def test_speed_sanity(self):
+        """A catch-up jump after a freeze, or an implausible speed, doesn't become the speed."""
+        f = StaleTrafficFilter()
+        step = 300.0 * 5 / 3600 / 60 / math.cos(math.radians(51.2))    # 300 kt east, in degrees
+        track = [(0, -0.30), (5, -0.30 + step), (10, -0.30 + 2 * step),     # moving at 300 kt
+                 (15, -0.30 + 2 * step), (20, -0.30 + 2 * step),            # frozen
+                 (25, -0.30 + 8 * step),          # catch-up: 6 steps in 15 s
+                 (30, -0.30 + 9 * step),                                    # normal again
+                 (35, -0.30 + 9 * step + 0.2)]    # a mismatch: 7 nm in 5 s
+        for t, lon in track[:-1]:
+            f.process(_tfcpos((51.2, lon, 17000, 90.0)), float(t))
+        # the catch-up isn't a speed
+        self.assertAlmostEqual(f.targets[0].speed_kt, 300.0, delta=5.0)
+        f.process(_tfcpos((51.2, track[-1][1], 17000, 90.0)), 35.0)
+        self.assertIsNone(f.targets[0].speed_kt)   # 7 nm away: another aircraft
 
     def test_counts(self):
         """counts() tells how many targets are dead-reckoned and removed now."""

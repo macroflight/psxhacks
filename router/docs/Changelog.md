@@ -17,6 +17,12 @@
     dead-reckons a repeated position along the target's last track and
     speed, and removes a target frozen for over 60 s until it moves
     again.
+  - The speed it dead-reckons with is the average of the target's last
+    3 normal updates, capped by altitude (350 kt below 10,000 ft, 480 kt
+    below FL250, 650 kt above). One jittery vPilot step no longer sends
+    slow airport traffic off at 600+ kt. A target that's frozen from
+    the moment it appears is dead-reckoned along the track vPilot sends,
+    at a typical speed for its altitude.
   - Each change gets a WARNING, once when it starts and once when it
     stops.
   - It's off by default, and only a workaround: the real fix belongs
