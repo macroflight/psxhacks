@@ -35,6 +35,7 @@ from frankenrouter import variables
 from frankenrouter import routercache
 from frankenrouter import navdata
 from frankenrouter import orchestration
+from frankenrouter import stale_traffic
 from frankenrouter import cdumenus
 from frankenrouter import crewalertness
 from frankenrouter import logcompress
@@ -4331,6 +4332,32 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         at = self._orchestration_feed_at.get(zone)
         return at is not None and time.perf_counter() - at < ORCHESTRATION_FEED_FRESH_S
 
+    def stale_traffic_fix(self, sender, line):
+        """Return the TfcPos line from sender with frozen vPilot targets dead-reckoned or removed.
+
+        Temporary workaround, opt-in: see stale_traffic.py and [filtering]
+        stale_traffic_dead_reckon_seconds. Lines from other clients, or
+        with the filter off, are returned unchanged. The traffic log
+        keeps vPilot's original line (DATA FROM), and shows what we sent
+        on (DATA TO).
+        """
+        seconds = self.config.filtering.stale_traffic_dead_reckon_seconds
+        if not seconds or sender.is_frankenrouter or self.filter_traffic:
+            # (filter_traffic: not the traffic master's sim, its traffic is dropped anyway)
+            return line
+        names = self.config.filtering.stale_traffic_client_names
+        if sender.client_provided_id not in names and sender.display_name not in names:
+            return line
+        if sender.stale_traffic is None:
+            sender.stale_traffic = stale_traffic.StaleTrafficFilter(dead_reckon_s=seconds)
+            self.logger.warning("Stale traffic filter (temporary vPilot workaround) on for %s: "
+                                "frozen targets dead-reckoned for up to %s s, then removed",
+                                sender.display_name, seconds)
+        value, logs = sender.stale_traffic.process(line.split('=', 1)[1], time.monotonic())
+        for text in logs:
+            self.logger.warning("%s (from %s)", text, sender.display_name)
+        return 'Qs450=' + value
+
     def orchestration_peernames(self, exclude=None):
         """Return the peernames of the local clients named in [filtering] orchestration_names."""
         names = set(self.config.filtering.orchestration_names)
@@ -4615,6 +4642,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     _pnf_mode_prev = int(self.cache.get_value('Qi217'))
                 except (routercache.RouterCacheException, ValueError):
                     pass
+
+        if line.startswith('Qs450=') and not sender.upstream:
+            line = self.stale_traffic_fix(sender, line)
 
         (action, code, message, extra_data) = self.rules.route(line, sender)
 

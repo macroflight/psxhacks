@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- **New (temporary, opt-in): a fix for frozen vPilot traffic.**
+  vPilot sometimes repeats an aircraft's last position for 20 s, or
+  for minutes, while its altitude keeps changing. On TCAS such a
+  target stops, climbs or descends in place, then jumps: the ghost
+  targets crews have reported.
+  - With `[filtering] stale_traffic_dead_reckon_seconds = 60`, a
+    router fixes the traffic from its vPilot plugin client
+    (`stale_traffic_client_names`, default `VPLG`) as it arrives. It
+    dead-reckons a repeated position along the target's last track and
+    speed, and removes a target frozen for over 60 s until it moves
+    again.
+  - Each change gets a WARNING, once when it starts and once when it
+    stops.
+  - It's off by default, and only a workaround: the real fix belongs
+    in vPilot.
+
 ## 2026-11-05: version 1.40.0
 
 - **Change: a router's clock difference is only a warning.** The master

@@ -747,6 +747,29 @@ frdp_rtt_warning = 0.5
   messages themselves only go to frankenrouters. Without them for 90 s,
   no delay.
 
+- `stale_traffic_dead_reckon_seconds`: a temporary workaround for frozen
+  vPilot traffic. It's opt-in: default `0` (off); `60` is a good value.
+  The real fix belongs in vPilot. vPilot sometimes repeats an
+  aircraft's last position in its updates, for 20 s or for minutes,
+  while that aircraft's altitude keeps changing. PSX works out each
+  traffic target's speed (`TfcVel`) from successive positions, so on
+  TCAS the target stops, often climbs or descends in place, then jumps
+  ahead. With a value above 0, the router fixes the traffic (`TfcPos`)
+  from the clients in `stale_traffic_client_names` as it arrives. It
+  dead-reckons a repeated position along the target's last track and
+  ground speed, so the target keeps moving smoothly, and removes a
+  target frozen for longer than this many seconds until it moves again
+  or disappears. Each change gets a WARNING on the router console, once
+  when it starts for an aircraft and once when it stops (moving again,
+  removed, or gone from the traffic data). The traffic log keeps
+  vPilot's original line (`DATA FROM`) and shows what was sent on
+  (`DATA TO`). It only works where the traffic is used: on a master or
+  standalone router, or on a slave router whose sim is the traffic
+  master. See `frankenrouter/stale_traffic.py`.
+- `stale_traffic_client_names`: the clients the stale traffic fix
+  applies to, matched on the id or the display name they send with
+  `name=`. Default `["VPLG"]`, the PSX.NET.vPilot plugin.
+
 - `client_reset_whitelist`: display names of the clients the `/utils`
   "Reset clients" page pre-selects. That page is a slave-router-only
   feature: it re-sends `load1`/`load2`/`load3` and a full state refresh

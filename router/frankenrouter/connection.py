@@ -101,6 +101,9 @@ class Connection():  # pylint: disable=too-many-instance-attributes,too-few-publ
         self.client_provided_id = None
         self.client_provided_display_name = None
 
+        # Frankenrouter.stale_traffic_fix(): this client's StaleTrafficFilter, if it gets one
+        self.stale_traffic = None
+
         self.simulator_name = 'unknown sim'
         self.router_name = 'unknown router'
         self.uuid = None

@@ -254,6 +254,9 @@ class _RouterConfigSharedinfo:  # pylint: disable=missing-class-docstring,too-fe
 # handle_addon() FRANKENWEATHER:WXMODES case and Frankenrouter.orchestration_*)
 _DEFAULT_ORCHESTRATION_NAMES = ['PSX.NET.Orchestration']
 
+# The PSX.NET.vPilot plugin: name=VPLG:vPilot Plugin
+_DEFAULT_STALE_TRAFFIC_CLIENT_NAMES = ['VPLG']
+
 _DEFAULT_GROUND_HANDLING_FORWARD_NAMES = [
     'PSX.NET EFB For Windows', 'PSX.NET.Orchestration', 'BA ACARS Simulation',
 ]
@@ -282,6 +285,27 @@ class _RouterConfigFiltering:  # pylint: disable=missing-class-docstring,too-few
         if not isinstance(self.orchestration_names, list) or not all(
                 isinstance(n, str) for n in self.orchestration_names):
             raise RouterConfigError("filtering orchestration_names must be a list of strings")
+
+        # Temporary workaround, opt-in: vPilot sometimes repeats an
+        # aircraft's last position for 20 s to minutes (PSX then shows a
+        # target that stops, then jumps). With a value above 0, TfcPos from
+        # the clients in stale_traffic_client_names (matched on the id or
+        # the display name from name=) is fixed on ingress: a repeated
+        # position is dead-reckoned along the target's last track and
+        # speed for up to this many seconds, then removed until it moves
+        # again. See stale_traffic.py. The real fix belongs in vPilot.
+        self.stale_traffic_dead_reckon_seconds = data.get('stale_traffic_dead_reckon_seconds', 0)
+        if (isinstance(self.stale_traffic_dead_reckon_seconds, bool) or
+                not isinstance(self.stale_traffic_dead_reckon_seconds, (int, float)) or
+                self.stale_traffic_dead_reckon_seconds < 0):
+            raise RouterConfigError(
+                "filtering stale_traffic_dead_reckon_seconds must be a number >= 0 (0: off)")
+        self.stale_traffic_client_names = data.get(
+            'stale_traffic_client_names', list(_DEFAULT_STALE_TRAFFIC_CLIENT_NAMES))
+        if not isinstance(self.stale_traffic_client_names, list) or not all(
+                isinstance(n, str) for n in self.stale_traffic_client_names):
+            raise RouterConfigError(
+                "filtering stale_traffic_client_names must be a list of strings")
 
         # display_name values the /utils "Reset clients" page (a
         # slave-router-only feature -- see
@@ -1058,6 +1082,18 @@ keywords = ["Qs123"]
             RouterConfig(config_data=(
                 "[[upstream]]\nname = 'test upstream'\n"
                 "on_forced_disconnect = 'bogus'\n"))
+
+    def test_stale_traffic(self):
+        """The stale traffic filter is off by default, on with a number of seconds."""
+        conf = RouterConfig(config_data="")
+        self.assertEqual(conf.filtering.stale_traffic_dead_reckon_seconds, 0)
+        self.assertEqual(conf.filtering.stale_traffic_client_names, ['VPLG'])
+        conf = RouterConfig(config_data="[filtering]\nstale_traffic_dead_reckon_seconds = 60\n")
+        self.assertEqual(conf.filtering.stale_traffic_dead_reckon_seconds, 60)
+        with self.assertRaises(RouterConfigError):
+            RouterConfig(config_data="[filtering]\nstale_traffic_dead_reckon_seconds = -1\n")
+        with self.assertRaises(RouterConfigError):
+            RouterConfig(config_data="[filtering]\nstale_traffic_dead_reckon_seconds = true\n")
 
     def test_orchestration_names(self):
         """orchestration_names defaults to PSX.NET.Orchestration and can be overridden."""
