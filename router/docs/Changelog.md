@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026-11-05: version 1.40.0
 
 - **Change: a router's clock difference is only a warning.** The master
   router used to raise a critical error once another router's clock was
