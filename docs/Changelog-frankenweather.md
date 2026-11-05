@@ -1,5 +1,25 @@
 # frankenweather changelog
 
+## Unreleased
+
+- **New: switch single SIGMET types off on /efb.** Below the Off / Normal /
+  PSX presets, a row of toggles: TS, TC, TURB, MTW, VA, ICE.
+  - In the Normal preset, a type switched off is used by nobody:
+    frankenweather leaves it out of its own SIGMET weather and doesn't give
+    it to PSX.
+  - With Off or PSX the toggles are greyed out. PSX downloads and uses
+    every SIGMET itself, exactly as without frankenweather, so they show
+    all on there. The choice is kept for the next time Normal is selected.
+  - The choice is saved next to the config file
+    (`<config>-sigmet-types.json`), so it survives a restart, and logged at
+    startup if a type is off. The SIGMETs page says which types are off.
+  - **VA is off by default**, the others on. On 2026-11-05 a Sakurajima
+    volcanic-ash SIGMET whose text had no area (only the volcano's
+    position and "ABV FL060") reached PSX, and two sims with
+    frankenweather got ash damage thousands of miles away, one of them on
+    a taxiway. It couldn't be reproduced on a test sim, so VA SIGMETs are
+    simply not used unless switched on (see docs/psx-issues.md).
+
 ## 2.4.0 (2026-11-05)
 
 - **New (testing): CBs drift with the wind, `--advanced-zones`.** A

@@ -247,6 +247,34 @@ def sigmet_preset_row(w):
     return f'<div class="efb-chip-row">{chips}</div>\n'
 
 
+def sigmet_type_row(w):
+    """Render the per-type SIGMET toggles (TS, TC, TURB, MTW, VA, ICE) below the presets.
+
+    A type switched off is used by neither FrankenWeather nor PSX. Only
+    with FrankenWeather's own SIGMET system on (Normal, or a custom choice):
+    with Off nothing uses SIGMETs, and with PSX, PSX downloads and uses all
+    of them itself, so the toggles are greyed out there and PSX's shown all
+    on. The choice itself is kept (and saved) for the next time.
+    """
+    type_on = w.get('sigmet_type_on')
+    if type_on is None:
+        return ''   # FrankenWeather before the toggles
+    preset = w['sigmet_preset']
+    live = w['sigmet_enabled'] and preset not in ('off', 'psx')
+    dim = '' if live else ' disabled style="opacity:0.4;pointer-events:none"'
+    chips = []
+    for hazard in _fw_sigmet.HAZARDS:
+        on = True if preset == 'psx' else (bool(type_on.get(hazard, True)) and preset != 'off')
+        chips.append(
+            f'<form class="efb-inline" method="post" action="/api/efb/sigmet-type">'
+            f'<input type="hidden" name="hazard" value="{hazard}">'
+            f'<input type="hidden" name="on" value="{0 if on else 1}">'
+            f'<button type="submit" class="efb-chip efb-chip-sm{" active" if on else ""}"'
+            f' title="{hazard} SIGMETs: {"in use" if on else "not used by anyone"}"{dim}>'
+            f'{hazard}</button></form>\n')
+    return f'<div class="efb-chip-row">{"".join(chips)}</div>\n'
+
+
 def sigmet_hint(w):
     """Return the /efb hint line explaining the SIGMET presets."""
     if not w['sigmet_enabled']:
@@ -319,6 +347,7 @@ def controls_card(w):
         cb_airport_mode_row(w) +
         '<div class="efb-eyebrow" style="margin-top:0.6rem">SIGMETs</div>\n' +
         sigmet_preset_row(w) +
+        sigmet_type_row(w) +
         '<div class="efb-chip-row efb-section">'
         '<form class="efb-inline" method="post" action="/api/efb/panic">'
         f'<button type="submit" class="efb-chip efb-chip-sm panic"{panic_off}>PANIC</button>'
@@ -673,6 +702,8 @@ def weather_status(ctx, now=None):  # pylint: disable=too-many-locals
             bool(cfg.get('disable_psx_sigmets', False)),
             {h for h, on in (cfg.get('sigmet_handle') or {}).items() if on}),
         'sigmet_hazards': list((state or {}).get('sigmet_hazards', [])),
+        # FrankenWeather with the per-type toggles: {"TS": True, ...}, else None
+        'sigmet_type_on': cfg.get('sigmet_type_on'),
         # FrankenWeather with advanced zones: {"hdg", "kt"} CBs drift with here
         'cb_motion': (state or {}).get('cb_motion'),
         'src_router_color': fw_color, 'src_router_label': fw_label, 'src_router_age': fw_age,
@@ -700,7 +731,7 @@ def weather_status(ctx, now=None):  # pylint: disable=too-many-locals
     return weather_info
 
 
-def register_control_routes(routes, ctx, logger, page='/efb'):  # pylint: disable=too-many-locals
+def register_control_routes(routes, ctx, logger, page='/efb'):  # pylint: disable=too-many-locals,too-many-statements
     """Register the /efb page's /api/efb/* weather control and PIREP routes.
 
     Shared by the router (its RouterFWContext) and frankenweather's own
@@ -739,6 +770,20 @@ def register_control_routes(routes, ctx, logger, page='/efb'):  # pylint: disabl
             data.get('preset'), status['weather']['sigmet_enabled'])
         if cmd:
             await ctx.send_fw_settings_cmd(cmd)
+        raise web.HTTPFound(page)
+
+    @routes.post('/api/efb/sigmet-type')
+    async def handle_efb_sigmet_type_post(request):
+        data = await request.post()
+        hazard = data.get('hazard')
+        w = weather_status(ctx)
+        # Only with FrankenWeather's own SIGMETs in use (greyed out otherwise)
+        if (hazard in _fw_sigmet.HAZARDS and w['sigmet_enabled'] and
+                w['sigmet_preset'] not in ('off', 'psx') and w.get('sigmet_type_on') is not None):
+            logger.info("API: EFB SIGMET type %s %s", hazard,
+                        "on" if data.get('on') == '1' else "off")
+            await ctx.send_fw_settings_cmd({'sigmet_type_on': {hazard: data.get('on') == '1'}})
+            await asyncio.sleep(1)
         raise web.HTTPFound(page)
 
     @routes.post('/api/efb/cb-airport-mode')

@@ -2367,6 +2367,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._sigmet_enabled: bool = False   # see handle_args()
         self._sigmet_own: bool = True
         self._sigmet_handle: dict = {h: True for h in _fw_sigmet.OWN_HAZARDS}
+        # SIGMET types in use at all (router /efb toggles, Normal preset): a
+        # type switched off is used by neither frankenweather nor PSX. Saved
+        # in its own file (_sigmet_types_file()), so it survives a restart.
+        # VA off by default: an area-less VA SIGMET (Sakurajima, 2026-11-05)
+        # gave two frankenweather sims ash damage far from the volcano
+        # (docs/psx-issues.md); a saved choice overrides this
+        self._sigmet_type_on: dict = {h: h != "VA" for h in _fw_sigmet.HAZARDS}
         # The varying intensity of TURB/MTW SIGMET turbulence, one per type,
         # each with its own timeline per altitude layer (see
         # _sigmet_turbulence()), and the altitude it was last asked for.
@@ -3753,6 +3760,21 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 self._use_own_sigmet_data()
             if self._web_sigmetstate is not None:
                 self._update_web_sigmetstate()  # "handled" is shown on the page
+            self._own_sigmet_refresh_event.set()
+            settings_changed = True
+        if isinstance(cmd.get("sigmet_type_on"), dict):
+            for hazard, val in cmd["sigmet_type_on"].items():
+                if hazard in self._sigmet_type_on:
+                    self._sigmet_type_on[hazard] = bool(val)
+            in_use = [h for h, on in self._sigmet_type_on.items() if on]
+            off = [h for h, on in self._sigmet_type_on.items() if not on]
+            self.logger.info("SIGMET types in use: %s (off: %s)",
+                             ", ".join(in_use) or "none", ", ".join(off) or "none")
+            self._save_sigmet_types()
+            if self._own_sigmets_applied:
+                self._use_own_sigmet_data()
+            if self._web_sigmetstate is not None:
+                self._update_web_sigmetstate()
             self._own_sigmet_refresh_event.set()
             settings_changed = True
         if cmd.get("sigmet_refresh"):
@@ -5229,7 +5251,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._sigmet_turb_alt_ft = alt_ft
         levels = {h: p.value(alt_ft) for h, p in self._sigmet_turb_profiles.items()}
         self._sigmet_turb_scale = {}
-        for entry in self._own_sigmet_entries:
+        for entry in self._own_sigmets_in_use():
             if not entry["ok"] or entry["hazard"] not in _fw_sigmet.TURB_HAZARDS:
                 continue
             if not self._sigmet_handle.get(entry["hazard"]):
@@ -5318,7 +5340,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         """Return True if lat/lon is in a TS/TC SIGMET area frankenweather handles (--sigmet)."""
         if lat is None or lon is None or not self._own_sigmets_applied:
             return False
-        for entry in self._own_sigmet_entries:
+        for entry in self._own_sigmets_in_use():
             if not (entry["ok"] and entry["hazard"] in _fw_sigmet.CB_HAZARDS and
                     self._sigmet_handle.get(entry["hazard"])):
                 continue
@@ -5347,7 +5369,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return None
         level = self._sigmet_conv_profile.value(alt_ft)
         best, entry, scale, best_floor = 0.0, None, 0.0, 0.0
-        for candidate in self._own_sigmet_entries:
+        for candidate in self._own_sigmets_in_use():
             if (not candidate["ok"] or candidate["hazard"] not in _fw_sigmet.CB_HAZARDS or
                     not self._sigmet_handle.get(candidate["hazard"])):
                 continue
@@ -7599,7 +7621,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         """Move one zone into a TS/TC SIGMET area that wants one; True if moved."""
         now = time.time()
         areas = []
-        for entry in self._own_sigmet_entries:
+        for entry in self._own_sigmets_in_use():
             if not entry["ok"] or entry["hazard"] not in _fw_sigmet.CB_HAZARDS:
                 continue
             if not self._sigmet_handle.get(entry["hazard"]):
@@ -9107,6 +9129,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "sigmet_enabled": self._sigmet_enabled,
             "sigmet_own": self._sigmet_own,
             "sigmet_handle": dict(self._sigmet_handle),
+            "sigmet_type_on": dict(self._sigmet_type_on),
             "disable_psx_sigmets": self._disable_psx_sigmets,
             "cb_airport_mode": self._cb_airport_mode,
             # Routers before 1.26.0 only know this on/off form
@@ -9788,7 +9811,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # disable_psx_sigmets: PSX gets no SIGMETs at all
         handled = self._handled_hazards()
         text = ("#" if self._disable_psx_sigmets else
-                _fw_sigmet.psx_text(self._own_sigmet_entries, self._own_sigmet_fetched_at,
+                _fw_sigmet.psx_text(self._own_sigmets_in_use(), self._own_sigmet_fetched_at,
                                     handled))
         # Compare without the "#DOWNLOADED <time>" header line: a new
         # download with the same SIGMETs isn't worth a PSX write.
@@ -9799,7 +9822,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         elif self._disable_psx_sigmets:
             self.logger.info("Own SIGMETs: disable_psx_sigmets, emptying PSX's SIGMET data")
         else:
-            kept = len(_fw_sigmet.psx_entries(self._own_sigmet_entries, handled))
+            kept = len(_fw_sigmet.psx_entries(self._own_sigmets_in_use(), handled))
             self.logger.info(
                 "Own SIGMETs: giving PSX %d SIGMETs (%d bytes), left out %d handled by"
                 " frankenweather (%s) and %d unusable", kept, len(text),
@@ -9811,6 +9834,42 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self.psx_send_and_set("WxSigmet", text)
         self._psx_sigmet_raw = text
         self._own_sigmet_written = text
+
+    def _sigmet_types_file(self) -> str:
+        """Return the file the SIGMET type toggles are saved in, next to the config file."""
+        base = self.args.config_file or _DEFAULT_CONFIG_FILE
+        return os.path.splitext(base)[0] + "-sigmet-types.json"
+
+    def _load_sigmet_types(self) -> None:
+        """Load the SIGMET type toggles saved by _save_sigmet_types(), if any."""
+        try:
+            with open(self._sigmet_types_file(), encoding="utf-8") as fh:
+                saved = json.load(fh)
+        except FileNotFoundError:
+            return
+        except (OSError, ValueError) as exc:
+            self.logger.warning("SIGMET types: can't read %s (%s): using the defaults",
+                                self._sigmet_types_file(), exc)
+            return
+        for hazard, val in (saved or {}).items():
+            if hazard in self._sigmet_type_on:
+                self._sigmet_type_on[hazard] = bool(val)
+        off = [h for h, on in self._sigmet_type_on.items() if not on]
+        if off:
+            self.logger.warning("SIGMET types switched off (saved in %s): %s",
+                                self._sigmet_types_file(), ", ".join(off))
+
+    def _save_sigmet_types(self) -> None:
+        """Save the SIGMET type toggles, so they survive a restart."""
+        try:
+            with open(self._sigmet_types_file(), "w", encoding="utf-8") as fh:
+                json.dump(self._sigmet_type_on, fh)
+        except OSError as exc:
+            self.logger.warning("SIGMET types: can't save %s: %s", self._sigmet_types_file(), exc)
+
+    def _own_sigmets_in_use(self) -> list:
+        """Return the downloaded SIGMETs of the types in use (the /efb toggles)."""
+        return [e for e in self._own_sigmet_entries if self._sigmet_type_on.get(e["hazard"], True)]
 
     def _handled_hazards(self) -> set:
         """Return the SIGMET types frankenweather handles itself (the rest go to PSX)."""
@@ -9824,7 +9883,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         unchanged. ts_sigmets also holds TC: neither reaches PSX any more.
         """
         sigmets = []
-        for e in self._own_sigmet_entries:
+        for e in self._own_sigmets_in_use():
             if not e["ok"]:
                 continue
             top = e["top_ft"] or 35000
@@ -9888,6 +9947,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "enabled": self._sigmet_enabled,
             "own": self._sigmet_own,
             "handled": sorted(self._handled_hazards()),
+            "type_on": dict(self._sigmet_type_on),
             "psx_off": self._disable_psx_sigmets,
             "source": "aviationweather.gov",
             "fetched_at": self._own_sigmet_fetched_at,
@@ -10550,6 +10610,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._turb_gairmet_fetcher = GairmetFetcher()
         self.logger.info("Turbulence engine initialized")
         self._load_config_file()
+        self._load_sigmet_types()
         self._apply_turb_profile_option()      # also without a config file
         self._apply_turb_profile_bands()
         self._startup_config_dict = self._build_config_dict()

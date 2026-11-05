@@ -185,6 +185,46 @@ change). `WxSlowTransit` before each write made no difference.
 - **Request:** redraw the radar picture regardless of how often zones move,
   or document the minimum interval.
 
+### A VA SIGMET without an area in its text may damage aircraft anywhere
+
+*Observed on two sims (2026-11-05); not reproduced on the test sim.* The
+Japan Meteorological Agency issued a volcanic-ash SIGMET for Sakurajima
+with only the volcano's position and a level, no area:
+`PSN N3136 E13039 VA CLD OBS AT 1317Z ABV FL060 MOV SE`.
+aviationweather.gov's data has a 50 nm circle around the volcano, but PSX
+reads the area from the SIGMET's text. About 100 s after frankenweather
+passed it to PSX (13:40:13Z), PSX itself activated engine flameouts, all
+four pitots and cargo fire warnings in turn on the main sim, over the
+North Sea at 11,000 ft, 5,000 nm from the volcano: the volcanic-ash damage
+pattern. No malfunction was written over the network and no traffic was
+within 9 nm (not the collision damage). At almost the same time another
+sim with frankenweather (SIMFEST), on the ground on a taxiway, got the
+same failures, starting with the aft cargo fire warning.
+
+We couldn't reproduce it on the test sim (same PSX version). PSX drew the
+SIGMET as a small circle around the volcano, the Instructor's SIGMET tab
+stayed clear, and nothing failed in any of these:
+
+- frankenweather's exact 13:40 SIGMET text, at the main sim's position,
+  altitude and time;
+- the same text on the ground with engines running;
+- PSX downloading its own SIGMETs, without frankenweather;
+- both main-sim autosaves (from just before and just after the failures)
+  loaded in PSX.
+
+A VA SIGMET whose area covers the aircraft does give the same damage there
+(about 90 s after entering it: pitots, then cargo fire). So what made both
+sims "inside" the ash is unknown. A PSX that has been running for hours
+may hold state that a fresh situ load doesn't.
+
+- **Workaround:** frankenweather no longer uses VA SIGMETs by default, so
+  PSX gets none from it. A toggle on the router's /efb page (SIGMET types,
+  Normal preset) switches them back on if wanted. The SIGMET texts
+  themselves are passed on unchanged.
+- **Request:** ignore a SIGMET whose text has no area, or use the
+  position with a small radius, and respect its level (here "ABV FL060");
+  and if possible say what makes PSX apply a VA SIGMET to the aircraft.
+
 ### Zone names PSX rewrites
 
 *Confirmed (2026-10-27).* A WxMode zone named like `Z1X` was rewritten by

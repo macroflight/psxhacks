@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **New: SIGMET type toggles on /efb**, below the SIGMET presets: TS, TC,
+  TURB, MTW, VA, ICE. A type switched off is used by neither frankenweather
+  nor PSX (Normal preset). They're greyed out with Off and PSX. VA is off
+  by default. Needs a frankenweather with the toggles.
 - **New (temporary, opt-in): a fix for frozen vPilot traffic.**
   vPilot sometimes repeats an aircraft's last position for 20 s, or
   for minutes, while its altitude keeps changing. On TCAS such a

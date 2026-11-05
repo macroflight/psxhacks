@@ -2357,6 +2357,13 @@ def _build_weather_sigmets_page(ctx):  # pylint: disable=too-many-locals
         own, psx_off, {h for h in fw_sigmet.OWN_HAZARDS if handle.get(h, True)}))
     if own:
         toggle_html += _sigmet_handle_html(handle)
+        off = [h for h, on in ((sigstate or {}).get('type_on') or {}).items() if not on]
+        if off:
+            toggle_html += (
+                '<div class="card warn"><p style="margin:0">'
+                f'<b>Not used by anyone:</b> {_esc(", ".join(off))} SIGMETs '
+                '(switched off on the router\'s /efb page, in the Normal preset: neither '
+                'frankenweather nor PSX gets them).</p></div>\n')
     else:
         toggle_html += (
             '<div class="card warn"><p style="margin:0">frankenweather\'s SIGMET system is '
@@ -2650,8 +2657,10 @@ def register_weather_routes(routes, ctx):  # pylint: disable=too-many-statements
         entries = sigstate.get('entries') or []
         name = "sigmets.txt"
         if request.match_info['which'] == 'psx':
+            type_on = sigstate.get('type_on') or {}
             entries = fw_sigmet.psx_entries(
-                entries, set(sigstate.get('handled', fw_sigmet.OWN_HAZARDS)))
+                [e for e in entries if type_on.get(e['hazard'], True)],
+                set(sigstate.get('handled', fw_sigmet.OWN_HAZARDS)))
             name = "sigmets-psx.txt"
         text = fw_sigmet.sigmet_text(entries, sigstate.get('fetched_at') or time.time())
         return web.Response(text=text, content_type='text/plain', headers={
