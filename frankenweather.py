@@ -463,6 +463,26 @@ _DATIS_LINE_MAX_CHARS = 24            # PSX MetarsUp (Qs464): max chars per '^'-
 _DATIS_BLOCK_SEP = '^^'
 
 
+def _read_test_metars(path: str, logger) -> dict:
+    """Return --test-metar-file's METARs, icao -> raw METAR ({} if unreadable).
+
+    One METAR per line ("VYYY 061800Z 22010KT 4000 TSRA ..."), re-read at
+    every zone update so a test script can change them while we run. For
+    testing only: they override the live METARs of those airports.
+    """
+    metars = {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                icao = line.split(None, 1)[0] if line else ""
+                if len(icao) == 4 and icao.isalpha() and icao.isupper():
+                    metars[icao] = line
+    except OSError as exc:
+        logger.warning("--test-metar-file %s: %s", path, exc)
+    return metars
+
+
 def _has_model_metar(text: str) -> bool:
     """Return True if PSX's D-ATIS/printer text has one of our station-only METARs.
 
@@ -8092,6 +8112,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         else:
             combined = dict(self.noaa_metar_cache)
             combined.update(vatsim)
+        if self.args.test_metar_file:
+            combined.update(_read_test_metars(self.args.test_metar_file, self.logger))
         return combined
 
     def _metar_source_label(self, icao: str, raw: str) -> str:
@@ -10525,6 +10547,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             help="Squeeze zone spacing when CAPE is high: at avg CAPE >= CAPE J/kg "
                  "shrink fwd_max to MIN_FWD nm (default: 500:150). New zones are "
                  "never squeezed closer than 100nm ahead.")
+        parser.add_argument(
+            '--test-metar-file', default=None, metavar='FILE',
+            help="TESTING: METARs (one per line) that override the live ones for their "
+                 "airports, re-read at every zone update.")
         parser.add_argument(
             '--fake-cb', type=_parse_cb_arg, default=None, metavar='O:B:T',
             help="Override CB in all zones: O=oktas (0-8), B=base ft, T=top ft "
