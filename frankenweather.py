@@ -5925,12 +5925,20 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         now = time.time()
         ramp = self.zone_cb_ramp.get(zone_num)
         if ramp is None:
-            if target_oktas <= 0:
+            start = self._psx_cb_in_place(zone_num)
+            if target_oktas <= 0 and start is None:
                 return target_wx
-            ramp = self.zone_cb_ramp[zone_num] = {
-                'current_oktas': 0.0, 'current_top_ft': target_base + _CB_MIN_DEPTH_FT,
-                'base_ft': target_base, 'last_update_ts': now - 60.0 / _CB_FADE_IN_OKTAS_PER_MIN,
-                'last_oktas_rate_per_min': 0.0, 'last_top_rate_per_min': 0.0}
+            if start is not None:   # PSX already draws this zone's CB here: carry on from it
+                ramp = self.zone_cb_ramp[zone_num] = {
+                    'current_oktas': float(start[0]), 'current_top_ft': float(start[1]),
+                    'base_ft': float(start[2]), 'last_update_ts': now,
+                    'last_oktas_rate_per_min': 0.0, 'last_top_rate_per_min': 0.0}
+            else:
+                ramp = self.zone_cb_ramp[zone_num] = {
+                    'current_oktas': 0.0, 'current_top_ft': target_base + _CB_MIN_DEPTH_FT,
+                    'base_ft': target_base,
+                    'last_update_ts': now - 60.0 / _CB_FADE_IN_OKTAS_PER_MIN,
+                    'last_oktas_rate_per_min': 0.0, 'last_top_rate_per_min': 0.0}
         elapsed_min = max(0.0, (now - ramp['last_update_ts']) / 60.0)
         old = ramp['current_oktas']
         if target_oktas >= old:
@@ -5959,6 +5967,25 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         parts[10] = str(round(new_top))
         parts[11] = str(round(base))
         return ';'.join(parts)
+
+    def _psx_cb_in_place(self, zone_num: int) -> Optional[tuple]:
+        """Return (oktas, top, base) of PSX's CB in zone_num if the zone stays where PSX has it.
+
+        So a fade starts from what's on screen: after a frankenweather
+        restart every CB fell to 1/8 and grew again (FTECH2, 2026-11-06).
+        None if PSX has no CB there, or the zone is (being) moved.
+        """
+        if not self.psx or zone_num not in self.zone_positions:
+            return None
+        psx_mode, psx_wx = self.psx.get(f"WxMode{zone_num}"), self.psx.get(f"Wx{zone_num}")
+        pos = _fw_drift.wxmode_pos(psx_mode) if psx_mode else None
+        cb = parse_wx_zone_basic(psx_wx) if psx_wx else None
+        if pos is None or cb is None or cb[0] <= 0:
+            return None
+        lat, lon, _ = self.zone_positions[zone_num]
+        if self._dist_nm(lat, lon, *pos) >= _ZONE_MOVE_CLEAR_CB_NM:
+            return None
+        return cb
 
     async def cb_fade_coro(self) -> None:
         """Without --cb-growth: every _CB_FADE_STEP_S, write the next step of each fading CB.

@@ -26,7 +26,9 @@ Yangon, 2026-11-06), three causes:
   written every 20 s. A new or growing CB grows in at 0.5 okta/min (top
   2,500 ft/min, from 1/8), a disappearing one fades at 0.25 okta/min (top
   1,000 ft/min): a 6/8 CB takes about 12 minutes to grow and 25 to fade.
-  Without `--cb-growth`, which has its own rates.
+  Without `--cb-growth`, which has its own rates. A zone that stays where
+  PSX already has it starts from the CB PSX shows, so a frankenweather
+  restart doesn't make the CBs around the aircraft collapse and regrow.
 - **Fix: holds no longer move visible CBs.** Maneuvering mode (holds,
   vectoring) placed all zones afresh around the aircraft, moving CBs in
   sight (six zones moved 58-390 nm in one go on the test sim). Zones with
