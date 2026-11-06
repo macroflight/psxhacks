@@ -1,5 +1,41 @@
 # frankenweather changelog
 
+## Unreleased
+
+CBs popping in, vanishing and jumping (Simfest and the main sim around
+Yangon, 2026-11-06), three causes:
+
+- **Fix: a new METAR no longer replaces our CBs.** PSX rebuilds a zone's
+  weather from its METAR whenever the METAR's weather changes, about 1 s
+  after it's written. At VYYY the 1700Z METAR turned our 6/8 CB with
+  tops at 44,900 ft into PSX's own 2/8 to 10,500 ft, until the next zone
+  update put it back 5 minutes later. Airport zones now get a
+  station-only METAR (`VYYY 061700Z RMK FRANKENWX MODEL WX`), like our
+  other zones; we build their weather from the real METAR ourselves, as
+  before. Only while the D-ATIS override is on (it's on unless
+  `--no-datis-override`), and not in the Open-Meteo-outage METAR fallback,
+  which still gives PSX the real METARs.
+- **D-ATIS and ALTN weather replies** for such an airport now show the real
+  METAR. PSX builds its D-ATIS from the zone METAR (`SCCI J 160420Z`,
+  `EXPECT RWY 01`, `TRANS LVL 90`, then the METAR); we keep PSX's ATIS
+  lines and put the real METAR in place of our remark. The ALTN printout
+  gets the real METAR in the supplement, like an UNAVAIL airport.
+- **Fix: CBs fade in and out instead of popping.** A CB fading away used
+  to be stepped only at the zone updates, 5 minutes apart, so a small one
+  was gone in one write (2/8 at 17 nm, 2026-11-06). The steps are now
+  written every 20 s. A new or growing CB grows in at 0.5 okta/min (top
+  2,500 ft/min, from 1/8), a disappearing one fades at 0.25 okta/min (top
+  1,000 ft/min): a 6/8 CB takes about 12 minutes to grow and 25 to fade.
+  Without `--cb-growth`, which has its own rates.
+- **Fix: holds no longer move visible CBs.** Maneuvering mode (holds,
+  vectoring) placed all zones afresh around the aircraft, moving CBs in
+  sight (six zones moved 58-390 nm in one go on the test sim). Zones with
+  a CB within 100 nm, out of the window or on the radar, now stay where
+  they are, as zones with CB turbulence reaching the aircraft already did.
+- **Fix: a SIGMET type switched off is no longer shown as used by PSX** in
+  the SIGMET JSON and on the map. The JSON has the per-type toggles in
+  `type_on`.
+
 ## 2.5.0 (2026-11-06)
 
 - **Fix: the periodic clock sync no longer rewrites PSX's clock about
