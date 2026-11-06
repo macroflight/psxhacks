@@ -19,7 +19,7 @@ dead-reckoning a target, once when we stop (it moves again, is removed or
 is gone), not for each update.
 
 A temporary workaround, opt-in ([filtering]
-stale_traffic_dead_reckon_seconds): the real fix belongs in vPilot.
+stale_traffic_dead_reckon_seconds); the cause of the frozen positions is not known yet.
 
 TfcPos holds 7 slots "lat rad;lon rad;true altitude x10 ft;true track x100",
 nearest first; an empty slot is 0;0;0;0. Slots carry no callsigns: a

@@ -29,8 +29,8 @@
     at a typical speed for its altitude.
   - Each change gets a WARNING, once when it starts and once when it
     stops.
-  - It's off by default, and only a workaround: the real fix belongs
-    in vPilot.
+  - It's off by default, and only a workaround: the cause of the
+    frozen positions is still being investigated.
   - **Utils → Stale traffic filter** switches it on and off at runtime
     and sets its time, until the router restarts. It shows the 7 traffic
     slots (position, altitude, range and bearing), which of them are

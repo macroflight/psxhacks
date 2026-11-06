@@ -754,7 +754,8 @@ frdp_rtt_warning = 0.5
 
 - `stale_traffic_dead_reckon_seconds`: a temporary workaround for frozen
   vPilot traffic. It's opt-in: default `0` (off); `60` is a good value.
-  The real fix belongs in vPilot. vPilot sometimes repeats an
+  The cause of the frozen positions is still being investigated.
+  vPilot sometimes repeats an
   aircraft's last position in its updates, for 20 s or for minutes,
   while that aircraft's altitude keeps changing. PSX works out each
   traffic target's speed (`TfcVel`) from successive positions, so on

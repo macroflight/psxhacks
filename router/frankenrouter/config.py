@@ -293,7 +293,7 @@ class _RouterConfigFiltering:  # pylint: disable=missing-class-docstring,too-few
         # the display name from name=) is fixed on ingress: a repeated
         # position is dead-reckoned along the target's last track and
         # speed for up to this many seconds, then removed until it moves
-        # again. See stale_traffic.py. The real fix belongs in vPilot.
+        # again. See stale_traffic.py. A workaround; the cause isn't known yet.
         self.stale_traffic_dead_reckon_seconds = data.get('stale_traffic_dead_reckon_seconds', 0)
         if (isinstance(self.stale_traffic_dead_reckon_seconds, bool) or
                 not isinstance(self.stale_traffic_dead_reckon_seconds, (int, float)) or
