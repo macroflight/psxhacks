@@ -1,6 +1,6 @@
 # frankenweather changelog
 
-## Unreleased
+## 2.6.0 (2026-11-06)
 
 CBs popping in, vanishing and jumping (Simfest and the main sim around
 Yangon, 2026-11-06), three causes:
