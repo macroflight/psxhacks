@@ -9241,7 +9241,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     "polygon": [[round(la, 4), round(lo, 4)] for la, lo in poly],
                     "base_ft": s["base_ft"],
                     "top_ft": s["top_ft"],
-                    "used_by": ("frankenweather"
+                    "used_by": (None if not self._sigmet_type_on.get(s["hazard"], True)
+                                else "frankenweather"
                                 if id(s) in cb_used or s["hazard"] in turb_used
                                 else "PSX" if psx_gets else None),
                 })
@@ -10638,7 +10639,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         Every SIGMET of the last download (fw_sigmet.all_entries(): all
         normalized fields, ok/reason), each also with "expired" and
         "used_by": "frankenweather" (a type it handles), "PSX" (given to
-        PSX) or None (unusable, expired, or no SIGMETs for PSX).
+        PSX) or None (unusable, expired, type switched off, or no SIGMETs
+        for PSX). "type_on" has the per-type toggles.
         """
         now = time.time()
         handled = self._handled_hazards()
@@ -10647,7 +10649,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         for entry in self._own_sigmet_downloaded:
             expired = bool(entry["valid_to"]) and entry["valid_to"] < now
             used_by = None
-            if entry["ok"] and not expired and own:
+            type_on = self._sigmet_type_on.get(entry["hazard"], True)
+            if entry["ok"] and not expired and own and type_on:
                 if entry["hazard"] in handled:
                     used_by = "frankenweather"
                 elif not self._disable_psx_sigmets:
@@ -10671,6 +10674,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "sigmet_system_on": self._sigmet_active(),
             "psx_sigmets_off": self._disable_psx_sigmets,
             "handled_by_frankenweather": sorted(handled),
+            "type_on": dict(self._sigmet_type_on),
             "counts": {
                 "total": len(entries),
                 "usable": sum(1 for e in entries if e["ok"] and not e["expired"]),
