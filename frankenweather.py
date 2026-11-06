@@ -5939,7 +5939,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     'base_ft': target_base,
                     'last_update_ts': now - 60.0 / _CB_FADE_IN_OKTAS_PER_MIN,
                     'last_oktas_rate_per_min': 0.0, 'last_top_rate_per_min': 0.0}
-        elapsed_min = max(0.0, (now - ramp['last_update_ts']) / 60.0)
+        # At most two steps' worth: a CB that sat at its target since the last
+        # zone update (no steps written) would otherwise jump by 5 minutes'
+        # fade at once when the target changes (test sim, 2026-11-06: 6/8
+        # to 5/8 and its top 5,000 ft lower in one write)
+        elapsed_min = min(max(0.0, (now - ramp['last_update_ts']) / 60.0),
+                          2.0 * _CB_FADE_STEP_S / 60.0)
         old = ramp['current_oktas']
         if target_oktas >= old:
             new_oktas = min(float(target_oktas), old + _CB_FADE_IN_OKTAS_PER_MIN * elapsed_min)
