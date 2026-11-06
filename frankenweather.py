@@ -461,6 +461,16 @@ _DATIS_LINE_MAX_CHARS = 24            # PSX MetarsUp (Qs464): max chars per '^'-
 # '^' (see _handle_metars_up()), so blocks never contain an empty segment
 # themselves and splitting on '^^' is exact.
 _DATIS_BLOCK_SEP = '^^'
+
+
+def _has_model_metar(text: str) -> bool:
+    """Return True if PSX's D-ATIS/printer text has one of our station-only METARs.
+
+    "FRANKENWX" stays one token however PSX wraps the lines (24 chars).
+    """
+    return "FRANKENWX" in text
+
+
 # Header for the printer message frankenweather sends after PSX's own FMC
 # ALTN weather-request printout when it contains an UNAVAIL airport we have
 # VATSIM data for -- see _handle_printer_text(). In practice this write
@@ -2291,6 +2301,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self.zone_metar_source: dict = {}
         # zone -> station-only METAR last given to PSX, see _station_only_metar()
         self._zone_station_metar: dict = {}
+        # ICAO -> the real METAR of an airport zone given a station-only one
+        # (_airport_station_only_metar()), for D-ATIS/ALTN replies
+        self._airport_real_metar: dict = {}
         self.last_write_time = 0.0
         # _OWNED_KEYS: key -> the value we last gave PSX (see handle_owned_change())
         self._owned_values: dict[str, str] = {}
@@ -2795,6 +2808,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.psx._set(key, value)  # pylint: disable=protected-access
         finally:
             self._own_write = None
+
+    def _airport_station_only_metar(self) -> bool:
+        """Return True if airport zones get a station-only METAR (see _station_only_metar()).
+
+        Their weather is built from the real METAR by us; PSX given the real
+        one rebuilds the zone from it and replaces our CBs. PSX answers ACARS
+        D-ATIS and ALTN requests from its zone METARs, so this needs the
+        D-ATIS override (which then answers with the real METAR). The
+        Open-Meteo-outage METAR fallback wants PSX to build from real METARs.
+        """
+        return not self.args.no_datis_override and not self._metar_fallback_active
 
     def _station_only_metar(self, zone_num: int, icao: str, now: datetime) -> str:
         """Return the METAR for a zone whose weather we build ourselves.
@@ -8250,17 +8274,26 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 icaos.append(icao)
         return icaos
 
-    def _compose_datis_block(self, icao: str) -> str:
+    def _compose_datis_block(self, icao: str, psx_block: Optional[str] = None) -> str:
         """Build one airport's MetarsUp block.
 
-        The VATSIM METAR if we have one, wrapped to PSX's 24-char line
-        limit, else the same "UNAVAIL" text PSX itself would show.
+        The VATSIM METAR if we have one (else the real METAR of our airport
+        zone there), wrapped to PSX's 24-char line limit, else the same
+        "UNAVAIL" text PSX itself would show. PSX's own block for one of our
+        station-only zone METARs ("SCCI J 160420Z ^EXPECT RWY 01^TRANS LVL
+        90^RMK FRANKENWX MODEL^WX", live 2026-11-06) keeps its ATIS lines
+        and gets the real METAR in place of our remark.
         """
-        raw = self.vatsim_cache.get(icao)
+        raw = self.vatsim_cache.get(icao) or self._airport_real_metar.get(icao)
         if raw is None:
             lines = [f"{icao} UNAVAIL"]
         else:
             lines = textwrap.wrap(raw, width=_DATIS_LINE_MAX_CHARS)
+            if psx_block and _has_model_metar(psx_block):
+                psx_lines = [ln.strip() for ln in psx_block.split("^")]
+                cut = next((i for i, ln in enumerate(psx_lines) if ln.startswith("RMK")),
+                           len(psx_lines))
+                lines = [ln for ln in psx_lines[:cut] if ln] + lines
         return "^".join(lines) + _DATIS_BLOCK_SEP
 
     def _compose_datis_reply(self, value: str) -> str:
@@ -8273,7 +8306,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         icaos = self._datis_requested_icaos(value)
         if not icaos:
             return value
-        return "".join(self._compose_datis_block(icao) for icao in icaos)
+        psx_blocks = {block.strip().split(None, 1)[0]: block.strip()
+                      for block in value.split(_DATIS_BLOCK_SEP) if block.strip()}
+        return "".join(self._compose_datis_block(icao, psx_blocks.get(icao)) for icao in icaos)
 
     def _handle_metars_up(self, _key: str, value: str) -> None:
         """React to PSX's own MetarsUp (Qs464) D-ATIS reply.
@@ -8286,7 +8321,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return
         if self._should_skip_wx_update():
             return
-        if 'UNAVAIL' not in value:
+        if 'UNAVAIL' not in value and not _has_model_metar(value):
             return
         if value == self._datis_last_written:
             # Our own previous write, reflected back via psx_send_and_set()'s
@@ -8302,7 +8337,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
     @staticmethod
     def _print_requested_unavail_icaos(value: str) -> list:
-        """Return ICAOs from a Qs119 printout whose block was exactly "<ICAO> UNAVAIL"."""
+        """Return ICAOs of a Qs119 printout's "<ICAO> UNAVAIL" or station-only METAR blocks."""
         icaos = []
         for block in value.split(_DATIS_BLOCK_SEP):
             parts = block.strip().split(None, 1)
@@ -8310,7 +8345,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 continue
             icao, rest = parts
             if (len(icao) == 4 and icao.isalpha() and icao.isupper() and
-                    rest.strip() == "UNAVAIL"):
+                    (rest.strip() == "UNAVAIL" or _has_model_metar(rest))):
                 icaos.append(icao)
         return icaos
 
@@ -8336,14 +8371,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return
         if self._should_skip_wx_update():
             return
-        if not value.startswith(_DATIS_PRINT_HEADER) or 'UNAVAIL' not in value:
+        if not value.startswith(_DATIS_PRINT_HEADER) or (
+                'UNAVAIL' not in value and not _has_model_metar(value)):
             return
         if value == self._altn_supplement_last_written:
             # Our own previous write, reflected back through
             # psx_send_and_set()'s local cache update -- not a new printout.
             return
         icaos = [icao for icao in self._print_requested_unavail_icaos(value)
-                 if icao in self.vatsim_cache]
+                 if icao in self.vatsim_cache or icao in self._airport_real_metar]
         if not icaos:
             return
         supplement = self._compose_altn_supplement(icaos)
@@ -8916,8 +8952,16 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         wx = _max_cb(wx, refined)
                     elif refined.split(';')[9] != '0':
                         wx = refined
-                new_metars.append(_strip_convective_metar(raw_metars[i]) if cb_removed_for
-                                  else raw_metars[i])
+                if self._airport_station_only_metar():
+                    # Our Wx is built from the METAR (above); giving PSX the
+                    # METAR itself would make it rebuild the zone from it ~1 s
+                    # later, replacing our CBs (2026-11-06 VYYY: 6/8 to
+                    # 44,891 ft became 2/8 to 10,520 ft for 5 min)
+                    self._airport_real_metar[icao] = raw_metars[i]
+                    new_metars.append(self._station_only_metar(i + 1, icao, now))
+                else:
+                    new_metars.append(_strip_convective_metar(raw_metars[i]) if cb_removed_for
+                                      else raw_metars[i])
             else:
                 elev = _airport_elev_m(icao, float(om.get("elevation", 0)) if om else 0.0)
                 new_modes.append(build_wxmode_string(
