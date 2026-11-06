@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-06: version 1.41.1
+
+- The opt-in fix for frozen vPilot traffic no longer says the cause is
+  in vPilot (config, docs and the web page): it's a workaround, and the
+  cause is still being investigated.
+
 ## 2026-11-06: version 1.41.0
 
 - **New: a client can opt out of the post-connect quarantine** by
