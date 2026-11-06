@@ -695,6 +695,9 @@ _MANEUVER_EXIT_DEG = 60.0             # total hdg change to exit maneuvering mod
 # turbulence. Moving it made CBs vanish and pop (2026-11-06 VYYY holds);
 # that matters more than placing new zones ahead (user).
 _HOLD_KEEP_CB_NM = 100.0
+# A zone moving further than this gets its CB cleared before its new
+# position is written (_clear_cb_of_moving_zones())
+_ZONE_MOVE_CLEAR_CB_NM = 3.0
 
 # ---------------------------------------------------------------------------
 # Radar (RainViewer) and lightning (Blitzortung) constants
@@ -7179,6 +7182,29 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self.zone_mode[zone_num] = mode
         self.psx_send_and_set(f"WxMode{zone_num}", mode)
 
+    def _clear_cb_of_moving_zones(self, new_modes: list) -> None:
+        """Write a moving zone's weather without its CB before its new position.
+
+        The new position (WxMode) goes out a second before the zone's new
+        weather, so PSX briefly drew the zone's old CB at its new place
+        (2026-11-06: a 5/8 CB moved 190 nm, then down to the 1/8 a new CB
+        grows from). Drifting zones (advanced zones) move their CB on purpose.
+        """
+        for i, wxmode in enumerate(new_modes):
+            zone_num = i + 1
+            old_mode = self.zone_mode.get(zone_num)
+            if not old_mode or zone_num in self._drift:
+                continue
+            old_pos, new_pos = _fw_drift.wxmode_pos(old_mode), _fw_drift.wxmode_pos(wxmode)
+            if old_pos is None or new_pos is None or (
+                    self._dist_nm(*old_pos, *new_pos) < _ZONE_MOVE_CLEAR_CB_NM):
+                continue
+            wx = self.zone_wx.get(zone_num) or (self.psx.get(f"Wx{zone_num}") if self.psx else None)
+            if wx and parse_wx_zone_basic(wx) and parse_wx_zone_basic(wx)[0] > 0:
+                self.logger.info("Zone %d: CB cleared before the zone moves %.0fnm", zone_num,
+                                 self._dist_nm(*old_pos, *new_pos))
+                self._write_zone_wx(zone_num, _strip_cb(wx))
+
     def _write_zone_wx(self, zone_num: int, wx: str) -> None:
         """Send zone_num's weather if it changed."""
         if self.zone_wx.get(zone_num) == wx:
@@ -9169,6 +9195,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._drift_override(new_modes, new_wxs, new_metars, snap_positions, snap_icaos, month)
         self._inject_wx_slow_transit()
         self.psx_send_and_set("WxAutoSet", "0")
+        self._clear_cb_of_moving_zones(new_modes)
 
         for i, wxmode in enumerate(new_modes):
             zone_num = i + 1

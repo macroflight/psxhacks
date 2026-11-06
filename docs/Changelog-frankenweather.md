@@ -32,6 +32,11 @@ Yangon, 2026-11-06), three causes:
   sight (six zones moved 58-390 nm in one go on the test sim). Zones with
   a CB within 100 nm, out of the window or on the radar, now stay where
   they are, as zones with CB turbulence reaching the aircraft already did.
+- **Fix: a moving zone no longer flashes its old CB at its new place.** The
+  new position goes out a second before the zone's new weather, so PSX
+  briefly drew the old CB there (a 5/8 CB moved 190 nm, then dropped to
+  the 1/8 a new CB grows from). A zone moving more than 3 nm now has its
+  CB cleared first.
 - **Fix: a SIGMET type switched off is no longer shown as used by PSX** in
   the SIGMET JSON and on the map. The JSON has the per-type toggles in
   `type_on`.
