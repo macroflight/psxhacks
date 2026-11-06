@@ -645,14 +645,26 @@ _CB_GROWTH_MAX_TOP_FT_PER_MIN_CEILING = 4000.0
 _MPS_TO_FT_PER_MIN = 196.85
 _CB_DECAY_TOP_FT_PER_MIN = 150.0            # fixed, real-CB-collapse-plausible rate
 _CB_DECAY_OKTAS_PER_MIN = 0.1               # ~1 okta every 10 minutes
-# Without --cb-growth a disappearing CB fades instead (_fade_cb_wx()):
-# 8 oktas / 40000 ft gone in ~13-15 min
-_CB_FADE_OKTAS_PER_MIN = 0.6
-_CB_FADE_TOP_FT_PER_MIN = 2500.0
+# Without --cb-growth a CB fades in and out (_fade_cb_wx()). Real CBs grow
+# from towering cumulus in ~10-20 min and take ~20-30 min to dissipate, so
+# growing is quicker than fading: 6/8 in ~12 min, gone in ~25 (user,
+# 2026-11-06). cb_fade_coro() writes the steps every _CB_FADE_STEP_S between
+# the zone updates (5 min apart), which used to see a 2-okta CB gone in one
+# write (2026-11-06 VYYY).
+_CB_FADE_IN_OKTAS_PER_MIN = 0.5
+_CB_FADE_IN_TOP_FT_PER_MIN = 2500.0
+_CB_FADE_OUT_OKTAS_PER_MIN = 0.25
+_CB_FADE_OUT_TOP_FT_PER_MIN = 1000.0
+_CB_FADE_STEP_S = 20.0
 
 _HDG_WINDOW_S = 300.0                 # heading-change detection window (5 min)
 _MANEUVER_ENTER_DEG = 180.0           # total hdg change to enter maneuvering mode
 _MANEUVER_EXIT_DEG = 60.0             # total hdg change to exit maneuvering mode
+# In maneuvering mode (holds, vectoring) a zone whose CB is this close stays
+# put: visible out of the window or on the radar, or near enough for its
+# turbulence. Moving it made CBs vanish and pop (2026-11-06 VYYY holds);
+# that matters more than placing new zones ahead (user).
+_HOLD_KEEP_CB_NM = 100.0
 
 # ---------------------------------------------------------------------------
 # Radar (RainViewer) and lightning (Blitzortung) constants
@@ -2293,6 +2305,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # current_oktas/current_top_ft/growth_rate_*_per_min/last_update_ts,
         # present only while that zone's CB is actively growing/decaying.
         self.zone_cb_ramp: dict = {}
+        # zone -> the Wx a fading CB is heading for (_fade_cb_wx(), cb_fade_coro())
+        self._zone_cb_fade_target: dict = {}
         # zone_num → (zone position, max oktas, max top ft) for a zone within
         # _CB_SQUEEZE_MIN_FWD_NM, see _limit_close_cb(); and the zone
         # position each zone_wx was sent for
@@ -5846,46 +5860,91 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         parts[9], parts[10] = str(new_oktas), str(round(new_top))
         return ';'.join(parts)
 
-    def _fade_cb_wx(self, zone_num: int, target_wx: str) -> str:
-        """Let zone_num's CB fade instead of vanishing (without --cb-growth).
+    def _fade_cb_wx(self, zone_num: int, target_wx: str) -> str:  # pylint: disable=too-many-locals
+        """Let zone_num's CB fade in and out instead of popping (without --cb-growth).
 
-        A CB appears or grows at once, as forecast, but a CB whose
-        forecast shrinks or disappears (a TEMPO switching off, a new
-        METAR, SIGMET expiry...) shrinks at _CB_FADE_*_PER_MIN: at most
-        ~15 min from 8 oktas. It used to vanish in one zone update,
-        radar echo and turbulence with it. Zone moves reset it (the zone
-        starts fresh), so it never holds a zone back.
+        A CB that appears or grows changes at _CB_FADE_IN_*_PER_MIN (from
+        1 okta and _CB_MIN_DEPTH_FT deep when it's new); one whose forecast
+        shrinks or disappears (a TEMPO switching off, a new METAR, SIGMET
+        expiry, an hourly Open-Meteo update...) at _CB_FADE_OUT_*_PER_MIN. cb_fade_coro()
+        keeps calling this with the last target between zone updates, so
+        PSX gets every step. Zone moves reset it (the zone starts fresh).
         """
+        self._zone_cb_fade_target[zone_num] = target_wx
         parts = target_wx.split(';')
         target_oktas = int(parts[9])
         target_top = float(parts[10])
+        target_base = float(parts[11])
         now = time.time()
         ramp = self.zone_cb_ramp.get(zone_num)
-        if ramp is None or target_oktas >= ramp['current_oktas']:
-            if target_oktas > 0:
-                self.zone_cb_ramp[zone_num] = {
-                    'current_oktas': float(target_oktas), 'current_top_ft': target_top,
-                    'base_ft': float(parts[11]), 'last_update_ts': now,
-                    'last_oktas_rate_per_min': 0.0, 'last_top_rate_per_min': 0.0}
-            else:
-                self.zone_cb_ramp.pop(zone_num, None)
-            return target_wx
+        if ramp is None:
+            if target_oktas <= 0:
+                return target_wx
+            ramp = self.zone_cb_ramp[zone_num] = {
+                'current_oktas': 0.0, 'current_top_ft': target_base + _CB_MIN_DEPTH_FT,
+                'base_ft': target_base, 'last_update_ts': now - 60.0 / _CB_FADE_IN_OKTAS_PER_MIN,
+                'last_oktas_rate_per_min': 0.0, 'last_top_rate_per_min': 0.0}
         elapsed_min = max(0.0, (now - ramp['last_update_ts']) / 60.0)
-        new_oktas = max(float(target_oktas),
-                        ramp['current_oktas'] - _CB_FADE_OKTAS_PER_MIN * elapsed_min)
-        if new_oktas < 0.5:
+        old = ramp['current_oktas']
+        if target_oktas >= old:
+            new_oktas = min(float(target_oktas), old + _CB_FADE_IN_OKTAS_PER_MIN * elapsed_min)
+        else:
+            new_oktas = max(float(target_oktas), old - _CB_FADE_OUT_OKTAS_PER_MIN * elapsed_min)
+        if new_oktas < 0.5 and target_oktas <= 0:
             self.zone_cb_ramp.pop(zone_num, None)
             return target_wx
-        base = float(parts[11]) if target_oktas > 0 else ramp.get('base_ft', float(parts[11]))
-        new_top = max(target_top if target_oktas > 0 else base + _CB_MIN_DEPTH_FT,
-                      ramp['current_top_ft'] - _CB_FADE_TOP_FT_PER_MIN * elapsed_min)
+        base = target_base if target_oktas > 0 else ramp.get('base_ft', target_base)
+        goal_top = target_top if target_oktas > 0 else base + _CB_MIN_DEPTH_FT
+        old_top = ramp['current_top_ft']
+        if goal_top >= old_top:
+            new_top = min(goal_top, old_top + _CB_FADE_IN_TOP_FT_PER_MIN * elapsed_min)
+        else:
+            new_top = max(goal_top, old_top - _CB_FADE_OUT_TOP_FT_PER_MIN * elapsed_min)
+        new_top = max(new_top, base + _CB_MIN_DEPTH_FT)
+        rates = ((new_oktas - old) / elapsed_min, (new_top - old_top) / elapsed_min) \
+            if elapsed_min else (0.0, 0.0)
         ramp.update(current_oktas=new_oktas, current_top_ft=new_top, base_ft=base,
-                    last_update_ts=now, last_oktas_rate_per_min=-_CB_FADE_OKTAS_PER_MIN,
-                    last_top_rate_per_min=-_CB_FADE_TOP_FT_PER_MIN)
+                    last_update_ts=now, last_oktas_rate_per_min=rates[0],
+                    last_top_rate_per_min=rates[1])
+        if target_oktas > 0 and (new_oktas, new_top) == (target_oktas, target_top):
+            return target_wx
         parts[9] = str(max(1, round(new_oktas)))
         parts[10] = str(round(new_top))
         parts[11] = str(round(base))
         return ';'.join(parts)
+
+    async def cb_fade_coro(self) -> None:
+        """Without --cb-growth: every _CB_FADE_STEP_S, write the next step of each fading CB.
+
+        The zone updates (_fade_cb_wx()) are minutes apart; this writes the
+        steps in between so a CB grows or shrinks gradually instead of
+        jumping at the next update. Drifting zones (advanced zones) and
+        zones a situ load or a user override owns are left alone.
+        """
+        myname = inspect.currentframe().f_code.co_name
+        try:
+            self.logger.debug("Starting %s", myname)
+            while True:
+                await asyncio.sleep(_CB_FADE_STEP_S)
+                if (self.args.cb_growth or not self.psx_connected or self.psx is None or
+                        self.psx_paused or self._should_skip_wx_update()):
+                    continue
+                for zone_num, target in list(self._zone_cb_fade_target.items()):
+                    if zone_num not in self.zone_cb_ramp or zone_num in self._drift:
+                        continue
+                    if self.zone_wx.get(zone_num) == target:
+                        continue
+                    stepped = self._fade_cb_wx(zone_num, target)
+                    if stepped != self.zone_wx.get(zone_num):
+                        self._inject_wx_slow_transit()
+                        self.last_write_time = time.time()
+                        self.logger.info("Zone %d: CB fade step %s/8 top %s ft (target %s/8)",
+                                         zone_num, stepped.split(';')[9], stepped.split(';')[10],
+                                         target.split(';')[9])
+                        self._write_zone_wx(zone_num, stepped)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
+            self.logger.critical(traceback.format_exc())
 
     def _ramp_cb_wx(  # pylint: disable=too-many-locals,too-many-statements
             self, zone_num: int, target_wx: str, cape_jkg: float = 0.0) -> str:
@@ -6453,6 +6512,26 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return None
         return f"CB turbulence reaches {reach_nm:.0f}nm, aircraft {dist_nm:.0f}nm away"
 
+    def _cb_kept_in_hold(self, zone_num: int) -> Optional[str]:
+        """Return why zone_num stays put in maneuvering mode, or None (see _HOLD_KEEP_CB_NM).
+
+        Any zone whose CB turbulence can reach the aircraft
+        (_cb_turb_in_reach()), and while maneuvering any zone with a CB
+        within _HOLD_KEEP_CB_NM.
+        """
+        why = self._cb_turb_in_reach(zone_num)
+        if why is not None or not self._maneuvering:
+            return why
+        raw = self.psx.get(f"Wx{zone_num}") if self.psx else None
+        cb = parse_wx_zone_basic(raw) if raw else None
+        if (cb is None or cb[0] == 0 or self.ac_lat is None or
+                zone_num not in self.zone_positions):
+            return None
+        dist_nm = self._dist_nm(self.ac_lat, self.ac_lon, *self.zone_positions[zone_num][:2])
+        if dist_nm > _HOLD_KEEP_CB_NM:
+            return None
+        return f"maneuvering, {cb[0]}/8 CB {dist_nm:.0f}nm away"
+
     def _replace_zones_for_cb_area(self) -> bool:
         """Re-place the zones placed before the SIGMETs were applied, if in a TS/TC area.
 
@@ -6517,14 +6596,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
     def _place_all_zones(self, keep_cb_turb: bool = False) -> None:
         """Place all 7 zones randomly around the aircraft (startup, reposition, maneuvering).
 
-        With keep_cb_turb, zones whose CB turbulence can reach the aircraft
-        stay where they are (see _cb_turb_in_reach()).
+        With keep_cb_turb, zones whose CB turbulence can reach the aircraft,
+        and (maneuvering) zones with a CB in sight, stay where they are (see
+        _cb_kept_in_hold()).
         """
         self._zones_placed_before_sigmets = not self._own_sigmets_applied
         kept = {}
         if keep_cb_turb:
             for zone_num, pos in self.zone_positions.items():
-                why = self._cb_turb_in_reach(zone_num)
+                why = self._cb_kept_in_hold(zone_num)
                 if why is not None:
                     kept[zone_num] = pos
                     self.logger.info("Zone %d: %s left in place (%s)", zone_num, pos[2], why)
@@ -6675,7 +6755,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             if reason is None:
                 continue
             why_kept = ("nearest and/or PSX's FocussedWxZone" if zone_num in protected_zones
-                        else self._cb_turb_in_reach(zone_num))
+                        else self._cb_kept_in_hold(zone_num))
             if why_kept is not None:
                 last_logged = self._zone_protected_last_logged.get(zone_num, 0)
                 if now - last_logged >= _ZONE_PROTECTED_LOG_INTERVAL_S:
@@ -10262,6 +10342,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     ("PirepLevels", self.pirep_levels_coro),
                 ]
                 coros.append(("CbDrift", self.cb_drift_coro))   # idle unless advanced zones are on
+                coros.append(("CbFade", self.cb_fade_coro))     # idle with --cb-growth
                 coros.append(("OrchestrationFeed", self.orchestration_feed_coro))
                 coros.append(("CbMotion", self.cb_motion_coro))
                 for name, coro_fn in coros:
