@@ -1,6 +1,6 @@
 # frankenweather changelog
 
-## Unreleased
+## 2.5.0 (2026-11-06)
 
 - **Fix: the periodic clock sync no longer rewrites PSX's clock about
   every other minute.** PSX only broadcasts its clock (TimeEarth) every
