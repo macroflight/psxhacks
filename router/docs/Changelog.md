@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026-11-06: version 1.41.0
 
 - **New: a client can opt out of the post-connect quarantine** by
   sending `addon=FRANKENROUTER:1:NO_QUARANTINE`. For test tools that load
