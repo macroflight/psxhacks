@@ -317,6 +317,7 @@ class RulesCode(enum.Enum):
     FRDP_FLIGHTCONTROLS = enum.auto()
     FRDP_ELEVATION_SOURCE = enum.auto()
     FRDP_TRAFFIC_SOURCE = enum.auto()
+    FRDP_SEAT = enum.auto()
     FRDP_MASTER_BANG = enum.auto()
     FRDP_CREW_ALERTNESS = enum.auto()
     FRDP_JOIN = enum.auto()
@@ -654,6 +655,26 @@ class Rules():  # pylint: disable=too-many-public-methods
             return self.myreturn(RulesAction.DROP, RulesCode.FRDP_TRAFFIC_SOURCE)
         return self.myreturn(RulesAction.UPSTREAM_ONLY, RulesCode.FRDP_TRAFFIC_SOURCE)
 
+    def handle_addon_frankenrouter_seat(self, payload):
+        """Handle FRDP SEAT message (shared cockpit seat assignment, seats.py).
+
+        Format:
+        addon=FRANKENROUTER:<protocol version>:SEAT:<LEFT|RIGHT|OBSERVER>:<sim name>
+
+        The master applies it to SHAREDINFO (evicting the seat's occupant to the
+        other pilot seat or observer) and broadcasts; other routers forward it
+        upstream. A standalone router has no seats.
+        """
+        seat, _, sim = payload.partition(":")
+        if self.router.config.identity.type == 'master':
+            error = self.router.apply_seat_request(seat, sim)
+            if error:
+                self.logger.warning("Ignoring FRDP SEAT %s: %s", payload, error)
+            return self.myreturn(RulesAction.DROP, RulesCode.FRDP_SEAT)
+        if self.router.config.identity.type == 'standalone':
+            return self.myreturn(RulesAction.DROP, RulesCode.FRDP_SEAT)
+        return self.myreturn(RulesAction.UPSTREAM_ONLY, RulesCode.FRDP_SEAT)
+
     def handle_addon_frankenrouter_master_bang(self):
         """Handle a FRDP MASTER_BANG message.
 
@@ -912,6 +933,8 @@ class Rules():  # pylint: disable=too-many-public-methods
             'pilot_flying_simulator',
             'elevation_source_simulator',
             'traffic_source_simulator',
+            'seat_left_simulator',
+            'seat_right_simulator',
             'errors',
             'warnings',
             'crew_alertness',
@@ -1118,6 +1141,8 @@ class Rules():  # pylint: disable=too-many-public-methods
             return self.handle_addon_frankenrouter_elevation_source(payload)
         if message_type == 'TRAFFIC_SOURCE':
             return self.handle_addon_frankenrouter_traffic_source(payload)
+        if message_type == 'SEAT':
+            return self.handle_addon_frankenrouter_seat(payload)
         if message_type == 'MASTER_BANG':
             return self.handle_addon_frankenrouter_master_bang()
         if message_type == 'CREW_ALERTNESS':

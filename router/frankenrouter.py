@@ -39,6 +39,7 @@ from frankenrouter import stale_traffic
 from frankenrouter import cdumenus
 from frankenrouter import crewalertness
 from frankenrouter import logcompress
+from frankenrouter import seats
 
 from frankenrouter.rules import (
     RulesAction, RulesCode, Rules, START_PRIVATE_WINDOW_S, FLIGHT_CONTROL_INPUT_KEYWORDS)
@@ -121,6 +122,8 @@ FRDP_ROUTERINFO_INTERVAL = 10.0
 
 # How often to send FRDP SHAREDINFO (also sent after certain events, e.g router connects to network)
 FRDP_SHAREDINFO_INTERVAL = 10.0
+# A seated sim that disconnects keeps its seat this long (reconnects are common)
+SEAT_GRACE_S = 120.0
 
 # A client sending TfcPos at least this often counts as a traffic sender
 # (see Frankenrouter._traffic_sender_errors())
@@ -531,6 +534,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.session_password = None
         self.observer_session_password = None
         self.observer_mode = False
+        # Seat assignment (seats.py): when a seated sim was last missing (master),
+        # and the seat this sim last acted on (slave: SELECT_ACP/layout sent)
+        self.seat_missing_since = {}
+        self.own_seat_applied = None
+        self.seat_acp_sent = set()
 
         # Sim event log: all_sim_events holds events from this and all remote routers.
         # _simevents_pending accumulates local events not yet broadcast to the network.
@@ -651,6 +659,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             'pilot_flying_simulator': "NO_CONTROL_LOCKS",
             'elevation_source_simulator': "NOSIM",
             'traffic_source_simulator': "NOSIM",
+            'seat_left_simulator': seats.NOSIM,
+            'seat_right_simulator': seats.NOSIM,
             'errors': [],
         }
         # Track when we last send the start keyword upstream
@@ -673,6 +683,104 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.status_display_requested = asyncio.current_task().get_name()
         self.frdp_routerinfo_requested = asyncio.current_task().get_name()
         self.frdp_sharedinfo_requested = asyncio.current_task().get_name()
+
+    def apply_seat_request(self, seat, sim):
+        """Put sim in seat (LEFT/RIGHT/OBSERVER) in SHAREDINFO; master only.
+
+        Return an error string, or None when applied. The master's own sim
+        never has a seat (it has no pilot controls). An evicted sim moves to
+        the other pilot seat if free, else becomes an observer (seats.assign()).
+        """
+        if self.config.identity.type != 'master':
+            return "only the master router assigns seats"
+        if sim == self.config.identity.simulator:
+            return f"{sim} is the master sim, which never has a seat"
+        left = self.sharedinfo.get('seat_left_simulator', seats.NOSIM)
+        right = self.sharedinfo.get('seat_right_simulator', seats.NOSIM)
+        try:
+            new_left, new_right, evicted, evicted_to = seats.assign(left, right, sim, seat)
+        except ValueError as exc:
+            return str(exc)
+        self.logger.info("SEAT: %s -> %s (left %s -> %s, right %s -> %s%s)",
+                         sim, seat, left, new_left, right, new_right,
+                         f", evicted {evicted} to {evicted_to}" if evicted else "")
+        self._set_seats(new_left, new_right)
+        return None
+
+    def _set_seats(self, new_left, new_right):
+        """Store new seat occupants in SHAREDINFO, record changes, broadcast."""
+        for key, value in (('seat_left_simulator', new_left), ('seat_right_simulator', new_right)):
+            prev = self.sharedinfo.get(key, seats.NOSIM)
+            if value != prev:
+                self.sharedinfo[key] = value
+                self.record_sim_event('sharedinfo_change', field=key, value=value, prev=prev)
+                self.frdp_sharedinfo_requested = True
+
+    def own_seat(self):
+        """Return this router's sim's seat (LEFT/RIGHT/OBSERVER) per SHAREDINFO."""
+        return seats.seat_of(self.sharedinfo.get('seat_left_simulator', seats.NOSIM),
+                             self.sharedinfo.get('seat_right_simulator', seats.NOSIM),
+                             self.config.identity.simulator)
+
+    async def send_seat_to_local_clients(self, seat, layout=True):
+        """Tell this sim's own (non-router) clients about its seat.
+
+        PSX.NET.VATSIM's audio control panel (observer = CENTER) and, if
+        [seat] send_layout, the PSX layout for the seat. Never to other
+        routers: these are per-sim (rules.py also drops SELECT_ACP that
+        arrives from another sim).
+        """
+        local = [c for c in self.clients.values() if not c.is_frankenrouter]
+        if not local:
+            return
+        acp = {'LEFT': 'LEFT', 'RIGHT': 'RIGHT'}.get(seat, 'CENTER')
+        peers = [c.peername for c in local]
+        await self.client_broadcast(f"addon=PSXNETVATSIM:SELECT_ACP:{acp}", include=peers)
+        if layout and self.config.seat.send_layout:
+            await self.client_broadcast(f"layout={self.config.seat.layouts[seat]}", include=peers)
+
+    async def _housekeeping_seats(self):
+        """Seat housekeeping: the master's reconnect grace, a slave's local seat actions."""
+        if self.config.identity.type == 'master':
+            left = self.sharedinfo.get('seat_left_simulator', seats.NOSIM)
+            right = self.sharedinfo.get('seat_right_simulator', seats.NOSIM)
+            connected = {v.get('simulator_name') for v in self.routerinfo.values()
+                         if v.get('type') == 'slave'}
+            now = time.time()
+            keep = set(connected)
+            for sim in (left, right):
+                if sim == seats.NOSIM:
+                    continue
+                if sim in connected:
+                    self.seat_missing_since.pop(sim, None)
+                    continue
+                since = self.seat_missing_since.setdefault(sim, now)
+                if now - since < SEAT_GRACE_S:
+                    keep.add(sim)
+            new_left, new_right, vacated = seats.vacate_missing(left, right, keep)
+            if vacated:
+                for sim in vacated:
+                    self.seat_missing_since.pop(sim, None)
+                self.logger.info("SEAT: %s gone for %.0f s, seat emptied",
+                                 ", ".join(vacated), SEAT_GRACE_S)
+                self._set_seats(new_left, new_right)
+        elif self.config.identity.type == 'slave' and self.sharedinfo.get('master_uuid'):
+            seat = self.own_seat()
+            local = [c for c in self.clients.values() if not c.is_frankenrouter]
+            if seat != self.own_seat_applied:
+                self.logger.info("SEAT: this sim is now %s (was %s)", seat, self.own_seat_applied)
+                self.own_seat_applied = seat
+                await self.send_seat_to_local_clients(seat)
+                self.seat_acp_sent = {c.client_id for c in local}
+            else:
+                # A client that connected later (e.g. PSX.NET.VATSIM restarted) gets
+                # the audio panel too - not the layout, which only follows seat changes
+                new = [c for c in local if c.client_id not in self.seat_acp_sent]
+                if new:
+                    acp = {'LEFT': 'LEFT', 'RIGHT': 'RIGHT'}.get(seat, 'CENTER')
+                    await self.client_broadcast(f"addon=PSXNETVATSIM:SELECT_ACP:{acp}",
+                                                include=[c.peername for c in new])
+                    self.seat_acp_sent |= {c.client_id for c in new}
 
     def record_sim_event(self, event_type, ts=None, **kwargs):
         """Append a sim event to the local log and the pending broadcast list."""
@@ -3090,6 +3198,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             "pilot_flying_simulator": self.sharedinfo["pilot_flying_simulator"],
             "elevation_source_simulator": self.sharedinfo["elevation_source_simulator"],
             "traffic_source_simulator": self.sharedinfo["traffic_source_simulator"],
+            "seat_left_simulator": self.sharedinfo.get("seat_left_simulator", seats.NOSIM),
+            "seat_right_simulator": self.sharedinfo.get("seat_right_simulator", seats.NOSIM),
             "errors": self.get_errors(),
             # Shown on every sim's /efb (Router errors and warnings): e.g.
             # the navdata checks only the master makes
@@ -4574,6 +4684,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 await self._housekeeping_cdu_menus()
                 await self._housekeeping_crew_alertness()
                 await self._housekeeping_no_upstream_warning()
+                await self._housekeeping_seats()
                 await self._housekeeping_auto_reset_clients()
                 if time.perf_counter() - last_run > HOUSEKEEPING_INTERVAL:
                     last_run = time.perf_counter()
@@ -4894,6 +5005,10 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         elif code == RulesCode.FRDP_ELEVATION_SOURCE:
             self.logger.info(
                 "Got FRDP ELEVATION_SOURCE message from %s: %s",
+                sender_hr, line)
+        elif code == RulesCode.FRDP_SEAT:
+            self.logger.info(
+                "Got FRDP SEAT message from %s: %s",
                 sender_hr, line)
         elif code == RulesCode.FRDP_TRAFFIC_SOURCE:
             self.logger.info(

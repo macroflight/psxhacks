@@ -340,7 +340,34 @@ FIXME: document the JSON data format. Among its keys: `errors` and
 warnings, shown on every router's `/efb` page; `crew_alertness`, the
 state of the master router's crew alertness monitor (`enabled`, `level`
 `A`/`C`/`W` or null, `idle_s`, `phase`, `times_min`, `min_altitude`,
-`message`), shown on every slave router's Utils page.
+`message`), shown on every slave router's Utils page;
+`seat_left_simulator` and `seat_right_simulator`, the slave sims in
+the pilot seats (`NOSIM` when empty, see FRDP SEAT).
+
+### FRDP SEAT
+
+`addon=FRANKENROUTER:<protocol version>:SEAT:<LEFT|RIGHT|OBSERVER>:<sim name>`
+asks the master router to put a slave sim in a seat. It is sent by any
+router's web UI (the seat buttons on `/efb` and the Seats section of
+`/utils/sims`); a slave router forwards it upstream until it reaches the
+master, which stores the result in SHAREDINFO (`seat_left_simulator`,
+`seat_right_simulator`) and broadcasts it. SHAREDINFO is the only source
+of truth for who sits where; add-ons such as frankenpilot follow it.
+
+- One sim per pilot seat; every other connected slave sim is an
+  observer. The master sim never has a seat (it has no pilot controls).
+- Taking an occupied pilot seat moves its occupant to the other pilot
+  seat if that is free, otherwise to observer (so two pilots swap seats
+  with one click). The web UI asks first and reminds you to tell them.
+- A seated sim that disconnects keeps its seat for 2 minutes, then the
+  seat is emptied (nobody is moved into it).
+- When a slave sim's seat changes, its own router tells its local
+  clients: `addon=PSXNETVATSIM:SELECT_ACP:LEFT|RIGHT|CENTER` (observer =
+  CENTER), also to clients that connect later, and, with `[seat]
+  send_layout = true`, `layout=<n>` for the seat (see Configuration.md).
+  These never go to other sims; a `SELECT_ACP` arriving from another sim
+  is dropped.
+- A standalone router has no seats.
 
 ### FRDP CREW_ALERTNESS
 

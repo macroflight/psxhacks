@@ -22,6 +22,27 @@ class _RouterConfigIdentity:  # pylint: disable=missing-class-docstring,too-few-
                 f"got '{self.type}'")
 
 
+class _RouterConfigSeat:  # pylint: disable=missing-class-docstring,too-few-public-methods
+    """[seat]: what this sim's router does locally when the sim's seat changes.
+
+    The seat itself (left/right/observer) lives in the master's SHAREDINFO
+    (see seats.py). The PSX layouts are local to each sim, so a slave router
+    can switch its own PSX instances' layout: send_layout (default false) and
+    the layout number per seat. Several seats may share a layout number.
+    """
+
+    def __init__(self, data):
+        self.send_layout = data.get('send_layout', False)
+        if not isinstance(self.send_layout, bool):
+            raise RouterConfigError("seat.send_layout must be true or false")
+        self.layouts = {}
+        for seat, default in (('left', 1), ('right', 2), ('observer', 2)):
+            value = data.get(f'layout_{seat}', default)
+            if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= 99:
+                raise RouterConfigError(f"seat.layout_{seat} must be a layout number (1-99)")
+            self.layouts[seat.upper()] = value
+
+
 class _RouterConfigListen:  # pylint: disable=missing-class-docstring,too-few-public-methods
     def __init__(self, data):
         self.port = data.get('port', 10748)
@@ -749,6 +770,7 @@ class RouterConfig():  # pylint: disable=too-many-instance-attributes,too-few-pu
 
         self.identity = _RouterConfigIdentity(config.get('identity', {}))
         self.listen = _RouterConfigListen(config.get('listen', {}))
+        self.seat = _RouterConfigSeat(config.get('seat', {}))
         self.log = _RouterConfigLog(config.get('log', {}))
         self.psx = _RouterConfigPsx(config.get('psx', {}))
         self.performance = _RouterConfigPerformance(config.get('performance', {}))

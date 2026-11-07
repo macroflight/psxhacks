@@ -566,6 +566,44 @@ def _latest_router_per_sim(routerinfo, own_sim):
     return latest.values()
 
 
+def _seats_section_html(router):
+    """Build the Seats section of /utils/sims: every slave sim, its seat, and buttons to move it.
+
+    SHAREDINFO is the truth (seats.py); requests go to the master as FRDP
+    SEAT (a slave router forwards them). Moving a sim into an occupied pilot
+    seat moves the occupant to the other pilot seat if free, else observer.
+    """
+    if router.config.identity.type not in ('master', 'slave'):
+        return ''
+    left = router.sharedinfo.get('seat_left_simulator', 'NOSIM')
+    right = router.sharedinfo.get('seat_right_simulator', 'NOSIM')
+    sims = sorted({i.get('simulator_name') for i in router.routerinfo.values()
+                   if i.get('type') == 'slave' and i.get('simulator_name')} |
+                  {sim for sim in (left, right) if sim != 'NOSIM'})
+    labels = {'LEFT': 'Left seat', 'RIGHT': 'Right seat', 'OBSERVER': 'Observer'}
+    rows = ''
+    for sim in sims:
+        seat = 'LEFT' if sim == left else 'RIGHT' if sim == right else 'OBSERVER'
+        buttons = ''.join(
+            f'<form method="post" action="/api/sims/seat" style="display:inline">'
+            f'<input type="hidden" name="sim" value="{html.escape(sim)}">'
+            f'<input type="hidden" name="seat" value="{target}">'
+            '<button type="submit" class="btn btn-gray btn-sm" '
+            'style="width:auto;margin:0 0 0 0.3em"'
+            f'{" disabled" if target == seat else ""}>{labels[target]}</button></form>'
+            for target in ('LEFT', 'RIGHT', 'OBSERVER'))
+        rows += (f'<tr><td>{html.escape(sim)}</td><td><b>{labels[seat]}</b></td>'
+                 f'<td style="text-align:right;white-space:nowrap">{buttons}</td></tr>\n')
+    body = ('<table><tr><th style="text-align:left">Sim</th><th style="text-align:left">Seat</th>'
+            '<th></th></tr>\n' + rows + '</table>\n'
+            if rows else '<p>No slave sims connected.</p>\n')
+    return ('<h2>Seats</h2>\n<p class="note">One sim per pilot seat; everyone else is an observer. '
+            'Moving a sim into an occupied seat moves the occupant to the other pilot seat '
+            'if it is free, otherwise to observer: tell them. The master sim never has a '
+            'seat.</p>\n' + body +
+            '<h2>Disconnect</h2>\n')
+
+
 def _build_sims_page(router, color_scheme):
     """Build the /utils/sims page.
 
@@ -616,6 +654,7 @@ def _build_sims_page(router, color_scheme):
         '</div>'
         '</div>\n'
         '<p class="note">Auto-refreshes every 30 s</p>\n' +
+        _seats_section_html(router) +
         body +
         '</body>\n</html>\n'
     )
@@ -1678,6 +1717,11 @@ def _efb_status_dict(router, ctx):  # pylint: disable=too-many-locals
             'flight_control_locks': _flight_control_locks_label(pilot_flying, own_sim),
             'flight_control_locks_ok': pilot_flying == own_sim,
             'connected_sims': connected_sims,
+            # Shared cockpit seats (seats.py; SHAREDINFO is the truth)
+            'own_sim': own_sim,
+            'seat_left': router.sharedinfo.get('seat_left_simulator', 'NOSIM'),
+            'seat_right': router.sharedinfo.get('seat_right_simulator', 'NOSIM'),
+            'own_seat': router.own_seat(),
         })
 
     weather_info = _fw_efb.weather_status(ctx, now)
@@ -1778,6 +1822,43 @@ def _efb_claim_sources_html(info):
     )
 
 
+def _efb_seat_html(info):
+    """Render the "I am in the left/right seat / observer" strip, or '' where seats don't apply.
+
+    Slave routers only: the master sim never has a seat, standalone has no
+    seats. Clicking a pilot seat someone else holds asks first: they will be
+    moved (to the other pilot seat if free, else observer) and it's the
+    clicker's job to tell them. The button shows "Requested..." at once; the
+    next status poll shows the real result.
+    """
+    if not info.get('is_slave') or 'own_seat' not in info:
+        return ''
+    own, left, right = info['own_sim'], info['seat_left'], info['seat_right']
+    labels = {'LEFT': 'Left seat', 'RIGHT': 'Right seat', 'OBSERVER': 'Observer'}
+    holders = {'LEFT': left, 'RIGHT': right}
+    buttons = []
+    for seat in ('LEFT', 'RIGHT', 'OBSERVER'):
+        holder = holders.get(seat, 'NOSIM')
+        occupied = holder not in ('NOSIM', own) and seat != 'OBSERVER'
+        current = info['own_seat'] == seat
+        style = ' style="outline:2px solid #22c55e"' if current else ''
+        buttons.append(
+            f'<button type="button" class="efb-chip efb-chip-sm"{style} '
+            f'onclick="efbSeat(this, {json.dumps(seat)}, '
+            f'{json.dumps(holder if occupied else "")})">'
+            f'{labels[seat]}{" &#10003;" if current else ""}</button>')
+
+    def name(sim):
+        if sim == 'NOSIM':
+            return 'empty'
+        return html.escape(sim) + (' (this sim)' if sim == own else '')
+    return (
+        '<div class="efb-banner" style="background:transparent">'
+        f'Seats: left <b>{name(left)}</b>, right <b>{name(right)}</b>. '
+        f'I am in: {" ".join(buttons)}</div>\n'
+    )
+
+
 def _build_efb_page(router, ctx, page_url):
     """Build the compact /efb status+control page for the PSX.NET EFB app."""
     status = _efb_status_dict(router, ctx)
@@ -1802,6 +1883,7 @@ def _build_efb_page(router, ctx, page_url):
         '</head>\n<body>\n'
         f'<div id="efb-errors">{_efb_errors_html(r["errors"])}</div>\n'
         f'<div id="efb-claim-sources">{_efb_claim_sources_html(r)}</div>\n'
+        f'<div id="efb-seat">{_efb_seat_html(r)}</div>\n'
         '<div class="efb-grid wide">' +
         _efb_status_card(r, w) + _fw_efb.controls_card(w) +
         _fw_efb.location_wx_card(loc, w, w['sigmet_hazards']) +
@@ -1827,6 +1909,8 @@ def _build_efb_page(router, ctx, page_url):
         '    var lc = document.getElementById("efb-location-card");\n'
         '    if (ec) ec.innerHTML = s.errors_html;\n'
         '    if (cs) cs.innerHTML = s.claim_sources_html;\n'
+        '    var st = document.getElementById("efb-seat");\n'
+        '    if (st) st.innerHTML = s.seat_html;\n'
         '    if (sc) sc.outerHTML = s.status_html;\n'
         '    if (cc) cc.outerHTML = s.controls_html;\n'
         '    var hp = document.getElementById("efb-help");\n'
@@ -1837,6 +1921,17 @@ def _build_efb_page(router, ctx, page_url):
         '  }).catch(function() {});\n'
         '}\n'
         'setInterval(efbPoll, 5000);\n'
+        'function efbSeat(btn, seat, holder) {\n'
+        '  if (holder && !confirm(holder + " is already in that seat. Move them out?\\n\\n"'
+        ' + holder + " goes to the other pilot seat if it is free, otherwise becomes an observer. '
+        'It is your responsibility to tell " + holder + "\'s pilot that you moved them."))'
+        ' return;\n'
+        '  btn.textContent = "Requested...";\n'
+        '  btn.disabled = true;\n'
+        '  fetch("/api/efb/seat", {method: "POST", headers: {"Content-Type": '
+        '"application/x-www-form-urlencoded"}, body: "seat=" + encodeURIComponent(seat)})'
+        '.then(function() { setTimeout(efbPoll, 1500); }).catch(function() {});\n'
+        '}\n'
         '</script>\n' +
         _fw_efb.POPUP_JS +
         '</body>\n</html>\n'
@@ -2655,12 +2750,29 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                     'weather': w,
                     'errors_html': _efb_errors_html(r['errors']),
                     'claim_sources_html': _efb_claim_sources_html(r),
+                    'seat_html': _efb_seat_html(r),
                     'status_html': _efb_status_card(r, w),
                     'controls_html': _fw_efb.controls_card(w),
                     'help_html': _fw_efb.help_html(w),
                     'problems_html': _efb_problems_html(r),
                     'location_html': _fw_efb.location_wx_card(loc, w, w['sigmet_hazards']),
                 }, headers={'Cache-Control': 'no-store'})
+
+            @routes.post('/api/efb/seat')
+            async def handle_efb_seat_post(request):
+                # Slave routers only: ask the master (SHAREDINFO authority) to put
+                # this sim in a seat. The master sim never has one; standalone none.
+                if router.config.identity.type != 'slave':
+                    return web.json_response(
+                        {'ok': False, 'error': 'no seats on this router'}, status=400)
+                seat = (await request.post()).get('seat', '')
+                if seat not in ('LEFT', 'RIGHT', 'OBSERVER'):
+                    return web.json_response({'ok': False, 'error': 'bad seat'}, status=400)
+                sim = router.config.identity.simulator
+                router.logger.info("API: EFB seat request: %s -> %s", sim, seat)
+                await router.send_to_upstream(
+                    f"addon=FRANKENROUTER:{router.frdp_version}:SEAT:{seat}:{sim}")
+                return web.json_response({'ok': True})
 
             @routes.post('/api/efb/claim-sources')
             async def handle_efb_claim_sources_post(_):
@@ -2759,6 +2871,25 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                 return web.Response(
                     text=_build_sims_page(router, cs),
                     content_type='text/html')
+
+            @routes.post('/api/sims/seat')
+            async def handle_sims_seat(request):
+                data = await request.post()
+                sim, seat = (data.get('sim') or '').strip(), data.get('seat', '')
+                if seat not in ('LEFT', 'RIGHT', 'OBSERVER') or not sim:
+                    return web.Response(text="Bad seat request", status=400)
+                if router.config.identity.type == 'master':
+                    error = router.apply_seat_request(seat, sim)
+                    if error:
+                        return web.Response(text=f"Seat not changed: {error}", status=400)
+                elif router.config.identity.type == 'slave':
+                    router.logger.info("API: seat request: %s -> %s", sim, seat)
+                    await router.send_to_upstream(
+                        f"addon=FRANKENROUTER:{router.frdp_version}:SEAT:{seat}:{sim}")
+                    await asyncio.sleep(1.5)   # usually back in the next SHAREDINFO
+                else:
+                    return web.Response(text="Not available on a standalone router", status=404)
+                raise web.HTTPFound('/utils/sims')
 
             @routes.post('/api/sims/{uuid}/disconnect')
             async def handle_sims_disconnect(request):

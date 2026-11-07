@@ -60,6 +60,31 @@ router = "router1"
 type = "slave"
 ```
 
+### `[seat]`
+
+Shared cockpit only (slave routers). What this sim's router does locally
+when the sim's seat changes (seats are assigned on any router's `/efb`
+page or `/utils/sims`, and stored by the master in SHAREDINFO). PSX
+layouts are local to each sim, so each sim configures its own.
+
+- `send_layout`: send `layout=<n>` to this sim's own PSX instances when
+  its seat changes (default false).
+- `layout_left`, `layout_right`, `layout_observer`: the layout number for
+  each seat (defaults 1, 2, 2). Several seats may use the same layout.
+
+The PSX.NET.VATSIM audio control panel (`SELECT_ACP:LEFT|RIGHT|CENTER`)
+is always set by the router, no configuration needed.
+
+Example:
+
+```text
+[seat]
+send_layout = true
+layout_left = 1
+layout_right = 2
+layout_observer = 2
+```
+
 ### `[listen]`
 
 - `port`: the port number the router should listen on

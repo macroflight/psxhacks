@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- **New: seat assignment for shared cockpit.** The master router's
+  SHAREDINFO now says which slave sim sits in the left and right seat;
+  everyone else is an observer, and the master sim never has a seat.
+  - `/efb` on a slave router has "I am in: Left seat / Right seat /
+    Observer" buttons. Taking an occupied seat asks first; the occupant
+    moves to the other pilot seat if it's free, otherwise to observer,
+    and it's up to you to tell them.
+  - `/utils/sims` has a Seats section to move any sim.
+  - A sim that disconnects keeps its seat for 2 minutes.
+  - On a seat change, a sim's own router sets PSX.NET.VATSIM's audio
+    control panel (left, right, or center for observers) and, with the
+    new `[seat]` config section, switches its PSX layout.
+  - New FRDP message `SEAT` (see docs/NOTES.md).
+
 ## 2026-11-06: version 1.41.1
 
 - The opt-in fix for frozen vPilot traffic no longer says the cause is
