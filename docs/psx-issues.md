@@ -420,6 +420,22 @@ confirmed that PSX keeps moving a target that has left the list).
   or make the setting off by default; and let only the main server decide
   on collision damage, not every instance.
 
+### No PSX instance reports its frame rate on the network
+
+*Feature request (2026-11-07).* PSX shows its frame rate only in its own
+window. In a shared cockpit a slow PSX (main server or any main client in
+any sim) causes odd behaviour that is hard to trace, and nothing on the
+network says which instance is struggling: the boost feed of a test sim
+had gaps of up to a second today with no other sign. An ordinary
+variable doesn't help, because it is one shared value that every
+instance would overwrite.
+
+- **Workaround (planned):** frankenboostproxy measures its own sim's boost
+  feed (rate, longest gap) as a stand-in.
+- **Fix needed (Aerowinx):** let every PSX instance send its own frame
+  rate now and then, tagged with its client id (e.g. a non-shared message
+  like `addon=AEROWINX:FPS:<id>:<fps>`), so routers can show all of them.
+
 ## Documentation
 
 Things we had to learn from the forum, other addons' authors, or live
