@@ -52,6 +52,7 @@ $AddonSpecs = [ordered]@{
     'frankenweather'       = @('frankenweather.spec')
     'frankentanker'        = @('frankentanker.spec')
     'frankenpush'          = @('frankenpush.spec')
+    'frankenpilot'         = @('frankenpilot.spec')
     'frankenboostproxy'    = @('frankenboostproxy.spec')
     'show_boost_gauges'    = @('show_boost_gauges.spec')
     'frankencduproxy'      = @('frankencduproxy.spec')

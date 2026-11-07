@@ -12,6 +12,18 @@ PSX instances connected. Can be used for shared cockpit.
 
 [More information is available here](router/README.md)
 
+### frankenpilot.py
+
+A configurable virtual Pilot Monitoring that replaces the silent tasks of
+PSX's own virtual pilot (PSX keeps the call-outs): lights at 10,000 ft
+above the airport, runway entry and runway exit flows, packs after
+takeoff, autobrakes, fuel pumps, anti-ice, F/D follow. Every action can
+be switched off, and it backs off from a switch you change.
+
+Maturity: new (2026-11).
+
+[More information is available here](docs/frankenpilot.md)
+
 ### frankenusb.py
 
 Replacement for the PSX USB subsystem (for my needs at least). Things
