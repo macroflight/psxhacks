@@ -1,5 +1,14 @@
 # frankenboostproxy changelog
 
+
+## Unreleased
+
+- **Fix: the telemetry could carry another sim's name.** frankenboostproxy
+  looked for its own connection in the ROUTERINFO of every sim, so with
+  frankenboostproxy running in several sims it could label its telemetry
+  with the wrong sim. It now takes its sim name from the router's new
+  YOUAREON answer (needs a frankenrouter with YOUAREON).
+
 ## 2.0.1 (2026-10-29)
 
 - **Fix: short jolts are no longer averaged away.** The accelerations

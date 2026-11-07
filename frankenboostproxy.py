@@ -74,11 +74,9 @@ own telemetry is broadcast). It subscribes to:
     on) to compute "gross_weight_kg" and, combined with "tas_kt",
     "kinetic_energy_gj".
   - "addon=FRANKENROUTER:<version>:SUBSCRIBE" (see router/docs/NOTES.md's
-    "FRDP SUBSCRIBE" section), to receive ROUTERINFO and pick out its own
-    directly-connected router's "simulator_name"/"uuid" (by matching its
-    own connection entry by client_provided_id) - silently staying null
-    if not connected to a frankenrouter, or until the first ROUTERINFO
-    after connecting.
+    "FRDP SUBSCRIBE" section): its own router answers with YOUAREON, giving
+    the directly-connected router's "simulator_name"/"uuid" - silently
+    staying null if not connected to a frankenrouter (or an older one).
 
 Lines arrive at a high rate (tens of Hz) and forwarding delay must stay
 low, so each downstream client (on either port) only ever has its most
@@ -220,38 +218,32 @@ class BoostProxy:  # pylint: disable=too-many-instance-attributes,too-few-public
             self.logger.warning("Malformed FuelQty value from PSX: %r", value)
 
     def _on_addon(self, _key: str, value: str) -> None:
-        """Pick our own router's simulator_name/uuid out of an FRDP ROUTERINFO.
+        """Pick our own router's simulator_name/uuid out of an FRDP YOUAREON.
 
-        See router/docs/NOTES.md's "FRDP SUBSCRIBE" section: we opted in
-        with SUBSCRIBE rather than becoming a full FRDP peer, so this is
-        the only addon= traffic we receive. In a multi-router shared
-        cockpit, ROUTERINFO for *other* sims can also reach us (relayed),
-        so pick out our own router by finding our own connection (by the
-        client_provided_id from our name= message) in its connections list.
+        See router/docs/NOTES.md's "FRDP SUBSCRIBE" and "FRDP YOUAREON"
+        sections: our own router answers our SUBSCRIBE with its identity,
+        sent to us only. (ROUTERINFO from every sim reaches every
+        subscriber, so matching our client id in its connection lists could
+        pick another sim running frankenboostproxy too.)
         """
         if not value.startswith('FRANKENROUTER:'):
             return
         parts = value[len('FRANKENROUTER:'):].split(':', 2)
-        if len(parts) < 3 or parts[1] != 'ROUTERINFO':
+        if len(parts) < 3 or parts[1] != 'YOUAREON':
             return
         try:
-            routerinfo = json.loads(parts[2])
+            info = json.loads(parts[2])
         except json.JSONDecodeError:
             return
-        router_uuid = routerinfo.get('uuid')
-        if not router_uuid:
-            return
-        for conn in routerinfo.get('connections', []):
-            if conn.get('client_provided_id') == _MY_CLIENT_ID:
-                self._sim_name = routerinfo.get('simulator_name')
-                self._router_uuid = router_uuid
-                break
+        if info.get('simulator_name'):
+            self._sim_name = info.get('simulator_name')
+            self._router_uuid = info.get('uuid')
 
     async def _psx_task(self) -> None:
         def connected(*_args) -> None:
             self.logger.info("Connected to PSX as client #%s", self.psx.get("id"))
             self.psx.send("name", f"{_MY_CLIENT_ID}:FrankenBoostProxy {__version__}")
-            # Opt into FRDP broadcasts (ROUTERINFO) if connected to a
+            # Opt into FRDP (our router answers with YOUAREON) if connected to a
             # frankenrouter - see router/docs/NOTES.md's "FRDP SUBSCRIBE"
             # section. Silently ignored if connected directly to a PSX
             # main server instead.
