@@ -1,6 +1,5 @@
 # frankenboostproxy changelog
 
-
 ## Unreleased
 
 - **Fix: the telemetry could carry another sim's name.** frankenboostproxy
