@@ -424,6 +424,16 @@ than `is_frankenrouter`, so the client is not FRDP-pinged and none of
 those other behaviors apply. It can be sent on the same connection as
 normal PSX traffic.
 
+### FRDP YOUAREON
+
+`addon=FRANKENROUTER:<protocol version>:YOUAREON:<JSON data>` is the
+router's answer to a client's SUBSCRIBE, sent to that client only and
+never forwarded. The JSON data says which router and sim the client is
+directly connected to: `simulator_name`, `router_name`, `type`, `uuid`.
+Add-ons use it to learn their own sim's name (for example to find their
+own seat in SHAREDINFO): ROUTERINFO from every sim reaches every
+subscriber, so it can't tell an add-on which sim is its own.
+
 ### FRDP NO_QUARANTINE
 
 `addon=FRANKENROUTER:<protocol version>:NO_QUARANTINE` (no payload),

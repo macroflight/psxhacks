@@ -1143,6 +1143,9 @@ class Rules():  # pylint: disable=too-many-public-methods
             return self.handle_addon_frankenrouter_traffic_source(payload)
         if message_type == 'SEAT':
             return self.handle_addon_frankenrouter_seat(payload)
+        if message_type == 'YOUAREON':
+            # Router -> its own subscribed client only; never forwarded
+            return self.myreturn(RulesAction.DROP, RulesCode.FRDP_SUBSCRIBE)
         if message_type == 'MASTER_BANG':
             return self.handle_addon_frankenrouter_master_bang()
         if message_type == 'CREW_ALERTNESS':

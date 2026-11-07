@@ -182,7 +182,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.right_seat = False
 
         # Shared cockpit seat assignment (frankenrouter, router/docs/NOTES.md
-        # "FRDP SEAT"): our own sim's name, from our router's ROUTERINFO, and
+        # "FRDP SEAT"): our own sim's name, from our router's YOUAREON, and
         # the seats from the master's SHAREDINFO. When connected to a
         # frankenrouter, SEAT_SELECT only asks the router for a seat and the
         # L/R remapping follows SHAREDINFO; the router sets the layout and the
@@ -1944,29 +1944,29 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.psx._set(psx_variable, new_psx_value)  # pylint: disable=protected-access
 
     def _on_frdp_addon(self, _key, value):
-        """Track our sim's name (ROUTERINFO) and seat (SHAREDINFO) for seat assignment.
+        """Track our sim's name (YOUAREON) and seat (SHAREDINFO) for seat assignment.
 
-        ROUTERINFO: our own router is the one whose connections list holds a
-        client with our client id. SHAREDINFO: the master's seats; LEFT/RIGHT
-        set our L/R remapping. Observer handling is a later work package.
+        YOUAREON: our own router answers our SUBSCRIBE with its identity, sent
+        to us only (ROUTERINFO from every sim reaches every subscriber, so it
+        can't tell us which sim is ours). SHAREDINFO: the master's seats;
+        LEFT/RIGHT set our L/R remapping. Observer handling is a later work
+        package.
         """
         if not value.startswith('FRANKENROUTER:'):
             return
         parts = value[len('FRANKENROUTER:'):].split(':', 2)
-        if len(parts) < 3 or parts[1] not in ('ROUTERINFO', 'SHAREDINFO'):
+        if len(parts) < 3 or parts[1] not in ('YOUAREON', 'SHAREDINFO'):
             return
         try:
             data = json.loads(parts[2])
         except json.JSONDecodeError:
             return
-        if parts[1] == 'ROUTERINFO':
-            if any(c.get('client_provided_id') == __MY_CLIENT_ID__
-                   for c in data.get('connections', [])):
-                sim = data.get('simulator_name')
-                if sim and sim != self.frdp_sim_name:
-                    self.logger.info(
-                        "Connected via frankenrouter of sim %s: seats follow SHAREDINFO", sim)
-                    self.frdp_sim_name = sim
+        if parts[1] == 'YOUAREON':
+            sim = data.get('simulator_name')
+            if sim and sim != self.frdp_sim_name:
+                self.logger.info(
+                    "Connected via frankenrouter of sim %s: seats follow SHAREDINFO", sim)
+                self.frdp_sim_name = sim
             return
         if not self.frdp_sim_name or 'seat_left_simulator' not in data:
             return

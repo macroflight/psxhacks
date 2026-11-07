@@ -5067,6 +5067,19 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             # have skipped it (see handle_name()'s newly_identified for
             # the same idiom).
             self.connection_state_changed()
+            # Tell this client (only) which router and sim it is directly on:
+            # ROUTERINFO from every sim reaches every subscriber, so it can't
+            # reliably find "its own" there (all frankenusbs share client id USB)
+            if not sender.upstream and not sender.is_frankenrouter:
+                youareon = json.dumps({
+                    "simulator_name": self.config.identity.simulator,
+                    "router_name": self.config.identity.router,
+                    "type": self.config.identity.type,
+                    "uuid": self.uuid,
+                })
+                await self.client_broadcast(
+                    f"addon=FRANKENROUTER:{self.frdp_version}:YOUAREON:{youareon}",
+                    include=[sender.peername])
         elif code == RulesCode.LOAD1:
             self.logger.info(
                 "Got load1 message from %s "
