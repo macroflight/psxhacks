@@ -76,6 +76,12 @@ if ($StartFrankenpush ) {
     Invoke-WindowPosition "frankenpush"
 }
 
+if ($StartFrankenpilot ) {
+    Write-Output "Starting FrankenPilot..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenpilot.ps1"
+    Invoke-WindowPosition "frankenpilot"
+}
+
 if ($StartPsxNetMsfsRouter ) {
     Write-Output "Starting PSX.NET.MSFS.Router..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_psx_net_msfs_router.ps1"

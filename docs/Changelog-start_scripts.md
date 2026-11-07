@@ -1,5 +1,12 @@
 # start_scripts changelog
 
+## Unreleased
+
+- **New: frankenpilot.** `$StartFrankenpilot`, `$FrankenpilotOptions` and
+  `$FrankenpilotRepo` (see the FrankenPilot section of
+  `psxhacks-start-override-EXAMPLE.ps1`); started by `startsim_master.ps1`
+  and `startsim_norouter.ps1`, stopped by the matching `stopsim_*`.
+
 ## 1.13.0 (2026-11-03)
 
 - **New, opt-in: start the PSX main clients from a known-good situ.**

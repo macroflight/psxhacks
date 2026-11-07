@@ -575,6 +575,23 @@
 
 
 # ---------------------------------------------------------------------------
+# FrankenPilot settings (master sim, or a sim without a router)
+#
+# A configurable virtual Pilot Monitoring that replaces PSX's own virtual
+# pilot's silent tasks (PSX keeps the call-outs). In shared cockpit it is on
+# when 0-1 slave sims are connected and sits in the free seat; the router's
+# frankenpilot page can switch it and each of its actions on/off. See
+# docs/frankenpilot.md.
+#
+# NOTE: started from startsim_master.ps1 - see the FrankenTanker settings
+# note above regarding the PSX port.
+# ---------------------------------------------------------------------------
+#$StartFrankenpilot   = $true   # FrankenPilot
+#$FrankenpilotOptions = @("--config-file=C:\fs\frankenpilot.toml")
+#$FrankenpilotRepo    = $null
+
+
+# ---------------------------------------------------------------------------
 # FrankenControl settings (master sim)
 #
 # NOTE: started from startsim_master.ps1 - see the FrankenTanker settings

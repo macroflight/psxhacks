@@ -54,6 +54,12 @@ if ($StartFrankenpush ) {
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenpush.ps1"
 }
 
+if ($StartFrankenpilot ) {
+    AddonDelay
+    Write-Output "Starting FrankenPilot..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenpilot.ps1"
+}
+
 if ($StartSrslPsxMaster ) {
     AddonDelay
     Write-Output "Starting SRSL-PSX..."
