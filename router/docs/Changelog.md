@@ -15,6 +15,10 @@
     control panel (left, right, or center for observers) and, with the
     new `[seat]` config section, switches its PSX layout.
   - New FRDP message `SEAT` (see docs/NOTES.md).
+- **New: `/frankenpilot` page** for the new frankenpilot add-on (virtual
+  Pilot Monitoring): status, auto/on/off and per-action switches, from
+  any router in a shared cockpit (docs/API.md). The router caches
+  frankenpilot's `FRANKENPILOT:STATE` messages.
 - **New: FRDP `YOUAREON`.** A client that sends SUBSCRIBE now gets its
   own router's sim and router name back, so add-ons know which sim they
   are on.

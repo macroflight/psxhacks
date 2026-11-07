@@ -193,7 +193,7 @@ QUARANTINE_VARIABLES = {
 # not listed here since it never reaches this classification -- it is
 # special-cased and forwarded via its own filter in handle_addon() below.
 _KNOWN_ADDONS = frozenset(('FRANKENCDUPROXY', 'FRANKENMSFSBRIDGE', 'FRANKENCONTROL',
-                           'PSXNETVATSIM'))
+                           'PSXNETVATSIM', 'FRANKENPILOT'))
 
 # Same idea, but for addons whose messages don't use the normal NAME:payload
 # colon convention (so the "addon" token above ends up being the whole
@@ -1189,6 +1189,13 @@ class Rules():  # pylint: disable=too-many-public-methods
             self.logger.debug("Got unsupported addon message: %s", rest)
             addon = rest
             payload = ""
+        # frankenpilot's STATE: cache it for the /frankenpilot page (forwarded as usual)
+        if addon == 'FRANKENPILOT' and payload.startswith('STATE:'):
+            try:
+                self.router.frankenpilot_state = json.loads(payload[len('STATE:'):])
+                self.router.frankenpilot_received_at = time.time()
+            except ValueError:
+                self.logger.warning("Malformed FRANKENPILOT STATE: %s", payload[:80])
         # Drop addon=FRANKENCDUPROXY from from other sims
         if addon == 'FRANKENCDUPROXY':
             if (self.sender.is_frankenrouter and

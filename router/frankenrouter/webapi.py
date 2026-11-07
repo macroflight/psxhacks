@@ -184,6 +184,7 @@ _UTILS_PAGE = (
     '<a href="/utils/events" class="btn btn-gray">Event log</a>\n'
     '<a href="/services" class="btn btn-gray">Master sim services</a>\n'
     '{sims_link}'
+    '<a href="/frankenpilot" class="btn btn-gray">frankenpilot</a>\n'
     '<form method="post" action="/api/utils/printer/reset" style="display:inline">'
     '<button class="btn btn-gray">Reset printer</button></form>\n'
     '<form method="post" action="/api/utils/hafap/reset" style="display:inline" '
@@ -602,6 +603,62 @@ def _seats_section_html(router):
             'if it is free, otherwise to observer: tell them. The master sim never has a '
             'seat.</p>\n' + body +
             '<h2>Disconnect</h2>\n')
+
+
+def _build_frankenpilot_page(router, color_scheme):
+    """Build the /frankenpilot page: frankenpilot's state, on/off/auto and a toggle per action.
+
+    Renders whatever frankenpilot last broadcast (addon=FRANKENPILOT:STATE),
+    so new frankenpilot actions need no router change. Changes go back as
+    addon=FRANKENPILOT:COMMAND (see /api/frankenpilot).
+    """
+    st = router.frankenpilot_state
+    age = time.time() - router.frankenpilot_received_at if st else None
+    if not st or age > 60:
+        body = ('<p>No frankenpilot seen on the network in the last minute. It runs in the '
+                'master sim (start scripts: <code>$StartFrankenpilot</code>), see '
+                'docs/frankenpilot.md.</p>\n')
+    else:
+        seat = f" in the {html.escape(str(st.get('seat')))} seat" if st.get('active') else ''
+        status = (f"<b>{'ON' if st.get('active') else 'off'}</b>{seat}"
+                  f" &mdash; mode {html.escape(str(st.get('mode')))}, phase "
+                  f"{html.escape(str(st.get('phase')))}, "
+                  f"version {html.escape(str(st.get('version')))}")
+        enabled = st.get('enabled', 'auto')
+        radios = ''.join(
+            f'<button name="enabled" value="{v}" class="btn btn-sm '
+            f'{"btn-blue" if v == enabled else "btn-gray"}" style="width:auto;margin:0 0.3em 0 0">'
+            f'{label}</button>'
+            for v, label in (('auto', 'Auto'), ('on', 'On'), ('off', 'Off')))
+        rows = ''
+        for name, info in (st.get('actions') or {}).items():
+            on = bool(info.get('on'))
+            rows += (f'<tr><td>{html.escape(str(info.get("text", name)))}</td>'
+                     '<td style="text-align:right">'
+                     f'<button name="toggle" value="{html.escape(name)}" '
+                     f'class="btn btn-sm {"btn-blue" if on else "btn-gray"}" '
+                     f'style="width:auto;margin:0">{"On" if on else "Off"}</button></td></tr>\n')
+        recent = ''.join(f'<li>{html.escape(str(x))}</li>' for x in st.get('recent') or [])
+        body = (f'<p>{status}</p>\n'
+                '<form method="post" action="/api/frankenpilot">'
+                f'<p>frankenpilot: {radios} '
+                '<span class="note">(auto: on with 0-1 slave sims)</span></p>'
+                '<h2>Actions</h2><table>\n' + rows + '</table></form>\n'
+                '<h2>Recent actions</h2><ul>' + (recent or '<li>none yet</li>') + '</ul>\n')
+    return (
+        '<!DOCTYPE html>\n<html>\n<head>\n'
+        f'<meta name="color-scheme" content="{color_scheme}" />\n'
+        '<meta http-equiv="refresh" content="15">\n' +
+        _COMMON_CSS.format() +
+        '\n<style>td:first-child { width: auto; color: inherit; font-size: inherit; }</style>\n'
+        '</head>\n<body>\n'
+        '<div class="page-title">'
+        '<a href="/"><img src="/static/frankentech.png" alt="Home"></a>'
+        '<h1>frankenpilot</h1>'
+        '<div style="margin-left:auto">'
+        '<a href="/utils" class="btn btn-gray btn-sm">Back</a>'
+        '</div></div>\n' + body + '</body>\n</html>\n'
+    )
 
 
 def _build_sims_page(router, color_scheme):
@@ -1897,6 +1954,7 @@ def _build_efb_page(router, ctx, page_url):
         '<button type="button" class="efb-chip efb-chip-sm" onclick="efbPirep()">'
         'PIREP</button> ' +
         music_link +
+        '<a href="/frankenpilot" class="efb-chip efb-chip-sm">frankenpilot</a> '
         '<a href="/" class="efb-chip efb-chip-sm">Full router/weather control panel</a></div>\n'
         '<script>\n'
         'function efbPoll() {\n'
@@ -2793,6 +2851,33 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
                         f"addon=FRANKENROUTER:{router.frdp_version}:TRAFFIC_SOURCE:{sim}")
                 await asyncio.sleep(1)
                 raise web.HTTPFound('/efb')
+
+            @routes.get('/frankenpilot')
+            async def handle_frankenpilot_get(_):
+                return web.Response(
+                    text=_build_frankenpilot_page(
+                        router, router.config.listen.rest_api_color_scheme),
+                    content_type='text/html')
+
+            @routes.post('/api/frankenpilot')
+            async def handle_frankenpilot_post(request):
+                # Sent both ways: frankenpilot runs in the master sim, so from a
+                # slave router this travels up; on the master it's a local client.
+                data = await request.post()
+                cmd = {}
+                if data.get('enabled') in ('auto', 'on', 'off'):
+                    cmd['enabled'] = data['enabled']
+                toggle = data.get('toggle')
+                actions = (router.frankenpilot_state or {}).get('actions') or {}
+                if toggle in actions:
+                    cmd['actions'] = {toggle: not actions[toggle].get('on')}
+                if cmd:
+                    line = f"addon=FRANKENPILOT:COMMAND:{json.dumps(cmd)}"
+                    router.logger.info("API: frankenpilot command %s", cmd)
+                    await router.send_to_upstream(line)
+                    await router.client_broadcast(line)
+                    await asyncio.sleep(1.5)   # frankenpilot answers with a fresh STATE
+                raise web.HTTPFound('/frankenpilot')
 
             @routes.get('/utils')
             async def handle_utils_get(_):

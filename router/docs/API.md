@@ -19,6 +19,17 @@ data from being forwarded and the filter that prevents traffic/TCAS
 data (from vPilot or any other client) from being forwarded. You can also toggle the filters
 from there.
 
+### Web page: /frankenpilot
+
+<http://127.0.0.1:8747/frankenpilot> shows frankenpilot (the virtual Pilot
+Monitoring add-on, see the repository's docs/frankenpilot.md): whether it
+is active, its seat, mode and flight phase, its recent actions, and buttons
+to set it to auto, on or off and to switch each action on or off. It works
+from any router in a shared cockpit: the router caches frankenpilot's
+latest `addon=FRANKENPILOT:STATE` and sends commands as
+`addon=FRANKENPILOT:COMMAND:<json>` both upstream and to its own clients.
+Linked from `/utils` and `/efb`.
+
 ### Mini web page: /upstream
 
 If you open <http://127.0.0.1:8747/upstream> you get a small control
@@ -304,6 +315,17 @@ router in a shared cockpit; `generated_at` says how old it is. Returns
 ```text
 $ curl -s http://127.0.0.1:8747/api/sigmet/latest/json | jq .counts.total
 182
+```
+
+### POST /api/frankenpilot
+
+Form fields: `enabled` (`auto`, `on` or `off`) and/or `toggle` (an action
+name from frankenpilot's STATE, flipped). Sends
+`addon=FRANKENPILOT:COMMAND:{"enabled": ..., "actions": {...}}` and
+redirects to `/frankenpilot`.
+
+```text
+curl -s -d enabled=on http://127.0.0.1:8747/api/frankenpilot
 ```
 
 ### POST /api/vpilotprint/message
