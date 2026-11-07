@@ -59,6 +59,7 @@ $AddonSpecs = [ordered]@{
     'psx_shutdown'         = @('psx_shutdown.spec')
     'temporary_weather_logger' = @('temporary_weather_logger.spec')
     'show_psx'             = @('show_psx.spec')
+    'show_boost_rate'      = @('show_boost_rate.spec')
     'show_usb'             = @('show_usb.spec')
     'show_hid'             = @('show_hid.spec')
     'compare_metars'       = @('compare_metars.spec')

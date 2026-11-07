@@ -124,6 +124,17 @@ newer, and which fields (QNH, wind, visibility, weather, clouds,
 temperature) disagree. Use `--detail` for a per-station diff, and
 `--icao EGLL,KJFK` or `--prefix K,EG` to limit the comparison.
 
+### show_boost_rate.py
+
+Measures how fast a PSX boost server delivers data: every 10 seconds it
+prints the rate (boost lines per second) and the longest gap between two
+lines, and writes the same lines to a log file
+(`show_boost_rate-<date>.log`, or `--log-file`). The boost server
+nominally sends about 20 Hz in flight; a lower rate or long gaps suggest
+that PSX instance can't keep up. Use `--boost-port` for another port (for
+example a second boost server on a main client, or frankenboostproxy's
+relay port). Read-only.
+
 ### show_psx.py
 
 Will display and monitor for changes one PSX variable. Mostly useful

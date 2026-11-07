@@ -1,5 +1,12 @@
 # psxutils changelog
 
+## Unreleased
+
+- New: `show_boost_rate.py`, a diagnostic tool that measures a PSX boost
+  server's data rate and longest gap every 10 seconds and logs it to a
+  file, to spot a PSX instance that can't keep up (nominally about
+  20 Hz in flight).
+
 ## 1.1.0 (2026-10-21)
 
 - New: `compare_metars.py`, a diagnostic tool that downloads the current
