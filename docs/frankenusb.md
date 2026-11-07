@@ -626,6 +626,17 @@ Each of those three is individually optional (see the `SEAT_SELECT` keys
 above), so you can use `SEAT_SELECT` purely for the frankenusb-side L/R
 variable swap if that's all you need.
 
+**Shared cockpit (connected to a frankenrouter):** the router decides who
+sits where (seat assignment, router/docs/NOTES.md "FRDP SEAT"), and
+`SEAT_SELECT` only *asks* the router for the seat (`LEFT`, `RIGHT`, or the
+other one for `TOGGLE`). frankenusb then follows the seat the master's
+SHAREDINFO reports for its own sim, so its L/R swap also follows a seat
+change made on any router's web page. The layout and the PSX.NET.VATSIM
+ACP are set by the router (`[seat]` in its config), and the PSX Human
+Pilot seat by frankenpilot, so the three options above only apply
+without a frankenrouter (a plain PSX main server). Observer seats aren't
+handled by frankenusb yet: it keeps its current L/R mapping.
+
 If a `SEAT_SELECT` button is configured with `'seat': 'TOGGLE'` (the
 default), frankenusb also infers the real current seat from PSX's own
 `layout` value every time a full state dump arrives (on connect and on

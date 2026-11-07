@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import importlib.util
+import json
 import logging
 import os
 import sys
@@ -179,6 +180,15 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         # True when operating from the right (FO) seat; remaps variables
         # listed in LEFT_RIGHT_CONTROLS to their right-seat equivalents.
         self.right_seat = False
+
+        # Shared cockpit seat assignment (frankenrouter, router/docs/NOTES.md
+        # "FRDP SEAT"): our own sim's name, from our router's ROUTERINFO, and
+        # the seats from the master's SHAREDINFO. When connected to a
+        # frankenrouter, SEAT_SELECT only asks the router for a seat and the
+        # L/R remapping follows SHAREDINFO; the router sets the layout and the
+        # PSX.NET.VATSIM ACP, and frankenpilot the PSX human pilot seat.
+        self.frdp_sim_name = None
+        self.shared_seat = None
 
     def _track_task(self, coro):
         """Fire-and-forget `coro` as a tracked Task.
@@ -1441,6 +1451,15 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
                     seat = "LEFT"
                 self.logger.info("SEAT_SELECT: new seat will be %s", seat)
 
+                # Shared cockpit: the router decides. Ask it for the seat;
+                # SHAREDINFO then drives our L/R remapping (_on_frdp_addon),
+                # and the routers/frankenpilot do layout, ACP and PNF seat.
+                if self.frdp_sim_name:
+                    self.logger.info("SEAT_SELECT: asking the router to put %s in the %s seat",
+                                     self.frdp_sim_name, seat)
+                    self.psx.send("addon", f"FRANKENROUTER:1:SEAT:{seat}:{self.frdp_sim_name}")
+                    return
+
                 # Should frankenusb swap all L/R controls in the cabin?
                 if select_usb_lr_swap:
                     if seat == 'RIGHT':
@@ -1790,6 +1809,9 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
             self.logger.info("Connected to PSX")
             self.psx.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__} {__version__}")
             self.psx.send("clientName", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__} {__version__}")
+            # Opt into FRDP broadcasts (ROUTERINFO, SHAREDINFO) for seat
+            # assignment; silently ignored by a plain PSX main server.
+            self.psx.send("addon", "FRANKENROUTER:1:SUBSCRIBE")
             # Called on every load3 (full initial dump complete, including
             # reconnects), so layout/PnfMode are guaranteed fresh here.
             self._sync_seat_state_from_psx()
@@ -1829,6 +1851,7 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
 
         self.psx.subscribe("id")
         self.psx.subscribe("version", connected)
+        self.psx.subscribe("addon", self._on_frdp_addon)
 
         # Needed for tiller mode
         self.psx.subscribe("Tiller")
@@ -1919,6 +1942,45 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.logger.debug("TO PSX: %s -> %s", psx_variable, new_psx_value)
         self.psx.send(psx_variable, new_psx_value)
         self.psx._set(psx_variable, new_psx_value)  # pylint: disable=protected-access
+
+    def _on_frdp_addon(self, _key, value):
+        """Track our sim's name (ROUTERINFO) and seat (SHAREDINFO) for seat assignment.
+
+        ROUTERINFO: our own router is the one whose connections list holds a
+        client with our client id. SHAREDINFO: the master's seats; LEFT/RIGHT
+        set our L/R remapping. Observer handling is a later work package.
+        """
+        if not value.startswith('FRANKENROUTER:'):
+            return
+        parts = value[len('FRANKENROUTER:'):].split(':', 2)
+        if len(parts) < 3 or parts[1] not in ('ROUTERINFO', 'SHAREDINFO'):
+            return
+        try:
+            data = json.loads(parts[2])
+        except json.JSONDecodeError:
+            return
+        if parts[1] == 'ROUTERINFO':
+            if any(c.get('client_provided_id') == __MY_CLIENT_ID__
+                   for c in data.get('connections', [])):
+                sim = data.get('simulator_name')
+                if sim and sim != self.frdp_sim_name:
+                    self.logger.info(
+                        "Connected via frankenrouter of sim %s: seats follow SHAREDINFO", sim)
+                    self.frdp_sim_name = sim
+            return
+        if not self.frdp_sim_name or 'seat_left_simulator' not in data:
+            return
+        if data.get('seat_left_simulator') == self.frdp_sim_name:
+            seat = 'LEFT'
+        elif data.get('seat_right_simulator') == self.frdp_sim_name:
+            seat = 'RIGHT'
+        else:
+            seat = 'OBSERVER'
+        if seat != self.shared_seat:
+            self.logger.info("Seat from SHAREDINFO: %s (was %s)", seat, self.shared_seat)
+            self.shared_seat = seat
+            if seat in ('LEFT', 'RIGHT'):
+                self.right_seat = seat == 'RIGHT'
 
     def _set_psx_human_pilot_seat(self, seat):
         """Put PSX's automated "Human Pilot" in the seat the real pilot is NOT sitting in.

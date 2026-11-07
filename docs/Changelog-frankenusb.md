@@ -1,5 +1,15 @@
 # frankenusb changelog
 
+## Unreleased
+
+- **Shared cockpit seats come from the router.** When connected to a
+  frankenrouter, `SEAT_SELECT` asks the router for a seat instead of
+  switching things itself, and frankenusb's L/R swap follows the seat in
+  the master's SHAREDINFO (also when someone moves you on the router's
+  web page). The router now sets the layout and the PSX.NET.VATSIM ACP,
+  and frankenpilot the PSX Human Pilot seat. Without a frankenrouter,
+  `SEAT_SELECT` works as before.
+
 ## 1.4.3 (2026-10-29)
 
 - **Fix: thrust lever handling depended on the config listing `Tla`.**
