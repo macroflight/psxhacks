@@ -1,5 +1,15 @@
 # frankenweather changelog
 
+## Unreleased
+
+- **New: departure and destination MSA for frankenpilot.** Within 60 nm of
+  the FMC departure and 120 nm of the destination (before top of descent),
+  frankenweather works out the airport's minimum safe altitude from its
+  terrain data (highest terrain within 25 nm plus 1,000 ft, rounded up to
+  100 ft) and announces it once a minute, at once when the FMC destination
+  changes (a diversion): `addon=FRANKENWEATHER:MSA:<id>:{"role", "icao",
+  "msa_ft", "radius_nm"}`. frankenpilot sets the standby altimeter by it.
+
 ## 2.6.0 (2026-11-06)
 
 CBs popping in, vanishing and jumping (Simfest and the main sim around

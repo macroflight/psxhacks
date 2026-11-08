@@ -1552,6 +1552,29 @@ def _max_cb(wx: str, other: str) -> str:
     return ';'.join(a)
 
 
+def area_msa_ft(elevation_at, lat: float, lon: float, radius_nm: float = 25.0,
+                step_nm: float = 0.5) -> Optional[int]:
+    """Return a minimum safe altitude (ft) for the area around (lat, lon), or None.
+
+    The highest terrain within radius_nm plus 1000 ft, rounded up to 100 ft
+    (like the MSA on a departure chart). elevation_at(lat, lon) gives metres
+    or None (ocean, no data); None when no point in the area has data.
+    """
+    highest = None
+    k = math.cos(math.radians(lat)) or 1e-6
+    steps = int(radius_nm / step_nm)
+    for i in range(-steps, steps + 1):
+        for j in range(-steps, steps + 1):
+            if (i * i + j * j) * step_nm * step_nm > radius_nm * radius_nm:
+                continue
+            elev = elevation_at(lat + i * step_nm / 60.0, lon + j * step_nm / 60.0 / k)
+            if elev is not None and (highest is None or elev > highest):
+                highest = elev
+    if highest is None:
+        return None
+    return int(math.ceil((max(highest, 0.0) * 3.28084 + 1000.0) / 100.0) * 100)
+
+
 def metar_to_wx_string(parsed: dict, lat: Optional[float] = None,
                        month: Optional[int] = None) -> str:
     """Convert a parsed METAR dict to a PSX Wx semicolon string.
@@ -10188,6 +10211,62 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             None, _fw_webui.encode_lzma_json_payload, self._sigmet_json())
         return f"FRANKENWEATHER:SIGMETJSON:{self._instance_uuid}:{payload}"
 
+    async def departure_msa_coro(self) -> None:
+        """Announce the departure and destination minimum safe altitudes (60 s, or on change).
+
+        addon=FRANKENWEATHER:MSA:<instance uuid>:{"role", "icao", "msa_ft",
+        "radius_nm"} for frankenpilot (standby altimeter to STD only above the
+        departure MSA). Only near the airport: within 60 nm of the departure
+        (the climb-out) and 120 nm of the destination (before top of descent,
+        well before FL210, so frankenpilot has it by 10,000 ft above even an
+        11,000 ft airport). Worked out once per airport from our terrain data
+        (area_msa_ft()); nothing is sent while it isn't known.
+        """
+        myname = inspect.currentframe().f_code.co_name
+        computed = {}       # icao -> msa_ft or None
+        sent = {}           # role -> ((icao, msa_ft), time sent)
+        try:
+            self.logger.debug("Starting %s", myname)
+            while True:
+                # Every 10 s, so a new FMC destination (a diversion) is announced
+                # at once; unchanged ones every 60 s
+                await asyncio.sleep(10.0)
+                if self._turb_engine is None or not self.psx:
+                    continue
+                try:
+                    pos = parse_pibahealtas(self.psx.get("PiBaHeAlTas"))
+                except (TypeError, ValueError, AttributeError):
+                    continue
+                for role, icao, within_nm in (("departure", self.fmc_dep_icao, 60.0),
+                                              ("destination", self.fmc_dst_icao, 120.0)):
+                    if not icao or icao not in self.airports:
+                        continue
+                    lat, lon = self.airports[icao]
+                    if self._dist_nm(pos[5], pos[6], lat, lon) > within_nm:
+                        continue
+                    if icao not in computed:
+                        try:
+                            computed[icao] = await asyncio.to_thread(
+                                area_msa_ft, self._turb_engine.grid.elevation_at, lat, lon)
+                        except Exception as exc:  # pylint: disable=broad-exception-caught
+                            self.logger.warning("MSA for %s failed: %s", icao, exc)
+                            computed[icao] = None
+                        self.logger.info("MSA %s (%s): %s ft", icao, role, computed[icao])
+                    if computed[icao] is None or not self.psx_connected or \
+                            self._conflict_paused():
+                        continue
+                    last, at = sent.get(role, (None, 0.0))
+                    if last == (icao, computed[icao]) and time.time() - at < 60.0:
+                        continue
+                    sent[role] = ((icao, computed[icao]), time.time())
+                    payload = json.dumps({"role": role, "icao": icao, "msa_ft": computed[icao],
+                                          "radius_nm": 25}, separators=(",", ":"))
+                    self._psx_send("addon",
+                                   f"FRANKENWEATHER:MSA:{self._instance_uuid}:{payload}")
+        except asyncio.CancelledError:
+            self.logger.debug("Stopping %s", myname)
+            raise
+
     async def sigmetstate_broadcast_coro(self) -> None:
         """Broadcast SIGMETSTATE when it changes, and every 5 min for routers connecting later.
 
@@ -10465,6 +10544,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     ("PSXWind", self.psx_wind_coro),
                     ("TurbBroadcast", self.turb_state_broadcast_coro),
                     ("PirepLevels", self.pirep_levels_coro),
+                    ("DepartureMsa", self.departure_msa_coro),
                 ]
                 coros.append(("CbDrift", self.cb_drift_coro))   # idle unless advanced zones are on
                 coros.append(("CbFade", self.cb_fade_coro))     # idle with --cb-growth

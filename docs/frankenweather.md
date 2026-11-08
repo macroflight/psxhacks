@@ -906,6 +906,19 @@ inside one, where the events are most frequent. A SEV TURB SIGMET's
 levels are light chop most of the time, so they read light. The log's
 turbulence labels use the same calibration: up to 34% is light.
 
+### Minimum safe altitude for frankenpilot
+
+Near the FMC departure (60 nm) and destination (120 nm, before top of
+descent), frankenweather works out the airport's minimum safe altitude from
+its terrain data: the highest terrain within 25 nm plus 1,000 ft, rounded
+up to 100 ft. It announces it once a minute, and at once after a change of
+the FMC destination (a diversion), as
+`addon=FRANKENWEATHER:MSA:<id>:{"role":"departure","icao":"YSSY","msa_ft":2500,"radius_nm":25}`.
+frankenpilot uses it for the standby altimeter (STD only above the
+departure MSA, the arrival QNH below the destination MSA). Each airport is
+worked out once (a few seconds, in the background); in cruise nothing is
+done.
+
 ### Time sync
 
 Keeps PSX's clocks (`TimeEarth`, and both cockpit clocks `TimeClockL`/
