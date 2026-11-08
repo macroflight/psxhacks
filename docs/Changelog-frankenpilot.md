@@ -37,5 +37,8 @@
   after the other.
 - Stab trim after landing sometimes chased across 6 units and gave up (when
   it chose to overshoot first, like a pilot).
+- Knows whether the flight is online on VATSIM (any sim connected, as pilot
+  or observer, per the routers' VATSIM status or the vPilot plugin); in the
+  log and on its web page, for step climbs later.
 - Readable log texts for the fuel and anti-ice actions; fuel pumps are
   switched one after the other.

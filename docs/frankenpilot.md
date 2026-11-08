@@ -107,8 +107,14 @@ config file (`[actions]`, names in brackets).
 frankenpilot uses one pair of hands: when two flows run at the same time
 their switches are moved one after the other.
 
-Not yet: step climbs (only when Flight Centre confirms you're not online on
-VATSIM), MCP speed on flap selection (opt-in).
+frankenpilot knows whether the flight is online on VATSIM: online when any
+sim of the cockpit is connected (as pilot or observer), from the routers'
+VATSIM status (the PSX.NET.vPilot plugin) or, without a router, the plugin
+itself; offline only when every sim reports offline. Its log and web page
+show it. Step climbs will only happen offline.
+
+Not yet: step climbs (only when not online on VATSIM), MCP speed on flap
+selection (opt-in).
 
 ## Log files and web UI
 

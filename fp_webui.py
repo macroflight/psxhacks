@@ -69,7 +69,7 @@ def build_app(pilot):
             '<h1>frankenpilot</h1>'
             f'<p><b>{"ON" if st["active"] else "off"}</b>{seat} &mdash; mode '
             f'{html.escape(str(st["mode"]))}, phase {html.escape(str(st["phase"]))}, '
-            f'version {html.escape(str(st["version"]))}</p>'
+            f'version {html.escape(str(st["version"]))}; {html.escape(st["vatsim"])}</p>'
             '<form method="post" action="/api/command">'
             f'<p>frankenpilot: {radios} <span class="note">(auto: on with 0-1 slave sims, '
             'always in local mode)</span></p>'

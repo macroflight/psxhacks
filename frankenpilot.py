@@ -361,7 +361,9 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.cur_alt, self.cur_dep = None, None    # this tick's altitude and departure
         self.hands = asyncio.Lock()     # one switch at a time (see write())
         self.pnf_saved = None       # our PnfMode bits 0/2/3 before we took over
-        self.routerinfo = {}        # uuid -> (time, type, simulator_name)
+        self.routerinfo = {}        # uuid -> (time, type, simulator_name, vatsim_connection)
+        self.vpilot_status = (None, 0.0)   # local mode: the vPilot plugin's own status, time
+        self.vatsim_logged = None
         self.seats = {}             # SHAREDINFO seat_left/right_simulator
         self.in_cloud = None
         self.in_cloud_at = 0.0
@@ -604,10 +606,14 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
                                  data.get('router_name'), data.get('type'))
             elif parts[1] == 'ROUTERINFO' and data.get('uuid'):
                 self.routerinfo[data['uuid']] = (time.monotonic(), data.get('type'),
-                                                 data.get('simulator_name'))
+                                                 data.get('simulator_name'),
+                                                 data.get('vatsim_connection'))
             elif parts[1] == 'SHAREDINFO':
                 self.seats = {k: data.get(k, 'NOSIM')
                               for k in ('seat_left_simulator', 'seat_right_simulator')}
+        elif value.startswith('PSX.NET.VPILOT.STATUS'):
+            # No router (local mode): the vPilot plugin's status reaches us directly
+            self.vpilot_status = (value.rsplit('|', 1)[-1].strip(), time.monotonic())
         elif value.startswith('FRANKENMSFSBRIDGE:'):
             try:
                 data = json.loads(value[len('FRANKENMSFSBRIDGE:'):])
@@ -648,7 +654,7 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         rtype = (self.router or {}).get('type')
         if rtype == 'master':
             self.mode = 'shared'
-            slaves = {sim for t, typ, sim in self.routerinfo.values()
+            slaves = {sim for t, typ, sim, _ in self.routerinfo.values()
                       if typ == 'slave' and now - t < 30}
             auto_on = len(slaves) <= 1
             left = self.seats.get('seat_left_simulator', 'NOSIM')
@@ -1268,6 +1274,30 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
 
     # -------------------------------------------------------------- state out
 
+    def vatsim_online(self):
+        """Return (True/False/None, why): whether this flight is online on VATSIM.
+
+        Any sim connected to VATSIM (as pilot or observer) makes it online.
+        From the routers' ROUTERINFO (vatsim_connection) in a shared cockpit or
+        on a router, else from the vPilot plugin's own status. Offline only when
+        every sim that reports is offline; no reports at all: unknown (None).
+        """
+        now = time.monotonic()
+        sims = {name: conn for t, _, name, conn in self.routerinfo.values()
+                if now - t < 60 and conn in ('online', 'offline', 'unknown')}
+        status, at = self.vpilot_status
+        if not sims and status and now - at < 30:
+            sims = {'this sim': {'CONNECTED': 'online', 'DISCONNECTED': 'offline'}.get(
+                status, 'unknown')}
+        online = sorted(n for n, c in sims.items() if c == 'online')
+        if online:
+            return True, f"online on VATSIM: {', '.join(online)}"
+        if sims and all(c == 'offline' for c in sims.values()):
+            return False, f"not on VATSIM ({', '.join(sorted(sims))} offline)"
+        return None, ("VATSIM status unknown" +
+                      (f" ({', '.join(n for n, c in sims.items() if c == 'unknown')})"
+                       if sims else " (no vPilot plugin status)"))
+
     def state_dict(self):
         """Return our state (router page via STATE, and our own web UI)."""
         return {
@@ -1276,6 +1306,7 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             'actions': {name: {'on': self.actions[name], 'text': text}
                         for name, (_, text) in ACTIONS.items()},
             'params': self.params, 'recent': self.status_log[:10],
+            'vatsim': self.vatsim_online()[1],
         }
 
     def send_state(self):
@@ -1301,6 +1332,10 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             if time.monotonic() - last_state > 10:
                 last_state = time.monotonic()
                 self.send_state()
+            vatsim = self.vatsim_online()
+            if vatsim[0] != self.vatsim_logged:
+                self.vatsim_logged = vatsim[0]
+                self.logger.info("VATSIM: %s", vatsim[1])
             if self.active and time.monotonic() - last_context > 60:
                 last_context = time.monotonic()
                 FILE_ONLY.info("STATE: %s", self.context())
