@@ -84,6 +84,9 @@ ACTIONS = {
     'fd_follow': (True, "Other F/D switch follows the pilot's"),
     'exit_flaps_speedbrake': (True, "After runway exit: flaps up, speedbrake down"),
     'exit_lights': (True, "After runway exit: landing lights off, taxi light on, strobes off"),
+    'exit_autobrake': (True, "Autobrake OFF after runway exit"),
+    'exit_mcp': (True, "Both F/Ds and A/T arm off, MCP SPD pressed twice after runway exit"),
+    'exit_minimums': (True, "Radio and baro minimums off on both sides after runway exit"),
     'exit_wxr_terr': (True, "After runway exit: weather radar and terrain off where on"),
     'exit_stab_trim': (True, "After runway exit: stabilizer trim to 6 units"),
     'exit_apu': (True, "After runway exit: APU start (delayed)"),
@@ -448,6 +451,10 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.flown = False
         self.dep_elev = None
         self.touchdown_hdg = None
+        self.exit_off_since, self.exit_on, self.exit_why = None, None, ""
+        self.stby_want = None          # standby altimeter target: 'STD', hPa*100 or None
+        self.alt_task = None           # the altimeter sync task (one at a time)
+        self.alt_why = "With the pilot flying"
         self.thrust_reduced = False
         self.max_tla = None
         self.on_runway = None       # runway designator we're lined up on / crossing
@@ -606,6 +613,7 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         task = asyncio.get_running_loop().create_task(coro)
         self.tasks.add(task)
         task.add_done_callback(self._task_done)
+        return task
 
     def _task_done(self, task):
         self.tasks.discard(task)
@@ -627,7 +635,8 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
                      "LtLandInbR", "LtRwyTurnL", "LtRwyTurnR", "LtTaxi", "LtStrobe", "LtWing",
                      "LtLogo", "CfgTaxiLight", "TcasPanSel", "EfisActL", "EfisActR", "StabTrim",
                      "EicasA", "EicasC", "LocalRwys", "FmcRteViAcMo", "FmcRte0", "FmcRte1",
-                     "FmcRte2", "PnfMode", "McpFdCp", "McpFdFo", "CfgNaiAuto", "CfgWaiAuto",
+                     "FmcRte2", "PnfMode", "McpFdCp", "McpFdFo", "McpAtArm", "CfgNaiAuto",
+                     "CfgWaiAuto",
                      "NaiPush1", "NaiPush2", "NaiPush3", "NaiPush4", "WaiPush", "NaiTogg1",
                      "NaiTogg2", "NaiTogg3", "NaiTogg4", "WaiTogg", "FuelXfeed1", "FuelXfeed4",
                      "FuelOvrd2Fwd", "FuelOvrd2Aft", "FuelOvrd3Fwd", "FuelOvrd3Aft",
@@ -869,8 +878,7 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             elif on_ground:
                 self.phase = 'GROUND'       # a bounce or a situ quirk: not a flight
         elif self.phase == 'ROLLOUT':
-            turned = heading_diff(hdg, self.touchdown_hdg) > self.params['exit_turn_deg']
-            if gs < self.params['exit_speed_kt'] and turned:
+            if gs < self.params['exit_speed_kt'] and self.runway_exited(lat, lon, hdg, gs):
                 self.phase = 'TAXI_IN'
                 self.on_runway_exit()
         elif self.phase == 'TAXI_IN' and not on_ground:
@@ -1065,12 +1073,35 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
 
     # --- after runway exit
 
+    def runway_exited(self, lat, lon, hdg, gs):
+        """Return True once the aircraft (slow) has left every runway for 3 s.
+
+        With PSX's LocalRwys: off every runway (turning onto another runway, or
+        backtracking, is still on a runway). Without runway data: turned more
+        than exit_turn_deg from the touchdown heading.
+        """
+        now = time.monotonic()
+        if parse_local_runways(self.psx.get("LocalRwys")):
+            on, _, _, where = self.runway_here(lat, lon, hdg, gs)
+            if on:
+                self.exit_off_since, self.exit_on = None, (on.strip(), where)
+                return False
+            self.exit_off_since = self.exit_off_since or now
+            if now - self.exit_off_since < 3.0:
+                return False
+            self.exit_why = (f"off every runway for 3 s (last on runway "
+                             f"{self.exit_on[0] if self.exit_on else '?'}), {gs:.0f} kt")
+            return True
+        if heading_diff(hdg, self.touchdown_hdg) > self.params['exit_turn_deg']:
+            self.exit_why = (f"no runway data: turned from {self.touchdown_hdg:.0f} to {hdg:.0f} "
+                             f"(more than {self.params['exit_turn_deg']:.0f} deg), {gs:.0f} kt")
+            return True
+        return False
+
     def on_runway_exit(self):
         """Flaps, speedbrake, lights, strobes, WXR/TERR, stab trim, APU (delayed)."""
-        self.decide(f"runway exit: landed on heading {self.touchdown_hdg:.0f}, now "
-                    f"{self.ground_speed() or 0:.0f} kt and turned to {self.attitude()[3]:.0f} "
-                    f"(more than {self.params['exit_turn_deg']:.0f} deg, slower than "
-                    f"{self.params['exit_speed_kt']:.0f} kt): after-landing flow")
+        self.decide(f"runway exit: landed on heading {self.touchdown_hdg:.0f}, now {self.exit_why} "
+                    f"(slower than {self.params['exit_speed_kt']:.0f} kt): after-landing flow")
         self.spawn(self.runway_exit_flow())
 
     async def runway_exit_flow(self):  # pylint: disable=too-many-branches
@@ -1090,11 +1121,26 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             if self.get_int("CfgTaxiLight", 1) == 1:
                 if self.get_int("LtTaxi") == 0:
                     await self.write("LtTaxi", 1, "Runway exit: taxi light on")
-            else:
-                await self.write("LtLandInbL", 1,
-                                 "Runway exit: inboard landing light L on as taxi light")
+            else:       # no taxi light installed: both inboard landing lights instead
+                for name, text in (("LtLandInbL", "inboard landing light L"),
+                                   ("LtLandInbR", "inboard landing light R")):
+                    await self.write(name, 1, f"Runway exit: {text} on as taxi light")
             if self.get_int("LtStrobe") == 1:
                 await self.write("LtStrobe", 0, "Runway exit: strobes off")
+        if self.actions['exit_autobrake'] and self.get_int("Autobr") != AUTOBRAKE['OFF']:
+            await self.write("Autobr", AUTOBRAKE['OFF'], "Runway exit: autobrake OFF")
+        if self.actions['exit_mcp']:
+            # SPD twice (user: the MCP speed window back to 100/200 kt, aircraft config)
+            # while the A/T is still armed (without it PSX ignores SPD), then F/Ds, A/T arm
+            for n in (1, 2):
+                await self.press("McpPshSpd", f"Runway exit: MCP SPD button ({n})")
+                await asyncio.sleep(random.uniform(0.3, 0.7))
+            for name, text in (("McpFdCp", "captain's F/D off"), ("McpFdFo", "F/O's F/D off"),
+                               ("McpAtArm", "A/T arm off")):
+                if self.get_int(name) == 1:
+                    await self.write(name, 0, f"Runway exit: {text}")
+        if self.actions['exit_minimums']:
+            await self.clear_minimums()
         if self.actions['exit_wxr_terr']:
             for side, act, wxr, terr in (("captain", "EfisActL", "EcpWxrCp", "EcpTerrCp"),
                                          ("F/O", "EfisActR", "EcpWxrFo", "EcpTerrFo")):
@@ -1112,6 +1158,33 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
                 await self.write("ApuStart", 2, "Runway exit: APU start", delay=False)
                 await asyncio.sleep(1.5)
                 await self.write("ApuStart", 1, "Runway exit: APU selector ON", delay=False)
+
+    async def clear_minimums(self):
+        """Radio and baro minimums off on both EFIS control panels (knob turned all the way down).
+
+        EfisActL/R field 1 = "R"/"r" + radio minimum (-1 = off), field 2 = baro minimum
+        (-101 = off), field 3 = MINS selector (1 = BARO, 0 = RADIO; EcpMinsModeCp/Fo);
+        EcpMinsCp/Fo turn the selected one (test sim 2026-11-08).
+        """
+        for side, suffix, name in (('L', 'Cp', "captain's"), ('R', 'Fo', "F/O's")):
+            try:
+                fields = self.psx.get(f"EfisAct{side}").split(";")
+                radio, baro, mode = int(fields[0].lstrip("Rr")), int(fields[1]), int(fields[2])
+            except (AttributeError, ValueError, IndexError):
+                continue
+            todo = [(0, "radio")] if radio >= 0 else []
+            todo += [(1, "baro")] if baro > -101 else []
+            for want, what in todo:
+                if mode != want:
+                    await self.write(f"EcpMinsMode{suffix}", want,
+                                     f"Runway exit: {name} MINS selector {what.upper()}")
+                    mode = want
+                async with self.hands:
+                    await asyncio.sleep(self.hand_delay(f"EcpMins{suffix}"))
+                    self.psx.send(f"EcpMins{suffix}", "-6000")
+                    self.last_switch = (f"EcpMins{suffix}", time.monotonic())
+                self.log_action(f"Runway exit: {name} {what} minimums off")
+                await asyncio.sleep(0.5)
 
     async def stab_trim_to(self, units):
         """Trim like a pilot: hold the trim switch in blips, sometimes overshoot and come back."""
@@ -1399,10 +1472,14 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
     # --- altimeters
 
     def efis(self, side):
-        """Return (baro setting hPa*100, STD?) of the L or R PFD (EfisActL/R fields 4, 5)."""
+        """Return (baro setting hPa*100, STD?) of the L or R PFD (EfisActL/R fields 4, 5).
+
+        Field 5: 1 = QNH, 2 = STD, 3 = STD with a preselected QNH showing (the baro
+        knob turned while in STD; test sim 2026-11-08). 3 is still STD.
+        """
         try:
             fields = self.psx.get(f"EfisAct{side}").split(";")
-            return int(fields[3]), fields[4] == "2"
+            return int(fields[3]), fields[4] in ("2", "3")
         except (AttributeError, ValueError, IndexError):
             return None
 
@@ -1438,7 +1515,7 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.pf_efis[side] = cur    # both sides, also while inactive: the first change counts
         if self.seat is None:
             return
-        own, pf_side = self.sides()
+        pf_side = self.sides()[1]
         changed = cur is not None and last is not None and cur != last
         if side != pf_side or not changed or not self.active or not self.actions['altimeters']:
             return
@@ -1457,14 +1534,15 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
                         (f"above the departure MSA {msa} ft" if msa else
                          "no departure MSA from frankenweather") + ")")
             self.decide(f"the {pf_name} (pilot flying) set STD on their PFD: our PFD STD, {stby}")
-            self.spawn(self.follow_pfd(own, None, std=True, standby_std=not self.stby_std_above))
+            if not self.stby_std_above:
+                self.stby_want = 'STD'
         elif not std:
             self.stby_std_above = None
-            self.decide(f"the {pf_name} (pilot flying) set QNH {baro / 100:.0f} on their PFD: "
-                        "our PFD and the standby altimeter follow")
-            self.spawn(self.follow_pfd(own, baro, std=False, standby_qnh=baro))
-        elif baro != last[0]:
-            self.spawn(self.follow_pfd(own, baro, std=True))   # preselect while in STD
+            if last[1] or self.alt_task is None or self.alt_task.done():   # not every click
+                self.decide(f"the {pf_name} (pilot flying) set QNH {baro / 100:.0f} on their PFD: "
+                            "our PFD and the standby altimeter follow")
+            self.stby_want = baro
+        self.kick_altimeters()      # also a baro preselect while in STD
 
     def check_altimeters(self, alt, dep, dst):
         """Standby altimeter: STD above the departure MSA; destination QNH below its MSA."""
@@ -1479,7 +1557,8 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
                 self.decide(f"climbing through {alt:.0f} ft, above the departure ({dep}) MSA "
                             f"{self.stby_std_above} ft: standby altimeter STD")
                 self.stby_std_above = None
-                self.spawn(self.standby_std("Above the departure MSA"))
+                self.stby_want = 'STD'
+                self.kick_altimeters("Above the departure MSA")
         msa = self.msa_for('destination', dst)
         crossed = msa is not None and prev is not None and prev >= msa > alt
         if self.phase == 'AIRBORNE' and crossed and self.arrival_qnh_done != dst:
@@ -1489,7 +1568,8 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
                 self.decide(f"descending through {alt:.0f} ft, below the destination ({dst}) MSA "
                             f"{msa} ft: standby altimeter to the arrival QNH {qnh / 100:.0f} "
                             f"({source})")
-                self.spawn(self.standby_qnh(qnh, "Below the destination MSA"))
+                self.stby_want = qnh
+                self.kick_altimeters("Below the destination MSA")
 
     def arrival_qnh(self, dst):
         """Return (QNH hPa*100, source) for dst from its PSX METAR or zone, or (None, '')."""
@@ -1508,20 +1588,65 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
                 return None, ""
         return None, ""
 
-    async def follow_pfd(self, own, baro, std, standby_std=False, standby_qnh=None):
-        """Our PFD to the pilot flying's STD/baro, then the standby altimeter."""
-        side_name = "captain's" if own == 'L' else "F/O's"
-        mine = self.efis(own)
-        if mine and mine[1] != std:
-            await self.press(f"EcpStd{'Cp' if own == 'L' else 'Fo'}",
-                             f"Altimeters: {side_name} PFD {'STD' if std else 'QNH'}")
-        if baro is not None:
-            await self.turn_pfd_baro(own, baro,
-                                     f"Altimeters: {side_name} PFD baro {baro / 100:.0f}")
-        if standby_std:
-            await self.standby_std("With the pilot flying")
-        if standby_qnh is not None:
-            await self.standby_qnh(standby_qnh, "With the pilot flying")
+    def kick_altimeters(self, why="With the pilot flying"):
+        """Start the altimeter sync task unless it's running (it works on the latest state)."""
+        self.alt_why = why
+        if self.alt_task is None or self.alt_task.done():
+            self.alt_task = self.spawn(self.sync_altimeters())
+
+    def standby_matches(self, want):
+        """Return True if the standby altimeter shows want ('STD' or hPa*100)."""
+        isfd = self.get_int("CfgStbyInstr") == 2
+        cur = self.get_int("StbyBaro")
+        if want == 'STD':
+            return self.get_int("IsfdBaroStd") == 1 if isfd else \
+                cur is not None and abs(cur - 101325) <= 4
+        if isfd and self.get_int("IsfdBaroStd") == 1:
+            return False
+        return cur is not None and abs(cur - want) <= 4
+
+    async def sync_altimeters(self):
+        """Bring our PFD (STD/QNH, baro) to the pilot flying's and the standby to stby_want.
+
+        One task at a time, re-reading both PFDs before every step: a pilot
+        flicking STD/QNH or turning the knob click by click never leaves a queue
+        of stale actions behind (a toggle pressed on old information flips the
+        wrong way). Done when everything matches for a second.
+        """
+        for _ in range(40):
+            if not self.active or self.seat is None or not self.actions['altimeters']:
+                return
+            own, pf_side = self.sides()
+            pf, mine = self.efis(pf_side), self.efis(own)
+            if pf is None or mine is None:
+                return
+            side_name = "captain's" if own == 'L' else "F/O's"
+            unit = 100.0 if self.get_int(f"EcpBaroMode{'Cp' if own == 'L' else 'Fo'}", 1) == 1 \
+                else 33.8639
+            if mine[1] != pf[1]:
+                await self.press(f"EcpStd{'Cp' if own == 'L' else 'Fo'}",
+                                 f"Altimeters: {side_name} PFD {'STD' if pf[1] else 'QNH'}")
+                for _ in range(20):         # wait until PSX shows the toggle
+                    await asyncio.sleep(0.1)
+                    now_mine = self.efis(own)
+                    if now_mine is None or now_mine[1] != mine[1]:
+                        break
+                continue
+            if abs(mine[0] - pf[0]) > unit / 2:
+                await self.turn_pfd_baro(own, pf[0],
+                                         f"Altimeters: {side_name} PFD baro {pf[0] / 100:.0f}")
+                continue
+            want = self.stby_want
+            if want is not None and not self.standby_matches(want):
+                if want == 'STD':
+                    await self.standby_std(self.alt_why)
+                else:
+                    await self.standby_qnh(want, self.alt_why)
+                continue
+            await asyncio.sleep(1.0)        # settled - unless the pilot flying moved again
+            if self.efis(pf_side) == pf and self.stby_want == want:
+                return
+        self.logger.warning("Altimeters: still not in sync after 40 steps")
 
     async def turn_pfd_baro(self, own, target, text):
         """Turn our PFD baro knob to target (hPa*100): 1 hPa or 0.01 inHg per click."""
@@ -1551,6 +1676,9 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
                 cur = self.get_int("StbyBaro")
                 if cur is None or not self.active or abs(target - cur) <= 4:
                     break
+                if self.stby_want not in (None, target) and not \
+                        (self.stby_want == 'STD' and target == 101325):
+                    break       # the pilot flying set something else meanwhile
                 clicks = max(-16, min(16, round((target - cur) / 4))) or (1 if target > cur else -1)
                 self.psx.send("TurnStbyBaro", str(clicks))
                 moved = True

@@ -68,11 +68,17 @@ config file (`[actions]`, names in brackets).
   logo lights off / on (`lights_10000`).
 - **5,000 ft above the destination**: autobrake 4 if none is set
   (`autobrake_5000`; level in `autobrake_setting`).
-- **After runway exit** (landed, slowed down and turned off the runway):
-  flaps up and speedbrake down (`exit_flaps_speedbrake`); landing lights off,
-  taxi light on (or the inboard landing light if the aircraft has no taxi
-  light), strobes off (`exit_lights`); weather radar and terrain off on any
-  ND where they're on (`exit_wxr_terr`); stabilizer trim to 6 units
+- **After runway exit** (landed, slower than 30 kt and off every runway for
+  3 seconds, using PSX's runway data: turning onto another runway or
+  backtracking is still on a runway; without runway data, turned more than
+  40 degrees from the landing heading): flaps up and speedbrake down
+  (`exit_flaps_speedbrake`); landing lights off, taxi light on (or both
+  inboard landing lights if the aircraft has no taxi light), strobes off
+  (`exit_lights`); autobrake OFF (`exit_autobrake`); the MCP SPD button
+  pressed twice (the speed window back to its default), then both F/Ds and
+  the A/T arm switch off (`exit_mcp`); radio and baro minimums off on both
+  EFIS control panels (`exit_minimums`); weather radar and terrain off on
+  any ND where they're on (`exit_wxr_terr`); stabilizer trim to 6 units
   (`exit_stab_trim`); APU start 30 s later (`exit_apu`).
 - **Fuel** in flight, standard Boeing 747 procedure, following the EICAS messages (`fuel`):
   center pumps off at >FUEL LOW CTR and on at >FUEL OVD CTR; stabilizer
@@ -118,7 +124,11 @@ config file (`[actions]`, names in brackets).
   down it is set to the arrival airport's QNH (its METAR in PSX, or its PSX
   weather zone) as soon as the aircraft descends below the destination MSA,
   while the PFDs stay on STD. The MSAs come from frankenweather; without
-  them the standby altimeter simply follows the pilot flying's PFD.
+  them the standby altimeter simply follows the pilot flying's PFD. A QNH
+  preselected while in STD is not a change to QNH. frankenpilot always
+  works towards what the pilot flying's PFD shows now, so flicking STD/QNH
+  or turning the baro knob click by click doesn't leave it behind on a
+  stale setting.
 
 frankenpilot uses one pair of hands: when two flows run at the same time
 their switches are moved one after the other. Switches right next to each
