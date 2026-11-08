@@ -91,6 +91,7 @@ ACTIONS = {
     'fuel': (True, "Fuel pumps and outer crossfeeds in flight (Boeing procedure, EICAS driven)"),
     'anti_ice': (True, "Engine and wing anti-ice by the book"),
     'altimeters': (True, "PFD baro follows the pilot flying's; standby QNH/STD by the MSA"),
+    'flap_speeds': (False, "MCP speed to the flap manoeuvre speed on flap extension (opt-in)"),
     'step_climb': (True, "Step climb when VNAV says AT NOW (VNAV PTH, NG FMC, offline on VATSIM)"),
 }
 
@@ -464,6 +465,8 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.step_next_look = 0.0       # when to read VNAV CRZ 2/3 next
         self.step_logged = None         # last "due but not climbing" reason logged
         self.step_last_look = 0.0
+        self.flap_seen = (None, 0.0)    # (lever position, since when) - flap_speeds
+        self.flap_done = None           # lever position whose speed was set
         self.atis_checked = False      # departure ATIS looked at after engine start
         self.stby_std_above = None     # standby to STD once above this (departure MSA), ft
         self.arrival_qnh_done = None   # destination whose QNH the standby got below its MSA
@@ -633,7 +636,7 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             self.psx.subscribe(name)
         self.psx.subscribe("version", self.on_connected)
         for name in ("StbyBaro", "IsfdBaroStd", "CfgStbyInstr", "EcpBaroModeCp", "EcpBaroModeFo",
-                     "Afds", "McpWdoAlt",
+                     "Afds", "McpWdoAlt", "McpWdoSpd", "FmcAppRef", "ApproachNg",
                      *[f"{side}cdu{part}" for side in "LR" for part in
                        ("Title", "Line1b", "Line2b", "Line4s", "Line4b")]):
             self.psx.subscribe(name)
@@ -882,6 +885,7 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.check_altimeters(alt, dep, dst)
         if self.phase == 'AIRBORNE':
             self.check_step_climb(alt)
+            self.check_flap_speeds()
 
     # --- runway entry / crossing
 
@@ -1560,6 +1564,81 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
                 await self.press("IsfdPushStd", f"{why}: standby altimeter STD")
         else:
             await self.turn_standby(101325, f"{why}: standby altimeter 1013 (STD)")
+
+    # --- flap manoeuvre speeds (opt-in)
+
+    FLAP_NAMES = ("UP", "1", "5", "10", "20", "25", "30")    # FlapLever 0-6
+    FLAP_ADD_KT = {1: 60, 2: 40, 3: 20, 4: 10}              # PFD flap bugs: REF + this
+
+    def selected_ref(self):
+        """Return (landing flap '25'/'30', REF kt, wind correction kt) from APPROACH REF, or None.
+
+        FmcAppRef "h100000g147..." = flaps 30 / 147 kt, "f153" = flaps 25 /
+        153, "a999" = nothing selected; ApproachNg "G10" = 10 kt correction,
+        "G-1;" = none entered (the page shows the default 5).
+        """
+        m = re.match(r"h\d{6}([a-z])(\d{3})", self.psx.get("FmcAppRef") or "")
+        if not m or m.group(1) not in "fg" or m.group(2) == "999":
+            return None
+        corr = re.match(r"G(-?\d+)", self.psx.get("ApproachNg") or "")
+        wind = int(corr.group(1)) if corr else -1
+        return ("25" if m.group(1) == "f" else "30"), int(m.group(2)), (5 if wind < 0 else wind)
+
+    def check_flap_speeds(self):
+        """On flap extension (lever at rest 2 s): MCP speed to that flap's manoeuvre speed.
+
+        What a pilot reads off the PFD speed tape: the flap bugs are the
+        selected REF speed + 60 (1), 40 (5), 20 (10), 10 (20); at the landing
+        flap REF + the wind correction. Never on retraction (takeoff, go-around),
+        not with the speed window closed (VNAV SPD), not without a REF selected;
+        flaps 25 on the way to a flaps 30 landing has no bug: nothing then.
+        """
+        if not self.actions['flap_speeds']:
+            return
+        lever, now = self.get_int("FlapLever"), time.monotonic()
+        if lever != self.flap_seen[0]:
+            if self.flap_done is not None and lever is not None and lever < self.flap_done:
+                self.flap_done = lever      # retraction: only remember it
+            self.flap_seen = (lever, now)
+            return
+        if lever is None or now - self.flap_seen[1] < 2.0 or lever == self.flap_done:
+            return
+        extended = self.flap_done is not None and lever > self.flap_done
+        self.flap_done = lever
+        if not extended or lever == 0:
+            return
+        name, ref = self.FLAP_NAMES[lever], self.selected_ref()
+        target, why = None, None
+        if ref is None:
+            why = "no REF speed selected on APPROACH REF"
+        elif name == ref[0]:
+            target = ref[1] + ref[2]
+            why = f"landing flap {name}: REF {ref[1]} + wind correction {ref[2]}"
+        elif lever in self.FLAP_ADD_KT:
+            target = ref[1] + self.FLAP_ADD_KT[lever]
+            why = f"flaps {name} bug: REF {ref[1]} + {self.FLAP_ADD_KT[lever]}"
+        else:
+            why = f"flaps {name} on the way to a flaps {ref[0]} landing (no bug)"
+        window = self.get_int("McpWdoSpd")
+        if target and (window is None or window >= 1000):
+            target, why = None, f"{why}, but the MCP speed window is closed (VNAV SPD)"
+        self.decide(f"flaps {name} selected: " +
+                    (f"MCP speed {target} kt ({why})" if target else f"no speed set ({why})"))
+        if target:
+            self.spawn(self.turn_mcp_speed(target, f"Flaps {name}: MCP speed {target}"))
+
+    async def turn_mcp_speed(self, target, text):
+        """Turn the MCP speed knob to target kt (1 kt per click)."""
+        async with self.hands:
+            await asyncio.sleep(self.hand_delay("McpTurnSpd"))
+            for _ in range(30):
+                cur = self.get_int("McpWdoSpd")
+                if cur is None or cur >= 1000 or not self.active or cur == target:
+                    break
+                self.psx.send("McpTurnSpd", str(max(-16, min(16, target - cur))))
+                await asyncio.sleep(0.15)
+            self.last_switch = ("McpTurnSpd", time.monotonic())
+            self.log_action(text)
 
     # --- step climbs (VNAV CRZ 2/3 on our own CDU: not on the network otherwise)
 

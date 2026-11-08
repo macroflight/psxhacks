@@ -149,7 +149,16 @@ on VATSIM and doesn't count). Its log and web page show it.
   doesn't look at all from a page it can't bring back (INIT REF pages,
   DEP/ARR, other subsystems).
 
-Not yet: MCP speed on flap selection (opt-in).
+- **Flap speeds** (`flap_speeds`, off by default, opt-in): when the pilot
+  flying extends the flaps, frankenpilot sets the MCP speed to that flap's
+  manoeuvre speed, the number the pilot reads off the PFD speed tape: the
+  REF speed selected on APPROACH REF + 60 (flaps 1), 40 (5), 20 (10), 10
+  (20); at the landing flap (25 or 30, as selected) REF + the wind
+  correction (5 kt unless another is entered). It waits until the lever has
+  rested for 2 seconds, never acts on retraction (takeoff, go-around), and
+  sets nothing without a selected REF speed, with the speed window closed
+  (VNAV SPD), or at flaps 25 on the way to a flaps 30 landing (no bug
+  there).
 
 ## Log files and web UI
 

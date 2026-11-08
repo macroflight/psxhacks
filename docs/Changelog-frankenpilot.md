@@ -53,6 +53,11 @@
 - Departure anti-ice check uses the departure's PSX zone weather when its
   METAR has no weather groups (frankenweather writes "RMK FRANKENWX MODEL
   WX"), seen on the real sim; tested on the headless sim.
+- New action `flap_speeds` (opt-in): on flap extension the MCP speed goes to
+  the flap manoeuvre speed from the selected REF (FmcAppRef) + 60/40/20/10,
+  the landing flap REF + wind correction (ApproachNg), like the PFD flap
+  bugs (checked against PSX's PFD for flaps 30 and 25 landings). Tested on
+  the headless sim.
 - New action `step_climb` (NG FMC): at VNAV's "STEP TO FLxxx / AT NOW",
   MCP altitude to that level and the altitude knob pushed, only level in
   VNAV PTH cruise, STEP not 0, MCP altitude at cruise altitude and not
