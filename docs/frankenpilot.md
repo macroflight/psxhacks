@@ -80,6 +80,8 @@ config file (`[actions]`, names in brackets).
 - **Anti-ice** (`anti_ice`): engine anti-ice on when entering icing
   conditions (TAT 10 C or colder and in cloud); at >ICING NAC / >ICING WING
   engine / wing anti-ice to ON, also an automatic system set to AUTO or OFF.
+  On the ground it waits until all four engines are running (and wing
+  anti-ice is only switched in flight).
   Back to AUTO (or off) at >ANTI-ICE NAC/WING, when TAT has been above 10 C
   for a minute, or a while after leaving cloud (longer after a long time in
   icing conditions).

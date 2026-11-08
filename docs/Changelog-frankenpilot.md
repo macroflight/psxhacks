@@ -15,5 +15,7 @@
 - Keeps PSX's silent tasks off while active: a situation brings its own
   virtual pilot setting (every PSX Basic situation switches them on), so
   after loading one PSX's virtual pilot and frankenpilot did the same tasks.
+- Anti-ice on the ground only once all four engines are running (seen on
+  the real sim: engine anti-ice went ON in fog before engine start).
 - Readable log texts for the fuel and anti-ice actions; fuel pumps are
   switched one after the other.

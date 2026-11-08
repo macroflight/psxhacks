@@ -299,6 +299,7 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.icing_seconds = 0.0       # time spent in icing conditions this episode
         self.cloud_exit_at = None      # when we last left cloud while icing
         self.icing_clear_since = None  # TAT > 10 C since
+        self.icing_nac_waiting = False  # >ICING NAC on the ground before all engines ran
 
     def log_action(self, text):
         """Log an action and remember it for STATE."""
@@ -333,6 +334,14 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             return int(self.psx.get("MiscFltData").split(";")[2]) / 10.0
         except (AttributeError, ValueError, IndexError):
             return None
+
+    def engines_running(self):
+        """Return True when all four engines run (N1 at least 18 %, EngParam fields 13-16)."""
+        try:
+            n1 = [int(v) for v in self.psx.get("EngParam").split(";")[13:17]]
+        except (AttributeError, ValueError):
+            return False
+        return len(n1) == 4 and min(n1) >= 180
 
     def eicas(self, cat):
         """Return the set of message numbers in an EICAS list (A or C)."""
@@ -392,9 +401,9 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
 
     def setup_psx(self):
         """Subscribe to everything frankenpilot reads."""
-        for name in ("id", "PiBaHeAlTas", "OnGround", "GroundSpeed", "MiscFltData", "Tla",
-                     "FlapLever", "SpdBrkLever", "GearLever", "Autobr", "ApuStart", "PackSel1",
-                     "PackSel2", "PackSel3", "LtLandOubL", "LtLandOubR", "LtLandInbL",
+        for name in ("id", "PiBaHeAlTas", "OnGround", "GroundSpeed", "MiscFltData", "EngParam",
+                     "Tla", "FlapLever", "SpdBrkLever", "GearLever", "Autobr", "ApuStart",
+                     "PackSel1", "PackSel2", "PackSel3", "LtLandOubL", "LtLandOubR", "LtLandInbL",
                      "LtLandInbR", "LtRwyTurnL", "LtRwyTurnR", "LtTaxi", "LtStrobe", "LtWing",
                      "LtLogo", "CfgTaxiLight", "TcasPanSel", "EfisActL", "EfisActR", "StabTrim",
                      "EicasA", "EicasC", "LocalRwys", "FmcRteViAcMo", "FmcRte0", "FmcRte1",
@@ -422,6 +431,7 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.psx.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__} {__version__}")
         self.psx.send("demand", "GroundSpeed")
         self.psx.send("demand", "MiscFltData")
+        self.psx.send("demand", "EngParam")
         self.psx.send("addon", f"{FRDP}:SUBSCRIBE")
         self.youareon_wait_until = time.monotonic() + 15.0
         self.connected_at = time.monotonic()
@@ -907,9 +917,16 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             self.icing_seconds += now - self.icing_since
             self.icing_since = None
             self.cloud_exit_at = now
-        # --- on
-        if EICAS_C['ICING NAC'] in new_c:
-            self.icing = True
+        # --- on (on the ground only once all engines run, like a crew after engine start)
+        may_switch_on = not on_ground or self.engines_running()
+        if EICAS_C['ICING NAC'] in new_c and not may_switch_on:
+            self.icing_nac_waiting = True
+        nac_now = EICAS_C['ICING NAC'] in new_c or (
+            self.icing_nac_waiting and EICAS_C['ICING NAC'] in self.last_eicas['C'])
+        if not may_switch_on:
+            pass
+        elif nac_now:
+            self.icing, self.icing_nac_waiting = True, False
             self.spawn(self.set_anti_ice('nai', True, ">ICING NAC"))
         elif in_icing and not self.icing:
             self.icing = True
