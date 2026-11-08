@@ -540,6 +540,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.vpilot_status = None       # our sim's PSX.NET.VPILOT.STATUS (note_vpilot_status())
         self.vpilot_status_at = None
         self.geovr_state = None         # (state, callsign, time) from PSX.NET.VATSIM
+        self.vatsim_mode_reported = 'unknown'
         # Seat assignment (seats.py): when a seated sim was last missing (master),
         # and the seat this sim last acted on (slave: SELECT_ACP/layout sent)
         self.seat_missing_since = {}
@@ -744,10 +745,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
     def note_geovr_state(self, state, callsign):
         """Record our own sim's PSX.NET.VATSIM state/result (connected/disconnected, callsign)."""
-        old = self.vatsim_mode()
         self.geovr_state = (state, callsign.strip().upper(), time.time())
         new = self.vatsim_mode()
-        if new != old:
+        # Compared with the mode last reported, not recomputed: a FLT NO change
+        # between two messages would make "before" already the new mode
+        if new != self.vatsim_mode_reported:
+            self.vatsim_mode_reported = new
             self.logger.info("VATSIM: this sim's mode is now %s (PSX.NET.VATSIM %s as %s, "
                              "FLT NO %s)", new, state, callsign, self.flight_number())
             self.frdp_routerinfo_requested = True
