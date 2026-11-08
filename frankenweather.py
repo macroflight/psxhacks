@@ -6558,8 +6558,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         for _ in range(10):
             if initial or self._maneuvering:
                 bearing = random.uniform(0.0, 360.0)
-                nearest = min(_CB_AREA_MIN_DIST_NM, fwd_max) if cb_area else 0.0
-                dist_m = random.uniform(nearest, fwd_max) * _NM_TO_M
+                # While maneuvering, not beyond the behind-relocation limit (with a
+                # margin): placed all-around up to 250 nm, a zone was "behind" past
+                # the 200 nm low_alt_dist after the next turn and relocated again -
+                # 18 relocations in 22 min orbiting Iguazu (headless test 2026-11-08)
+                far = (min(fwd_max, 0.9 * self.args.low_alt_dist)
+                       if self._maneuvering and not initial else fwd_max)
+                nearest = min(_CB_AREA_MIN_DIST_NM, far) if cb_area else 0.0
+                dist_m = random.uniform(nearest, far) * _NM_TO_M
             else:
                 fwd_nm = random.uniform(fwd_min, fwd_max)
                 lat_nm = random.uniform(lat_min, lat_max) * random.choice([-1, 1])
@@ -7834,10 +7840,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             if not self._sigmet_handle.get(entry["hazard"]):
                 continue  # PSX gets this type (SIGMETs page)
             dist, brg = _fw_sigmet.entry_distance(self.ac_lat, self.ac_lon, entry)
-            if dist > _SIGMET_ZONE_RANGE_NM:
+            if dist > self._sigmet_zone_range_nm():
                 continue
-            if brg is not None and abs((brg - self.ac_hdg + 180) % 360 - 180) > 90.0:
-                continue  # behind the aircraft
+            if (not self._maneuvering and brg is not None and
+                    abs((brg - self.ac_hdg + 180) % 360 - 180) > 90.0):
+                continue  # behind the aircraft (no "behind" while maneuvering: all-around)
             areas.append((dist, entry))
         if not areas:
             return False
@@ -7873,6 +7880,27 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return True
         return False
 
+    def _sigmet_zone_range_nm(self) -> float:
+        """Return how far away a SIGMET area may get a zone placed in it.
+
+        While maneuvering, only within the behind-relocation limit (with a margin):
+        in a hold, heading swings around, and zones placed 200-300 nm "ahead" were
+        relocated as "behind" after the next turn, then placed again - 12 SIGMET
+        placements + 17 relocations in 35 min orbiting Penang (headless test 2026-11-07).
+        """
+        if self._maneuvering:
+            return min(_SIGMET_ZONE_RANGE_NM, 0.9 * self.args.low_alt_dist)
+        return _SIGMET_ZONE_RANGE_NM
+
+    def _cb_sigmets_containing(self, lat: float, lon: float) -> list:
+        """Return the TS/TC SIGMET entries (ours, handled, in use) whose area contains lat/lon."""
+        if not self._own_sigmets_applied or not self._handles_cb_sigmets():
+            return []
+        return [e for e in self._own_sigmets_in_use()
+                if e["ok"] and e["hazard"] in _fw_sigmet.CB_HAZARDS and
+                self._sigmet_handle.get(e["hazard"]) and
+                _fw_sigmet.entry_distance(lat, lon, e)[0] == 0.0]
+
     def _expendable_for_sigmet(self) -> Optional[int]:
         """Return the zone _place_sigmet_zones() may move, or None (see there)."""
         arpt_icaos = {icao for icao, _, _ in self._arpt_coverage_needed()}
@@ -7907,12 +7935,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         points = []
         for poly in entry["polygons"]:
             points += _fw_sigmet.points_in_polygon(
-                self.ac_lat, self.ac_lon, poly, _SIGMET_ZONE_RANGE_NM)
+                self.ac_lat, self.ac_lon, poly, self._sigmet_zone_range_nm())
         # never behind the aircraft: the relocation moved such a zone away 3 s later,
         # and the next placement put one back, every minute for 7 minutes alongside a
-        # TS area the aircraft had nearly passed (test sim 2026-10-29, OOMM A2)
+        # TS area the aircraft had nearly passed (test sim 2026-10-29, OOMM A2).
+        # While maneuvering there is no "behind" (zones go all-around): any bearing,
+        # but only within the behind-relocation limit (see _sigmet_zone_range_nm()).
         points = [p for p in points if p[2] >= _CB_SQUEEZE_MIN_FWD_NM and
-                  abs((p[3] - self.ac_hdg + 180) % 360 - 180) <= 90.0]
+                  (self._maneuvering or abs((p[3] - self.ac_hdg + 180) % 360 - 180) <= 90.0)]
         if not points:
             return None
         others = [(lat, lon) for zn, (lat, lon, _) in self.zone_positions.items()
@@ -8774,6 +8804,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # Find all airports within snapping range for each zone
         zone_candidates = [self._airports_within_nm(lat, lon, _AIRPORT_SNAP_NM)
                            for lat, lon, _ in positions]
+        # A zone inside a TS/TC SIGMET area only snaps to an airport inside that
+        # same area: snapping it out lost the CB the SIGMET gives it (headless test
+        # 2026-11-07: a zone placed in SARR A1 FRQ went 13 nm onto SGAS, outside).
+        for i, (lat, lon, _) in enumerate(positions):
+            areas = self._cb_sigmets_containing(lat, lon)
+            if areas:
+                zone_candidates[i] = [
+                    c for c in zone_candidates[i]
+                    if any(_fw_sigmet.entry_distance(c[1], c[2], e)[0] == 0.0 for e in areas)]
 
         # Per-zone: pick the nearest airport that has a VATSIM METAR; otherwise Open-Meteo
         snap_positions: list = []

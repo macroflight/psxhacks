@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Fix: much less zone churn while maneuvering (holds, vectoring).** Zones
+  were placed further away than the distance after which a zone behind the
+  aircraft is moved again (200 nm below cruise altitude), so after the next
+  turn they were "behind" and relocated: on the headless test sim, 18
+  relocations and 22 SIGMET placements in 40 minutes orbiting Penang. Now,
+  while maneuvering, new zones (also the ones placed in TS/TC SIGMET areas)
+  stay within 90% of that distance, and any bearing counts (no "behind" in
+  a hold). Penang rerun: 1 relocation, 5 SIGMET placements.
+- **Fix: a zone inside a TS/TC SIGMET area only snaps to an airport inside
+  that same area.** Snapping it 13 nm onto an airport outside lost the CB
+  the SIGMET gives it (headless test, SARR A1 / SGAS).
+
 - **New: departure and destination MSA for frankenpilot.** Within 60 nm of
   the FMC departure and 120 nm of the destination (before top of descent),
   frankenweather works out the airport's minimum safe altitude from its
