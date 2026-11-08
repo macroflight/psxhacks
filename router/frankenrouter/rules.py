@@ -1251,6 +1251,10 @@ class Rules():  # pylint: disable=too-many-public-methods
                 return self.myreturn(
                     RulesAction.FILTER, RulesCode.FRANKENWEATHER_FILTERED,
                     extra_data={'orchestration_cbfeed': feed})
+            # MSA (departure/destination minimum safe altitude, ~80 bytes once a
+            # minute near those airports) is for frankenpilot, a normal client.
+            if payload.startswith('MSA:'):
+                return self.myreturn(RulesAction.NORMAL, RulesCode.FRANKENWEATHER_FILTERED)
             # SIGMETJSON (the parsed SIGMET download, ~30 KB) is only for
             # the routers' own /api/sigmet/latest/json, so frankenrouters only.
             if payload.startswith('SIGMETJSON:'):
@@ -3237,6 +3241,18 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             "addon=FRANKENWEATHER:STATE:someuuid:{}", testpeer)
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.NOWRITE)
+
+    def test_addon_frankenweather_msa(self):
+        """FRANKENWEATHER:MSA goes to everyone (frankenpilot), unlike other FW state."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+        router.upstream = self.DummyUpstreamConnection()
+        router.clients = {('127.0.0.1', 12345): self.DummyClientConnection(('127.0.0.1', 12345))}
+        line = ('addon=FRANKENWEATHER:MSA:4e9d422e-a05e-4162-97b2-9bdeea69748e:'
+                '{"role":"departure","icao":"YSSY","msa_ft":2500,"radius_nm":25}')
+        for sender in (router.upstream, router.clients[('127.0.0.1', 12345)]):
+            (action, *_) = rules.route(line, sender)
+            self.assertEqual(action, RulesAction.NORMAL)
 
     def test_addon_ground_handling_filter(self):
         """GROUND.HANDLING addon messages must be filtered per [filtering] config."""

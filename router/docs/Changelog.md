@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Change: `addon=FRANKENWEATHER:MSA` reaches every client** (frankenpilot),
+  unlike frankenweather's other state messages, which only go to routers and
+  other frankenweather instances. Small, once a minute near the airports.
+
 - **New: VATSIM status per sim.** Each router reports its sim's VATSIM
   connection (online / offline, from the PSX.NET.vPilot plugin) and mode
   (normal / observer, from PSX.NET.VATSIM's callsign: the flight's callsign
