@@ -979,9 +979,15 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         # 3 deg of lever travel back, at least 20 s after liftoff
         if self.max_tla - top > 300 and time.monotonic() - self.airborne_at > 20:
             self.thrust_reduced = True
+            gear = self.get_int("GearLever")
+            packs_off = [n for n in (1, 2, 3) if self.get_int(f"PackSel{n}") == 0]
+            todo = [f"pack{'s' if len(packs_off) > 1 else ''} "
+                    f"{', '.join(map(str, packs_off))} on" if packs_off else "packs already on",
+                    "gear lever OFF" if gear == GEAR_UP else
+                    f"gear lever stays {({GEAR_OFF: 'OFF', GEAR_DOWN: 'DOWN'}).get(gear, gear)}"]
             self.decide(f"thrust reduction: thrust levers back from {self.max_tla / 100:.1f} to "
                         f"{top / 100:.1f} deg, {time.monotonic() - self.airborne_at:.0f} s after "
-                        f"liftoff, gear lever {self.get_int('GearLever')}: packs and gear lever")
+                        f"liftoff: {', '.join(todo)}")
             if self.actions['packs_after_takeoff']:
                 self.spawn(self.packs_on())
             if self.actions['gear_lever_off'] and self.get_int("GearLever") == GEAR_UP:
