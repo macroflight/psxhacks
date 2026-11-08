@@ -436,6 +436,34 @@ instance would overwrite.
   rate now and then, tagged with its client id (e.g. a non-shared message
   like `addon=AEROWINX:FPS:<id>:<fps>`), so routers can show all of them.
 
+### A main client's aircraft bounces on its gear during refuelling
+
+*Seen 2026-11-08, parked: not reproduced.* In a shared cockpit (master
+FTECH2, slave sim MACRO, both PSX 10.195), the MSFS external model of the
+slave sim bounced up and down while parked at YSSY during PSX's own
+refuelling (Instructor, to a preselected amount). The slave's PSX main
+client's boost output showed it: flight-deck height swinging by about 1 ft
+(sd 0.23 ft), a slow sink and then jumps of up to 0.23 ft, in time with
+the master's fuel updates (`FuelQty`, 5 per second). It dropped to a fifth
+(sd 0.045 ft) in the same second refuelling stopped, but didn't go away
+completely. The master's own position updates (`PiBaHeAlTas`, about once
+a second while parked) were smooth.
+
+Not reproduced on the headless test sim (also 10.195): no bounce on a main
+server or a main client (behind two frankenrouters, like the slave sim)
+during refuelling, light or at the slave's weight, with or without a
+constant MSFS-style ground elevation injection every 0.5 s or a
+frankenboostproxy in the boost path. Ruled out: the boost proxy (it passes
+lines unchanged), the elevation injection (constant), PSX.NET.MSFS.Router
+feedback (it writes nothing that depends on the boost data),
+frankenweather gusts (none), CPU load (under 50 %). Untested: network
+timing between master and slave.
+
+- **Workaround:** none needed so far; it stops with the refuelling.
+- **For Aerowinx, if it comes back:** a main client seems to work out the
+  height on the gear from the weight itself and to be corrected by the
+  master's slower position updates.
+
 ## Documentation
 
 Things we had to learn from the forum, other addons' authors, or live
