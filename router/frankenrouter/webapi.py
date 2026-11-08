@@ -1901,8 +1901,9 @@ def _efb_seat_html(info):
         style = ' style="outline:2px solid #22c55e"' if current else ''
         buttons.append(
             f'<button type="button" class="efb-chip efb-chip-sm"{style} '
-            f'onclick="efbSeat(this, {json.dumps(seat)}, '
-            f'{json.dumps(holder if occupied else "")})">'
+            # Escaped: json.dumps' double quotes would end the onclick attribute
+            f'onclick="efbSeat(this, {html.escape(json.dumps(seat))}, '
+            f'{html.escape(json.dumps(holder if occupied else ""))})">'
             f'{labels[seat]}{" &#10003;" if current else ""}</button>')
 
     def name(sim):
