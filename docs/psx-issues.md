@@ -436,6 +436,26 @@ instance would overwrite.
   rate now and then, tagged with its client id (e.g. a non-shared message
   like `addon=AEROWINX:FPS:<id>:<fps>`), so routers can show all of them.
 
+### The FMC's next step climb isn't on the network
+
+*Feature request (2026-11-08).* frankenpilot should do a step climb when
+VNAV says it's due ("STEP TO FL350 / AT NOW" on VNAV CRZ page 2/3, NG FMC),
+whether the step comes from the LEGS page ("FL330S") or from VNAV's
+automatic steps (STEP size). None of that is on the network except the CDU
+screen lines of a CDU that happens to show the page: the step size is
+(`StepSizeNg`, Qi266: 0, the size in ft, -2 = RVSM), but not the STEP TO
+level nor the AT time/distance or NOW. (`StepClbFreeze`, Qs563, doesn't
+change when a step becomes due or is no longer due.) The STEP TO level
+isn't simply the current level plus the step size either: from FL310 VNAV
+showed FL340 with STEP 1000 and FL350 with STEP 2000.
+
+- **Workaround (planned):** frankenpilot switches its own side's CDU to
+  VNAV CRZ 2/3 for a moment, reads STEP TO / AT from the screen lines and
+  switches back to the page that was showing.
+- **Fix needed (Aerowinx):** a variable with VNAV's next step (STEP TO
+  level, the step point as time and distance, and whether it's due now),
+  for example `StepClbNext` = `FL350;1010;265;0` / `FL340;;;1` for NOW.
+
 ### A main client's aircraft bounces on its gear during refuelling
 
 *Seen 2026-11-08, parked: not reproduced.* In a shared cockpit (master
