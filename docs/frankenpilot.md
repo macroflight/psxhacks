@@ -82,9 +82,12 @@ config file (`[actions]`, names in brackets).
   engine / wing anti-ice to ON, also an automatic system set to AUTO or OFF.
   On the ground it waits until all four engines are running (and wing
   anti-ice is only switched in flight).
-  Back to AUTO (or off) at >ANTI-ICE NAC/WING, when TAT has been above 10 C
-  for a minute, or a while after leaving cloud (longer after a long time in
-  icing conditions).
+  Back to AUTO (or off) when TAT has been above 10 C for a minute, and in
+  flight at >ANTI-ICE NAC/WING or a while after leaving cloud (longer after
+  a long time in icing conditions; the time counts from liftoff, so fog
+  patches on the ground don't end it). An engine failure never switches
+  anti-ice off, and if you switch it off or to AUTO yourself it stays that
+  way until the next trigger.
 - **F/D**: your F/D switch moves, the other one follows (`fd_follow`).
 
 Not yet: step climbs (only when Flight Centre confirms you're not online on

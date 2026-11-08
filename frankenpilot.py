@@ -935,8 +935,13 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         if not on_ground and EICAS_A['ICING WING'] in new_a:
             self.icing = True
             self.spawn(self.set_anti_ice('wai', True, ">ICING WING"))
-        # --- off / back to AUTO
-        if EICAS_A['ANTI-ICE NAC'] in new_a:
+        # --- off / back to AUTO. Nothing here depends on the engines: an engine failure on
+        # takeoff never switches anti-ice off. On the ground only TAT > 10 C ends icing
+        # conditions; fog patches or breaking out of a low layer on the takeoff roll don't,
+        # the clear-of-cloud time starts at liftoff.
+        if on_ground and self.cloud_exit_at is not None:
+            self.cloud_exit_at = now
+        if not on_ground and EICAS_A['ANTI-ICE NAC'] in new_a:
             self.spawn(self.set_anti_ice('nai', False, ">ANTI-ICE NAC (on, no ice)"))
         if not on_ground and EICAS_A['ANTI-ICE WING'] in new_a:
             self.spawn(self.set_anti_ice('wai', False, ">ANTI-ICE WING (on, no ice)"))

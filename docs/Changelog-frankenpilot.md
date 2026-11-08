@@ -17,5 +17,8 @@
   after loading one PSX's virtual pilot and frankenpilot did the same tasks.
 - Anti-ice on the ground only once all four engines are running (seen on
   the real sim: engine anti-ice went ON in fog before engine start).
+- Anti-ice switched on stays on through ground ops and takeoff (also with an
+  engine failure): on the ground only TAT above 10 C ends icing conditions,
+  the clear-of-cloud time starts at liftoff, >ANTI-ICE NAC only in flight.
 - Readable log texts for the fuel and anti-ice actions; fuel pumps are
   switched one after the other.
