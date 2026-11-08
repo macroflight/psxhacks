@@ -124,12 +124,14 @@ LOG_KEEP = 10    # like frankenweather
 
 
 def setup_logging(debug, log_dir):
-    """Console (local time) and a log file per run in log_dir (UTC, with date; LOG_KEEP kept)."""
+    """Console and a log file per run in log_dir, both UTC (file with date; LOG_KEEP kept)."""
     level = logging.DEBUG if debug else logging.INFO
     root = logging.getLogger()
     root.setLevel(level)
     console = logging.StreamHandler()
-    console.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", "%H:%M:%S"))
+    console_formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s", "%H:%M:%SZ")
+    console_formatter.converter = time.gmtime       # UTC like the log file
+    console.setFormatter(console_formatter)
     console.addFilter(lambda record: not record.name.startswith("frankenpilot.file"))
     root.addHandler(console)
     try:

@@ -1871,10 +1871,11 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self.handle_args()
 
         log_format = "%(asctime)s: %(message)s"
+        logging.Formatter.converter = time.gmtime    # log times in UTC, like every psxhacks log
         logging.basicConfig(
             format=log_format,
             level=logging.INFO,
-            datefmt="%H:%M:%S",
+            datefmt="%H:%M:%SZ",
             handlers=[logging.StreamHandler(sys.stdout)],
         )
         self.logger = logging.getLogger(__MYNAME__)

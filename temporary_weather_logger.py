@@ -123,7 +123,7 @@ class WeatherLogger:  # pylint: disable=too-many-instance-attributes
     def _log_line(self, text: str) -> None:
         """Write one line to the filtered data log, timestamped."""
         if self.logfile is not None:
-            self.logfile.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {text}\n")
+            self.logfile.write(f"{time.strftime('%Y-%m-%d %H:%M:%SZ', time.gmtime())} {text}\n")
             self.logfile.flush()
 
     # ------------------------------------------------------------------
@@ -376,10 +376,11 @@ class WeatherLogger:  # pylint: disable=too-many-instance-attributes
         """Parse args, open the log file, then run the PSX loop."""
         self.handle_args()
         print(f"temporary_weather_logger version {__version__} starting")
+        logging.Formatter.converter = time.gmtime    # log times in UTC, like every psxhacks log
         logging.basicConfig(
             level=logging.DEBUG if self.args.debug else logging.INFO,
             format="%(asctime)s: %(message)s",
-            datefmt="%H:%M:%S")
+            datefmt="%H:%M:%SZ")
         self.logfile = open(  # pylint: disable=consider-using-with
             self.args.log_file, 'a', encoding='utf-8')
         self.logger.info("Logging filtered data to %s", self.args.log_file)

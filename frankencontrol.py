@@ -370,10 +370,11 @@ class Script:  # pylint: disable=too-many-instance-attributes
     async def run(self) -> None:
         """Parse args and run the main task group."""
         self.handle_args()
+        logging.Formatter.converter = time.gmtime    # log times in UTC, like every psxhacks log
         logging.basicConfig(
             level=logging.DEBUG if self.args.debug else logging.INFO,
             format="%(asctime)s: %(message)s",
-            datefmt="%H:%M:%S")
+            datefmt="%H:%M:%SZ")
         print(f"frankencontrol version {__version__} starting")
         if not self.args.start_scripts_dir.is_dir():
             self.logger.warning(

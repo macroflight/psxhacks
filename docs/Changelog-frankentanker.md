@@ -1,5 +1,9 @@
 # frankentanker changelog
 
+## Unreleased
+
+- **Change: console log times are UTC**, marked with a Z (e.g. `14:05:31Z`), like every psxhacks log.
+
 ## 1.0.2 (2026-10-18)
 
 - **Fix: the 12 call sites that trigger an MCDU repaint

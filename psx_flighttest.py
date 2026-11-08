@@ -17,7 +17,7 @@ __version__ = get_version("psxutils", __file__)
 
 def log(msg: str) -> None:
     """Print a timestamped progress line."""
-    print(f"{time.strftime('%H:%M:%S')} {msg}", flush=True)
+    print(f"{time.strftime('%H:%M:%SZ', time.gmtime())} {msg}", flush=True)
 
 
 def _cmd_load(sim: Sim, args) -> None:

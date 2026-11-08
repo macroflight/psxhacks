@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Change: console log times are UTC**, marked with a Z (e.g. `14:05:31Z`), like every psxhacks log.
+
 - **New: VATSIM status from Flight Centre.** Flight Centre's
   `vatsim_status` (is this sim online on VATSIM as a pilot) is logged when
   it changes and relayed to the PSX network as

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Change: console log times are UTC**, marked with a Z (e.g. `14:05:31Z`), like every psxhacks log.
+
 - **Fix: the telemetry could carry another sim's name.** frankenboostproxy
   looked for its own connection in the ROUTERINFO of every sim, so with
   frankenboostproxy running in several sims it could label its telemetry

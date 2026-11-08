@@ -410,10 +410,11 @@ class FrankenPrint:
     async def run(self) -> None:
         """Parse args, open the printer or validate Pushover args, then run PSX loop."""
         self.handle_args()
+        logging.Formatter.converter = time.gmtime    # log times in UTC, like every psxhacks log
         logging.basicConfig(
             level=logging.DEBUG if self.args.debug else logging.INFO,
             format="%(asctime)s: %(message)s",
-            datefmt="%H:%M:%S")
+            datefmt="%H:%M:%SZ")
         print(f"frankenprint version {__version__} starting")
         if self.args.pushover:
             missing = [f'--{f}' for f in ('pushover-token', 'pushover-user')

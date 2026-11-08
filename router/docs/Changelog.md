@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Change: console log times are UTC**, marked with a Z (e.g. `14:05:31Z`), like every psxhacks log.
+
 - **Change: `addon=FRANKENWEATHER:MSA` reaches every client** (frankenpilot),
   unlike frankenweather's other state messages, which only go to routers and
   other frankenweather instances. Small, once a minute near the airports.

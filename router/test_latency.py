@@ -367,7 +367,7 @@ class LatencyMeasurer:
             sent = self.seqno
             pending = len(self.send_times)
             received = len(self.latencies)
-            ts = time.strftime('%H:%M:%S')
+            ts = time.strftime('%H:%M:%SZ', time.gmtime())
 
             if self.latencies:
                 lats = self.latencies
@@ -457,7 +457,7 @@ class LatencyMeasurer:
             received = len(self.latencies)
             # In upstream direction each send produces num_clients samples
             expected = sent * num_clients if direction == 'upstream' else sent
-            ts = time.strftime('%H:%M:%S')
+            ts = time.strftime('%H:%M:%SZ', time.gmtime())
 
             if self.latencies:
                 lats = self.latencies

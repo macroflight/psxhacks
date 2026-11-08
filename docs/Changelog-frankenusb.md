@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Change: console log times are UTC**, marked with a Z (e.g. `14:05:31Z`), like every psxhacks log.
+
 - **Shared cockpit seats come from the router.** When connected to a
   frankenrouter, `SEAT_SELECT` asks the router for a seat instead of
   switching things itself, and frankenusb's L/R swap follows the seat in

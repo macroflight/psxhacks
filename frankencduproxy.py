@@ -23,6 +23,7 @@ import logging
 import re
 import socket
 import sys
+import time
 from typing import Callable, List, Optional, Set, Tuple
 
 from psxhacks_version import get_version
@@ -409,10 +410,11 @@ def main() -> None:
                   f'overrides --psx-port={args.psx_port}', file=sys.stderr)
         args.psx_port = args.psx_port_override
 
+    logging.Formatter.converter = time.gmtime    # log times in UTC, like every psxhacks log
     logging.basicConfig(
         level=logging.DEBUG if args.debug else logging.INFO,
         format='%(asctime)s %(levelname)-5s %(name)s: %(message)s',
-        datefmt='%H:%M:%S',
+        datefmt='%H:%M:%SZ',
         stream=sys.stdout,
     )
 

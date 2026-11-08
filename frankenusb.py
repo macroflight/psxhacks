@@ -112,10 +112,11 @@ class FrankenUsb():  # pylint: disable=too-many-instance-attributes,too-many-pub
     def __init__(self):
         """Initialize the class."""
         log_format = "%(asctime)s: %(message)s"
+        logging.Formatter.converter = time.gmtime    # log times in UTC, like every psxhacks log
         logging.basicConfig(
             format=log_format,
             level=logging.INFO,
-            datefmt="%H:%M:%S",
+            datefmt="%H:%M:%SZ",
         )
         self.logger = logging.getLogger("frankenusb")
         print(f"frankenusb version {__version__} starting")

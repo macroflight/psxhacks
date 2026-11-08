@@ -2840,7 +2840,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             queue_handler = logging.handlers.QueueHandler(log_queue)
             self.logger.addHandler(queue_handler)
 
-            console_formatter = logging.Formatter("%(asctime)s: %(message)s", datefmt="%H:%M:%S")
+            console_formatter = logging.Formatter("%(asctime)s: %(message)s", datefmt="%H:%M:%SZ")
+            console_formatter.converter = time.gmtime     # UTC like the log files
             file_formatter = logging.Formatter("%(asctime)s: %(message)s")
             file_formatter.converter = time.gmtime
 

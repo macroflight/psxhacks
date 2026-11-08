@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Change: console log times are UTC**, marked with a Z (e.g. `14:05:31Z`), like every psxhacks log.
+
 - **New add-on: frankenpilot**, a configurable virtual Pilot Monitoring that
   replaces the silent tasks of PSX's own virtual pilot (PSX keeps the
   call-outs). See docs/frankenpilot.md.

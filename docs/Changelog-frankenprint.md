@@ -1,5 +1,9 @@
 # frankenprint changelog
 
+## Unreleased
+
+- **Change: console log times are UTC**, marked with a Z (e.g. `14:05:31Z`), like every psxhacks log.
+
 ## 1.2.0 (2026-11-03)
 
 - **New: the printer's PPR ADV button feeds the real paper.** Each press

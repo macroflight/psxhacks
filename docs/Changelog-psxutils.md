@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Change: console log times are UTC**, marked with a Z (e.g. `14:05:31Z`), like every psxhacks log.
+
 - New: `show_boost_rate.py`, a diagnostic tool that measures a PSX boost
   server's data rate and longest gap every 10 seconds and logs it to a
   file, to spot a PSX instance that can't keep up (nominally about

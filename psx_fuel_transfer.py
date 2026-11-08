@@ -101,7 +101,7 @@ This script simulates additional tanks in the hold. Usage:
             continue
         try:
             print()
-            print(f"Status at {datetime.datetime.now()}")
+            print(f"Status at {datetime.datetime.now(datetime.timezone.utc):%Y-%m-%d %H:%M:%SZ}")
             zfw_kg = lb2kg(PSX.get("TrueZfw"))
             fuelqty = PSX.get("FuelQty")
             # Remove intial "d"
