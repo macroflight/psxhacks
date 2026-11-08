@@ -19,7 +19,11 @@ a crew member would. PSX keeps doing the voice call-outs and checklists.
 
 While active it shows its seat on the Instructor and switches off PSX's own
 "Performs silent tasks" and "Sets S/C alt if VNAV PTH engaged" (the
-call-outs setting is left as it is). When it goes inactive again (switched
+call-outs setting is left as it is). It keeps them off while it's active:
+a situation brings its own virtual pilot settings, and if those (or a
+click on the Instructor) switch the silent tasks back on, frankenpilot
+switches them off again, so two pilots never do the same tasks; to use
+PSX's own virtual pilot, switch frankenpilot off. When it goes inactive again (switched
 off on the router page, or a second slave sim joins) it puts PSX's virtual
 pilot back the way it was. In a shared cockpit it waits about 12 seconds
 after connecting before deciding, so that every slave sim has reported in.

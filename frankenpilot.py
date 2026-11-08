@@ -52,6 +52,16 @@ EICAS_A = {
     'ANTI-ICE NAC': 129, 'ANTI-ICE WING': 130, 'ICING WING': 131,
 }
 EICAS_C = {'ICING NAC': 47}
+# Readable fuel panel switch names for the log
+FUEL_LABELS = {
+    'FuelCtrL': "center pump L", 'FuelCtrR': "center pump R",
+    'FuelStabL': "stabilizer pump L", 'FuelStabR': "stabilizer pump R",
+    'FuelAuxL': "AUX pump L", 'FuelAuxR': "AUX pump R",
+    'FuelXfeed1': "crossfeed 1", 'FuelXfeed4': "crossfeed 4",
+    **{f"FuelOvrd{n}{p}": f"override pump {n} {p.lower()}" for n in (2, 3) for p in ("Fwd", "Aft")},
+    **{f"FuelMain{n}{p}": f"main pump {n} {p.lower()}"
+       for n in (1, 2, 3, 4) for p in ("Fwd", "Aft")},
+}
 
 AUTOBRAKE = {'RTO': 0, 'OFF': 1, 'DISARM': 2, '1': 3, '2': 4, '3': 5, '4': 6, 'MAX': 7}
 GEAR_UP, GEAR_OFF, GEAR_DOWN = 1, 2, 3
@@ -420,12 +430,20 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
     def on_welcome(self):
         """Forget the flight phase on a full PSX welcome (connect or situ load)."""
         self.reset_flight()
+        if self.active:
+            # The situ brought its own PnfMode: remember that one for restore_pnf_mode()
+            self.pnf_saved = None
+            self.apply_pnf_mode()
         self.last_eicas = {'A': self.eicas('A'), 'C': self.eicas('C')}
         self.logger.info("PSX welcome: flight state reset")
 
     def on_situ_loaded(self):
         """Start a new flight when a situation is loaded (load3), like a welcome."""
         self.reset_flight()
+        if self.active:
+            # The situ brought its own PnfMode: remember that one for restore_pnf_mode()
+            self.pnf_saved = None
+            self.apply_pnf_mode()
         self.last_eicas = {'A': self.eicas('A'), 'C': self.eicas('C')}
         self.logger.info("Situation loaded: flight state reset")
 
@@ -529,6 +547,10 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             self.apply_pnf_mode()
         elif stopped:
             self.restore_pnf_mode()
+        elif active and (self.get_int("PnfMode", 0) & 0b1100):
+            # A situ load (its own PnfMode) or the Instructor switched PSX's silent tasks
+            # back on: two pilots doing the same tasks, so switch them off again
+            self.apply_pnf_mode()
 
     def apply_pnf_mode(self):
         """Show our seat on the Instructor (bit 0); PSX's silent tasks and S/C off (bits 2, 3)."""
@@ -833,23 +855,27 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             ('FUEL LO STAB L', "FuelStabL", False), ('FUEL LO STAB R', "FuelStabR", False),
             ('FUEL AUX L', "FuelAuxL", False), ('FUEL AUX R', "FuelAuxR", False),
         )
-        for msg, switch, on in rules:
-            if EICAS_A[msg] in new:
-                text = f">{msg}: {switch} {'on' if on else 'off'}"
-                self.spawn(self.push_switch(switch, on, text))
+        todo = [(switch, on, f">{msg}: {FUEL_LABELS[switch]} {'on' if on else 'off'}")
+                for msg, switch, on in rules if EICAS_A[msg] in new]
+        if todo:    # one after the other, like a hand moving across the panel
+            self.spawn(self.push_switches(todo))
         if EICAS_A['FUEL TANK/ENG'] in new:
             self.spawn(self.tank_to_engine())
 
+    async def push_switches(self, todo):
+        """Set several push switches (name, on, text) one after the other."""
+        for name, on, text in todo:
+            await self.push_switch(name, on, text)
+
     async def tank_to_engine(self):
         """>FUEL TANK/ENG: override pumps 2/3 off, outer crossfeeds closed, main pumps on."""
-        for name in ("FuelOvrd2Fwd", "FuelOvrd2Aft", "FuelOvrd3Fwd", "FuelOvrd3Aft"):
-            await self.push_switch(name, False, f">FUEL TANK/ENG: {name} off")
-        for name in ("FuelXfeed1", "FuelXfeed4"):
-            await self.push_switch(name, False, f">FUEL TANK/ENG: {name} closed")
-        for n in (1, 2, 3, 4):
-            for pos in ("Fwd", "Aft"):
-                await self.push_switch(f"FuelMain{n}{pos}", True,
-                                       f">FUEL TANK/ENG: FuelMain{n}{pos} on")
+        todo = [(name, False, f">FUEL TANK/ENG: {FUEL_LABELS[name]} off")
+                for name in ("FuelOvrd2Fwd", "FuelOvrd2Aft", "FuelOvrd3Fwd", "FuelOvrd3Aft")]
+        todo += [(name, False, f">FUEL TANK/ENG: {FUEL_LABELS[name]} closed")
+                 for name in ("FuelXfeed1", "FuelXfeed4")]
+        mains = [f"FuelMain{n}{pos}" for n in (1, 2, 3, 4) for pos in ("Fwd", "Aft")]
+        todo += [(name, True, f">FUEL TANK/ENG: {FUEL_LABELS[name]} on") for name in mains]
+        await self.push_switches(todo)
 
     # --- anti-ice (what a pilot sees: TAT, clouds out of the window, EICAS)
 
@@ -920,15 +946,15 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         auto = self.get_int("CfgNaiAuto" if kind == 'nai' else "CfgWaiAuto", 0) == 1
         names = [f"Nai{'Togg' if auto else 'Push'}{n}" for n in (1, 2, 3, 4)] if kind == 'nai' \
             else ["WaiTogg" if auto else "WaiPush"]
-        label = "engine" if kind == 'nai' else "wing"
         for name in names:
+            label = f"engine {name[-1]}" if kind == 'nai' else "wing"
             if auto:
                 want = 1 if on else 0
                 if self.get_int(name) != want:
-                    await self.write(name, want, f"{why}: {label} anti-ice {name} "
+                    await self.write(name, want, f"{why}: {label} anti-ice "
                                                  f"{'ON' if on else 'AUTO'}")
             else:
-                text = f"{why}: {label} anti-ice {name} {'on' if on else 'off'}"
+                text = f"{why}: {label} anti-ice {'on' if on else 'off'}"
                 await self.push_switch(name, on, text)
 
     # --- F/D follow
