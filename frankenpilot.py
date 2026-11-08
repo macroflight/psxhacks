@@ -1956,13 +1956,29 @@ def main():
         args.psx_port = args.psx_port_override
     config = {}
     if args.config_file:
-        with open(args.config_file, "rb") as fh:
-            config = tomllib.load(fh)
+        try:
+            with open(args.config_file, "rb") as fh:
+                config = tomllib.load(fh)
+        except OSError as exc:
+            logging.error("Can't read config file %s: %s", args.config_file, exc)
+            return 2
+        except tomllib.TOMLDecodeError as exc:
+            found = re.search(r"line (\d+)", str(exc))
+            line = int(found.group(1)) if found else None
+            text = ""
+            if line:
+                with open(args.config_file, encoding="utf-8", errors="replace") as fh:
+                    text = (fh.read().splitlines()[line - 1:line] or [""])[0].strip()
+            logging.error("Config file %s is not valid TOML: %s%s (true/false must be lowercase, "
+                          "text in quotes, e.g. flap_speeds = true, seat = \"left\")",
+                          args.config_file, exc, f": {text!r}" if text else "")
+            return 2
     logging.info("frankenpilot %s starting", __version__)
     try:
         asyncio.run(FrankenPilot(args, config).run())
     except KeyboardInterrupt:
         pass
+    return 0
 
 
 if __name__ == "__main__":
