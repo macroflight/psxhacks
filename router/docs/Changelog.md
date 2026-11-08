@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **New: VATSIM status per sim.** Each router reports its sim's VATSIM
+  connection (online / offline, from the PSX.NET.vPilot plugin) and mode
+  (normal / observer, from PSX.NET.VATSIM's callsign: the flight's callsign
+  or that plus one letter) in ROUTERINFO, shown on `/utils/sims` and in the
+  `/efb` seat strip. The master router reports an error when more than one
+  sim is online as a pilot (not observer), and a warning when one is and
+  another sim isn't connected. See docs/NOTES.md.
+- **Fix: the vPilot plugin's status and PSX.NET.VATSIM / EFB remote control
+  messages (`GEOVR.PSX.*`) no longer leave their sim.** They went upstream
+  and from the master to every other sim, so each EFB saw every sim's
+  PSX.NET.VATSIM.
+
 - **New: seat assignment for shared cockpit.** The master router's
   SHAREDINFO now says which slave sim sits in the left and right seat;
   everyone else is an observer, and the master sim never has a seat.

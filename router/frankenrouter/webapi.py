@@ -518,6 +518,15 @@ def _build_services_page(router, color_scheme):
     )
 
 
+def _vatsim_label(connection, mode):
+    """Return a sim's VATSIM state for display ('' while unknown: no vPilot plugin seen)."""
+    if connection == 'online':
+        return 'VATSIM online' + {'normal': '', 'observer': ' (observer)'}.get(mode, '')
+    if connection == 'offline':
+        return 'VATSIM offline'
+    return ''
+
+
 def _sim_row_html(uuid, info, elevation_source, traffic_source):
     """Build one <tr> for the /utils/sims table (a row we're allowed to disconnect)."""
     sim_name_raw = info.get('simulator_name', 'unknown')
@@ -529,6 +538,9 @@ def _sim_row_html(uuid, info, elevation_source, traffic_source):
         badges += ' <span title="Elevation master">⛰️</span>'
     if sim_name_raw == traffic_source:
         badges += ' <span title="Traffic master">✈️</span>'
+    vatsim = _vatsim_label(info.get('vatsim_connection'), info.get('vatsim_mode'))
+    if vatsim:
+        badges += f' <span class="note">{vatsim}</span>'
     return (
         f'<tr><td>{sim_name}{badges}</td><td>{router_name}</td>'
         f'<td style="white-space:nowrap">{age}s ago</td>'
@@ -1779,6 +1791,7 @@ def _efb_status_dict(router, ctx):  # pylint: disable=too-many-locals
             'seat_left': router.sharedinfo.get('seat_left_simulator', 'NOSIM'),
             'seat_right': router.sharedinfo.get('seat_right_simulator', 'NOSIM'),
             'own_seat': router.own_seat(),
+            'vatsim': _vatsim_label(router.vatsim_connection(), router.vatsim_mode()),
         })
 
     weather_info = _fw_efb.weather_status(ctx, now)
@@ -1906,6 +1919,8 @@ def _efb_seat_html(info):
             f'{html.escape(json.dumps(holder if occupied else ""))})">'
             f'{labels[seat]}{" &#10003;" if current else ""}</button>')
 
+    vatsim = f' &middot; this sim: {html.escape(info["vatsim"])}' if info.get('vatsim') else ''
+
     def name(sim):
         if sim == 'NOSIM':
             return 'empty'
@@ -1913,7 +1928,7 @@ def _efb_seat_html(info):
     return (
         '<div class="efb-banner" style="background:transparent">'
         f'Seats: left <b>{name(left)}</b>, right <b>{name(right)}</b>. '
-        f'I am in: {" ".join(buttons)}</div>\n'
+        f'I am in: {" ".join(buttons)}{vatsim}</div>\n'
     )
 
 

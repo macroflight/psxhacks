@@ -390,7 +390,32 @@ Note: this differs from the CLIENTINFO message. CLIENTINFO is
 terminated by the first router that sees it and is used to set usable
 names for clients connected to that router.
 
-FIXME: document the JSON data format.
+FIXME: document the JSON data format. Documented fields so far:
+
+- `vatsim_connection`: is this sim connected to VATSIM: `online`,
+  `offline` or `unknown` (no PSX.NET.vPilot plugin status for 30 s), from
+  the plugin's `addon=PSX.NET.VPILOT.STATUS;;;;1|CONNECTED|DISCONNECTED`.
+- `vatsim_mode`: how: `normal`, `observer` or `unknown`. Until the vPilot
+  plugin reports it, deduced from PSX.NET.VATSIM's connection state and
+  callsign (`addon=GEOVR.PSX.CONTROL;;;;1|state|...|connected|<callsign>|`,
+  its answers to the EFB): the flight's callsign (PSX FLT NO) is
+  `normal`, FLT NO plus one letter is `observer` (VATSIM's advice for
+  shared-cockpit crew members who aren't the pilot), anything else
+  `unknown`. Never deduced from the seat.
+
+The master router reports an error when more than one sim is `online` +
+`normal`, and a warning when one is and another sim is `offline`.
+
+### Per-sim VATSIM add-on messages
+
+`addon=PSX.NET.VPILOT.STATUS;;;;...` (vPilot plugin) and
+`addon=GEOVR.PSX.*` (PSX.NET.VATSIM, whose internal name is GeoVR, and the
+EFB's remote control of vPilot and PSX.NET.VATSIM: `CONTROL` discover /
+state / connect / disconnect / result, `STATUS`, `STATUS.REQUEST`) belong
+to one sim: in a shared cockpit every slave sim runs them, and an EFB only
+controls its own sim's. A router passes them only within its own sim (its
+clients, a router of the same sim, PSX itself upstream of a master) and
+drops them from another sim's router.
 
 ### FRDP CLIENTINFO
 

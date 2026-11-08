@@ -280,6 +280,13 @@ class RulesAction(enum.Enum):
     only sent to if it is itself a frankenrouter. Used for
     FRANKENWEATHER:SIGMETJSON, which no other client needs.
 
+    - 'own_sim_only': True
+
+    Send only within this router's own sim: its non-frankenrouter clients,
+    frankenrouters of the same sim, and upstream if that is PSX itself or a
+    frankenrouter of the same sim (per-sim messages: PSX.NET.VPILOT.STATUS,
+    GEOVR.PSX.*).
+
     - 'ground_handling_forward': list of display_name values
 
     Send only to frankenrouters (upstream and downstream), plus any
@@ -345,6 +352,7 @@ class RulesCode(enum.Enum):
     ADDON_FORWARDED_KNOWN = enum.auto()
     FRANKENWEATHER_FILTERED = enum.auto()
     GROUND_HANDLING_FILTERED = enum.auto()
+    VPILOT_STATUS = enum.auto()
     AGAIN = enum.auto()
     START = enum.auto()
     LOAD1 = enum.auto()
@@ -1275,6 +1283,34 @@ class Rules():  # pylint: disable=too-many-public-methods
                     'ground_handling_forward':
                         self.router.config.filtering.ground_handling_forward_names})
 
+        # VATSIM add-ons of one sim (no colon, "NAME;;;;1|..."):
+        # - PSX.NET.VPILOT.STATUS;;;;1|CONNECTED / |DISCONNECTED: the vPilot
+        #   plugin, every 5 s: is this sim's vPilot connected to VATSIM.
+        # - GEOVR.PSX.*: PSX.NET.VATSIM (voice; GeoVR is its internal name) and
+        #   the EFB's remote control of it: CONTROL ...|discover|, |connect|,
+        #   |disconnect| (EFB) and |state| / |result| with role, connected /
+        #   disconnected and callsign (PSX.NET.VATSIM); STATUS, STATUS.REQUEST.
+        # In a shared cockpit every slave sim runs these, and an EFB only
+        # controls its own sim's: never let them reach another sim. Drop them
+        # from another sim's frankenrouter; from our own sim (its clients, PSX
+        # itself upstream of a master, a router of the same sim) note our sim's
+        # state (ROUTERINFO vatsim_connection / vatsim_mode) and pass them on
+        # within our own sim only. Frequent, so drops are logged at debug only.
+        if addon.startswith(('PSX.NET.VPILOT.STATUS', 'GEOVR.PSX.')):
+            if self.sender.is_frankenrouter and \
+                    self.router.config.identity.simulator != self.sender.simulator_name:
+                self.logger.debug("Dropping %s from other sim %s", addon[:21],
+                                  self.sender.simulator_name)
+                return self.myreturn(RulesAction.DROP, RulesCode.VPILOT_STATUS)
+            fields = self.line.split('|')
+            if addon.startswith('PSX.NET.VPILOT.STATUS'):
+                self.router.note_vpilot_status(fields[-1].strip())
+            elif addon.startswith('GEOVR.PSX.CONTROL') and len(fields) >= 8 \
+                    and fields[1] in ('state', 'result'):
+                self.router.note_geovr_state(fields[6], fields[7])
+            return self.myreturn(RulesAction.FILTER, RulesCode.VPILOT_STATUS,
+                                 extra_data={'own_sim_only': True})
+
         if addon == 'FRANKENROUTER':
             if ':' not in payload:
                 return self.myreturn(
@@ -1299,19 +1335,6 @@ class Rules():  # pylint: disable=too-many-public-methods
                 if self.router.config.identity.simulator != self.sender.simulator_name:
                     self.logger.info(
                         "Dropping addon=PSXNETVATSIM:SELECT_ACP from other sim %s: %s",
-                        self.sender.simulator_name, self.line)
-                    return self.myreturn(RulesAction.DROP, RulesCode.PSXNETVATSIM)
-
-        # Drop addon=GEOVR.PSX.* (PSX.NET.VATSIM's voice client: CONTROL
-        # discover/state/connect/result/disconnect, STATUS, STATUS.REQUEST)
-        # from other sims: it's for each sim's own clients. Like
-        # GROUND.HANDLING it has no NAME:payload colon, so it's matched on
-        # the rest-of-line. Frequent, so logged at debug only.
-        if rest.startswith('GEOVR.PSX.'):
-            if self.sender.is_frankenrouter:
-                if self.router.config.identity.simulator != self.sender.simulator_name:
-                    self.logger.debug(
-                        "Dropping addon=GEOVR.PSX from other sim %s: %s",
                         self.sender.simulator_name, self.line)
                     return self.myreturn(RulesAction.DROP, RulesCode.PSXNETVATSIM)
 
@@ -2210,6 +2233,16 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             self.load_marker_pause_enabled = False
             self.load_marker_pause_delay = 0.1
             self.orchestration_needed = False   # what orchestration_egress_needed() says
+            self.vpilot_statuses = []
+            self.geovr_states = []
+
+        def note_vpilot_status(self, status):
+            """Record a PSX.NET.VPILOT.STATUS from our own sim."""
+            self.vpilot_statuses.append(status)
+
+        def note_geovr_state(self, state, callsign):
+            """Record a PSX.NET.VATSIM state/result from our own sim."""
+            self.geovr_states.append((state, callsign))
 
         def is_upstream_connected(self):
             """Return dummy value."""
@@ -3244,6 +3277,51 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         self.assertEqual(action, RulesAction.DROP)
         self.assertEqual(code, RulesCode.NOWRITE)
 
+    def test_addon_vpilot_status(self):
+        """PSX.NET.VPILOT.STATUS and GEOVR.PSX.*: own sim only, our own sim's state noted."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+        router.upstream = self.DummyUpstreamConnection()
+        router.upstream.is_frankenrouter = True
+        router.upstream.simulator_name = 'MASTERSIM'
+        router.clients = {
+            ('127.0.0.1', 12345): self.DummyClientConnection(('127.0.0.1', 12345)),
+            ('127.0.0.1', 12346): self.DummyClientConnection(('127.0.0.1', 12346)),
+        }
+        local = router.clients[('127.0.0.1', 12345)]
+        other_sim = router.clients[('127.0.0.1', 12346)]
+        other_sim.is_frankenrouter = True
+        other_sim.simulator_name = 'OtherSim'
+        ids = "|3219b1f0|f5f73212|e51527b8|"
+        for line, vpilot, geovr in (
+                ("addon=PSX.NET.VPILOT.STATUS;;;;1|CONNECTED", 'CONNECTED', None),
+                (f"addon=GEOVR.PSX.CONTROL;;;;1|discover{ids}|||", None, None),
+                (f"addon=GEOVR.PSX.CONTROL;;;;1|state{ids}flightdeck|connected|BAN32NM|",
+                 None, ('connected', 'BAN32NM')),
+                (f"addon=GEOVR.PSX.CONTROL;;;;1|connect{ids}||BAN32N|", None, None),
+                (f"addon=GEOVR.PSX.CONTROL;;;;1|result{ids}flightdeck|disconnected|BAN32N|",
+                 None, ('disconnected', 'BAN32N')),
+                ("addon=GEOVR.PSX.STATUS;;;;1|f5f73212|2|0|Unknown|0:0:0,1:0:0", None, None),
+                ("addon=GEOVR.PSX.STATUS.REQUEST;;;;1", None, None)):
+            router.vpilot_statuses, router.geovr_states = [], []
+            # Another sim's, from its router or from the master above us: dropped, not noted
+            for sender in (router.upstream, other_sim):
+                (action, code, _, _) = rules.route(line, sender)
+                self.assertEqual((action, code), (RulesAction.DROP, RulesCode.VPILOT_STATUS),
+                                 msg=line)
+            self.assertEqual((router.vpilot_statuses, router.geovr_states), ([], []), msg=line)
+            # Our own sim's (a local client, or a router of the same sim): noted, own sim only
+            for sender in (local, other_sim):
+                if sender is other_sim:
+                    other_sim.simulator_name = router.config.identity.simulator
+                (action, code, _, extra_data) = rules.route(line, sender)
+                self.assertEqual((action, code, extra_data),
+                                 (RulesAction.FILTER, RulesCode.VPILOT_STATUS,
+                                  {'own_sim_only': True}), msg=line)
+            other_sim.simulator_name = 'OtherSim'
+            self.assertEqual(router.vpilot_statuses, [vpilot] * 2 if vpilot else [], msg=line)
+            self.assertEqual(router.geovr_states, [geovr] * 2 if geovr else [], msg=line)
+
     def test_addon_psxnetvatsim_known(self):
         """PSXNETVATSIM: a known addon, forwarded locally, dropped between sims."""
         router = self.DummyFrankenrouter()
@@ -3267,7 +3345,7 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             self.assertEqual(code, RulesCode.PSXNETVATSIM, msg=line)
 
     def test_addon_geovr_filter(self):
-        """addon=GEOVR.PSX.* must be dropped from other sims only."""
+        """addon=GEOVR.PSX.* must never reach another sim."""
         router = self.DummyFrankenrouter()
         rules = Rules(router)
 
@@ -3285,22 +3363,24 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             "addon=GEOVR.PSX.STATUS.REQUEST;;;;1",
         )
         for line in lines:
-            # From a regular (non-frankenrouter) client: forwarded
+            # From a regular (non-frankenrouter) client: within our own sim only
             testpeer.is_frankenrouter = False
-            (action, *_) = rules.route(line, testpeer)
-            self.assertEqual(action, RulesAction.NORMAL, msg=line)
+            (action, _, _, extra_data) = rules.route(line, testpeer)
+            self.assertEqual((action, extra_data),
+                             (RulesAction.FILTER, {'own_sim_only': True}), msg=line)
 
-            # From a frankenrouter on the same sim: forwarded
+            # From a frankenrouter on the same sim: the same
             testpeer.is_frankenrouter = True
             testpeer.simulator_name = router.config.identity.simulator
-            (action, *_) = rules.route(line, testpeer)
-            self.assertEqual(action, RulesAction.NORMAL, msg=line)
+            (action, _, _, extra_data) = rules.route(line, testpeer)
+            self.assertEqual((action, extra_data),
+                             (RulesAction.FILTER, {'own_sim_only': True}), msg=line)
 
             # From a frankenrouter on another sim: dropped
             testpeer.simulator_name = 'OtherSim'
             (action, code, *_) = rules.route(line, testpeer)
             self.assertEqual(action, RulesAction.DROP, msg=line)
-            self.assertEqual(code, RulesCode.PSXNETVATSIM, msg=line)
+            self.assertEqual(code, RulesCode.VPILOT_STATUS, msg=line)
 
     def test_route(self):
         """Test routing."""

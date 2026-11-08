@@ -537,6 +537,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         self.session_password = None
         self.observer_session_password = None
         self.observer_mode = False
+        self.vpilot_status = None       # our sim's PSX.NET.VPILOT.STATUS (note_vpilot_status())
+        self.vpilot_status_at = None
+        self.geovr_state = None         # (state, callsign, time) from PSX.NET.VATSIM
         # Seat assignment (seats.py): when a seated sim was last missing (master),
         # and the seat this sim last acted on (slave: SELECT_ACP/layout sent)
         self.seat_missing_since = {}
@@ -718,6 +721,75 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 self.sharedinfo[key] = value
                 self.record_sim_event('sharedinfo_change', field=key, value=value, prev=prev)
                 self.frdp_sharedinfo_requested = True
+
+    def note_vpilot_status(self, status):
+        """Record our own sim's PSX.NET.VPILOT.STATUS (CONNECTED / DISCONNECTED)."""
+        old = self.vatsim_connection()
+        self.vpilot_status, self.vpilot_status_at = status, time.time()
+        new = self.vatsim_connection()
+        if new != old:
+            self.logger.info("VATSIM: this sim is now %s (vPilot plugin: %s)", new, status)
+            self.frdp_routerinfo_requested = True
+
+    def vatsim_connection(self):
+        """Return whether this sim's vPilot is connected to VATSIM: online, offline or unknown.
+
+        From the PSX.NET.vPilot plugin's STATUS messages (every 5 s); unknown
+        after 30 s without one (plugin not running).
+        """
+        if self.vpilot_status_at is None or time.time() - self.vpilot_status_at > 30:
+            return 'unknown'
+        return {'CONNECTED': 'online', 'DISCONNECTED': 'offline'}.get(self.vpilot_status,
+                                                                      'unknown')
+
+    def note_geovr_state(self, state, callsign):
+        """Record our own sim's PSX.NET.VATSIM state/result (connected/disconnected, callsign)."""
+        old = self.vatsim_mode()
+        self.geovr_state = (state, callsign.strip().upper(), time.time())
+        new = self.vatsim_mode()
+        if new != old:
+            self.logger.info("VATSIM: this sim's mode is now %s (PSX.NET.VATSIM %s as %s, "
+                             "FLT NO %s)", new, state, callsign, self.flight_number())
+            self.frdp_routerinfo_requested = True
+
+    def flight_number(self):
+        """Return the PSX FMC flight number (FLT NO), upper case, or ''."""
+        keyword = self.variables.get_keyword_for_name("FmcFltNo")
+        try:
+            value = self.cache.get_value(keyword) if keyword else None
+        except routercache.RouterCacheException:
+            value = None    # not seen yet
+        return (value or '').strip().upper().strip('-')
+
+    def vatsim_mode(self):
+        """Return how this sim is connected to VATSIM: normal, observer or unknown.
+
+        From PSX.NET.VATSIM's connection state and callsign (its answers to the
+        EFB, every 5 s while an EFB runs; unknown after 30 s without one): the
+        flight's callsign (FLT NO) = normal; FLT NO plus one letter = observer,
+        as VATSIM asks shared-cockpit crew members who aren't the pilot to
+        connect; anything else unknown. Never derived from the seat.
+        """
+        if self.geovr_state is None:
+            return 'unknown'
+        state, callsign, at = self.geovr_state
+        flt = self.flight_number()
+        if state != 'connected' or time.time() - at > 30 or not flt:
+            return 'unknown'
+        if callsign == flt:
+            return 'normal'
+        if len(callsign) == len(flt) + 1 and callsign.startswith(flt) and callsign[-1].isalpha():
+            return 'observer'
+        return 'unknown'
+
+    def vatsim_sims(self):
+        """Return {simulator name: (connection, mode)} from recent ROUTERINFO (incl. our own)."""
+        sims = {}
+        for info in self.routerinfo.values():
+            if 'vatsim_connection' in info and time.time() - info.get('received', 0) < 60:
+                sims[info.get('simulator_name')] = (info['vatsim_connection'],
+                                                    info.get('vatsim_mode', 'unknown'))
+        return sims
 
     def own_seat(self):
         """Return this router's sim's seat (LEFT/RIGHT/OBSERVER) per SHAREDINFO."""
@@ -3153,6 +3225,9 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             # them when it drops off (see record_client_disconnected())
             "cdu_menu_tracking": self.config.filtering.cdu_menu_tracking,
             "errors": self.get_errors(),
+            # This sim's VATSIM connection per its vPilot plugin
+            "vatsim_connection": self.vatsim_connection(),
+            "vatsim_mode": self.vatsim_mode(),
         }
         payload['connections'] = []
 
@@ -3670,6 +3745,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             # error is a red (ROUTER) on every sim's EICAS, and a joining sim
             # an hour off forced a disconnect just before takeoff (2026-11-04)
             errors.extend(self._navdata_check()[0])
+            pilots = sorted(sim for sim, (conn, mode) in self.vatsim_sims().items()
+                            if conn == 'online' and mode == 'normal')
+            if len(pilots) > 1:
+                errors.append(f"More than one sim is online on VATSIM (not as observer): "
+                              f"{', '.join(pilots)}")
         if self.config.identity.type == 'master':
             for pattern in MASTER_ADDON_PATTERNS:
                 matches = self._find_network_clients_matching(pattern)
@@ -3719,6 +3799,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         f"Router {name}'s clock is off by {skew:+.1f}s"
                         f" (limit {perf.clock_skew_warning:.0f}s)")
             warnings.extend(self._navdata_check()[1])
+            sims = self.vatsim_sims()
+            pilots = sorted(sim for sim, (conn, mode) in sims.items()
+                            if conn == 'online' and mode == 'normal')
+            offline = sorted(sim for sim, (conn, _) in sims.items() if conn == 'offline')
+            if pilots and offline:
+                warnings.append(f"{', '.join(pilots)} online on VATSIM, but "
+                                f"{', '.join(offline)} not connected")
         checks = self.config.check
         if checks is None:
             return warnings
@@ -5456,6 +5543,17 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                     zone_info['wxmode'] and self.orchestration_feed_fresh(zone_info['zone']))
                 if late and not fed:
                     self.orchestration_enqueue(line)
+            elif 'own_sim_only' in extra_data:
+                own = self.config.identity.simulator
+                peers = [c.peername for c in self.clients.values()
+                         if c.peername != sender.peername and
+                         (not c.is_frankenrouter or c.simulator_name == own)]
+                tasks = [self.client_broadcast(line, include=peers)] if peers else []
+                if not sender.upstream and self.is_upstream_connected() and (
+                        not self.upstream.is_frankenrouter or
+                        self.upstream.simulator_name == own):
+                    tasks.append(self.send_to_upstream(line, sender.peername))
+                await asyncio.gather(*tasks)
             elif 'frankenrouters_only' in extra_data:
                 self.logger.debug("sending with frankenrouters_only: %s", line[:80])
                 if sender.upstream:
