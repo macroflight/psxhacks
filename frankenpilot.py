@@ -25,16 +25,19 @@ Behaviour
 # pylint: disable=too-many-lines
 import argparse
 import asyncio
+import collections
 import json
 import logging
 import math
 import os
 import random
+import re
 import sys
 import time
 import tomllib
 import urllib.request
 
+import fp_webui
 import psx
 from psxhacks_version import get_version
 
@@ -99,12 +102,107 @@ DEFAULT_PARAMS = {
     'delay_s': [1.0, 4.0],
     'runway_half_width_m': 40.0,
     'stab_trim_units': 6.0,
+    # Anti-ice: how much cloud makes "icing conditions" (in flight, TAT <= 10 C)
+    'icing_auto_cont_s': 60.0,      # auto system: in cloud this long in a row ...
+    'icing_auto_frac': 0.6,         # ... and this much of the last 3 min (more than ~3 oktas)
+    'icing_auto_depth_ft': 2000.0,  # auto system: or in cloud through this much climb/descent
+    'icing_dense_cont_s': 30.0,     # auto system: or this long in a row in dense cloud ...
+    'icing_dense': 0.1,             # ... with at least this mean MSFS cloud density
+    'icing_manual_cont_s': 30.0,    # manual system (and fog on the ground): this long in cloud
+    'icing_atis_base_ft': 3000.0,   # departure ATIS: BKN/OVC below this (AGL) after engine start
 }
+
+
+# Lines for the log file only (once-a-minute state, decision context), not the console
+FILE_ONLY = logging.getLogger("frankenpilot.file")
+LOG_DIR = os.path.join(os.path.expanduser("~"), ".cache", "frankenpilot", "logs")
+LOG_KEEP = 10    # like frankenweather
+
+
+def setup_logging(debug, log_dir):
+    """Console (local time) and a log file per run in log_dir (UTC, with date; LOG_KEEP kept)."""
+    level = logging.DEBUG if debug else logging.INFO
+    root = logging.getLogger()
+    root.setLevel(level)
+    console = logging.StreamHandler()
+    console.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", "%H:%M:%S"))
+    console.addFilter(lambda record: not record.name.startswith("frankenpilot.file"))
+    root.addHandler(console)
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+        old = sorted(f for f in os.listdir(log_dir)
+                     if f.startswith("frankenpilot_") and f.endswith(".log"))
+        for name in old[:max(0, len(old) - LOG_KEEP + 1)]:
+            os.remove(os.path.join(log_dir, name))
+        name = time.strftime("frankenpilot_%Y%m%dT%H%M%SZ.log", time.gmtime())
+        path = os.path.join(log_dir, name)
+        handler = logging.FileHandler(path, encoding="utf-8")
+    except OSError as exc:
+        logging.warning("No log file in %s: %s", log_dir, exc)
+        return None
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s", "%Y-%m-%d %H:%M:%SZ")
+    formatter.converter = time.gmtime
+    handler.setFormatter(formatter)
+    root.addHandler(handler)
+    logging.info("Logging to %s (times UTC)", path)
+    return path
 
 
 def human_delay(span):
     """Return a random delay (seconds) in span [low, high]."""
     return random.uniform(span[0], span[1])
+
+
+METAR_WEATHER = r"[+-]?(VC)?(MI|BC|PR|DR|BL|SH|TS|FZ)?(DZ|RA|SN|SG|PL|GR|GS|UP|BR|FG)+"
+
+
+def parse_metar(text):
+    """Return (temp C or None, visibility m or None, [(amount, base ft)], weather tokens).
+
+    Only what the anti-ice decision needs; trends (BECMG/TEMPO) and RMK are ignored.
+    """
+    temp = vis = None
+    layers, weather = [], []
+    for tok in re.split(r"\s+", text.strip())[1:]:
+        if tok in ("BECMG", "TEMPO", "RMK", "NOSIG"):
+            break
+        if m := re.fullmatch(r"(M?\d\d)/(M?\d\d)?", tok):
+            temp = int(m.group(1).replace("M", "-"))
+        elif re.fullmatch(r"\d{4}", tok) and vis is None:
+            vis = int(tok)
+        elif m := re.fullmatch(r"(\d+)?(?:(\d)/(\d))?SM", tok):
+            frac = int(m.group(2)) / int(m.group(3)) if m.group(2) else 0
+            vis = int((int(m.group(1) or 0) + frac) * 1609)
+        elif tok == "CAVOK":
+            vis = 10000
+        elif m := re.fullmatch(r"(FEW|SCT|BKN|OVC|VV)(\d{3})(CB|TCU)?", tok):
+            layers.append((m.group(1), int(m.group(2)) * 100))
+        elif re.fullmatch(METAR_WEATHER, tok):
+            weather.append(tok)
+    return temp, vis, layers, weather
+
+
+def atis_icing_reason(metar, base_limit_ft):
+    """Return why a departure METAR means icing conditions right after takeoff, or None.
+
+    Boeing: icing conditions exist when OAT (on the ground) is 10 C or below
+    and there is visible moisture: fog with visibility 1 mile (1,600 m) or
+    less, precipitation, or cloud we'll be in shortly after takeoff (here
+    BKN/OVC/VV below base_limit_ft). FEW/SCT alone are not enough.
+    """
+    temp, vis, layers, weather = parse_metar(metar)
+    if temp is None or temp > 10:
+        return None
+    if vis is not None and vis <= 1600:
+        return f"visibility {vis} m at {temp} C"
+    precip = [w for w in weather if re.search(r"DZ|RA|SN|SG|PL|GS|UP", w)]
+    if precip:
+        return f"{precip[0]} at {temp} C"
+    low = [(amt, base) for amt, base in layers
+           if amt in ("BKN", "OVC", "VV") and base < base_limit_ft]
+    if low:
+        return f"{low[0][0]}{low[0][1] // 100:03d} at {temp} C"
+    return None
 
 
 def nm_between(lat1, lon1, lat2, lon2):
@@ -260,11 +358,16 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.router = None          # YOUAREON data, or None
         self.youareon_wait_until = 0.0
         self.connected_at = 0.0
+        self.cur_alt, self.cur_dep = None, None    # this tick's altitude and departure
+        self.hands = asyncio.Lock()     # one switch at a time (see write())
         self.pnf_saved = None       # our PnfMode bits 0/2/3 before we took over
         self.routerinfo = {}        # uuid -> (time, type, simulator_name)
         self.seats = {}             # SHAREDINFO seat_left/right_simulator
         self.in_cloud = None
         self.in_cloud_at = 0.0
+        self.cloud_density = None
+        self.cloud_hist = collections.deque(maxlen=240)   # (t, in cloud, alt ft, density), 1 Hz
+        self.tat_hist = collections.deque(maxlen=90)      # (t, TAT C, alt ft), 1 Hz
         # Flight state
         self.tasks = set()          # running action flows
         self.last_liftoff = None    # monotonic time of the last liftoff flow
@@ -300,10 +403,27 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.cloud_exit_at = None      # when we last left cloud while icing
         self.icing_clear_since = None  # TAT > 10 C since
         self.icing_nac_waiting = False  # >ICING NAC on the ground before all engines ran
+        self.atis_checked = False      # departure ATIS looked at after engine start
+
+    def context(self):
+        """Return the flight state behind a decision, for the log file."""
+        att = self.attitude()
+        alt = f"{att[2]:.0f} ft" if att else "?"
+        cloud = self.in_cloud if time.monotonic() - self.in_cloud_at < 30 else None
+        dens = f" dens {self.cloud_density:.2f}" if cloud and self.cloud_density is not None else ""
+        return (f"phase {self.phase}, {alt}, GS {self.ground_speed() or 0:.0f} kt, "
+                f"TAT {self.tat()}, SAT {self.sat()}, cloud {cloud}{dens}, "
+                f"{'all' if self.engines_running() else 'not all'} engines running")
+
+    def decide(self, text):
+        """Log a decision in plain words: what was seen and what follows (context in the file)."""
+        self.logger.info("DECISION: %s", text)
+        FILE_ONLY.info("  context: %s", self.context())
 
     def log_action(self, text):
-        """Log an action and remember it for STATE."""
+        """Log an action (with its context in the log file) and remember it for STATE."""
         self.logger.info("ACTION: %s", text)
+        FILE_ONLY.info("  context: %s", self.context())
         stamp = time.strftime('%H:%M:%SZ', time.gmtime())
         self.status_log = ([f"{stamp} {text}"] + self.status_log)[:20]
 
@@ -361,14 +481,19 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
     # ----------------------------------------------------------------- writes
 
     async def write(self, name, value, text, delay=True):
-        """Set a PSX variable after a human-like delay, and log it."""
-        if delay:
-            await asyncio.sleep(human_delay(self.params['delay_s']))
-        if not self.active or not self.connected:
-            return
-        self.psx.send(name, str(value))
-        self.psx._set(name, str(value))  # pylint: disable=protected-access
-        self.log_action(text)
+        """Set a PSX variable after a human-like delay, and log it.
+
+        One pair of hands: flows that run at the same time (runway entry and
+        anti-ice, say) take turns switch by switch instead of interleaving.
+        """
+        async with self.hands:
+            if delay:
+                await asyncio.sleep(human_delay(self.params['delay_s']))
+            if not self.active or not self.connected:
+                return
+            self.psx.send(name, str(value))
+            self.psx._set(name, str(value))  # pylint: disable=protected-access
+            self.log_action(text)
 
     async def push_switch(self, name, on, text):
         """Set an alternate-action push switch (bit 1 = pushed) on/off, keeping its other bits."""
@@ -413,7 +538,8 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
                      "FuelOvrd2Fwd", "FuelOvrd2Aft", "FuelOvrd3Fwd", "FuelOvrd3Aft",
                      "FuelMain1Fwd", "FuelMain1Aft", "FuelMain2Fwd", "FuelMain2Aft",
                      "FuelMain3Fwd", "FuelMain3Aft", "FuelMain4Fwd", "FuelMain4Aft", "FuelCtrL",
-                     "FuelCtrR", "FuelStabL", "FuelStabR", "FuelAuxL", "FuelAuxR"):
+                     "FuelCtrR", "FuelStabL", "FuelStabR", "FuelAuxL", "FuelAuxR",
+                     *[f"Metar{n}" for n in range(1, 8)]):
             self.psx.subscribe(name)
         self.psx.subscribe("version", self.on_connected)
         self.psx.subscribe("McpFdCp", self.on_fd)
@@ -490,6 +616,8 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             if 'in_cloud' in data:
                 self.in_cloud = bool(data['in_cloud'])
                 self.in_cloud_at = time.monotonic()
+            if isinstance(data.get('cloud_density'), (int, float)):
+                self.cloud_density = float(data['cloud_density'])
         elif value.startswith('FRANKENPILOT:COMMAND:'):
             self.on_command(value[len('FRANKENPILOT:COMMAND:'):])
 
@@ -644,28 +772,35 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             self.check_thrust_reduction()
             self.check_altitudes(alt, dep, dst)
             self.check_fuel(new_a)
+        self.cur_alt, self.cur_dep = alt, dep
         self.check_anti_ice(on_ground, new_a, new_c)
 
     # --- runway entry / crossing
 
     def check_runway(self, lat, lon, hdg, gs):
         """Runway entry flow when lined up before takeoff; strobes while crossing a runway."""
-        on, aligned = None, False
+        on, aligned, where = None, False, ""
         for rwy in parse_local_runways(self.psx.get("LocalRwys")):
             cross, t, rhdg = runway_position(lat, lon, rwy)
             if cross <= self.params['runway_half_width_m'] and -0.05 <= t <= 1.05:
                 on = rwy[0]
                 aligned = heading_diff(hdg, rhdg) < 20 or heading_diff(hdg, rhdg + 180) < 20
+                where = (f"{cross:.0f} m from the centreline, heading {hdg:.0f} "
+                         f"(runway {rhdg % 360:.0f}/{(rhdg + 180) % 360:.0f}), {gs:.0f} kt")
                 break
         if on and aligned and self.phase == 'GROUND' and not self.runway_entry_done and gs < 40:
             self.runway_entry_done = True
-            self.logger.info("Lined up on runway %s", on)
+            self.decide(f"lined up on runway {on.strip()}: {where}, before takeoff, "
+                        "so the runway entry flow follows")
             self.spawn(self.runway_entry_flow())
         if on and not aligned and not self.crossing and self.actions['crossing_strobes']:
             self.crossing = True
-            self.spawn(self.write("LtStrobe", 1, f"Strobes on: crossing runway {on}"))
+            self.decide(f"on runway {on.strip()} but not lined up ({where}): crossing it, "
+                        "strobes on until clear")
+            self.spawn(self.write("LtStrobe", 1, f"Strobes on: crossing runway {on.strip()}"))
         elif not on and self.crossing:
             self.crossing = False
+            self.decide("off the runway again: crossing done, strobes off")
             self.spawn(self.write("LtStrobe", 0, "Strobes off: runway crossed"))
         self.on_runway = on
 
@@ -692,7 +827,9 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
 
     def on_liftoff(self):
         """Lights off after liftoff; remember the departure elevation."""
-        self.logger.info("Liftoff at %.0f ft", self.dep_elev)
+        self.decide(f"liftoff at {self.dep_elev:.0f} ft (no longer on the ground after the "
+                    "takeoff roll): after-liftoff lights in 5 s, departure elevation for the "
+                    "10,000 ft line set to this altitude")
         self.runway_entry_done = False
         if self.actions['liftoff_lights']:
             async def flow():
@@ -717,7 +854,9 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         # 3 deg of lever travel back, at least 20 s after liftoff
         if self.max_tla - top > 300 and time.monotonic() - self.airborne_at > 20:
             self.thrust_reduced = True
-            self.logger.info("Thrust reduction detected")
+            self.decide(f"thrust reduction: thrust levers back from {self.max_tla / 100:.1f} to "
+                        f"{top / 100:.1f} deg, {time.monotonic() - self.airborne_at:.0f} s after "
+                        f"liftoff, gear lever {self.get_int('GearLever')}: packs and gear lever")
             if self.actions['packs_after_takeoff']:
                 self.spawn(self.packs_on())
             if self.actions['gear_lever_off'] and self.get_int("GearLever") == GEAR_UP:
@@ -754,10 +893,17 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         elif above != self.above_line:
             self.above_line = above
             if self.lights_line == 'dep' and above:
+                self.decide(f"climbing through {alt:.0f} ft = {self.params['lights_agl_ft']:.0f} "
+                            f"ft above the departure ({dep or '?'}, {dep_elev:.0f} ft): landing "
+                            f"and logo lights off; next line {dst_line:.0f} ft "
+                            f"({dst or '?'} at {dst_elev:.0f} ft)")
                 if self.actions['lights_10000']:
                     self.spawn(self.lights_10000(on=False))
                 self.lights_line, self.above_line = 'dst', alt > dst_line
             elif self.lights_line == 'dst' and not above:
+                self.decide(f"descending through {alt:.0f} ft = {self.params['lights_agl_ft']:.0f} "
+                            f"ft above the destination ({dst or '?'}, {dst_elev:.0f} ft): landing "
+                            "and logo lights on")
                 if self.actions['lights_10000']:
                     self.spawn(self.lights_10000(on=True))
         ab_above = alt > dst_elev + self.params['autobrake_agl_ft']
@@ -765,6 +911,10 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             setting = AUTOBRAKE.get(str(self.params['autobrake_setting']), AUTOBRAKE['4'])
             unset = self.get_int("Autobr") in (AUTOBRAKE['OFF'], AUTOBRAKE['DISARM'])
             if self.actions['autobrake_5000'] and unset:
+                self.decide(f"descending through {alt:.0f} ft = "
+                            f"{self.params['autobrake_agl_ft']:.0f} ft above the destination "
+                            f"({dst or '?'}, {dst_elev:.0f} ft) with no autobrake set: "
+                            f"autobrake {self.params['autobrake_setting']}")
                 text = f"Descent: autobrake {self.params['autobrake_setting']} (none set)"
                 self.spawn(self.write("Autobr", setting, text))
         self.above_autobrake_alt = ab_above
@@ -784,7 +934,10 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
 
     def on_runway_exit(self):
         """Flaps, speedbrake, lights, strobes, WXR/TERR, stab trim, APU (delayed)."""
-        self.logger.info("Runway exit detected")
+        self.decide(f"runway exit: landed on heading {self.touchdown_hdg:.0f}, now "
+                    f"{self.ground_speed() or 0:.0f} kt and turned to {self.attitude()[3]:.0f} "
+                    f"(more than {self.params['exit_turn_deg']:.0f} deg, slower than "
+                    f"{self.params['exit_speed_kt']:.0f} kt): after-landing flow")
         self.spawn(self.runway_exit_flow())
 
     async def runway_exit_flow(self):  # pylint: disable=too-many-branches
@@ -830,16 +983,20 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
     async def stab_trim_to(self, units):
         """Trim like a pilot: hold the trim switch in blips, sometimes overshoot and come back."""
         target = units * 1000.0
-        overshoot = random.random() < 0.3
+        start = self.get_int("StabTrim")
+        if start is None:
+            return
+        # Sometimes a little past the target first (chosen once, beyond it as seen from the
+        # start: deciding per blip made it chase across the target and give up)
+        aim = target + (250 if start < target else -250) if random.random() < 0.3 else target
         for _ in range(30):
             pos = self.get_int("StabTrim")
             if pos is None:
                 return
-            aim = target + (250 if overshoot and pos < target else -250 if overshoot else 0)
             err = aim - pos
             if abs(err) < 150:
-                if overshoot:
-                    overshoot = False
+                if aim != target:
+                    aim = target
                     await asyncio.sleep(random.uniform(0.6, 1.5))
                     continue
                 self.log_action(f"Runway exit: stab trim {pos / 1000:.1f} units")
@@ -851,6 +1008,8 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             await asyncio.sleep(min(3.0, max(0.3, abs(err) / 330.0)) * random.uniform(0.7, 1.0))
             self.psx.send("StabTrimCp", "0")
             await asyncio.sleep(random.uniform(0.3, 0.9))
+        self.logger.warning("Runway exit: stab trim gave up at %s (target %.1f units)",
+                            self.get_int("StabTrim"), units)
 
     # --- fuel (EICAS driven, in flight)
 
@@ -867,9 +1026,15 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         )
         todo = [(switch, on, f">{msg}: {FUEL_LABELS[switch]} {'on' if on else 'off'}")
                 for msg, switch, on in rules if EICAS_A[msg] in new]
+        for msg, switch, on in rules:
+            if EICAS_A[msg] in new:
+                self.decide(f">{msg} appeared on EICAS: {FUEL_LABELS[switch]} "
+                            f"{'on' if on else 'off'} (Boeing fuel procedure)")
         if todo:    # one after the other, like a hand moving across the panel
             self.spawn(self.push_switches(todo))
         if EICAS_A['FUEL TANK/ENG'] in new:
+            self.decide(">FUEL TANK/ENG appeared on EICAS: tank-to-engine (override pumps 2/3 "
+                        "off, outer crossfeeds closed, main pumps on)")
             self.spawn(self.tank_to_engine())
 
     async def push_switches(self, todo):
@@ -889,17 +1054,81 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
 
     # --- anti-ice (what a pilot sees: TAT, clouds out of the window, EICAS)
 
-    def check_anti_ice(self, on_ground, new_a, new_c):  # pylint: disable=too-many-branches
+    def sat(self):
+        """Return SAT (deg C) from MiscFltData, or None."""
+        try:
+            return int(self.psx.get("MiscFltData").split(";")[1]) / 10.0
+        except (AttributeError, ValueError, IndexError):
+            return None
+
+    def cloud_run(self, now):
+        """Return (seconds in cloud in a row, altitude span ft, mean density) of the current run."""
+        start, lo, hi, dens = None, None, None, []
+        for t, cloud, alt, density in reversed(self.cloud_hist):
+            if not cloud:
+                break
+            start, lo, hi = t, min(alt, lo if lo is not None else alt), max(alt, hi or alt)
+            if density is not None:
+                dens.append(density)
+        if start is None:
+            return 0.0, 0.0, None
+        return now - start, hi - lo, (sum(dens) / len(dens) if dens else None)
+
+    def climb_trend(self):
+        """Return (climb rate ft/min, TAT expected in a minute) from the last ~90 s, or Nones."""
+        if len(self.tat_hist) < 30:
+            return None, None
+        (t0, tat0, alt0), (t1, tat1, alt1) = self.tat_hist[0], self.tat_hist[-1]
+        if t1 - t0 < 20:
+            return None, None
+        return (alt1 - alt0) / (t1 - t0) * 60.0, tat1 + (tat1 - tat0) / (t1 - t0) * 60.0
+
+    def icing_significant(self, now, on_ground, auto):
+        """Return why the cloud we're in makes icing conditions (TAT <= 10 C), or None.
+
+        Few whiffs on a CAVOK day are not icing conditions for a crew with an auto
+        system (the ice detectors handle those); a manual system, and fog on the
+        ground, need less. Climb and cruise at SAT -40 C or colder: no icing (FCOM).
+        A descent through a layer where TAT is about to rise above 10 C: none.
+        """
+        cont, depth, density = self.cloud_run(now)
+        prm = self.params
+        if on_ground or not auto:
+            return f"in cloud for {cont:.0f} s" if cont >= prm['icing_manual_cont_s'] else None
+        rate, tat_soon = self.climb_trend()
+        descending = rate is not None and rate < -500
+        sat = self.sat()
+        if (descending and tat_soon > 10.0) or (
+                not descending and sat is not None and sat <= -40.0):
+            return None
+        frac = sum(c for t, c, _, _ in self.cloud_hist if now - t <= 180) / 180.0
+        reasons = (
+            (cont >= prm['icing_auto_cont_s'] and frac >= prm['icing_auto_frac'],
+             f"in cloud for {cont:.0f} s, {frac:.0%} of the last 3 min"),
+            (depth >= prm['icing_auto_depth_ft'], f"in cloud through {depth:.0f} ft"),
+            (cont >= prm['icing_dense_cont_s'] and (density or 0.0) >= prm['icing_dense'],
+             f"in dense cloud for {cont:.0f} s"))
+        return next((text for hit, text in reasons if hit), None)
+
+    def departure_atis(self, dep):
+        """Return the departure's METAR text from PSX's Metar1-7, or None."""
+        if not dep:
+            return None
+        for n in range(1, 8):
+            metar = (self.psx.get(f"Metar{n}") or "").strip()
+            if metar.startswith(dep + " "):
+                return metar
+        return None
+
+    def check_anti_ice(self, on_ground, new_a, new_c):
         """Anti-ice by the book, edge-triggered so the crew can always override.
 
         ON (whatever the system type, like a pilot: even an AUTO or OFF auto
         system goes to ON): >ICING NAC -> engine, >ICING WING -> wing (in
-        flight); proactively engine anti-ice on entering icing conditions (TAT
-        <= 10 C and visible moisture: in cloud out of the window, MSFS).
-        Back to AUTO (auto systems) / off (manual): at >ANTI-ICE NAC/WING (on,
-        no ice), when TAT has been above 10 C for a minute, or after leaving
-        cloud for a while - 2 min plus half the time spent in icing, at most
-        10 min (long icing exposure keeps it on longer).
+        flight); engine anti-ice on entering icing conditions: TAT <= 10 C and
+        enough cloud out of the window (MSFS) - see icing_significant(); on the
+        ground, after engine start, also when the departure ATIS reports them.
+        Back to AUTO (auto systems) / off (manual): see anti_ice_off().
         """
         if not self.actions['anti_ice']:
             return
@@ -908,7 +1137,10 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             return
         now = time.monotonic()
         cloud = self.in_cloud if now - self.in_cloud_at < 30 else False
-        in_icing = bool(cloud and tat <= 10.0)
+        alt = self.cur_alt or 0.0
+        self.cloud_hist.append((now, bool(cloud), alt, self.cloud_density if cloud else None))
+        self.tat_hist.append((now, tat, alt))
+        in_icing = bool(cloud and tat <= 10.0)     # raw: how long in icing, when it ended
         self.icing_clear_since = (self.icing_clear_since or now) if tat > 10.0 else None
         if in_icing:
             self.icing_since = self.icing_since or now
@@ -917,33 +1149,70 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             self.icing_seconds += now - self.icing_since
             self.icing_since = None
             self.cloud_exit_at = now
-        # --- on (on the ground only once all engines run, like a crew after engine start)
-        may_switch_on = not on_ground or self.engines_running()
-        if EICAS_C['ICING NAC'] in new_c and not may_switch_on:
-            self.icing_nac_waiting = True
-        nac_now = EICAS_C['ICING NAC'] in new_c or (
-            self.icing_nac_waiting and EICAS_C['ICING NAC'] in self.last_eicas['C'])
-        if not may_switch_on:
-            pass
-        elif nac_now:
-            self.icing, self.icing_nac_waiting = True, False
-            self.spawn(self.set_anti_ice('nai', True, ">ICING NAC"))
-        elif in_icing and not self.icing:
-            self.icing = True
-            why = f"Icing conditions (TAT {tat:.0f}, in cloud)"
-            self.spawn(self.set_anti_ice('nai', True, why))
+        self.anti_ice_on(now, on_ground, in_icing, tat, new_c)
         if not on_ground and EICAS_A['ICING WING'] in new_a:
             self.icing = True
+            self.decide(">ICING WING appeared on EICAS (ice detectors): wing anti-ice ON")
             self.spawn(self.set_anti_ice('wai', True, ">ICING WING"))
-        # --- off / back to AUTO. Nothing here depends on the engines: an engine failure on
-        # takeoff never switches anti-ice off. On the ground only TAT > 10 C ends icing
-        # conditions; fog patches or breaking out of a low layer on the takeoff roll don't,
-        # the clear-of-cloud time starts at liftoff.
+        self.anti_ice_off(now, on_ground, tat, new_a)
+
+    def anti_ice_on(self, now, on_ground, in_icing, tat, new_c):
+        """Engine anti-ice on; on the ground only once all engines run (after engine start)."""
+        if EICAS_C['ICING NAC'] in new_c:
+            self.icing_nac_waiting = True
+        if on_ground and not self.engines_running():
+            return
+        if self.icing_nac_waiting and EICAS_C['ICING NAC'] in self.last_eicas['C']:
+            self.icing, self.icing_nac_waiting = True, False
+            self.decide(">ICING NAC on EICAS (ice detectors)" +
+                        (" and all engines running" if on_ground else "") + ": engine anti-ice ON")
+            self.spawn(self.set_anti_ice('nai', True, ">ICING NAC"))
+            return
+        self.icing_nac_waiting = False
+        if self.icing:
+            return
+        reason = None
+        if in_icing:
+            auto = self.get_int("CfgNaiAuto", 0) == 1
+            reason = self.icing_significant(now, on_ground, auto)
+            reason = reason and f"Icing conditions (TAT {tat:.0f}, {reason})"
+        if not reason and on_ground and not self.atis_checked and self.phase == 'GROUND':
+            # Once after engine start: icing conditions right after takeoff per the ATIS
+            self.atis_checked = True
+            metar = self.departure_atis(self.cur_dep)
+            atis = metar and atis_icing_reason(metar, self.params['icing_atis_base_ft'])
+            reason = atis and f"Departure ATIS: {atis}"
+            if metar:
+                self.decide(f"all engines running, departure ATIS ({metar}): " +
+                            (f"icing conditions after takeoff ({atis}), engine anti-ice ON"
+                             if atis else "no icing conditions expected after takeoff"))
+        elif reason:
+            self.decide(f"{reason}, {'on the ground' if on_ground else 'in flight'}, "
+                        f"{'auto' if self.get_int('CfgNaiAuto', 0) == 1 else 'manual'} "
+                        "anti-ice system: engine anti-ice ON")
+        if reason:
+            self.icing = True
+            self.spawn(self.set_anti_ice('nai', True, reason))
+
+    def anti_ice_off(self, now, on_ground, tat, new_a):
+        """Switch anti-ice back to AUTO / off when icing conditions have ended.
+
+        TAT above 10 C for a minute; in flight also >ANTI-ICE NAC/WING, or clear
+        of cloud for 2 min plus half the time spent in icing (at most 10 min).
+        Nothing here depends on the engines: an engine failure on takeoff never
+        switches anti-ice off. On the ground only TAT > 10 C ends icing
+        conditions; fog patches or breaking out of a low layer on the takeoff
+        roll don't, the clear-of-cloud time starts at liftoff.
+        """
         if on_ground and self.cloud_exit_at is not None:
             self.cloud_exit_at = now
         if not on_ground and EICAS_A['ANTI-ICE NAC'] in new_a:
+            self.decide(">ANTI-ICE NAC on EICAS (engine anti-ice on, no ice detected): "
+                        "engine anti-ice back to AUTO/off")
             self.spawn(self.set_anti_ice('nai', False, ">ANTI-ICE NAC (on, no ice)"))
         if not on_ground and EICAS_A['ANTI-ICE WING'] in new_a:
+            self.decide(">ANTI-ICE WING on EICAS (wing anti-ice on, no ice detected): "
+                        "wing anti-ice back to AUTO/off")
             self.spawn(self.set_anti_ice('wai', False, ">ANTI-ICE WING (on, no ice)"))
         if not self.icing:
             return
@@ -954,6 +1223,8 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         elif self.cloud_exit_at is not None and now - self.cloud_exit_at > wait:
             why = f"Clear of cloud for {wait / 60:.0f} min"
         if why:
+            self.decide(f"icing conditions over ({why}; {self.icing_seconds / 60:.0f} min in "
+                        "icing conditions): anti-ice back to AUTO/off")
             self.icing, self.icing_seconds, self.cloud_exit_at = False, 0.0, None
             self.spawn(self.set_anti_ice('nai', False, why))
             if not on_ground:
@@ -990,28 +1261,35 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         if key == theirs and self.psx.get(mine) != value:
             side = "captain's" if mine == "McpFdCp" else "F/O's"
             state = "on" if value == "1" else "off"
+            other = "F/O" if theirs == "McpFdFo" else "captain"
+            self.decide(f"the {other} (pilot flying) switched their F/D {state}: {side} F/D "
+                        "follows")
             self.spawn(self.write(mine, value, f"F/D follow: {side} F/D {state}"))
 
     # -------------------------------------------------------------- state out
 
-    def send_state(self):
-        """Broadcast our state for the router's frankenpilot page."""
-        if not self.connected:
-            return
-        state = {
+    def state_dict(self):
+        """Return our state (router page via STATE, and our own web UI)."""
+        return {
             'version': __version__, 'mode': self.mode, 'active': self.active, 'seat': self.seat,
             'enabled': self.enabled_setting, 'phase': self.phase,
             'actions': {name: {'on': self.actions[name], 'text': text}
                         for name, (_, text) in ACTIONS.items()},
             'params': self.params, 'recent': self.status_log[:10],
         }
+
+    def send_state(self):
+        """Broadcast our state for the router's frankenpilot page."""
+        if not self.connected:
+            return
+        state = self.state_dict()
         self.psx.send("addon", f"FRANKENPILOT:STATE:{json.dumps(state, separators=(',', ':'))}")
 
     # ------------------------------------------------------------------ main
 
     async def rules_task(self):
         """Run the rules every second and send STATE every 10 s."""
-        last_state = 0.0
+        last_state = last_context = 0.0
         while True:
             await asyncio.sleep(1.0)
             if not self.connected:
@@ -1023,6 +1301,9 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             if time.monotonic() - last_state > 10:
                 last_state = time.monotonic()
                 self.send_state()
+            if self.active and time.monotonic() - last_context > 60:
+                last_context = time.monotonic()
+                FILE_ONLY.info("STATE: %s", self.context())
 
     async def run(self):
         """Connect to PSX and run."""
@@ -1031,6 +1312,8 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         async with asyncio.TaskGroup() as tg:
             tg.create_task(self.psx.connect(self.args.psx_host, self.args.psx_port))
             tg.create_task(self.rules_task())
+            if self.args.web_port:
+                tg.create_task(fp_webui.serve(self, self.args.web_port))
 
 
 def main():
@@ -1049,10 +1332,13 @@ def main():
     parser.add_argument("--seat", choices=("auto", "left", "right"),
                         help="Local mode: frankenpilot's seat (default: the PSX Human Pilot seat)")
     parser.add_argument("--debug", action="store_true", help="Debug logging")
+    parser.add_argument("--web-port", type=int, default=9757,
+                        help="Web UI port (state, settings, log files); 0 = no web UI")
+    parser.add_argument("--log-dir", default=LOG_DIR,
+                        help=f"Log file directory, one file per run (default {LOG_DIR})")
     parser.add_argument("--version", action="version", version=__version__)
     args = parser.parse_args()
-    logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO,
-                        format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
+    args.log_path = setup_logging(args.debug, args.log_dir)
     if args.psx_port_override is not None:
         if args.psx_port not in (args.psx_port_override, 10747):
             logging.warning("--psx-port-override %d replaces --psx-port %d",

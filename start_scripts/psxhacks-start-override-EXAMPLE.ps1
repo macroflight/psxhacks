@@ -580,7 +580,8 @@
 # A configurable virtual Pilot Monitoring that replaces PSX's own virtual
 # pilot's silent tasks (PSX keeps the call-outs). In shared cockpit it is on
 # when 0-1 slave sims are connected and sits in the free seat; the router's
-# frankenpilot page can switch it and each of its actions on/off. See
+# frankenpilot page can switch it and each of its actions on/off. It also
+# has its own web page on port 9757 (--web-port) with its log files. See
 # docs/frankenpilot.md.
 #
 # NOTE: started from startsim_master.ps1 - see the FrankenTanker settings

@@ -77,11 +77,25 @@ config file (`[actions]`, names in brackets).
   pumps on at >FUEL PMP STB and off at >FUEL LO STAB; AUX pumps off at
   >FUEL AUX; at >FUEL TANK/ENG override pumps 2/3 off, outer crossfeeds
   1/4 closed, main pumps on. Before engine start the fuel panel is yours.
-- **Anti-ice** (`anti_ice`): engine anti-ice on when entering icing
-  conditions (TAT 10 C or colder and in cloud); at >ICING NAC / >ICING WING
-  engine / wing anti-ice to ON, also an automatic system set to AUTO or OFF.
-  On the ground it waits until all four engines are running (and wing
-  anti-ice is only switched in flight).
+- **Anti-ice** (`anti_ice`): at >ICING NAC / >ICING WING engine / wing
+  anti-ice to ON, also an automatic system set to AUTO or OFF. Engine
+  anti-ice also goes on in icing conditions, TAT 10 C or colder and enough
+  cloud (what the crew sees: MSFS in-cloud and cloud density from
+  PSX.NET.MSFS, the departure ATIS):
+  - Auto system in flight: a few whiffs of cloud are left to AUTO (the ice
+    detectors). It goes ON after 60 s in a row in cloud with 60 % of the
+    last 3 minutes in cloud (more than about 3 oktas on the way), or in
+    cloud through 2,000 ft of climb or descent (a deep layer), or 30 s in
+    dense cloud (MSFS cloud density 0.1 or more).
+  - Manual system, and fog on the ground: 30 s in a row in cloud.
+  - Not in climb and cruise at SAT -40 C or colder (Boeing), and not on a
+    descent where TAT will be above 10 C within a minute.
+  - On the ground, once all four engines are running (never before engine
+    start), also when the departure ATIS (its METAR in PSX) reports icing
+    conditions right after takeoff at 10 C or colder: visibility 1,600 m or
+    less, precipitation, or BKN/OVC below 3,000 ft (FEW/SCT alone don't
+    count). Wing anti-ice is only switched in flight.
+
   Back to AUTO (or off) when TAT has been above 10 C for a minute, and in
   flight at >ANTI-ICE NAC/WING or a while after leaving cloud (longer after
   a long time in icing conditions; the time counts from liftoff, so fog
@@ -90,9 +104,28 @@ config file (`[actions]`, names in brackets).
   way until the next trigger.
 - **F/D**: your F/D switch moves, the other one follows (`fd_follow`).
 
+frankenpilot uses one pair of hands: when two flows run at the same time
+their switches are moved one after the other.
+
 Not yet: step climbs (only when Flight Centre confirms you're not online on
-VATSIM), MCP speed on flap selection (opt-in), engine anti-ice on before
-takeoff when the departure ATIS reports a low cloud base.
+VATSIM), MCP speed on flap selection (opt-in).
+
+## Log files and web UI
+
+Every run writes a log file to `~/.cache/frankenpilot/logs/`
+(`frankenpilot_<UTC start time>.log`, times in UTC; the 10 newest are
+kept; `--log-dir` changes the directory). For each decision it says in
+plain words what frankenpilot saw and why it acted (a `DECISION:` line,
+e.g. the METAR or the minutes in cloud that switched anti-ice on), each
+switch it moved (`ACTION:`), and with each of them the flight state
+(phase, altitude, speed, TAT, SAT, cloud, engines); once a minute a
+`STATE:` line. That is what to send along when frankenpilot did something
+unexpected.
+
+frankenpilot has its own web page, by default on port 9757
+(`http://<sim>:9757/`, `--web-port`, 0 = none): the same state and
+switches as the router's frankenpilot page, the current log, and every log
+file to download.
 
 ## Running it
 
@@ -102,7 +135,9 @@ python frankenpilot.py --psx-host 127.0.0.1 --psx-port 10748
 
 In a shared cockpit start it in the master sim (start scripts:
 `$StartFrankenpilot = $true`). Options: `--enabled auto|on|off`,
-`--seat auto|left|right` (local mode), `--config-file FILE`, `--debug`.
+`--seat auto|left|right` (local mode), `--config-file FILE`,
+`--web-port PORT` (default 9757, 0 = no web page), `--log-dir DIR`,
+`--debug`.
 
 Config file (TOML), all optional:
 
@@ -122,6 +157,14 @@ exit_speed_kt = 30.0      # runway exit: slower than this ...
 exit_turn_deg = 40.0      # ... and turned this far from the landing heading
 apu_delay_s = 30.0
 stab_trim_units = 6.0
+# anti-ice: how much cloud makes icing conditions (TAT 10 C or colder)
+icing_auto_cont_s = 60.0     # auto system: in cloud this long in a row ...
+icing_auto_frac = 0.6        # ... and this much of the last 3 minutes
+icing_auto_depth_ft = 2000.0 # auto system: or in cloud through this much climb/descent
+icing_dense_cont_s = 30.0    # auto system: or this long in dense cloud ...
+icing_dense = 0.1            # ... of at least this MSFS cloud density
+icing_manual_cont_s = 30.0   # manual system and fog on the ground
+icing_atis_base_ft = 3000.0  # departure ATIS: BKN/OVC below this
 ```
 
 Airport elevations (for "10,000 ft above the airport") come from the UCAR
