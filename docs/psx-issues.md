@@ -479,6 +479,17 @@ feedback (it writes nothing that depends on the boost data),
 frankenweather gusts (none), CPU load (under 50 %). Untested: network
 timing between master and slave.
 
+PSX's own formulas (Hardy Heinlin, Aerowinx forum 2019): boost
+flight-deck altitude = reference altitude + 28.412 ft + 92.5 ft x
+sin(pitch); on the ground the reference altitude is the elevation plus
+3 - gross weight (kg) / 100,000 ft, the gross weight being fuel
+(`FuelQty`) + `TrueZfw`, not lift. So a parked aircraft sinks smoothly
+as fuel goes in: about 0.26 ft for the 26 t of this refuelling. The fuel
+went in evenly (an update every 0.20 s, +356 units, one tank group at a
+time, now and then a late update with two steps): no update was big
+enough to move the height by more than a thousandth of a foot, so
+neither explains jumps of 0.23 ft.
+
 - **Workaround:** none needed so far; it stops with the refuelling.
 - **For Aerowinx, if it comes back:** a main client seems to work out the
   height on the gear from the weight itself and to be corrected by the
