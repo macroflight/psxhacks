@@ -786,10 +786,14 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         return 'unknown'
 
     def vatsim_sims(self):
-        """Return {simulator name: (connection, mode)} from recent ROUTERINFO (incl. our own)."""
+        """Return {simulator name: (connection, mode)} from recent ROUTERINFO (incl. our own).
+
+        Slave sims only: the master sim is never connected to VATSIM.
+        """
         sims = {}
         for info in self.routerinfo.values():
-            if 'vatsim_connection' in info and time.time() - info.get('received', 0) < 60:
+            if 'vatsim_connection' in info and info.get('type') != 'master' and \
+                    time.time() - info.get('received', 0) < 60:
                 sims[info.get('simulator_name')] = (info['vatsim_connection'],
                                                     info.get('vatsim_mode', 'unknown'))
         return sims
@@ -3228,10 +3232,12 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
             # them when it drops off (see record_client_disconnected())
             "cdu_menu_tracking": self.config.filtering.cdu_menu_tracking,
             "errors": self.get_errors(),
-            # This sim's VATSIM connection per its vPilot plugin
-            "vatsim_connection": self.vatsim_connection(),
-            "vatsim_mode": self.vatsim_mode(),
         }
+        if self.config.identity.type != 'master':
+            # This sim's VATSIM connection per its vPilot plugin. Not for the
+            # master sim: it is never connected to VATSIM.
+            payload["vatsim_connection"] = self.vatsim_connection()
+            payload["vatsim_mode"] = self.vatsim_mode()
         payload['connections'] = []
 
         conns = list(self.clients.values())

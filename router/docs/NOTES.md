@@ -392,7 +392,8 @@ names for clients connected to that router.
 
 FIXME: document the JSON data format. Documented fields so far:
 
-- `vatsim_connection`: is this sim connected to VATSIM: `online`,
+- `vatsim_connection` (slave sims only: the master sim is never connected
+  to VATSIM, its router doesn't send these): is this sim connected to VATSIM: `online`,
   `offline` or `unknown` (no PSX.NET.vPilot plugin status for 30 s), from
   the plugin's `addon=PSX.NET.VPILOT.STATUS;;;;1|CONNECTED|DISCONNECTED`.
 - `vatsim_mode`: how: `normal`, `observer` or `unknown`. Until the vPilot
