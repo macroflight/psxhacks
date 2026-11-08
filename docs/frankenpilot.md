@@ -127,13 +127,29 @@ each other within half a second; moving to a switch further away takes 1-2
 seconds; the packs keep their own few seconds apart (bleed air demand).
 
 frankenpilot knows whether the flight is online on VATSIM: online when any
-sim of the cockpit is connected (as pilot or observer), from the routers'
-VATSIM status (the PSX.NET.vPilot plugin) or, without a router, the plugin
-itself; offline only when every sim reports offline. Its log and web page
-show it. Step climbs will only happen offline.
+slave sim is connected (as pilot or observer), from the routers' VATSIM
+status (the PSX.NET.vPilot plugin) or, without a router, the plugin itself;
+offline when a sim reports offline and none online (the master sim is never
+on VATSIM and doesn't count). Its log and web page show it.
 
-Not yet: step climbs (only when not online on VATSIM), MCP speed on flap
-selection (opt-in).
+- **Step climbs** (`step_climb`, NG FMC): when VNAV says a step climb is
+  due ("STEP TO FL350 / AT NOW" on VNAV CRZ page 2/3), frankenpilot sets
+  the MCP altitude to VNAV's STEP TO level and pushes the altitude knob
+  once. Whether the step comes from the LEGS page or from VNAV's automatic
+  steps (STEP size) doesn't matter. Only when all of this holds: level in
+  cruise in VNAV PTH, STEP not 0, the MCP altitude still at the cruise
+  altitude, and not online on VATSIM (online, ATC gives the step climb).
+  PSX doesn't put VNAV's next step on the network (docs/psx-issues.md), so
+  frankenpilot reads the page on its own side's CDU: when that CDU already
+  shows VNAV CRZ 2/3 every 30 s; otherwise 5 minutes after levelling off,
+  shortly before the step point VNAV shows, and every 10 minutes, each time
+  pressing VNAV and then putting the page that was showing back (its key,
+  then NEXT PAGE to the same page number). It never types into the
+  scratchpad, leaves a CDU alone that someone used in the last minute, and
+  doesn't look at all from a page it can't bring back (INIT REF pages,
+  DEP/ARR, other subsystems).
+
+Not yet: MCP speed on flap selection (opt-in).
 
 ## Log files and web UI
 

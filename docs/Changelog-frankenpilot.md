@@ -53,6 +53,15 @@
 - Departure anti-ice check uses the departure's PSX zone weather when its
   METAR has no weather groups (frankenweather writes "RMK FRANKENWX MODEL
   WX"), seen on the real sim; tested on the headless sim.
+- New action `step_climb` (NG FMC): at VNAV's "STEP TO FLxxx / AT NOW",
+  MCP altitude to that level and the altitude knob pushed, only level in
+  VNAV PTH cruise, STEP not 0, MCP altitude at cruise altitude and not
+  online on VATSIM. Reads VNAV CRZ 2/3 on its own side's CDU and puts the
+  page back (the step isn't on the network). Tested on the headless sim
+  (NG FMC): read via page switch and back to LEGS, read without switching,
+  climb FL310 -> FL350, no climb while the VATSIM status was unknown.
+- The master sim's VATSIM status is ignored (never on VATSIM); offline when
+  a slave sim reports offline and none online.
 - Knows whether the flight is online on VATSIM (any sim connected, as pilot
   or observer, per the routers' VATSIM status or the vPilot plugin); in the
   log and on its web page, for step climbs later.

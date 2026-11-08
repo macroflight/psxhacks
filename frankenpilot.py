@@ -37,6 +37,7 @@ import time
 import tomllib
 import urllib.request
 
+import fp_cdu
 import fp_webui
 import psx
 from psxhacks_version import get_version
@@ -90,6 +91,7 @@ ACTIONS = {
     'fuel': (True, "Fuel pumps and outer crossfeeds in flight (Boeing procedure, EICAS driven)"),
     'anti_ice': (True, "Engine and wing anti-ice by the book"),
     'altimeters': (True, "PFD baro follows the pilot flying's; standby QNH/STD by the MSA"),
+    'step_climb': (True, "Step climb when VNAV says AT NOW (VNAV PTH, NG FMC, offline on VATSIM)"),
 }
 
 DEFAULT_PARAMS = {
@@ -407,6 +409,8 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.connected_at = 0.0
         self.cur_alt, self.cur_dep = None, None    # this tick's altitude and departure
         self.pf_efis = {}               # 'L'/'R' -> (baro hPa*100, STD) last seen (on_efis())
+        self.cdu_key_at = {'L': 0.0, 'R': 0.0}   # last key pressed on each CDU by someone else
+        self.step_busy = False          # reading the CDU / climbing now
         self.msa = {}                   # role -> (icao, msa_ft, time) from frankenweather
         self.hands = asyncio.Lock()     # one switch at a time (see write())
         self.last_switch = ("", 0.0)    # (name, time) of the last switch moved (hand_delay())
@@ -456,6 +460,10 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.icing_clear_since = None  # TAT > 10 C since
         self.icing_nac_waiting = False  # >ICING NAC on the ground before all engines ran
         self.stby_std_above, self.arrival_qnh_done, self.prev_alt = None, None, None
+        self.step_cruise_since = None   # level in VNAV PTH cruise since (step climbs)
+        self.step_next_look = 0.0       # when to read VNAV CRZ 2/3 next
+        self.step_logged = None         # last "due but not climbing" reason logged
+        self.step_last_look = 0.0
         self.atis_checked = False      # departure ATIS looked at after engine start
         self.stby_std_above = None     # standby to STD once above this (departure MSA), ft
         self.arrival_qnh_done = None   # destination whose QNH the standby got below its MSA
@@ -624,8 +632,13 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
                      *[f"Metar{n}" for n in range(1, 8)], *[f"Wx{n}" for n in range(1, 8)]):
             self.psx.subscribe(name)
         self.psx.subscribe("version", self.on_connected)
-        for name in ("StbyBaro", "IsfdBaroStd", "CfgStbyInstr", "EcpBaroModeCp", "EcpBaroModeFo"):
+        for name in ("StbyBaro", "IsfdBaroStd", "CfgStbyInstr", "EcpBaroModeCp", "EcpBaroModeFo",
+                     "Afds", "McpWdoAlt",
+                     *[f"{side}cdu{part}" for side in "LR" for part in
+                       ("Title", "Line1b", "Line2b", "Line4s", "Line4b")]):
             self.psx.subscribe(name)
+        self.psx.subscribe("KeybCduL", self.on_cdu_key)
+        self.psx.subscribe("KeybCduR", self.on_cdu_key)
         self.psx.subscribe("EfisActL", self.on_efis)
         self.psx.subscribe("EfisActR", self.on_efis)
         self.psx.subscribe("McpFdCp", self.on_fd)
@@ -867,6 +880,8 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.cur_alt, self.cur_dep = alt, dep
         self.check_anti_ice(on_ground, new_a, new_c)
         self.check_altimeters(alt, dep, dst)
+        if self.phase == 'AIRBORNE':
+            self.check_step_climb(alt)
 
     # --- runway entry / crossing
 
@@ -1546,6 +1561,185 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         else:
             await self.turn_standby(101325, f"{why}: standby altimeter 1013 (STD)")
 
+    # --- step climbs (VNAV CRZ 2/3 on our own CDU: not on the network otherwise)
+
+    def on_cdu_key(self, key, value):
+        """Note when someone presses a key on a CDU (we leave a CDU in use alone)."""
+        if value not in ("-1", None):
+            self.cdu_key_at[key[-1]] = time.monotonic()
+
+    def check_step_climb(self, alt):
+        """Read VNAV CRZ 2/3 now and then in level VNAV PTH cruise; climb at "AT NOW".
+
+        First look 5 minutes after levelling off, then shortly before the step
+        point VNAV shows, otherwise every 10 minutes.
+        """
+        if not self.actions['step_climb'] or self.step_busy:
+            return
+        afds = (self.psx.get("Afds") or "").split(";")
+        level_vnav_pth = len(afds) > 2 and afds[2] == "15" and afds[0] == "19"
+        now = time.monotonic()
+        if not level_vnav_pth or alt < 20000:
+            self.step_cruise_since = None
+            return
+        if self.step_cruise_since is None:
+            self.step_cruise_since, self.step_next_look = now, now + 300.0
+            return
+        # Our CDU already on VNAV CRZ 2/3 (common in cruise): reading it costs no
+        # key presses, so every 30 s instead of the schedule
+        own = self.sides()[0] if self.seat else None
+        if own and fp_cdu.is_vnav_cruise_page2(fp_cdu.text(self.psx.get(f"{own}cduTitle"))):
+            self.step_next_look = min(self.step_next_look, max(now, self.step_last_look + 30.0))
+        if now >= self.step_next_look:
+            self.step_last_look = now
+            self.step_busy = True
+            self.spawn(self.step_climb_look())
+
+    async def step_climb_look(self):
+        """Read VNAV CRZ 2/3 on our CDU; at "AT NOW" climb if everything allows it."""
+        try:
+            page = await self.read_vnav_page()
+            now = time.monotonic()
+            self.step_next_look = now + 600.0
+            if page is None:
+                return
+            self.logger.info("CDU: VNAV CRZ: cruise %s, step to %s at %s, step size %s",
+                             page['crz_alt'], page['step_to_ft'], page['at'] or '-',
+                             page['step_size'])
+            if not page['now']:
+                if page['at_time']:
+                    hhmm = int(page['at_time'])
+                    utc = time.gmtime()
+                    secs = ((hhmm // 100 * 60 + hhmm % 100) * 60 -
+                            (utc.tm_hour * 3600 + utc.tm_min * 60 + utc.tm_sec)) % 86400
+                    self.step_next_look = now + max(30.0, min(600.0, secs - 45.0))
+                return
+            self.step_next_look = now + 120.0
+            why = self.step_climb_blocker(page)
+            target = page['step_to_ft']
+            if why:
+                if self.step_logged != (target, why):
+                    self.step_logged = (target, why)
+                    self.decide(f"VNAV: step to FL{(target or 0) // 100:03d} due now "
+                                f"(step size {page['step_size']}), not climbing: {why}")
+                return
+            self.decide(f"VNAV: step to FL{target // 100:03d} due now (cruise {page['crz_alt']}, "
+                        f"step size {page['step_size']}), VNAV PTH, "
+                        f"{self.vatsim_online()[1]}: MCP altitude FL{target // 100:03d}, "
+                        "altitude knob pushed")
+            await self.step_climb_to(target)
+            self.step_cruise_since, self.step_logged = None, None
+        finally:
+            self.step_busy = False
+
+    def step_climb_blocker(self, page):
+        """Return why a due step climb mustn't be done, or None."""
+        if page['step_size'] in ("", "0"):
+            return "STEP is 0 (no step climbs)"
+        if not page['step_to_ft']:
+            return "no STEP TO level"
+        online = self.vatsim_online()
+        if online[0] is not False:
+            return f"{online[1]} (ATC gives step climbs online)"
+        crz = page['crz_alt'] or ""
+        crz_ft = int(crz[2:]) * 100 if crz.startswith("FL") else (int(crz) if crz else None)
+        mcp = self.get_int("McpWdoAlt")
+        if mcp is None or crz_ft is None or mcp * 100 != crz_ft:
+            return f"MCP altitude {mcp}00 isn't the cruise altitude {crz}"
+        return None
+
+    async def cdu_key(self, side, name):
+        """Press (and release) a CDU key like a finger."""
+        self.psx.send(f"KeybCdu{side}", str(fp_cdu.KEYS[name]))
+        await asyncio.sleep(0.15)
+        self.psx.send(f"KeybCdu{side}", "-1")
+        await asyncio.sleep(random.uniform(0.4, 0.8))
+
+    async def wait_title(self, side, predicate, timeout=3.0):
+        """Return the CDU title once predicate(title) holds, or None after timeout."""
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            title = fp_cdu.text(self.psx.get(f"{side}cduTitle"))
+            if predicate(title):
+                return title
+            await asyncio.sleep(0.1)
+        return None
+
+    async def read_vnav_page(self):
+        """Read VNAV CRZ 2/3 on our own CDU and put the page that was showing back.
+
+        Skipped (None) when someone pressed a key on it in the last minute, or
+        when the page showing can't be brought back with its key and NEXT PAGE
+        (INIT REF pages, DEP/ARR, other subsystems): better not to look than to
+        leave the crew on another page. Never types into the scratchpad.
+        """
+        own = self.sides()[0] if self.seat else None
+        if own is None or time.monotonic() - self.cdu_key_at[own] < 60.0:
+            return None
+
+        def lines():
+            return {part: self.psx.get(f"{own}cdu{part}")
+                    for part in ("Line1b", "Line2b", "Line4s", "Line4b")}
+        async with self.hands:
+            title = fp_cdu.text(self.psx.get(f"{own}cduTitle"))
+            if fp_cdu.is_vnav_cruise_page2(title):
+                return fp_cdu.parse_vnav_cruise(lines())
+            key = fp_cdu.restore_key(title)
+            if key is None:
+                self.logger.info("CDU: not reading VNAV, the %s CDU shows %r (can't bring "
+                                 "that page back)", own, title)
+                return None
+            await asyncio.sleep(self.hand_delay(f"KeybCdu{own}"))
+            await self.cdu_key(own, "VNAV")
+            vnav = await self.wait_title(own, lambda t: bool(re.search(r"\b(CLB|CRZ|DES)\b", t)))
+            page = None
+            if vnav and re.search(r"\bCRZ\b", vnav):
+                for _ in range(3):
+                    if fp_cdu.page_number(vnav)[0] == 2:
+                        break
+                    before = vnav
+                    await self.cdu_key(own, "NEXT" if fp_cdu.page_number(vnav)[0] < 2 else "PREV")
+                    vnav = await self.wait_title(own, lambda t, b=before: t != b) or before
+                await asyncio.sleep(0.3)
+                if fp_cdu.is_vnav_cruise_page2(vnav):
+                    page = fp_cdu.parse_vnav_cruise(lines())
+            await self.restore_cdu_page(own, title, key)
+            self.last_switch = (f"KeybCdu{own}", time.monotonic())
+            return page
+
+    async def restore_cdu_page(self, own, title, key):
+        """Bring the CDU page back: its key, then NEXT PAGE to the same page number."""
+        want_name, (want_page, _) = fp_cdu.page_name(title), fp_cdu.page_number(title)
+        await self.cdu_key(own, key)
+        cur = await self.wait_title(own, lambda t: fp_cdu.page_name(t) == want_name) or ""
+        for _ in range(10):
+            if fp_cdu.page_name(cur) == want_name and fp_cdu.page_number(cur)[0] == want_page:
+                return
+            before = cur
+            await self.cdu_key(own, "NEXT")
+            cur = await self.wait_title(own, lambda t, b=before: t != b) or before
+        self.logger.warning("CDU: couldn't bring back %r on the %s CDU (now %r)", title, own, cur)
+
+    async def step_climb_to(self, target_ft):
+        """MCP altitude to target_ft (100 ft per click), then push the altitude knob once."""
+        async with self.hands:
+            await asyncio.sleep(self.hand_delay("McpTurnAlt"))
+            for _ in range(30):
+                cur = self.get_int("McpWdoAlt")
+                if cur is None or not self.active or cur == target_ft // 100:
+                    break
+                self.psx.send("McpTurnAlt", str(max(-16, min(16, target_ft // 100 - cur))))
+                await asyncio.sleep(0.15)
+            await asyncio.sleep(random.uniform(0.5, 1.0))
+            if self.active and self.get_int("McpWdoAlt") == target_ft // 100:
+                self.psx.send("McpPshAltSel", "1")
+                self.last_switch = ("McpPshAltSel", time.monotonic())
+                self.log_action(f"Step climb: MCP altitude FL{target_ft // 100:03d}, "
+                                "altitude knob pushed")
+            else:
+                self.logger.warning("Step climb: MCP altitude didn't reach FL%03d",
+                                    target_ft // 100)
+
     # --- F/D follow
 
     def on_fd(self, key, value):
@@ -1569,21 +1763,25 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
 
         Any sim connected to VATSIM (as pilot or observer) makes it online.
         From the routers' ROUTERINFO (vatsim_connection) in a shared cockpit or
-        on a router, else from the vPilot plugin's own status. Offline only when
-        every sim that reports is offline; no reports at all: unknown (None).
+        on a router, else from the vPilot plugin's own status. Offline when at
+        least one sim reports offline and none online (a sim without the plugin,
+        like the master sim, reports unknown and doesn't count); unknown (None)
+        when no sim reports either.
         """
         now = time.monotonic()
-        sims = {name: conn for t, _, name, conn in self.routerinfo.values()
-                if now - t < 60 and conn in ('online', 'offline', 'unknown')}
+        # Slave sims only: the master sim is never connected to VATSIM
+        sims = {name: conn for t, typ, name, conn in self.routerinfo.values()
+                if now - t < 60 and typ != 'master' and conn in ('online', 'offline', 'unknown')}
         status, at = self.vpilot_status
         if not sims and status and now - at < 30:
             sims = {'this sim': {'CONNECTED': 'online', 'DISCONNECTED': 'offline'}.get(
                 status, 'unknown')}
         online = sorted(n for n, c in sims.items() if c == 'online')
+        offline = sorted(n for n, c in sims.items() if c == 'offline')
         if online:
             return True, f"online on VATSIM: {', '.join(online)}"
-        if sims and all(c == 'offline' for c in sims.values()):
-            return False, f"not on VATSIM ({', '.join(sorted(sims))} offline)"
+        if offline:     # sims without a vPilot plugin (the master sim) report unknown
+            return False, f"not on VATSIM ({', '.join(offline)} offline)"
         return None, ("VATSIM status unknown" +
                       (f" ({', '.join(n for n, c in sims.items() if c == 'unknown')})"
                        if sims else " (no vPilot plugin status)"))
