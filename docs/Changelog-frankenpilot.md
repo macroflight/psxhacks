@@ -74,3 +74,26 @@
   log and on its web page, for step climbs later.
 - Readable log texts for the fuel and anti-ice actions; fuel pumps are
   switched one after the other.
+- The thrust reduction decision says in plain words why the packs and the
+  gear lever were (or weren't) moved.
+- A config file that isn't valid TOML gives one readable error line (the
+  file, the position and the offending line, e.g. `flap_speeds = True`)
+  instead of a traceback.
+- Runway exit only once the aircraft is off every runway for 3 s (PSX's
+  runway data); turning onto another runway or backtracking is still on a
+  runway (seen on the real sim at SCCI: the flow started while still on
+  runway 07). Without runway data the old turn rule.
+- After-landing flow: both inboard landing lights as taxi light when there
+  is no taxi light (only the left came on), autobrake OFF, the MCP SPD
+  button pressed twice, both F/Ds and the A/T arm switch off, radio and
+  baro minimums off on both sides (new actions `exit_autobrake`,
+  `exit_mcp`, `exit_minimums`). Tested on the headless sim.
+- Altimeters: a QNH preselected while in STD (PFD mode 3) was taken for QNH
+  and moved our PFD and the standby altimeter to QNH (seen on the real
+  sim); and one sync task now follows the pilot flying's current setting,
+  so quick STD/QNH flicks or clicking the baro knob no longer leave a queue
+  of stale presses. Tested on the headless sim.
+- Fuel paths tested on the headless sim: >FUEL PMP STB (with the
+  stabilizer tank configured), >FUEL TANK/ENG; anti-ice with an auto
+  system and the SAT -40 C rule. >FUEL LO STAB and >ICING WING not yet seen
+  (PSX shows no >ICING WING even with heavy wing ice).
