@@ -1552,6 +1552,31 @@ def _max_cb(wx: str, other: str) -> str:
     return ';'.join(a)
 
 
+# High up, a quarter of the up/down (SINK) bursts of random turbulence, the same
+# sizes. PSX's SINK burst costs energy whichever way it pushes (the altitude-hold
+# autopilot pays the way back with speed), while real gusts average out: real
+# moderate turbulence makes the speed fluctuate (e.g. +-13 kt), it doesn't drain
+# it. Measured on the headless sim (2026-11-08, FL370, M0.85, the Canada
+# jet-stream sequence: about 50%, 88 bursts a minute): SINK bursts alone took a
+# light 747 from 278 kt to the stall in 1.5 min at full thrust; BANK, YAW and
+# SPD bursts cost nothing; with every 4th SINK burst a heavy 747 held 277-280 kt.
+# Not for mountain waves (their up/down drafts really cost energy) nor the
+# testing profile's single turbulence events.
+_SINK_FACTOR_FULL_FT = 20000.0      # all SINK bursts up to here
+_SINK_FACTOR_MIN_FT = 35000.0       # _SINK_FACTOR_MIN from here up
+_SINK_FACTOR_MIN = 0.25
+_SINK_FACTOR_EXEMPT = frozenset(("wave", "mtw", "event"))
+
+
+def _high_alt_sink_factor(alt_ft: Optional[float]) -> float:
+    """Return the share of SINK bursts sent at alt_ft: 1.0 up to FL200, 0.25 from FL350."""
+    if alt_ft is None or alt_ft <= _SINK_FACTOR_FULL_FT:
+        return 1.0
+    span = _SINK_FACTOR_MIN_FT - _SINK_FACTOR_FULL_FT
+    frac = min(1.0, (alt_ft - _SINK_FACTOR_FULL_FT) / span)
+    return 1.0 - frac * (1.0 - _SINK_FACTOR_MIN)
+
+
 def area_msa_ft(elevation_at, lat: float, lon: float, radius_nm: float = 25.0,
                 step_nm: float = 0.5) -> Optional[int]:
     """Return a minimum safe altitude (ft) for the area around (lat, lon), or None.
@@ -4034,7 +4059,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                             tas_kt: float, limit_updown: bool = False) -> None:
         """Inject one WxBurst with probability intensity**1.5 (scaled by the rate setting).
 
-        On the ground only a weaker yaw/roll burst (_GROUND_TURB_CAP).
+        On the ground only a weaker yaw/roll burst (_GROUND_TURB_CAP). High up,
+        only a share of the SINK bursts (_high_alt_sink_factor()).
         limit_updown: up/down bursts one way add up to at most the largest
         single one within _UPDOWN_WINDOW_S (_updown_budget()).
         """
@@ -4054,6 +4080,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             base, direction, label = picked
         else:
             base, direction, label = _pick_burst(state, intensity)
+        thin_sink = base == _BURST_SINK and not on_ground and state.kind not in _SINK_FACTOR_EXEMPT
+        if thin_sink and random.random() >= _high_alt_sink_factor(self.ac_alt_ft):
+            return
         magnitude = min(99, random.randint(1, max(1, int(intensity * 99))))
         if base == _BURST_SINK and not on_ground and limit_updown:
             magnitude = self._updown_budget(direction, magnitude, intensity)

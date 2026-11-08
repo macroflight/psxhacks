@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Change: above FL200 fewer up/down bumps of random turbulence, a quarter
+  from FL350**, same sizes; bank, yaw and speed bumps unchanged, mountain
+  waves unchanged. PSX's SINK burst drains energy (measured on the headless
+  sim: SINK bursts alone took a 747 at FL370, M0.85 from 278 kt to the stall
+  in 1.5 minutes at full thrust; BANK, YAW and SPD bursts cost nothing),
+  which real turbulence doesn't. Live test: 50% shear turbulence at FL370,
+  heavy, speed held 278-280 kt for 7 minutes.
+
 - **Fix: much less zone churn while maneuvering (holds, vectoring).** Zones
   were placed further away than the distance after which a zone behind the
   aircraft is moved again (200 nm below cruise altitude), so after the next

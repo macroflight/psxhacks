@@ -835,6 +835,19 @@ too much, too little or just right weather or turbulence afterwards:
 - Every turbulence event, every change of a turbulence setting (with its
   value) and every zone update, SIGMET download and reposition.
 
+### Fewer up/down bumps high up
+
+Above FL200 frankenweather sends fewer up/down (SINK) bursts of random
+turbulence, down to a quarter from FL350; the bursts themselves stay the
+same size, and the bank, yaw and speed bumps all stay. PSX's up/down burst
+costs the aircraft energy whichever way it pushes (the autopilot pays for
+getting the altitude back with speed), while real gusts average out: real
+moderate turbulence makes the speed fluctuate, it doesn't drain it. With
+all of them, 50% clear-air turbulence at FL370 took a 747 from 278 kt to
+the stall in a few minutes at full thrust; with a quarter it holds its
+speed. Mountain waves keep all their up/down bursts: their downdrafts
+really cost energy, and there the answer is to descend or turn away.
+
 ### Turbulence gustiness and PIREPs
 
 The turbulence frankenweather works out itself from physics (the

@@ -106,3 +106,24 @@ The p95 reaches the pilot report bands at about:
   router's /efb page.
 - Mechanical turbulence in an ordinary strong wind is weak: 7% at
   Copenhagen in a 28 kt wind gusting 38 (practically smooth).
+
+## Energy loss at cruise altitude (2026-11-08)
+
+Not covered by the measurements above: what minutes of bursts do to the
+aircraft's energy. Replays of the Canada jet-stream sequence (about 50%,
+88 bursts a minute, sizes 1-50) at FL370, M0.85, autopilot ALT HOLD and
+autothrottle, on the headless sim (`canrepro.py`):
+
+| Bursts | 747, ZFW 360,000 lb | ZFW 560,000 lb |
+|---|---|---|
+| all (half SINK, half BANK) | stall after 5 min | stall after 1.5 min |
+| every 2nd | | stall after 4 min |
+| every 4th | | speed held |
+| SINK only | stall after 1.5 min | |
+| BANK, YAW, SPD only | no loss | |
+| all BANK, every 4th SINK | | 277-280 kt held |
+
+PSX's SINK burst costs energy in both directions; real gusts average out
+(real moderate turbulence: speed fluctuations of about +-13 kt, no steady
+decay). frankenweather now sends a quarter of the SINK bursts from FL350
+(full up to FL200), not for mountain waves.
