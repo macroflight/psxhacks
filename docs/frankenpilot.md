@@ -107,9 +107,24 @@ config file (`[actions]`, names in brackets).
   anti-ice off, and if you switch it off or to AUTO yourself it stays that
   way until the next trigger.
 - **F/D**: your F/D switch moves, the other one follows (`fd_follow`).
+- **Altimeters** (`altimeters`): frankenpilot never decides when to go to
+  STD or QNH (ATC does: STD when cleared to a flight level, QNH when cleared
+  to an altitude). When the pilot flying sets QNH or STD on their PFD,
+  frankenpilot's PFD follows. The standby altimeter gets every QNH the pilot
+  flying sets, but stays on the departure QNH until the aircraft is above
+  the departure area's minimum safe altitude (the terrain heights on
+  departure charts are relative to it), then goes to STD (the ISFD's STD
+  button, or turned to 1013 on the older standby altimeter). On the way
+  down it is set to the arrival airport's QNH (its METAR in PSX, or its PSX
+  weather zone) as soon as the aircraft descends below the destination MSA,
+  while the PFDs stay on STD. The MSAs come from frankenweather; without
+  them the standby altimeter simply follows the pilot flying's PFD.
 
 frankenpilot uses one pair of hands: when two flows run at the same time
-their switches are moved one after the other.
+their switches are moved one after the other. Switches right next to each
+other (an L/R pair, the four landing lights, engine anti-ice 1-4) follow
+each other within half a second; moving to a switch further away takes 1-2
+seconds; the packs keep their own few seconds apart (bleed air demand).
 
 frankenpilot knows whether the flight is online on VATSIM: online when any
 sim of the cockpit is connected (as pilot or observer), from the routers'

@@ -37,6 +37,14 @@
   after the other.
 - Stab trim after landing sometimes chased across 6 units and gave up (when
   it chose to overshoot first, like a pilot).
+- New action `altimeters`: frankenpilot's PFD follows the pilot flying's QNH
+  and STD; the standby altimeter follows each QNH, goes to STD only above
+  the departure MSA and to the arrival QNH below the destination MSA (MSAs
+  from frankenweather; without them it follows the pilot flying's PFD).
+  Tested on the headless sim (PFD follow, standby with and without the
+  departure MSA); the climb above and descent below an MSA not yet.
+- Switch timing like a hand on the panel: neighbouring switches within half
+  a second, further ones 1-2 s apart (packs unchanged).
 - Runway entry flow as soon as the aircraft enters the FMC departure runway
   (any angle), not only when lined up; any other runway is a crossing
   (strobes only) unless you line up on it. Seen on the real sim (16R at

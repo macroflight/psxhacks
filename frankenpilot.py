@@ -89,6 +89,7 @@ ACTIONS = {
     'crossing_strobes': (True, "Strobes on while crossing a runway"),
     'fuel': (True, "Fuel pumps and outer crossfeeds in flight (Boeing procedure, EICAS driven)"),
     'anti_ice': (True, "Engine and wing anti-ice by the book"),
+    'altimeters': (True, "PFD baro follows the pilot flying's; standby QNH/STD by the MSA"),
 }
 
 DEFAULT_PARAMS = {
@@ -146,6 +147,14 @@ def setup_logging(debug, log_dir):
     root.addHandler(handler)
     logging.info("Logging to %s (times UTC)", path)
     return path
+
+
+def switch_group(name):
+    """Return a switch's panel group: names differing only in side/number are neighbours.
+
+    LtRwyTurnL/R, LtLandOubL/InbR, NaiPush1-4, FuelMain1Fwd/2Aft, PackSel1-3...
+    """
+    return re.sub(r"(Oub|Inb)?(L|R|Cp|Fo)?$", "", re.sub(r"[1-4](Fwd|Aft)?$|Fwd$|Aft$", "", name))
 
 
 def human_delay(span):
@@ -397,7 +406,10 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.youareon_wait_until = 0.0
         self.connected_at = 0.0
         self.cur_alt, self.cur_dep = None, None    # this tick's altitude and departure
+        self.pf_efis = {}               # 'L'/'R' -> (baro hPa*100, STD) last seen (on_efis())
+        self.msa = {}                   # role -> (icao, msa_ft, time) from frankenweather
         self.hands = asyncio.Lock()     # one switch at a time (see write())
+        self.last_switch = ("", 0.0)    # (name, time) of the last switch moved (hand_delay())
         self.pnf_saved = None       # our PnfMode bits 0/2/3 before we took over
         self.routerinfo = {}        # uuid -> (time, type, simulator_name, vatsim_connection)
         self.vpilot_status = (None, 0.0)   # local mode: the vPilot plugin's own status, time
@@ -443,7 +455,11 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.cloud_exit_at = None      # when we last left cloud while icing
         self.icing_clear_since = None  # TAT > 10 C since
         self.icing_nac_waiting = False  # >ICING NAC on the ground before all engines ran
+        self.stby_std_above, self.arrival_qnh_done, self.prev_alt = None, None, None
         self.atis_checked = False      # departure ATIS looked at after engine start
+        self.stby_std_above = None     # standby to STD once above this (departure MSA), ft
+        self.arrival_qnh_done = None   # destination whose QNH the standby got below its MSA
+        self.prev_alt = None
 
     def context(self):
         """Return the flight state behind a decision, for the log file."""
@@ -528,19 +544,37 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
 
     # ----------------------------------------------------------------- writes
 
-    async def write(self, name, value, text, delay=True):
+    def hand_delay(self, name):
+        """Return how long the hand takes to the next switch, like a person.
+
+        The first switch of a flow: the normal reaction delay (delay_s). The
+        next one right beside the last (the other of an L/R pair, the next
+        landing light, engine anti-ice 1-4): 0.2-0.6 s. Further away on the
+        panel: 1-2 s. (Packs keep their own gap, see packs_on().)
+        """
+        last_name, last_at = self.last_switch
+        if time.monotonic() - last_at > 5.0:
+            return human_delay(self.params['delay_s'])
+        if switch_group(name) == switch_group(last_name):
+            return random.uniform(0.2, 0.6)
+        return random.uniform(1.0, 2.0)
+
+    async def write(self, name, value, text, delay=True, cache=True):
         """Set a PSX variable after a human-like delay, and log it.
 
         One pair of hands: flows that run at the same time (runway entry and
         anti-ice, say) take turns switch by switch instead of interleaving.
+        cache=False for DELTA variables (knob turns, button presses).
         """
         async with self.hands:
             if delay:
-                await asyncio.sleep(human_delay(self.params['delay_s']))
+                await asyncio.sleep(self.hand_delay(name))
             if not self.active or not self.connected:
                 return
             self.psx.send(name, str(value))
-            self.psx._set(name, str(value))  # pylint: disable=protected-access
+            if cache:
+                self.psx._set(name, str(value))  # pylint: disable=protected-access
+            self.last_switch = (name, time.monotonic())
             self.log_action(text)
 
     async def push_switch(self, name, on, text):
@@ -552,7 +586,7 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
 
     async def press(self, name, text):
         """Press a DELTA push button once."""
-        await self.write(name, 1, text)
+        await self.write(name, 1, text, cache=False)
 
     def spawn(self, coro):
         """Run an action in the background (cancelled if a new flight starts)."""
@@ -590,6 +624,10 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
                      *[f"Metar{n}" for n in range(1, 8)], *[f"Wx{n}" for n in range(1, 8)]):
             self.psx.subscribe(name)
         self.psx.subscribe("version", self.on_connected)
+        for name in ("StbyBaro", "IsfdBaroStd", "CfgStbyInstr", "EcpBaroModeCp", "EcpBaroModeFo"):
+            self.psx.subscribe(name)
+        self.psx.subscribe("EfisActL", self.on_efis)
+        self.psx.subscribe("EfisActR", self.on_efis)
         self.psx.subscribe("McpFdCp", self.on_fd)
         self.psx.subscribe("McpFdFo", self.on_fd)
         self.psx.subscribe("addon", self.on_addon)
@@ -636,7 +674,7 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.connected = False
         self.logger.info("Disconnected from PSX")
 
-    def on_addon(self, _key, value):
+    def on_addon(self, _key, value):  # pylint: disable=too-many-branches
         """FRDP (YOUAREON, ROUTERINFO, SHAREDINFO), MSFS in-cloud, and our own commands."""
         if value.startswith('FRANKENROUTER:'):
             parts = value[len('FRANKENROUTER:'):].split(':', 2)
@@ -657,6 +695,8 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             elif parts[1] == 'SHAREDINFO':
                 self.seats = {k: data.get(k, 'NOSIM')
                               for k in ('seat_left_simulator', 'seat_right_simulator')}
+        elif value.startswith('FRANKENWEATHER:MSA:'):
+            self.on_msa(value[len('FRANKENWEATHER:MSA:'):])
         elif value.startswith('PSX.NET.VPILOT.STATUS'):
             # No router (local mode): the vPilot plugin's status reaches us directly
             self.vpilot_status = (value.rsplit('|', 1)[-1].strip(), time.monotonic())
@@ -769,7 +809,7 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
 
     # ---------------------------------------------------------------- rules
 
-    def tick(self):  # pylint: disable=too-many-branches,too-many-locals
+    def tick(self):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
         """Run the rules once (called every second)."""
         self.update_mode()
         if not self.active:
@@ -826,6 +866,7 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             self.check_fuel(new_a)
         self.cur_alt, self.cur_dep = alt, dep
         self.check_anti_ice(on_ground, new_a, new_c)
+        self.check_altimeters(alt, dep, dst)
 
     # --- runway entry / crossing
 
@@ -1327,6 +1368,183 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             else:
                 text = f"{why}: {label} anti-ice {'on' if on else 'off'}"
                 await self.push_switch(name, on, text)
+
+    # --- altimeters
+
+    def efis(self, side):
+        """Return (baro setting hPa*100, STD?) of the L or R PFD (EfisActL/R fields 4, 5)."""
+        try:
+            fields = self.psx.get(f"EfisAct{side}").split(";")
+            return int(fields[3]), fields[4] == "2"
+        except (AttributeError, ValueError, IndexError):
+            return None
+
+    def sides(self):
+        """Return (our PFD side, the pilot flying's): 'L'/'R'."""
+        return ('L', 'R') if self.seat == 'LEFT' else ('R', 'L')
+
+    def msa_for(self, role, icao):
+        """Return frankenweather's MSA (ft) for the departure/destination icao, or None."""
+        entry = self.msa.get(role)
+        if not entry or not icao or entry[0] != icao or time.monotonic() - entry[2] > 600:
+            return None
+        return entry[1]
+
+    def on_msa(self, payload):
+        """Note frankenweather's departure/destination MSA ("<uuid>:{json}")."""
+        try:
+            data = json.loads(payload.split(':', 1)[1])
+            self.msa[data['role']] = (data['icao'], int(data['msa_ft']), time.monotonic())
+        except (IndexError, KeyError, TypeError, ValueError):
+            pass
+
+    def on_efis(self, key, _value):
+        """Follow the pilot flying's PFD QNH/STD on ours; the standby altimeter by the MSA.
+
+        Pilots go to STD when cleared to a flight level, to QNH when cleared
+        to an altitude: frankenpilot only follows. The standby altimeter stays
+        on the departure QNH until above the departure MSA (the terrain on
+        departure charts is relative to it), and gets every new QNH set.
+        """
+        side = key[-1]          # EfisActL / EfisActR
+        cur, last = self.efis(side), self.pf_efis.get(side)
+        self.pf_efis[side] = cur    # both sides, also while inactive: the first change counts
+        if self.seat is None:
+            return
+        own, pf_side = self.sides()
+        changed = cur is not None and last is not None and cur != last
+        if side != pf_side or not changed or not self.active or not self.actions['altimeters']:
+            return
+        baro, std = cur
+        pf_name = "captain" if pf_side == 'L' else "F/O"
+        if std and not last[1]:
+            msa = self.msa_for('departure', self.cur_dep)
+            alt = self.cur_alt or 0.0
+            if msa and alt < msa:
+                self.stby_std_above = msa
+                stby = (f"standby altimeter stays on QNH until above the departure MSA {msa} ft "
+                        f"(now {alt:.0f} ft)")
+            else:
+                self.stby_std_above = None
+                stby = ("standby altimeter STD too (" +
+                        (f"above the departure MSA {msa} ft" if msa else
+                         "no departure MSA from frankenweather") + ")")
+            self.decide(f"the {pf_name} (pilot flying) set STD on their PFD: our PFD STD, {stby}")
+            self.spawn(self.follow_pfd(own, None, std=True, standby_std=not self.stby_std_above))
+        elif not std:
+            self.stby_std_above = None
+            self.decide(f"the {pf_name} (pilot flying) set QNH {baro / 100:.0f} on their PFD: "
+                        "our PFD and the standby altimeter follow")
+            self.spawn(self.follow_pfd(own, baro, std=False, standby_qnh=baro))
+        elif baro != last[0]:
+            self.spawn(self.follow_pfd(own, baro, std=True))   # preselect while in STD
+
+    def check_altimeters(self, alt, dep, dst):
+        """Standby altimeter: STD above the departure MSA; destination QNH below its MSA."""
+        prev, self.prev_alt = self.prev_alt, alt
+        if not self.actions['altimeters']:
+            return
+        own_pf = self.efis(self.sides()[1]) if self.seat else None
+        if self.stby_std_above is not None:
+            if own_pf is None or not own_pf[1]:
+                self.stby_std_above = None
+            elif alt > self.stby_std_above:
+                self.decide(f"climbing through {alt:.0f} ft, above the departure ({dep}) MSA "
+                            f"{self.stby_std_above} ft: standby altimeter STD")
+                self.stby_std_above = None
+                self.spawn(self.standby_std("Above the departure MSA"))
+        msa = self.msa_for('destination', dst)
+        crossed = msa is not None and prev is not None and prev >= msa > alt
+        if self.phase == 'AIRBORNE' and crossed and self.arrival_qnh_done != dst:
+            qnh, source = self.arrival_qnh(dst)
+            if qnh:
+                self.arrival_qnh_done = dst
+                self.decide(f"descending through {alt:.0f} ft, below the destination ({dst}) MSA "
+                            f"{msa} ft: standby altimeter to the arrival QNH {qnh / 100:.0f} "
+                            f"({source})")
+                self.spawn(self.standby_qnh(qnh, "Below the destination MSA"))
+
+    def arrival_qnh(self, dst):
+        """Return (QNH hPa*100, source) for dst from its PSX METAR or zone, or (None, '')."""
+        for n in range(1, 8):
+            metar = (self.psx.get(f"Metar{n}") or "").strip()
+            if not dst or not metar.startswith(dst + " "):
+                continue
+            if m := re.search(r" Q(\d{4})\b", metar):
+                return int(m.group(1)) * 100, f"{dst} METAR"
+            if m := re.search(r" A(\d{4})\b", metar):
+                return round(int(m.group(1)) * 33.8639), f"{dst} METAR"
+            try:   # frankenweather: no weather groups, the zone's QNH (inHg*100)
+                return round(int(self.psx.get(f"Wx{n}").split(";")[23]) * 33.8639), \
+                    f"{dst} zone weather"
+            except (AttributeError, ValueError, IndexError):
+                return None, ""
+        return None, ""
+
+    async def follow_pfd(self, own, baro, std, standby_std=False, standby_qnh=None):
+        """Our PFD to the pilot flying's STD/baro, then the standby altimeter."""
+        side_name = "captain's" if own == 'L' else "F/O's"
+        mine = self.efis(own)
+        if mine and mine[1] != std:
+            await self.press(f"EcpStd{'Cp' if own == 'L' else 'Fo'}",
+                             f"Altimeters: {side_name} PFD {'STD' if std else 'QNH'}")
+        if baro is not None:
+            await self.turn_pfd_baro(own, baro,
+                                     f"Altimeters: {side_name} PFD baro {baro / 100:.0f}")
+        if standby_std:
+            await self.standby_std("With the pilot flying")
+        if standby_qnh is not None:
+            await self.standby_qnh(standby_qnh, "With the pilot flying")
+
+    async def turn_pfd_baro(self, own, target, text):
+        """Turn our PFD baro knob to target (hPa*100): 1 hPa or 0.01 inHg per click."""
+        suffix = 'Cp' if own == 'L' else 'Fo'
+        unit = 100.0 if self.get_int(f"EcpBaroMode{suffix}", 1) == 1 else 33.8639
+        async with self.hands:
+            await asyncio.sleep(self.hand_delay(f"EcpBaro{suffix}"))
+            moved = False
+            for _ in range(5):
+                mine = self.efis(own)
+                clicks = round((target - mine[0]) / unit) if mine else 0
+                if clicks == 0 or not self.active:
+                    break
+                self.psx.send(f"EcpBaro{suffix}", str(max(-6000, min(6000, clicks))))
+                moved = True
+                await asyncio.sleep(0.4)
+            if moved:
+                self.last_switch = (f"EcpBaro{suffix}", time.monotonic())
+                self.log_action(text)
+
+    async def turn_standby(self, target, text):
+        """Turn the standby altimeter's baro knob to target (StbyBaro, hPa*100)."""
+        async with self.hands:
+            await asyncio.sleep(self.hand_delay("TurnStbyBaro"))
+            moved = False
+            for _ in range(300):
+                cur = self.get_int("StbyBaro")
+                if cur is None or not self.active or abs(target - cur) <= 4:
+                    break
+                clicks = max(-16, min(16, round((target - cur) / 4))) or (1 if target > cur else -1)
+                self.psx.send("TurnStbyBaro", str(clicks))
+                moved = True
+                await asyncio.sleep(0.1)
+            if moved:
+                self.last_switch = ("TurnStbyBaro", time.monotonic())
+                self.log_action(text)
+
+    async def standby_qnh(self, qnh, why):
+        """Standby altimeter to a QNH (hPa*100): ISFD out of STD first."""
+        if self.get_int("CfgStbyInstr") == 2 and self.get_int("IsfdBaroStd") == 1:
+            await self.press("IsfdPushStd", f"{why}: standby altimeter STD off")
+        await self.turn_standby(qnh, f"{why}: standby altimeter {qnh / 100:.0f}")
+
+    async def standby_std(self, why):
+        """Standby altimeter to STD: the ISFD's STD button, else turned to 1013.25."""
+        if self.get_int("CfgStbyInstr") == 2:
+            if self.get_int("IsfdBaroStd") != 1:
+                await self.press("IsfdPushStd", f"{why}: standby altimeter STD")
+        else:
+            await self.turn_standby(101325, f"{why}: standby altimeter 1013 (STD)")
 
     # --- F/D follow
 
