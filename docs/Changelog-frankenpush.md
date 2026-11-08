@@ -1,5 +1,12 @@
 # frankenpush changelog
 
+## Unreleased
+
+- **New: VATSIM status from Flight Centre.** Flight Centre's
+  `vatsim_status` (is this sim online on VATSIM as a pilot) is logged when
+  it changes and relayed to the PSX network as
+  `addon=FRANKENPUSH:VATSIM:<the same JSON>` for other add-ons.
+
 ## 1.4.0 (2026-10-20)
 
 - **New feature: "join Discord voice chat?" doorbell from Flight

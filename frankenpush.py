@@ -323,6 +323,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self._bank_deg = None
         self._tail_number = None
         self._flight_number = None
+        self._vatsim_status_key = None   # last logged Flight Centre vatsim_status
         self._route_mode = None
         self._route1 = None
         self._route2 = None
@@ -1341,7 +1342,23 @@ class Script():  # pylint: disable=too-many-instance-attributes
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 self.logger.warning("Error handling portal message: %s", exc)
 
-    async def _handle_portal_message(self, data):
+    def _on_vatsim_status(self, data):
+        """Flight Centre's view: is this sim online on VATSIM as a pilot (~/to-psxhacks.md).
+
+        Relayed unchanged to the PSX network (addon=FRANKENPUSH:VATSIM:<json>)
+        for other add-ons; logged when it changes (heartbeats every <=120 s).
+        """
+        key = (data.get("online"), data.get("callsign"), data.get("match"))
+        if key != self._vatsim_status_key:
+            self._vatsim_status_key = key
+            self.logger.info("Flight Centre: VATSIM online=%s callsign=%s cid=%s (%s, data %s)",
+                             data.get("online"), data.get("callsign"), data.get("cid"),
+                             data.get("match"), data.get("checked_at"))
+        if self.psx_connected:
+            self.psx.send("addon", "FRANKENPUSH:VATSIM:" +
+                          json.dumps(data, separators=(",", ":")))
+
+    async def _handle_portal_message(self, data):  # pylint: disable=too-many-branches
         """Apply one message from Flight Centre (doorbell/crew_message/psx_print).
 
         flight_deck_doorbell places a fake cabin call in PSX -- see
@@ -1397,6 +1414,8 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 self.logger.info(
                     "Flight Centre: psx_print message received but no PSX "
                     "connection to print it on")
+        elif msg_type == "vatsim_status":
+            self._on_vatsim_status(data)
 
     async def _reverse_sync_loop(self, ws):
         """Send queued immediate messages to Flight Centre as soon as they arrive.
