@@ -49,12 +49,14 @@ a takeoff (no after-liftoff or thrust reduction flows).
 Each action can be switched off on the router's frankenpilot page or in the
 config file (`[actions]`, names in brackets).
 
-- **Runway entry** (lined up before takeoff): strobes, taxi light and all
+- **Runway entry** (entering the FMC departure runway before takeoff, at
+  any angle, or lined up on another runway): strobes, taxi light and all
   other lights on except the outboard landing lights, which are the pilot
   flying's after takeoff clearance (`runway_entry_lights`); autobrake RTO if
   not set (`runway_entry_rto`); transponder TA/RA if not set
   (`runway_entry_tcas`).
-- **Runway crossing**: strobes on while crossing, off again afterwards
+- **Runway crossing** (on a runway that isn't the FMC departure runway,
+  not lined up): strobes on while crossing, off again afterwards
   (`crossing_strobes`).
 - **After liftoff**: runway turnoff, taxi and wing lights off
   (`liftoff_lights`).
@@ -91,10 +93,12 @@ config file (`[actions]`, names in brackets).
   - Not in climb and cruise at SAT -40 C or colder (Boeing), and not on a
     descent where TAT will be above 10 C within a minute.
   - On the ground, once all four engines are running (never before engine
-    start), also when the departure ATIS (its METAR in PSX) reports icing
-    conditions right after takeoff at 10 C or colder: visibility 1,600 m or
-    less, precipitation, or BKN/OVC below 3,000 ft (FEW/SCT alone don't
-    count). Wing anti-ice is only switched in flight.
+    start), also when the departure weather means icing conditions right
+    after takeoff at 10 C or colder: visibility 1,600 m or less,
+    precipitation, or BKN/OVC (5 oktas or more) below 3,000 ft (FEW/SCT
+    alone don't count). The departure weather is its METAR in PSX, or, when
+    that has no weather groups (frankenweather's "RMK FRANKENWX MODEL WX"),
+    the PSX weather zone the METAR belongs to. Wing anti-ice is only switched in flight.
 
   Back to AUTO (or off) when TAT has been above 10 C for a minute, and in
   flight at >ANTI-ICE NAC/WING or a while after leaving cloud (longer after

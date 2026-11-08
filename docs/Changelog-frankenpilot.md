@@ -37,6 +37,14 @@
   after the other.
 - Stab trim after landing sometimes chased across 6 units and gave up (when
   it chose to overshoot first, like a pilot).
+- Runway entry flow as soon as the aircraft enters the FMC departure runway
+  (any angle), not only when lined up; any other runway is a crossing
+  (strobes only) unless you line up on it. Seen on the real sim (16R at
+  YSSY was taken for a crossing while turning onto it); tested on the
+  headless sim.
+- Departure anti-ice check uses the departure's PSX zone weather when its
+  METAR has no weather groups (frankenweather writes "RMK FRANKENWX MODEL
+  WX"), seen on the real sim; tested on the headless sim.
 - Knows whether the flight is online on VATSIM (any sim connected, as pilot
   or observer, per the routers' VATSIM status or the vPilot plugin); in the
   log and on its web page, for step climbs later.

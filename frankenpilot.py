@@ -182,6 +182,44 @@ def parse_metar(text):
     return temp, vis, layers, weather
 
 
+def zone_wx_weather(wx):
+    """Return (temp C, visibility m, precipitation level, [(oktas, base ft AGL)]) from PSX Wx<n>.
+
+    PSX zone weather fields (see fw_cb.WX_DEFAULTS): [3] low cloud oktas,
+    [5] its base, [9] CB oktas, [11] CB base (ft above the zone), [20]
+    visibility m, [21] precipitation level, [22] surface temperature C.
+    None when it can't be read.
+    """
+    try:
+        f = wx.split(";")
+        return (int(f[22]), int(f[20]), int(f[21]),
+                [(int(f[3]), int(f[5])), (int(f[9]), int(f[11]))])
+    except (AttributeError, ValueError, IndexError):
+        return None
+
+
+def zone_icing_reason(wx, base_limit_ft):
+    """Return why a departure's PSX zone weather means icing after takeoff, or None.
+
+    The same rules as atis_icing_reason(), for zones whose METAR has no
+    weather groups (frankenweather's "RMK FRANKENWX MODEL WX").
+    """
+    weather = zone_wx_weather(wx)
+    if weather is None:
+        return None
+    temp, vis, precip, layers = weather
+    if temp > 10:
+        return None
+    if vis <= 1600:
+        return f"visibility {vis} m at {temp} C"
+    if precip > 0:
+        return f"precipitation (level {precip}) at {temp} C"
+    low = [(oktas, base) for oktas, base in layers if oktas >= 5 and base < base_limit_ft]
+    if low:
+        return f"{low[0][0]}/8 cloud based at {low[0][1]} ft at {temp} C"
+    return None
+
+
 def atis_icing_reason(metar, base_limit_ft):
     """Return why a departure METAR means icing conditions right after takeoff, or None.
 
@@ -470,6 +508,14 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         value = self.psx.get({'A': 'EicasA', 'C': 'EicasC'}[cat]) or ''
         return {int(x) for x in value.split(';') if x.strip().lstrip('-').isdigit()}
 
+    def departure_runway(self):
+        """Return the active FMC route's departure runway (e.g. '16R', '09'), or None."""
+        mode = self.psx.get("FmcRteViAcMo") or ""
+        active = mode[:1] if mode[:1] in "012" else "1"
+        fields = (self.psx.get(f"FmcRte{active}") or "").split(';')
+        rwy = fields[2].strip().upper() if len(fields) > 2 else ""
+        return rwy or None
+
     def route_airports(self):
         """Return (departure, destination) ICAO from the active FMC route, or (None, None)."""
         mode = self.psx.get("FmcRteViAcMo") or ""
@@ -541,7 +587,7 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
                      "FuelMain1Fwd", "FuelMain1Aft", "FuelMain2Fwd", "FuelMain2Aft",
                      "FuelMain3Fwd", "FuelMain3Aft", "FuelMain4Fwd", "FuelMain4Aft", "FuelCtrL",
                      "FuelCtrR", "FuelStabL", "FuelStabR", "FuelAuxL", "FuelAuxR",
-                     *[f"Metar{n}" for n in range(1, 8)]):
+                     *[f"Metar{n}" for n in range(1, 8)], *[f"Wx{n}" for n in range(1, 8)]):
             self.psx.subscribe(name)
         self.psx.subscribe("version", self.on_connected)
         self.psx.subscribe("McpFdCp", self.on_fd)
@@ -783,26 +829,39 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
 
     # --- runway entry / crossing
 
-    def check_runway(self, lat, lon, hdg, gs):
-        """Runway entry flow when lined up before takeoff; strobes while crossing a runway."""
-        on, aligned, where = None, False, ""
+    def runway_here(self, lat, lon, hdg, gs):
+        """Return (runway designator, other end's, lined up?, description) or Nones."""
         for rwy in parse_local_runways(self.psx.get("LocalRwys")):
             cross, t, rhdg = runway_position(lat, lon, rwy)
             if cross <= self.params['runway_half_width_m'] and -0.05 <= t <= 1.05:
-                on = rwy[0]
                 aligned = heading_diff(hdg, rhdg) < 20 or heading_diff(hdg, rhdg + 180) < 20
                 where = (f"{cross:.0f} m from the centreline, heading {hdg:.0f} "
                          f"(runway {rhdg % 360:.0f}/{(rhdg + 180) % 360:.0f}), {gs:.0f} kt")
-                break
-        if on and aligned and self.phase == 'GROUND' and not self.runway_entry_done and gs < 40:
-            self.runway_entry_done = True
-            self.decide(f"lined up on runway {on.strip()}: {where}, before takeoff, "
-                        "so the runway entry flow follows")
+                return rwy[0], rwy[3], aligned, where
+        return None, None, False, ""
+
+    def check_runway(self, lat, lon, hdg, gs):
+        """Runway entry flow on entering the departure runway; strobes while crossing one."""
+        on, other, aligned, where = self.runway_here(lat, lon, hdg, gs)
+        dep_rwy = self.departure_runway()
+        ends = {on.strip().upper(), other.strip().upper()} if on else set()
+        is_dep = bool(dep_rwy) and dep_rwy.lstrip('0') in {e.lstrip('0') for e in ends}
+        entering = bool(on) and (is_dep or aligned) and gs < 40
+        if entering and self.phase == 'GROUND' and not self.runway_entry_done:
+            # Runway entry: entering the FMC departure runway (at any angle), or lined
+            # up on another one (a runway change the FMC doesn't know)
+            self.runway_entry_done, self.crossing = True, False
+            why = (f"entering the departure runway {on.strip()} (FMC: {dep_rwy})" if is_dep
+                   else f"lined up on runway {on.strip()} (FMC departure runway: "
+                        f"{dep_rwy or 'none'})")
+            self.decide(f"{why}: {where}, before takeoff, so the runway entry flow follows")
             self.spawn(self.runway_entry_flow())
-        if on and not aligned and not self.crossing and self.actions['crossing_strobes']:
+        elif on and not self.crossing and not self.runway_entry_done \
+                and self.actions['crossing_strobes']:
             self.crossing = True
-            self.decide(f"on runway {on.strip()} but not lined up ({where}): crossing it, "
-                        "strobes on until clear")
+            self.decide(f"on runway {on.strip()}, not the departure runway "
+                        f"({dep_rwy or 'none in the FMC'}) and not lined up ({where}): "
+                        "crossing it, strobes on until clear")
             self.spawn(self.write("LtStrobe", 1, f"Strobes on: crossing runway {on.strip()}"))
         elif not on and self.crossing:
             self.crossing = False
@@ -1117,14 +1176,21 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         return next((text for hit, text in reasons if hit), None)
 
     def departure_atis(self, dep):
-        """Return the departure's METAR text from PSX's Metar1-7, or None."""
+        """Return (METAR text, zone Wx<n> or None) of the departure's PSX zone, or (None, None).
+
+        The zone is the one whose Metar<n> starts with the departure's ICAO. A
+        METAR without weather groups (frankenweather writes just "ICAO time
+        RMK FRANKENWX MODEL WX") comes with that zone's Wx<n>: then the zone
+        weather is what the crew would get on the ATIS.
+        """
         if not dep:
-            return None
+            return None, None
         for n in range(1, 8):
             metar = (self.psx.get(f"Metar{n}") or "").strip()
             if metar.startswith(dep + " "):
-                return metar
-        return None
+                no_groups = parse_metar(metar)[0] is None
+                return metar, (self.psx.get(f"Wx{n}") if no_groups else None)
+        return None, None
 
     def check_anti_ice(self, on_ground, new_a, new_c):
         """Anti-ice by the book, edge-triggered so the crew can always override.
@@ -1185,11 +1251,17 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         if not reason and on_ground and not self.atis_checked and self.phase == 'GROUND':
             # Once after engine start: icing conditions right after takeoff per the ATIS
             self.atis_checked = True
-            metar = self.departure_atis(self.cur_dep)
-            atis = metar and atis_icing_reason(metar, self.params['icing_atis_base_ft'])
-            reason = atis and f"Departure ATIS: {atis}"
+            metar, zone_wx = self.departure_atis(self.cur_dep)
+            limit = self.params['icing_atis_base_ft']
+            if zone_wx:
+                atis = zone_icing_reason(zone_wx, limit)
+                source = f"departure zone weather ({metar[:4]} Wx {zone_wx})"
+            else:
+                atis = metar and atis_icing_reason(metar, limit)
+                source = f"departure ATIS ({metar})"
+            reason = atis and f"Departure weather: {atis}"
             if metar:
-                self.decide(f"all engines running, departure ATIS ({metar}): " +
+                self.decide(f"all engines running, {source}: " +
                             (f"icing conditions after takeoff ({atis}), engine anti-ice ON"
                              if atis else "no icing conditions expected after takeoff"))
         elif reason:
