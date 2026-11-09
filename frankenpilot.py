@@ -436,6 +436,7 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.step_busy = False          # reading the CDU / climbing now
         self.msa = {}                   # role -> (icao, msa_ft, time) from frankenweather
         self.hands = asyncio.Lock()     # one switch at a time (see write())
+        self.loading = False            # between load1 and load3 (a situation load)
         self.last_switch = ("", 0.0)    # (name, time) of the last switch moved (hand_delay())
         self.pnf_saved = None       # our PnfMode bits 0/2/3 before we took over
         self.routerinfo = {}        # uuid -> (time, type, simulator_name, vatsim_connection)
@@ -677,7 +678,7 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.psx.subscribe("addon", self.on_addon)
         self.psx.onConnect = self.on_welcome
         self.psx.onDisconnect = self.on_disconnect
-        self.psx.onPause = lambda: None
+        self.psx.onPause = self.on_situ_loading    # psx.py: load1 = a situation is being loaded
         self.psx.onResume = self.on_situ_loaded    # psx.py: load3 = a situation was loaded
         self.psx.logger = self.logger.debug
 
@@ -685,9 +686,6 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         """Identify and ask for data once connected (version received)."""
         self.logger.info("Connected to PSX %s as client #%s", value, self.psx.get("id"))
         self.psx.send("name", f"{__MY_CLIENT_ID__}:{__MY_DISPLAY_NAME__} {__version__}")
-        self.psx.send("demand", "GroundSpeed")
-        self.psx.send("demand", "MiscFltData")
-        self.psx.send("demand", "EngParam")
         self.psx.send("addon", f"{FRDP}:SUBSCRIBE")
         self.youareon_wait_until = time.monotonic() + 15.0
         self.connected_at = time.monotonic()
@@ -703,8 +701,28 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.last_eicas = {'A': self.eicas('A'), 'C': self.eicas('C')}
         self.logger.info("PSX welcome: flight state reset")
 
+    def send_demands(self):
+        """Ask PSX for the DEMAND variables we read: at load3 (end of the welcome, every load).
+
+        PSX only accepts Q-codes in demand=, and psx.py can only translate a name once
+        the Lexicon has arrived, which is after "version": the demands sent there went out
+        as "demand=EngParam" and were ignored. frankenpilot then only got these
+        variables while another client demanded them; without one it saw "not all
+        engines running" with the engines at idle (headless test 2026-11-09) and skipped
+        the departure-weather anti-ice check. frankenweather, frankenpush and frankenusb
+        demand at load3 too.
+        """
+        for name in ("GroundSpeed", "MiscFltData", "EngParam"):
+            self.psx.send("demand", name)
+
+    def on_situ_loading(self):
+        """load1: a situation is being loaded; no rules until load3 (see tick())."""
+        self.loading = True
+
     def on_situ_loaded(self):
         """Start a new flight when a situation is loaded (load3), like a welcome."""
+        self.loading = False
+        self.send_demands()
         self.reset_flight()
         if self.active:
             # The situ brought its own PnfMode: remember that one for restore_pnf_mode()
@@ -856,7 +874,10 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
     def tick(self):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
         """Run the rules once (called every second)."""
         self.update_mode()
-        if not self.active:
+        if not self.active or self.loading:
+            # Between load1 and load3 the new situation's values arrive while the old
+            # flight's state is still here: loading Basic 024 (1,150 ft) after a cruise
+            # gave "descending through 1150 ft = 10000 ft above the destination"
             return
         att = self.attitude()
         if att is None:
@@ -895,6 +916,9 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             elif on_ground:
                 self.phase = 'GROUND'       # a bounce or a situ quirk: not a flight
         elif self.phase == 'ROLLOUT':
+            on_rwy, _, _, where = self.runway_here(lat, lon, hdg, gs)
+            if on_rwy:      # for the exit decision's log line
+                self.exit_on = (on_rwy.strip(), where)
             if gs < self.params['exit_speed_kt'] and self.runway_exited(lat, lon, hdg, gs):
                 self.phase = 'TAXI_IN'
                 self.on_runway_exit()
@@ -1152,8 +1176,12 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             # in some configurations), then both F/Ds and the A/T arm switch off
             if self.get_int("McpWdoSpd") != 200:
                 await self.write("McpWdoSpd", 200, "Runway exit: MCP speed 200 kt")
-            for name, text in (("McpFdCp", "captain's F/D off"), ("McpFdFo", "F/O's F/D off"),
-                               ("McpAtArm", "A/T arm off")):
+            # Our own F/D first: switching the pilot flying's first made F/D follow switch
+            # ours again and log it twice
+            fds = [("McpFdCp", "captain's F/D off"), ("McpFdFo", "F/O's F/D off")]
+            if self.seat == 'RIGHT':
+                fds.reverse()
+            for name, text in fds + [("McpAtArm", "A/T arm off")]:
                 if self.get_int(name) == 1:
                     await self.write(name, 0, f"Runway exit: {text}")
         if self.actions['exit_minimums']:
@@ -1217,12 +1245,12 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             if pos is None:
                 return
             err = aim - pos   # aim in StabTrim (raw) units
-            if abs(err) < 150:
+            if abs(err) < 80:      # about 0.07 units on the indicator
                 if aim != target:
                     aim = target
                     await asyncio.sleep(random.uniform(0.6, 1.5))
                     continue
-                self.log_action(f"Runway exit: stab trim {stab_trim_units(pos):.1f} units "
+                self.log_action(f"Runway exit: stab trim {stab_trim_units(pos):.2f} units "
                                 f"(indicator; StabTrim {pos})")
                 return
             direction = 1 if err > 0 else -1     # +1 = nose up = more units (test sim 2026-11-07)

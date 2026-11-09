@@ -102,3 +102,21 @@
   real sim). Measured on the headless sim: indicator = 0.925 x StabTrim/1000
   plus 0.71; after a test landing the indicator read 5.93. The log shows
   both.
+- The runway exit decision names the last runway the aircraft was on (it
+  tracks the runway through the whole rollout; it said "?" when the
+  aircraft was already turning off below 30 kt). Stab trim stops within
+  about 0.07 units of 6.0 on the indicator (it stopped at 6.1).
+- Runway exit: our own F/D is switched off first, so F/D follow no longer
+  switches it a second time (a duplicate log line).
+- Fix: frankenpilot's own requests for PSX's DEMAND variables (EngParam,
+  MiscFltData, GroundSpeed) never worked: they were sent before PSX's
+  Lexicon arrived, as names, which PSX ignores. It only got them while
+  another client (frankenweather) asked; without one it saw "not all
+  engines running" with the engines at idle and skipped the
+  departure-weather anti-ice check (headless test). Now asked at load3, the
+  end of every welcome and situation load.
+- Fix: no rules run while a situation is being loaded (between load1 and
+  load3). The new situation's values arrived while the old flight's state
+  was still there: loading an approach after a cruise gave "descending
+  through 1150 ft = 10000 ft above the destination" and switched the
+  landing lights on (headless test).
