@@ -84,8 +84,8 @@
   runway (seen on the real sim at SCCI: the flow started while still on
   runway 07). Without runway data the old turn rule.
 - After-landing flow: both inboard landing lights as taxi light when there
-  is no taxi light (only the left came on), autobrake OFF, the MCP SPD
-  button pressed twice, both F/Ds and the A/T arm switch off, radio and
+  is no taxi light (only the left came on), autobrake OFF, MCP speed 200 kt
+  (a safe speed for the next takeoff), both F/Ds and the A/T arm switch off, radio and
   baro minimums off on both sides (new actions `exit_autobrake`,
   `exit_mcp`, `exit_minimums`). Tested on the headless sim.
 - Altimeters: a QNH preselected while in STD (PFD mode 3) was taken for QNH

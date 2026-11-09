@@ -85,7 +85,7 @@ ACTIONS = {
     'exit_flaps_speedbrake': (True, "After runway exit: flaps up, speedbrake down"),
     'exit_lights': (True, "After runway exit: landing lights off, taxi light on, strobes off"),
     'exit_autobrake': (True, "Autobrake OFF after runway exit"),
-    'exit_mcp': (True, "Both F/Ds and A/T arm off, MCP SPD pressed twice after runway exit"),
+    'exit_mcp': (True, "MCP speed 200 kt, both F/Ds and A/T arm off after runway exit"),
     'exit_minimums': (True, "Radio and baro minimums off on both sides after runway exit"),
     'exit_wxr_terr': (True, "After runway exit: weather radar and terrain off where on"),
     'exit_stab_trim': (True, "After runway exit: stabilizer trim to 6 units"),
@@ -1147,11 +1147,11 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         if self.actions['exit_autobrake'] and self.get_int("Autobr") != AUTOBRAKE['OFF']:
             await self.write("Autobr", AUTOBRAKE['OFF'], "Runway exit: autobrake OFF")
         if self.actions['exit_mcp']:
-            # SPD twice (user: the MCP speed window back to 100/200 kt, aircraft config)
-            # while the A/T is still armed (without it PSX ignores SPD), then F/Ds, A/T arm
-            for n in (1, 2):
-                await self.press("McpPshSpd", f"Runway exit: MCP SPD button ({n})")
-                await asyncio.sleep(random.uniform(0.3, 0.7))
+            # MCP speed 200 kt, so the next flight starts with a safe speed selected if
+            # the crew forgets to set V2 (user; pressing SPD twice gives 100/200 kt only
+            # in some configurations), then both F/Ds and the A/T arm switch off
+            if self.get_int("McpWdoSpd") != 200:
+                await self.write("McpWdoSpd", 200, "Runway exit: MCP speed 200 kt")
             for name, text in (("McpFdCp", "captain's F/D off"), ("McpFdFo", "F/O's F/D off"),
                                ("McpAtArm", "A/T arm off")):
                 if self.get_int(name) == 1:

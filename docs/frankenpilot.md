@@ -74,9 +74,9 @@ config file (`[actions]`, names in brackets).
   40 degrees from the landing heading): flaps up and speedbrake down
   (`exit_flaps_speedbrake`); landing lights off, taxi light on (or both
   inboard landing lights if the aircraft has no taxi light), strobes off
-  (`exit_lights`); autobrake OFF (`exit_autobrake`); the MCP SPD button
-  pressed twice (the speed window back to its default), then both F/Ds and
-  the A/T arm switch off (`exit_mcp`); radio and baro minimums off on both
+  (`exit_lights`); autobrake OFF (`exit_autobrake`); MCP speed 200 kt (a
+  safe speed for the next takeoff if the crew forgets to set V2), both F/Ds
+  and the A/T arm switch off (`exit_mcp`); radio and baro minimums off on both
   EFIS control panels (`exit_minimums`); weather radar and terrain off on
   any ND where they're on (`exit_wxr_terr`); stabilizer trim to 6 units
   as the pedestal indicator shows them (`exit_stab_trim`; PSX's network
