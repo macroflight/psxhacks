@@ -88,6 +88,7 @@ ACTIONS = {
     'exit_mcp': (True, "MCP speed 200 kt, both F/Ds and A/T arm off after runway exit"),
     'exit_minimums': (True, "Radio and baro minimums off on both sides after runway exit"),
     'exit_wxr_terr': (True, "After runway exit: weather radar and terrain off where on"),
+    'exit_xpdr': (True, "After runway exit: transponder TA/RA (or TA) to XPDR"),
     'exit_stab_trim': (True, "After runway exit: stabilizer trim to 6 units"),
     'exit_apu': (True, "After runway exit: APU start (delayed)"),
     'crossing_strobes': (True, "Strobes on while crossing a runway"),
@@ -1204,6 +1205,12 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
                         await self.press(wxr, f"Runway exit: weather radar off ({side})")
                     if flags[12] == "1":
                         await self.press(terr, f"Runway exit: terrain off ({side})")
+        if self.actions['exit_xpdr']:
+            # TcasPanSel field 4 = mode selector: 0 STBY, 1 XPDR, 2 TA, 3 TA/RA (ops manual order)
+            sel = (self.psx.get("TcasPanSel") or "").split(";")
+            if len(sel) == 4 and sel[3] in ("2", "3"):
+                await self.write("TcasPanSel", ";".join(sel[:3] + ["1"]),
+                                 "Runway exit: transponder XPDR")
         if self.actions['exit_stab_trim']:
             await self.stab_trim_to(self.params['stab_trim_units'])
         if self.actions['exit_apu'] and self.get_int("ApuStart") == 0:

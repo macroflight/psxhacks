@@ -132,3 +132,5 @@
   minimum went to 4,710 ft instead of 380, and kept being corrected). It now
   turns by the option's step, checks what each turn did, and stops with a
   warning if a turn moves nothing, goes the wrong way or overshoots.
+- New: after runway exit the transponder goes from TA/RA (or TA) to XPDR
+  (`exit_xpdr`).

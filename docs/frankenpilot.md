@@ -78,7 +78,8 @@ config file (`[actions]`, names in brackets).
   safe speed for the next takeoff if the crew forgets to set V2), both F/Ds
   and the A/T arm switch off (`exit_mcp`); radio and baro minimums off on both
   EFIS control panels (`exit_minimums`); weather radar and terrain off on
-  any ND where they're on (`exit_wxr_terr`); stabilizer trim to 6 units
+  any ND where they're on (`exit_wxr_terr`); transponder from TA/RA (or TA)
+  to XPDR (`exit_xpdr`); stabilizer trim to 6 units
   as the pedestal indicator shows them (`exit_stab_trim`; PSX's network
   value `StabTrim` reads about 0.3 units lower there); APU start 30 s
   later (`exit_apu`).
