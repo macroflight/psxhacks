@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Docs: zone placement and relocation described as the code does it.**
+  Altitude (18,000 ft) only sets how far behind the aircraft a zone must
+  be before it moves (50 or 200 nm); whether zones are placed ahead or
+  all around depends only on maneuvering mode (below 200 kt, or more than
+  180° of turn in 5 minutes). A zone must be behind the aircraft before it
+  moves in both modes. The `--cruise-behind-dist`/`--low-alt-dist` help
+  texts said the same wrong thing.
+
 - **Change: no clock write on connect or situ load when PSX's clock is
   already right.** Both now check 5 s later and sync only if PSX is more
   than 5 s off (a restart in flight rewrote the clock every time; each

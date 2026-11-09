@@ -332,26 +332,30 @@ and is an ordinary zone again as soon as another zone (e.g. the
 departure or destination airport's) is within 150 nm, or in maneuvering
 mode, where the zones are all around the aircraft anyway.
 
-Everything else follows the current flight phase:
+Everything else follows two separate rules: *where* a new or relocated zone
+is placed depends only on the placement mode (cruise or maneuvering, see
+below); *when* a zone may be relocated depends on the aircraft's altitude.
 
-- **Cruise** (aircraft at or above 18 000 ft, and not maneuvering): new or
+- **Where, cruise mode** (not maneuvering, at any altitude): new or
   relocated zones are placed ahead of the aircraft, in a forward-biased fan
   (a range of distances ahead, with some lateral spread either side of
-  track). A zone only becomes eligible for relocation once the aircraft has
-  actually flown past it — the zone must be more than 90° off the nose —
-  and then only once it's more than `cruise_behind_dist` (default 50 nm)
-  behind.
-- **Maneuvering** (a hold, vectoring, or any heading change greater than
-  180° within 5 minutes — see below — or below cruise altitude): new or
-  relocated zones are scattered all around the aircraft at a random bearing
-  instead of ahead of it, since the aircraft's track is no longer a
-  reliable predictor of where it's headed next, and no further than 50 nm
-  inside `low_alt_dist` (150 nm by default; also zones in TS/TC SIGMET
-  areas), so a hold doesn't carry the aircraft out of range of a zone just
-  placed. A zone becomes eligible once it is more than `low_alt_dist`
-  (default 200 nm) away, in any direction.
+  track).
+- **Where, maneuvering mode** (true airspeed below 200 kt, or a heading
+  change greater than 180° within 5 minutes, see below): new or relocated
+  zones are scattered all around the aircraft at a random bearing instead
+  of ahead of it, since the aircraft's track is no longer a reliable
+  predictor of where it's headed next, and no further than 50 nm inside
+  `low_alt_dist` (150 nm by default; also zones in TS/TC SIGMET areas), so
+  a hold doesn't carry the aircraft out of range of a zone just placed.
+  The zones placed at startup are also all around the aircraft.
+- **When:** a zone only becomes eligible for relocation once the aircraft
+  has actually flown past it (the zone is more than 90° off the nose, in
+  both modes), and then only once it's more than `cruise_behind_dist`
+  (default 50 nm) behind at or above 18,000 ft in cruise mode, or more
+  than `low_alt_dist` (default 200 nm) behind below 18,000 ft or while
+  maneuvering.
 
-In both phases, a zone that is still ahead of (or abeam) the aircraft is
+In both modes, a zone that is still ahead of (or abeam) the aircraft is
 never relocated — real CBs only ever drift slowly with the wind, so
 nothing currently in front of the aircraft, where it could be visible on
 radar, is allowed to disappear or jump.

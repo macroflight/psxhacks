@@ -6845,7 +6845,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         front of the aircraft (i.e. potentially visible on radar) gets
         relocated out from under the pilot. Only once a zone has actually
         passed behind does distance matter: cruise_behind_dist in cruise,
-        low_alt_dist below cruise altitude or while maneuvering.
+        low_alt_dist below 18,000 ft or while maneuvering.
         Does not apply _check_and_relocate()'s extra "don't relocate more
         than once per refresh interval" throttle, since that's specific to
         actually moving a zone, not to asking whether it geographically
@@ -10749,10 +10749,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             help="UCAR stations.txt file (downloads from UCAR if not given).")
         parser.add_argument(
             '--cruise-behind-dist', type=float, default=50.0, metavar='NM',
-            help="In cruise: relocate a zone more than this many nm behind the aircraft.")
+            help="At or above 18,000 ft, not maneuvering: relocate a zone more than this "
+                 "many nm behind the aircraft.")
         parser.add_argument(
             '--low-alt-dist', type=float, default=200.0, metavar='NM',
-            help="Below cruise alt: relocate any zone more than this many nm away.")
+            help="Below 18,000 ft or while maneuvering: relocate a zone more than this many "
+                 "nm behind the aircraft (maneuvering places zones up to 50 nm inside it).")
         parser.add_argument(
             '--wxautoset-handoff-dist', type=float, default=320.0, metavar='NM',
             help="During an Open-Meteo outage, reposition onto the nearest cached "
