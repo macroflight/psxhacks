@@ -23,8 +23,10 @@
   turn they were "behind" and relocated: on the headless test sim, 18
   relocations and 22 SIGMET placements in 40 minutes orbiting Penang. Now,
   while maneuvering, new zones (also the ones placed in TS/TC SIGMET areas)
-  stay within 90% of that distance, and any bearing counts (no "behind" in
-  a hold). Penang rerun: 1 relocation, 5 SIGMET placements.
+  stay 50 nm inside that distance (150 nm; a hold takes the aircraft tens
+  of nm away from where a zone was placed: with 90 %, 180 nm, a SIGMET zone
+  placed at 179 nm was moved again at 201 nm), and any bearing counts (no
+  "behind" in a hold). Penang rerun: 1 relocation, 5 SIGMET placements.
 - **Fix: a zone inside a TS/TC SIGMET area only snaps to an airport inside
   that same area.** Snapping it 13 nm onto an airport outside lost the CB
   the SIGMET gives it (headless test, SARR A1 / SGAS).

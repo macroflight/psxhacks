@@ -342,9 +342,11 @@ Everything else follows the current flight phase:
   180° within 5 minutes — see below — or below cruise altitude): new or
   relocated zones are scattered all around the aircraft at a random bearing
   instead of ahead of it, since the aircraft's track is no longer a
-  reliable predictor of where it's headed next. The same "must be behind"
-  rule still applies before a zone becomes eligible, but the distance
-  threshold is `low_alt_dist` (default 200 nm) instead.
+  reliable predictor of where it's headed next, and no further than 50 nm
+  inside `low_alt_dist` (150 nm by default; also zones in TS/TC SIGMET
+  areas), so a hold doesn't carry the aircraft out of range of a zone just
+  placed. A zone becomes eligible once it is more than `low_alt_dist`
+  (default 200 nm) away, in any direction.
 
 In both phases, a zone that is still ahead of (or abeam) the aircraft is
 never relocated — real CBs only ever drift slowly with the wind, so

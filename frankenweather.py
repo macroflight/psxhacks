@@ -1979,6 +1979,10 @@ _BURST_GUST = 400
 # this strength instead, with probability magnitude/this, so the speed kicks add up to the same per
 # minute, in fewer and bigger ones (_at_workaround()).
 _AT_SPD_MINUS_MIN = 35
+# While maneuvering, new zones (also SIGMET-area ones) are placed at most this much inside
+# the behind-relocation limit (low_alt_dist): a hold or vectoring takes the aircraft tens of nm
+# away from where a zone was placed (_place_zone(), _sigmet_zone_range_nm()).
+_MANEUVER_PLACE_MARGIN_NM = 50.0
 _BURST_NAMES = {_BURST_SINK: "SINK", _BURST_BANK: "BANK", _BURST_YAW: "YAW",
                 _BURST_SPD: "SPD", _BURST_GUST: "GUST"}
 _BURST_SUMMARY_S = 60.0               # the burst summary log line's period (_log_burst_summary())
@@ -6617,7 +6621,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 # margin): placed all-around up to 250 nm, a zone was "behind" past
                 # the 200 nm low_alt_dist after the next turn and relocated again -
                 # 18 relocations in 22 min orbiting Iguazu (headless test 2026-11-08)
-                far = (min(fwd_max, 0.9 * self.args.low_alt_dist)
+                far = (min(fwd_max, self.args.low_alt_dist - _MANEUVER_PLACE_MARGIN_NM)
                        if self._maneuvering and not initial else fwd_max)
                 nearest = min(_CB_AREA_MIN_DIST_NM, far) if cb_area else 0.0
                 dist_m = random.uniform(nearest, far) * _NM_TO_M
@@ -7942,9 +7946,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         in a hold, heading swings around, and zones placed 200-300 nm "ahead" were
         relocated as "behind" after the next turn, then placed again - 12 SIGMET
         placements + 17 relocations in 35 min orbiting Penang (headless test 2026-11-07).
+        With 90 % of the limit (180 nm) a zone placed at 179 nm was 201 nm away after the
+        hold took the aircraft 22 nm further and moved again (Penang 2026-11-09), so the
+        margin is a hold's size (_MANEUVER_PLACE_MARGIN_NM).
         """
         if self._maneuvering:
-            return min(_SIGMET_ZONE_RANGE_NM, 0.9 * self.args.low_alt_dist)
+            return min(_SIGMET_ZONE_RANGE_NM, self.args.low_alt_dist - _MANEUVER_PLACE_MARGIN_NM)
         return _SIGMET_ZONE_RANGE_NM
 
     def _cb_sigmets_containing(self, lat: float, lon: float) -> list:
