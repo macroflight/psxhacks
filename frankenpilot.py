@@ -655,8 +655,9 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
 
     def setup_psx(self):
         """Subscribe to everything frankenpilot reads."""
-        for name in ("id", "PiBaHeAlTas", "OnGround", "GroundSpeed", "MiscFltData", "EngParam",
-                     "Tla", "FlapLever", "SpdBrkLever", "GearLever", "Autobr", "ApuStart",
+        for name in ("id", "CfgPin2Prog", "PiBaHeAlTas", "OnGround", "GroundSpeed",
+                     "MiscFltData", "EngParam", "Tla", "FlapLever", "SpdBrkLever", "GearLever",
+                     "Autobr", "ApuStart",
                      "PackSel1", "PackSel2", "PackSel3", "LtLandOubL", "LtLandOubR", "LtLandInbL",
                      "LtLandInbR", "LtRwyTurnL", "LtRwyTurnR", "LtTaxi", "LtStrobe", "LtWing",
                      "LtLogo", "CfgTaxiLight", "TcasPanSel", "EfisActL", "EfisActR", "StabTrim",
@@ -1652,8 +1653,9 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
                                      f"Minimums: {side_name} MINS selector {kind.upper()}")
                     await asyncio.sleep(0.3)
                     continue
-                await self.turn_mins(own, i, pf[i], f"Minimums: {side_name} {kind} minimums "
-                                     f"{mins_text(pf[i], -1 if i == 0 else -101)}")
+                if not await self.turn_mins(own, i, pf[i], f"Minimums: {side_name} {kind} "
+                                            f"minimums {mins_text(pf[i], -1 if i == 0 else -101)}"):
+                    return
                 continue
             if mine[2] != pf[2]:
                 await self.write(f"EcpMinsMode{suffix}", pf[2],
@@ -1666,23 +1668,60 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
                 return
         self.logger.warning("Minimums: still not in sync after 40 steps")
 
+    def mins_step(self, field):
+        """Return the MINS knob's feet per click for field (0 radio, 1 baro).
+
+        Baro: 10 with the airline option "EFIS baro minima in 10 ft steps"
+        (CfgPin2Prog bit 128; the values then snap to tens), else 1. Radio: 1.
+        Test sim 2026-11-09; WorldFlight1 has the option.
+        """
+        return 10 if field == 1 and self.get_int("CfgPin2Prog", 0) & 128 else 1
+
     async def turn_mins(self, own, field, target, text):
-        """Turn our MINS knob until field (0 radio, 1 baro) of our minimums is target."""
+        """Turn our MINS knob until field (0 radio, 1 baro) of our minimums is target.
+
+        Returns False when it gave up or had nothing to do. After every knob
+        message it waits to see what PSX did, and stops with a warning when a
+        turn moves nothing, goes the wrong way or overshoots (the knob not
+        moving the feet per click mins_step() says: before it knew the 10 ft
+        option, WorldFlight1 went to 4,710 ft instead of 380, 2026-11-09).
+        """
         suffix = 'Cp' if own == 'L' else 'Fo'
+        step = self.mins_step(field)
         async with self.hands:
             await asyncio.sleep(self.hand_delay(f"EcpMins{suffix}"))
-            moved = False
-            for _ in range(5):
+            moved, ok = False, True
+            for _ in range(10):
                 mine = self.mins(own)
-                clicks = target - mine[field] if mine else 0
-                if clicks == 0 or not self.active:
+                if mine is None or not self.active:
                     break
-                self.psx.send(f"EcpMins{suffix}", str(max(-6000, min(6000, clicks))))
+                err = target - mine[field]
+                if abs(err) < step:
+                    break
+                clicks = max(-6000, min(6000, round(err / step)))
+                if target <= (-1 if field == 0 else -101):
+                    clicks = -6000          # off: all the way down
+                self.psx.send(f"EcpMins{suffix}", str(clicks))
                 moved = True
-                await asyncio.sleep(0.4)
+                for _ in range(30):         # until PSX shows the turn (3 s at most)
+                    await asyncio.sleep(0.1)
+                    now = self.mins(own)
+                    if now is None or now[field] != mine[field]:
+                        break
+                await asyncio.sleep(0.3)    # and settles
+                now = self.mins(own)
+                change = now[field] - mine[field] if now else 0
+                if change == 0 or (change > 0) != (err > 0) or abs(change) > abs(err) + step:
+                    self.logger.warning("Minimums: %s MINS knob %+d clicks (%d ft each) moved the "
+                                        "%s minimum %+d ft (%d, want %d): giving up", suffix,
+                                        clicks, step, "radio" if field == 0 else "baro", change,
+                                        mine[field], target)
+                    ok = False
+                    break
             if moved:
                 self.last_switch = (f"EcpMins{suffix}", time.monotonic())
                 self.log_action(text)
+            return ok and moved
 
     def check_altimeters(self, alt, dep, dst):
         """Standby altimeter: STD above the departure MSA; destination QNH below its MSA."""

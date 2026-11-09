@@ -127,3 +127,8 @@
 - New: minimums follow (`minimums`). When the pilot flying sets their radio
   or baro minimums or moves the MINS selector, frankenpilot's PFD follows
   (headless test: radio 199, baro 1650, both off, selector each time).
+- Fix: minimums follow overshot on a sim with the airline option "EFIS baro
+  minima in 10 ft steps" (CfgPin2Prog bit 128; WorldFlight1: the F/O's baro
+  minimum went to 4,710 ft instead of 380, and kept being corrected). It now
+  turns by the option's step, checks what each turn did, and stops with a
+  warning if a turn moves nothing, goes the wrong way or overshoots.
