@@ -352,6 +352,10 @@ from the MCP speed. 10.190 and earlier don't do it (tested 10.178, 10.186,
 - SPD minus -301 to -329: 8.6-12 s (the weaker, the longer); from -332 on
   about 1 s, -399 and +350, +399 normal. +307: 2 s late.
 - SINK, BANK, YAW: no effect.
+- These thresholds are for 5,000 ft. At FL350 (2026-11-09, MCP 270/290 kt)
+  every speed burst tested (+302 to +370, -335 to -380) made it hold the
+  levers for 5-14 s, so in cruise the strength doesn't help and the
+  frankenweather workaround doesn't either.
 
 - **Cost:** speed decays 15-20 kt below target (or overshoots) on approach
   in gusty weather and in frankenweather turbulence; crews reported "slow
