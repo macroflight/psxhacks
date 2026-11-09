@@ -257,7 +257,8 @@ Features:
   - While Open-Meteo can't be reached (or refuses, e.g. after the daily
     limit), older downloads are used instead (zone weather up to 90
     minutes: it's the weather of when it was downloaded, so a zone with
-    older data takes its airport's METAR, or keeps its weather; forecasts
+    older data takes a METAR from an airport within 120 nm, or keeps its
+    weather; forecasts
     as long as they cover the hour), so the zones still
     get new METARs and setting changes, and turbulence keeps working.
     The console banner says how old the data is.

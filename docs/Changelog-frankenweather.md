@@ -18,7 +18,9 @@
   no longer used.** It's the weather of the time it was downloaded (not a
   forecast for now): a simulated outage used data 8.6 hours old from an
   earlier flight in the area. Such a zone now takes its airport's METAR, or
-  keeps the weather it has.
+  keeps the weather it has. A zone with no data at all only moves onto a
+  METAR station within 120 nm; before, mid-ocean zones jumped 700-970 nm
+  to the nearest airports (headless test: all 7 zones to the Azores).
 
 - **Workaround: weak speed-down and gust turbulence bursts no longer freeze
   PSX's autothrottle.** Since PSX 10.191 the A/T stops moving the thrust

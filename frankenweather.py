@@ -101,6 +101,9 @@ _OM_ZONE_KEEP_S = 24 * 3600.0
 # simulated outage used data 517 min old from an earlier flight there. Such a zone takes its
 # METAR instead, or keeps its weather (user: fall back to a fresher METAR).
 _OM_ZONE_STALE_MAX_S = 90 * 60.0
+# A zone without Open-Meteo data moves onto the nearest METAR station only within this distance
+# (else it keeps its position and weather)
+_NO_OM_METAR_MAX_NM = 120.0
 _OM_ZONE_CACHE_PATH = os.path.join(
     os.path.expanduser("~"), ".cache", "frankenweather", "om_zones.json")
 _OM_ENROUTE_CACHE_PATH = os.path.join(
@@ -2736,6 +2739,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # aircraft to actually fly far enough for real zone staleness
         # (addon=FRANKENWEATHER:DIAG:force_zones_stale:1|0). See _handle_fw_addon().
         self._diag_force_zones_stale: bool = False
+        # Zones told "nearest METAR station too far" during this Open-Meteo outage (log once)
+        self._far_metar_logged: set = set()
         # Diagnostic-only: makes _nearest_metar_stations() (the METAR-fallback
         # path only -- not the D-ATIS override or normal per-zone METAR
         # matching, both of which keep using the real cache) act as if
@@ -9085,6 +9090,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             if station is None:
                 continue
             icao, alat, alon, dist_nm, raw = station
+            if dist_nm > _NO_OM_METAR_MAX_NM:
+                # Mid-ocean the nearest station can be far away: the zones moved 700-970nm
+                # to the Azores (headless test 2026-11-09); such a zone keeps its weather
+                if i not in self._far_metar_logged:
+                    self._far_metar_logged.add(i)
+                    self.logger.info("Zone %d: no Open-Meteo data, nearest METAR station %s is"
+                                     " %.0fnm away: zone stays, keeps its weather",
+                                     i + 1, icao, dist_nm)
+                continue
             snap_positions[i] = (alat, alon)
             snap_icaos[i] = icao
             raw_metars[i] = raw
@@ -9093,6 +9107,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.logger.info("Zone %d: no Open-Meteo data — using METAR station %s"
                              " (%.0fnm from the zone's position)", i + 1, icao, dist_nm)
         no_om_data = all(entry is None for entry in om_batch)
+        if not fetch_failed:
+            self._far_metar_logged.clear()
         self._zones_metar_only = no_om_data and any(raw is not None for raw in raw_metars)
         if no_om_data and all(raw is None for raw in raw_metars):
             if not self._zones_all_stale():
