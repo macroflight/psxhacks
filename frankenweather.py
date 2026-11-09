@@ -3013,6 +3013,20 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         """
         self.psx_send_and_set("Qi243", str(_WX_SLOW_TRANSIT_MS), force=True)
 
+    def _sync_psx_clock_if_off(self) -> None:
+        """Sync the PSX clocks (connect, situ load) unless PSX is already within _TIMESYNC_DRIFT_S.
+
+        A restart in flight used to rewrite the clock every time (2026-11-09); every clock
+        write moves PSX's CB orbit positions and was the suspected trigger of the VA SIGMET
+        damage (docs/psx-issues.md), so only when it's needed.
+        """
+        psx_ms = self.sim_time_ms()
+        if psx_ms is not None and abs(psx_ms - time.time() * 1000.0) <= _TIMESYNC_DRIFT_S * 1000.0:
+            self.logger.info("PSX clock already within %.0f s of real time (%.1f s): not synced",
+                             _TIMESYNC_DRIFT_S, abs(psx_ms - time.time() * 1000.0) / 1000.0)
+            return
+        self._sync_psx_clock()
+
     def _sync_psx_clock(self) -> None:
         """Sync PSX clocks (TimeEarth, TimeClockL, TimeClockR) to current real-world time.
 
@@ -10539,7 +10553,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 if self._fw_mode == "disabled":
                     self.psx_send_and_set("WxAutoSet", "1")
                 if self._timesync_on_startup:
-                    self._sync_psx_clock()
+                    # PSX's own time (TimeEarth) arrives with the welcome, after this
+                    asyncio.get_running_loop().call_later(5.0, self._sync_psx_clock_if_off)
 
             def disconnected():
                 self.logger.info("PSX DISCONNECTED")
@@ -10561,7 +10576,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 # wire-protocol signal PSX gives for "a new situ just finished
                 # loading", so it doubles as our situ-load detector here.
                 if self._timesync_on_situ_load:
-                    self._sync_psx_clock()
+                    # 5 s later PSX has broadcast the situation's time (TimeEarth every 3.5 s);
+                    # a situ saved at another time is synced, one already right isn't
+                    asyncio.get_running_loop().call_later(5.0, self._sync_psx_clock_if_off)
                 # TEMPORARY (PFD-altitude-jump investigation, see the
                 # project_frankenweather_altitude_jump memory): LeftPfdAlt
                 # (Qs562) is PSX Mode=DEMAND, so it's never sent unprompted.

@@ -972,7 +972,11 @@ three independent toggles on the Config and logs web page (or the
   in sync automatically once you return to 1x, instead of staying however
   far ahead the acceleration left it.
 
-All three call the same sync routine, which unconditionally overwrites
+`on_startup` and `on_situ_load` look 5 seconds after the event (by then
+PSX has sent its time) and only sync if PSX is more than 5 seconds off,
+so restarting frankenweather in flight doesn't rewrite a clock that is
+already right (each clock write nudges the positions of PSX's orbiting CB
+cells). All three overwrite
 `TimeEarth`/`TimeClockL`/`TimeClockR` with the current real-world time —
 none of them account for time zone or the aircraft's own local time, only
 real-world UTC-equivalent wall clock time as read from the machine running

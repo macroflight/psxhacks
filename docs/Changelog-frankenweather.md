@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Change: no clock write on connect or situ load when PSX's clock is
+  already right.** Both now check 5 s later and sync only if PSX is more
+  than 5 s off (a restart in flight rewrote the clock every time; each
+  write nudges PSX's orbiting CB cells). A situ saved at another time is
+  still synced.
+
 - **Fix (`--advanced-zones`): a CB only starts drifting once it has grown.**
   A cell that started drifting during its fade-in kept its first step
   (1/8) for its whole life (main sim, 2026-11-06: 1/8 for 30-60 minutes
