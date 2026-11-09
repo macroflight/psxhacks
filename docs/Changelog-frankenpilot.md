@@ -120,3 +120,7 @@
   was still there: loading an approach after a cruise gave "descending
   through 1150 ft = 10000 ft above the destination" and switched the
   landing lights on (headless test).
+- A master sim with no slave sim connected counts as not on VATSIM (the
+  master sim is never connected itself), so an unattended master sim does
+  its step climbs. Before, the status stayed "unknown" and no step climb
+  was done.

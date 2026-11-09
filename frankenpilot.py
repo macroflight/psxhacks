@@ -2027,12 +2027,18 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         on a router, else from the vPilot plugin's own status. Offline when at
         least one sim reports offline and none online (a sim without the plugin,
         like the master sim, reports unknown and doesn't count); unknown (None)
-        when no sim reports either.
+        when no sim reports either. On a master router with no slave sim
+        connected, offline: the master sim is never connected to VATSIM itself,
+        and is often left to fly unattended (step climbs wanted).
         """
         now = time.monotonic()
         # Slave sims only: the master sim is never connected to VATSIM
         sims = {name: conn for t, typ, name, conn in self.routerinfo.values()
                 if now - t < 60 and typ != 'master' and conn in ('online', 'offline', 'unknown')}
+        # (after 30 s: the slave routers' ROUTERINFO comes every ~10 s)
+        on_master = (self.router or {}).get('type') == 'master'
+        if not sims and on_master and now - self.connected_at > 30:
+            return False, "not on VATSIM (master sim only, no slave sim connected)"
         status, at = self.vpilot_status
         if not sims and status and now - at < 30:
             sims = {'this sim': {'CONNECTED': 'online', 'DISCONNECTED': 'offline'}.get(

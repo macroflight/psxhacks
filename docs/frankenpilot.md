@@ -142,7 +142,10 @@ frankenpilot knows whether the flight is online on VATSIM: online when any
 slave sim is connected (as pilot or observer), from the routers' VATSIM
 status (the PSX.NET.vPilot plugin) or, without a router, the plugin itself;
 offline when a sim reports offline and none online (the master sim is never
-on VATSIM and doesn't count). Its log and web page show it.
+on VATSIM and doesn't count). A master sim with no slave sim connected
+counts as offline (it is often left to fly unattended); a sim without a
+router and without the plugin's status is unknown. Its log and web page show
+it.
 
 - **Step climbs** (`step_climb`, NG FMC): when VNAV says a step climb is
   due ("STEP TO FL350 / AT NOW" on VNAV CRZ page 2/3), frankenpilot sets
