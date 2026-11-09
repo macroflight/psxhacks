@@ -79,7 +79,9 @@ config file (`[actions]`, names in brackets).
   the A/T arm switch off (`exit_mcp`); radio and baro minimums off on both
   EFIS control panels (`exit_minimums`); weather radar and terrain off on
   any ND where they're on (`exit_wxr_terr`); stabilizer trim to 6 units
-  (`exit_stab_trim`); APU start 30 s later (`exit_apu`).
+  as the pedestal indicator shows them (`exit_stab_trim`; PSX's network
+  value `StabTrim` reads about 0.3 units lower there); APU start 30 s
+  later (`exit_apu`).
 - **Fuel** in flight, standard Boeing 747 procedure, following the EICAS messages (`fuel`):
   center pumps off at >FUEL LOW CTR and on at >FUEL OVD CTR; stabilizer
   pumps on at >FUEL PMP STB and off at >FUEL LO STAB; AUX pumps off at
@@ -216,7 +218,7 @@ autobrake_setting = "4"   # 1, 2, 3, 4 or MAX
 exit_speed_kt = 30.0      # runway exit: slower than this ...
 exit_turn_deg = 40.0      # ... and turned this far from the landing heading
 apu_delay_s = 30.0
-stab_trim_units = 6.0
+stab_trim_units = 6.0     # as read on the stab trim indicator
 # anti-ice: how much cloud makes icing conditions (TAT 10 C or colder)
 icing_auto_cont_s = 60.0     # auto system: in cloud this long in a row ...
 icing_auto_frac = 0.6        # ... and this much of the last 3 minutes

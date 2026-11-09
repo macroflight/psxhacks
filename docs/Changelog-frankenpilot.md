@@ -97,3 +97,8 @@
   stabilizer tank configured), >FUEL TANK/ENG; anti-ice with an auto
   system and the SAT -40 C rule. >FUEL LO STAB and >ICING WING not yet seen
   (PSX shows no >ICING WING even with heavy wing ice).
+- Stab trim after landing goes to 6.0 as the pedestal indicator shows it
+  (it went to StabTrim 6.1, which the indicator shows as 6.4, seen on the
+  real sim). Measured on the headless sim: indicator = 0.925 x StabTrim/1000
+  plus 0.71; after a test landing the indicator read 5.93. The log shows
+  both.

@@ -390,6 +390,23 @@ class AirportElevations:
         return self.elev_ft.get(icao) if icao else None
 
 
+# The pedestal stab trim indicator doesn't show StabTrim/1000: measured on the headless sim
+# (PSX 10.195, 2026-11-09, 4.02 -> 4.43, 6.02 -> 6.32, 6.12 -> 6.43, 6.48 -> 6.73, 7.98 -> 8.09)
+# it reads about 0.925 x StabTrim/1000 + 0.71 (the user saw 6.4 when we had trimmed to
+# StabTrim 6.14).
+STAB_IND_SLOPE, STAB_IND_OFFSET = 0.925, 0.71
+
+
+def stab_trim_units(raw):
+    """Return the stab trim indicator reading (units) for a StabTrim value."""
+    return STAB_IND_SLOPE * raw / 1000.0 + STAB_IND_OFFSET
+
+
+def stab_trim_raw(units):
+    """Return the StabTrim value that shows units on the stab trim indicator."""
+    return (units - STAB_IND_OFFSET) / STAB_IND_SLOPE * 1000.0
+
+
 class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-public-methods
     """The virtual Pilot Monitoring."""
 
@@ -1187,8 +1204,8 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
                 await asyncio.sleep(0.5)
 
     async def stab_trim_to(self, units):
-        """Trim like a pilot: hold the trim switch in blips, sometimes overshoot and come back."""
-        target = units * 1000.0
+        """Trim like a pilot to units on the indicator: blips, sometimes overshoot and come back."""
+        target = stab_trim_raw(units)
         start = self.get_int("StabTrim")
         if start is None:
             return
@@ -1199,13 +1216,14 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             pos = self.get_int("StabTrim")
             if pos is None:
                 return
-            err = aim - pos
+            err = aim - pos   # aim in StabTrim (raw) units
             if abs(err) < 150:
                 if aim != target:
                     aim = target
                     await asyncio.sleep(random.uniform(0.6, 1.5))
                     continue
-                self.log_action(f"Runway exit: stab trim {pos / 1000:.1f} units")
+                self.log_action(f"Runway exit: stab trim {stab_trim_units(pos):.1f} units "
+                                f"(indicator; StabTrim {pos})")
                 return
             direction = 1 if err > 0 else -1     # +1 = nose up = more units (test sim 2026-11-07)
             self.psx.send("StabTrimCp", str(direction))
