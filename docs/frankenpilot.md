@@ -131,6 +131,11 @@ config file (`[actions]`, names in brackets).
   works towards what the pilot flying's PFD shows now, so flicking STD/QNH
   or turning the baro knob click by click doesn't leave it behind on a
   stale setting.
+- **Minimums** (`minimums`): when the pilot flying sets their radio or baro
+  minimums, or moves the MINS selector, frankenpilot's PFD follows: both
+  values (the selector picks which one the knob turns), then the selector
+  to where the pilot flying left theirs. Turned off goes off too. Like the
+  altimeters it always works towards what the pilot flying shows now.
 
 frankenpilot uses one pair of hands: when two flows run at the same time
 their switches are moved one after the other. Switches right next to each

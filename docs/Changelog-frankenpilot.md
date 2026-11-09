@@ -124,3 +124,6 @@
   master sim is never connected itself), so an unattended master sim does
   its step climbs. Before, the status stayed "unknown" and no step climb
   was done.
+- New: minimums follow (`minimums`). When the pilot flying sets their radio
+  or baro minimums or moves the MINS selector, frankenpilot's PFD follows
+  (headless test: radio 199, baro 1650, both off, selector each time).

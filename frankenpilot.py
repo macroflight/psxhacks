@@ -94,6 +94,7 @@ ACTIONS = {
     'fuel': (True, "Fuel pumps and outer crossfeeds in flight (Boeing procedure, EICAS driven)"),
     'anti_ice': (True, "Engine and wing anti-ice by the book"),
     'altimeters': (True, "PFD baro follows the pilot flying's; standby QNH/STD by the MSA"),
+    'minimums': (True, "PFD minimums (MINS selector, radio and baro) follow the pilot flying's"),
     'flap_speeds': (False, "MCP speed to the flap manoeuvre speed on flap extension (opt-in)"),
     'step_climb': (True, "Step climb when VNAV says AT NOW (VNAV PTH, NG FMC, offline on VATSIM)"),
 }
@@ -407,6 +408,11 @@ def stab_trim_raw(units):
     return (units - STAB_IND_OFFSET) / STAB_IND_SLOPE * 1000.0
 
 
+def mins_text(value, off):
+    """Return a minimums value as the pilot reads it: "off" or "<n> ft"."""
+    return "off" if value <= off else f"{value} ft"
+
+
 class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-public-methods
     """The virtual Pilot Monitoring."""
 
@@ -432,6 +438,8 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.connected_at = 0.0
         self.cur_alt, self.cur_dep = None, None    # this tick's altitude and departure
         self.pf_efis = {}               # 'L'/'R' -> (baro hPa*100, STD) last seen (on_efis())
+        self.pf_mins = {}               # 'L'/'R' -> (radio, baro, mode) last seen (on_efis())
+        self.mins_task = None           # the minimums sync task (one at a time)
         self.cdu_key_at = {'L': 0.0, 'R': 0.0}   # last key pressed on each CDU by someone else
         self.step_busy = False          # reading the CDU / climbing now
         self.msa = {}                   # role -> (icao, msa_ft, time) from frankenweather
@@ -1557,6 +1565,7 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         departure charts is relative to it), and gets every new QNH set.
         """
         side = key[-1]          # EfisActL / EfisActR
+        self.on_mins(side)
         cur, last = self.efis(side), self.pf_efis.get(side)
         self.pf_efis[side] = cur    # both sides, also while inactive: the first change counts
         if self.seat is None:
@@ -1589,6 +1598,91 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
                             "our PFD and the standby altimeter follow")
             self.stby_want = baro
         self.kick_altimeters()      # also a baro preselect while in STD
+
+    # --- minimums
+
+    def mins(self, side):
+        """Return (radio ft, baro ft, mode) of the L or R PFD minimums, or None.
+
+        EfisActL/R field 1 = "R"/"r" + radio minimum (-1 = off, up to 999), field 2 =
+        baro minimum (-101 = off), field 3 = MINS selector (1 = BARO, 0 = RADIO). The
+        MINS knob (EcpMinsCp/Fo, DELTA) turns the selected one 1 ft per click, at most
+        6000 per message (test sim 2026-11-09).
+        """
+        try:
+            fields = self.psx.get(f"EfisAct{side}").split(";")
+            return int(fields[0].lstrip("Rr")), int(fields[1]), int(fields[2])
+        except (AttributeError, ValueError, IndexError):
+            return None
+
+    def on_mins(self, side):
+        """Follow the pilot flying's minimums (selector, radio and baro) on our PFD."""
+        cur, last = self.mins(side), self.pf_mins.get(side)
+        self.pf_mins[side] = cur    # both sides, also while inactive: the first change counts
+        if self.seat is None or cur is None or last is None or cur == last:
+            return
+        if side != self.sides()[1] or not self.active or not self.actions['minimums']:
+            return
+        if self.mins_task is None or self.mins_task.done():   # once per change, not every click
+            pf_name = "captain" if side == 'L' else "F/O"
+            self.decide(f"the {pf_name} (pilot flying) changed their minimums: ours follow")
+            self.mins_task = self.spawn(self.sync_minimums())
+
+    async def sync_minimums(self):
+        """Bring our minimums (both values, then the MINS selector) to the pilot flying's.
+
+        Re-reads both PFDs before every step, like sync_altimeters(): a pilot turning
+        the knob click by click never leaves us on a stale value. Done when
+        everything matches for a second.
+        """
+        for _ in range(40):
+            if not self.active or self.seat is None or not self.actions['minimums']:
+                return
+            own, pf_side = self.sides()
+            pf, mine = self.mins(pf_side), self.mins(own)
+            if pf is None or mine is None:
+                return
+            suffix = 'Cp' if own == 'L' else 'Fo'
+            side_name = "captain's" if own == 'L' else "F/O's"
+            diff = [(i, kind) for i, kind in ((0, "radio"), (1, "baro")) if mine[i] != pf[i]]
+            if diff:
+                i, kind = diff[0]
+                if mine[2] != i:            # the selector picks what the knob turns (0 RADIO)
+                    await self.write(f"EcpMinsMode{suffix}", i,
+                                     f"Minimums: {side_name} MINS selector {kind.upper()}")
+                    await asyncio.sleep(0.3)
+                    continue
+                await self.turn_mins(own, i, pf[i], f"Minimums: {side_name} {kind} minimums "
+                                     f"{mins_text(pf[i], -1 if i == 0 else -101)}")
+                continue
+            if mine[2] != pf[2]:
+                await self.write(f"EcpMinsMode{suffix}", pf[2],
+                                 f"Minimums: {side_name} MINS selector "
+                                 f"{'BARO' if pf[2] == 1 else 'RADIO'}")
+                await asyncio.sleep(0.3)
+                continue
+            await asyncio.sleep(1.0)        # settled - unless the pilot flying moved again
+            if self.mins(pf_side) == pf:
+                return
+        self.logger.warning("Minimums: still not in sync after 40 steps")
+
+    async def turn_mins(self, own, field, target, text):
+        """Turn our MINS knob until field (0 radio, 1 baro) of our minimums is target."""
+        suffix = 'Cp' if own == 'L' else 'Fo'
+        async with self.hands:
+            await asyncio.sleep(self.hand_delay(f"EcpMins{suffix}"))
+            moved = False
+            for _ in range(5):
+                mine = self.mins(own)
+                clicks = target - mine[field] if mine else 0
+                if clicks == 0 or not self.active:
+                    break
+                self.psx.send(f"EcpMins{suffix}", str(max(-6000, min(6000, clicks))))
+                moved = True
+                await asyncio.sleep(0.4)
+            if moved:
+                self.last_switch = (f"EcpMins{suffix}", time.monotonic())
+                self.log_action(text)
 
     def check_altimeters(self, alt, dep, dst):
         """Standby altimeter: STD above the departure MSA; destination QNH below its MSA."""
