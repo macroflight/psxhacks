@@ -326,22 +326,25 @@ from the MCP speed. 10.190 and earlier don't do it (tested 10.178, 10.186,
 10.190 vs 10.191, 10.195 on the headless test sim, a burst sent by a client
 3 s after an MCP speed change, levels at 5,000 ft):
 
-- GUST 401-408: levers still exactly 8.0 s (409: 2 s late; 420, 450, 499:
-  no freeze). PSX's own gust bursts on a real approach (FTECH2/MACRO at
+- GUST 401-408: levers still exactly 8.0 s (sent by a client; 409: 2 s late;
+  410-418: 1 s late, sometimes a 5 s pause after; 420, 450, 499: no freeze).
+  PSX's own 409s froze them about 20 s (orbit near LPPD, 29030G43KT). PSX's own gust bursts on a real approach (FTECH2/MACRO at
   SCCI, 2026-11-08, zone wind 190/07G15): 401-408 every 12-37 s, the levers
   still for exactly 9.0 or 20.2 s after almost every one, IAS 16-20 kt below
   the MCP speed meanwhile; Aerowinx's own situ "03 Approach 008 - Chicago -
   Crosswind gusts" (411-413): 8 freezes of 6-19 s on 10.195, none on 10.190.
-- SPD minus -301 to -320: 9.6-12 s (the weaker, the longer). -350, -399,
-  +350, +399: no freeze. +307: 2 s late.
+- SPD minus -301 to -329: 8.6-12 s (the weaker, the longer); from -332 on
+  about 1 s, -399 and +350, +399 normal. +307: 2 s late.
 - SINK, BANK, YAW: no effect.
 
 - **Cost:** speed decays 15-20 kt below target (or overshoots) on approach
   in gusty weather and in frankenweather turbulence; crews reported "slow
   autothrottle" from November 2026 (Baker 11-05, FTECH2/MACRO 11-08).
 - **Workaround:** none for PSX's own gust bursts (the A/T has frozen before
-  anything reaches the network). frankenweather: opt-out option that keeps
-  its SPD-minus bursts out of the freezing range (planned).
+  anything reaches the network; the real surface gusts stay, user's call).
+  frankenweather (63317dd, `--no-psx-at-workaround` to turn off): its GUST
+  bursts go out as SPD, SPD-minus weaker than 35 as 35 with probability
+  strength/35.
 - **Request:** the tolerance should be about the speed deviation, not a
   fixed dormant time after a burst; at least the A/T must respond once IAS
   is clearly below the MCP speed.
