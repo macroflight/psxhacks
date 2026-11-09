@@ -96,6 +96,11 @@ _OM_VARS = (
 # from older data while Open-Meteo is unreachable.
 _OM_ZONE_FRESH_S = 900.0
 _OM_ZONE_KEEP_S = 24 * 3600.0
+# ... but while Open-Meteo is unreachable, a cached entry older than this isn't used: it's
+# the weather of that time ("current" values, not a forecast for now), and on 2026-11-09 a
+# simulated outage used data 517 min old from an earlier flight there. Such a zone takes its
+# METAR instead, or keeps its weather (user: fall back to a fresher METAR).
+_OM_ZONE_STALE_MAX_S = 90 * 60.0
 _OM_ZONE_CACHE_PATH = os.path.join(
     os.path.expanduser("~"), ".cache", "frankenweather", "om_zones.json")
 _OM_ENROUTE_CACHE_PATH = os.path.join(
@@ -8597,7 +8602,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         granularity) rather than exact position, so a relocated zone -- or a
         different zone landing nearby, common given the ~150-250nm forward
         placement cone -- also counts as a hit. If the fetch fails, any
-        older cache entry (up to _OM_ZONE_KEEP_S) is used instead, so the
+        older cache entry (up to _OM_ZONE_STALE_MAX_S) is used instead, so the
         zones can still be updated. fetch_failed is True if a fetch was
         needed and failed; oldest_s is the age of the oldest entry used.
         """
@@ -8615,6 +8620,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 for i, entry in zip(missing, fetched)})
             for i, entry in zip(missing, fetched):
                 entries[i], ages[i] = entry, 0.0
+        else:
+            for i in missing:
+                if ages[i] is not None and ages[i] > _OM_ZONE_STALE_MAX_S:
+                    entries[i], ages[i] = None, None
         oldest = max((a for a in ages if a is not None), default=0.0)
         return entries, fetched is None, oldest
 
