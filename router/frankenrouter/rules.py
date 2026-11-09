@@ -19,6 +19,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import re
 import unittest
 import time
@@ -44,6 +45,20 @@ SPDBRK_ARM_VALUE = 44
 
 # Same for teh traffic keywords
 TRAFFIC_KEYWORDS = frozenset({'Qs450', 'Qs451'})
+
+# Ground elevation (Qi198, ft * 100) spike filter, see elevation_spike_check().
+# MSFS can send garbage for a few seconds (2026-11-06 13:09Z: a parked
+# aircraft at VOBL, 2,935 ft, got 73/24/31 ft; PSX dropped it 2,900 ft
+# and crashed it). On the ground and slow, a jump this big with no
+# reposition or situ load just before it is dropped.
+ELEV_SPIKE_FT = 200
+ELEV_SPIKE_MAX_TAS_KT = 40
+# A load1/load3 or a reposition (note_reposition()) this recently allows any change
+ELEV_SPIKE_REPOSITION_WINDOW_S = 120.0
+# PSX's position moving this far in one update is a reposition
+REPOSITION_JUMP_NM = 1.0
+# A changed elevation that keeps coming this long is accepted after all
+ELEV_SPIKE_ACCEPT_AFTER_S = 30.0
 
 # PTT buttons and audio panel switches: sim-local only, filtered from other sims
 # Qh82="LcpPttCp"; Qh93="LcpPttFo"; Qh410="SwitchesAudioL";
@@ -371,6 +386,7 @@ class RulesCode(enum.Enum):
     KEYVALUE_FILTERED_EGRESS_SIM_LOCAL = enum.auto()
     CHECK_SWITCHES_DROPPED = enum.auto()
     KEYVALUE_FILTERED_INGRESS = enum.auto()
+    ELEVATION_SPIKE_DROPPED = enum.auto()
     KEYVALUE_FILTERED_INGRESS_SILENT = enum.auto()
     KEYVALUE_FILTER_EGRESS = enum.auto()
     KEYVALUE_NORMAL = enum.auto()
@@ -1551,6 +1567,98 @@ class Rules():  # pylint: disable=too-many-public-methods
                 return self.myreturn(RulesAction.DROP, RulesCode.LAYOUT)
         return self.myreturn(RulesAction.NORMAL, RulesCode.LAYOUT)
 
+    def note_reposition(self, key, value):
+        """Remember a reposition, for elevation_spike_check(), whatever tool made it.
+
+        Qs122 (StartPiBaHeAlVsTasYw, the Instructor and situ loads) or a
+        PiBaHeAlTas (Qs121) a client writes is one; so is PSX's own
+        Qs121 jumping more than REPOSITION_JUMP_NM from the last one
+        (an EFB or any other way of moving the aircraft).
+        """
+        now = time.perf_counter()
+        if key == 'Qs122' or not self.sender.upstream:
+            self.router.last_reposition = now
+            return
+        try:
+            old = self.router.cache.get_value('Qs121').split(';')
+            new = value.split(';')
+            dlat = float(new[5]) - float(old[5])
+            dlon = (float(new[6]) - float(old[6])) * math.cos(float(new[5]))
+        except (RouterCacheException, ValueError, TypeError, IndexError, AttributeError):
+            return
+        if math.degrees(math.hypot(dlat, dlon)) * 60.0 > REPOSITION_JUMP_NM:
+            self.router.last_reposition = now
+
+    def _since(self, attr):
+        """Return the seconds since the router's perf_counter() timestamp attr (inf if never)."""
+        stamp = getattr(self.router, attr, None)
+        if not stamp:
+            return float('inf')
+        return time.perf_counter() - stamp
+
+    def elevation_spike_check(self, value):
+        """Return why a downstream Elev (Qi198) write is a spike to drop, or None to let it through.
+
+        A spike: the aircraft is on the ground and slow (OnGround Qi257,
+        TAS from PiBaHeAlTas Qs121), the value is more than ELEV_SPIKE_FT
+        from the elevation last let through (the cached Qi198), and there
+        was no reposition or situ load (load1, load3, or a reposition
+        note_reposition() saw) in the last ELEV_SPIKE_REPOSITION_WINDOW_S,
+        so gate repositions and situ loads are never filtered. A changed value that keeps coming for
+        ELEV_SPIKE_ACCEPT_AFTER_S is accepted after all, so a real change
+        can't be locked out.
+        """
+        router = self.router
+        try:
+            new = int(value)
+            accepted = int(router.cache.get_value('Qi198'))
+            on_ground = int(router.cache.get_value('Qi257')) == 1
+            tas_kt = float(router.cache.get_value('Qs121').split(';')[4]) / 1000.0
+        except (RouterCacheException, ValueError, TypeError, IndexError, AttributeError):
+            return None   # not enough known (e.g. just started): let it through
+        state = getattr(router, 'elev_spike', None)
+        if abs(new - accepted) <= ELEV_SPIKE_FT * 100:
+            if state:
+                self.logger.warning(
+                    "Elevation spike over: dropped %d Qi198 write(s) in %.1f s"
+                    " (%s ft, last accepted %s ft)",
+                    state['count'], time.perf_counter() - state['since'],
+                    state['values'], accepted / 100)
+                router.elev_spike = None
+            return None
+        if not on_ground or tas_kt >= ELEV_SPIKE_MAX_TAS_KT:
+            router.elev_spike = None
+            return None
+        since_reposition = min(self._since('last_load1'), self._since('last_load3'),
+                               self._since('last_reposition'))
+        if since_reposition < ELEV_SPIKE_REPOSITION_WINDOW_S:
+            router.elev_spike = None
+            return None
+        now = time.perf_counter()
+        if not state:
+            state = router.elev_spike = {'since': now, 'count': 0, 'values': []}
+            self.logger.warning(
+                "Elevation spike from %s: Qi198 %.0f ft, last accepted %.0f ft,"
+                " on the ground at %.0f kt with no reposition: dropping it",
+                self.sender.display_name, new / 100, accepted / 100, tas_kt)
+            router.record_sim_event(
+                'elevation_spike_dropped', client=self.sender.display_name,
+                elev_ft=new / 100, accepted_ft=accepted / 100)
+        if now - state['since'] >= ELEV_SPIKE_ACCEPT_AFTER_S:
+            self.logger.warning(
+                "Elevation from %s has been %.0f ft (not %.0f ft) for %.0f s: accepting it",
+                self.sender.display_name, new / 100, accepted / 100, now - state['since'])
+            router.record_sim_event(
+                'elevation_spike_accepted', client=self.sender.display_name,
+                elev_ft=new / 100, accepted_ft=accepted / 100)
+            router.elev_spike = None
+            return None
+        state['count'] += 1
+        if len(state['values']) < 10:
+            state['values'].append(new / 100)
+        return (f"dropped Qi198={value}: {abs(new - accepted) / 100:.0f} ft from"
+                f" {accepted / 100:.0f} ft on the ground, no reposition")
+
     def handle_load1(self):
         """Handle the load1 keyword."""
         self.router.last_load1 = time.perf_counter()
@@ -1772,6 +1880,9 @@ class Rules():  # pylint: disable=too-many-public-methods
                 RulesCode.KEYVALUE_FILTERED_EGRESS_SIM_LOCAL,
                 extra_data={'exclude_other_sim_frankenrouters': True})
 
+        if key in ('Qs121', 'Qs122'):
+            self.note_reposition(key, value)
+
         if key == 'load1':
             return self.handle_load1()
 
@@ -1931,6 +2042,12 @@ class Rules():  # pylint: disable=too-many-public-methods
                     RulesAction.DROP,
                     RulesCode.KEYVALUE_FILTERED_INGRESS_SILENT,
                     message="filtered Qi198 as filter_elevation is set")
+            spike = self.elevation_spike_check(value)
+            if spike:
+                return self.myreturn(
+                    RulesAction.DROP,
+                    RulesCode.ELEVATION_SPIKE_DROPPED,
+                    message=spike)
             # If the value is unchanged, only send to
             # upstream. Sending unconditionally to upstream prevents
             # the master sim router from switching to PSX's elevation
@@ -2225,6 +2342,9 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             self.cache = TestRules.DummyCache()
             self.last_load1 = 0.0
             self.last_load3 = 0.0
+            self.last_reposition = 0.0
+            self.elev_spike = None
+            self.sim_events = []
             self.start_sent_at = 0.0
             self.jettison_resync_sent_at = 0.0
             self.frdp_version = 1
@@ -2234,6 +2354,7 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             self.observer_mode = False
             self.sharedinfo = {"pilot_flying_simulator": "NO_CONTROL_LOCKS"}
             self.filter_traffic = False
+            self.filter_elevation = False
             self.load_marker_pause_enabled = False
             self.load_marker_pause_delay = 0.1
             self.orchestration_needed = False   # what orchestration_egress_needed() says
@@ -2251,6 +2372,10 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
         def is_upstream_connected(self):
             """Return dummy value."""
             return False
+
+        def record_sim_event(self, event_type, **kwargs):
+            """Remember a sim event."""
+            self.sim_events.append((event_type, kwargs))
 
         def orchestration_egress_needed(self, _zone):
             """Return whether weather-zone writes go to Orchestration clients late."""
@@ -3695,6 +3820,65 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
                     rules, line, peer, QUARANTINE_WEATHER_S - 1.0), quarantined, line)
                 self.assertEqual(self._quarantine_route(
                     rules, line, peer, QUARANTINE_WEATHER_S + 1.0), RulesCode.KEYVALUE_NORMAL, line)
+
+    def _elev_setup(self):
+        """Return (router, rules, peer): parked on the ground at 2,935 ft, nothing loaded lately."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+        peer = self._quarantine_peer(router)
+        peer.connected_at = time.perf_counter() - 1000.0
+        router.cache.update('Qi198', '293459')
+        router.cache.update('Qi257', '1')
+        router.cache.update('Qs121', '0;1;1222;2935000;0;0.2304139;1.3563638')
+        return router, rules, peer
+
+    def test_elevation_spike_dropped(self):
+        """A parked aircraft's ground elevation jumping thousands of feet is dropped."""
+        router, rules, peer = self._elev_setup()
+        for value in ('7289', '2353', '3070'):   # 2026-11-06 VOBL
+            (action, code, *_) = rules.route(f"Qi198={value}", peer)
+            self.assertEqual((action, code), (RulesAction.DROP, RulesCode.ELEVATION_SPIKE_DROPPED))
+        self.assertEqual(router.cache.get_value('Qi198'), '293459')
+        self.assertEqual([e[0] for e in router.sim_events], ['elevation_spike_dropped'])
+        # Back to normal: small changes go through, and the spike is over
+        (action, code, *_) = rules.route("Qi198=293475", peer)
+        self.assertEqual(action, RulesAction.NORMAL)
+        self.assertIsNone(router.elev_spike)
+
+    def test_elevation_spike_allowed(self):
+        """Repositions, situ loads, flight, speed and lasting changes still change the elevation."""
+        cases = {
+            'Qs122 (Instructor)': lambda r, rules, peer: rules.route(
+                "Qs122=0;0;0;1686;8;-19;12;0;0.44;0.97;81", r.upstream),
+            'load1': lambda r, rules, peer: rules.route("load1", r.upstream),
+            'client writes Qs121 (EFB)': lambda r, rules, peer: rules.route(
+                "Qs121=0;1;1222;216000;0;0.9283;-0.1086", peer),
+            "PSX's position jumps": lambda r, rules, peer: rules.route(
+                "Qs121=0;1;1222;216000;0;0.9283;-0.1086", r.upstream),
+            'airborne': lambda r, rules, peer: r.cache.update('Qi257', '0'),
+            'fast (takeoff roll)': lambda r, rules, peer: r.cache.update(
+                'Qs121', '0;1;1222;2935000;120000;0.2304139;1.3563638'),
+        }
+        for name, before in cases.items():
+            router, rules, peer = self._elev_setup()
+            before(router, rules, peer)
+            (action, code, *_) = rules.route("Qi198=21600", peer)
+            self.assertNotEqual(code, RulesCode.ELEVATION_SPIKE_DROPPED, name)
+            self.assertIn(action, (RulesAction.NORMAL, RulesAction.UPSTREAM_ONLY), name)
+        # Taxiing on: PSX's position creeping isn't a reposition
+        router, rules, peer = self._elev_setup()
+        rules.route("Qs121=0;1;1222;2935000;0;0.2304150;1.3563650", router.upstream)
+        (_, code, *_) = rules.route("Qi198=7289", peer)
+        self.assertEqual(code, RulesCode.ELEVATION_SPIKE_DROPPED)
+        # A changed value that keeps coming is accepted after ELEV_SPIKE_ACCEPT_AFTER_S
+        router, rules, peer = self._elev_setup()
+        (_, code, *_) = rules.route("Qi198=21600", peer)
+        self.assertEqual(code, RulesCode.ELEVATION_SPIKE_DROPPED)
+        router.elev_spike['since'] -= ELEV_SPIKE_ACCEPT_AFTER_S  # pylint: disable=unsupported-assignment-operation
+        (action, code, *_) = rules.route("Qi198=21600", peer)
+        self.assertEqual(action, RulesAction.NORMAL)
+        self.assertEqual(router.cache.get_value('Qi198'), '21600')
+        self.assertEqual(router.sim_events[-1][0], 'elevation_spike_accepted')
 
     def test_post_connect_quarantine_exempt(self):
         """FRDP NO_QUARANTINE exempts the sending client from the quarantine."""

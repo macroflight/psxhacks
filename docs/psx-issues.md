@@ -303,6 +303,22 @@ warning that ended it. Reproduced twice with different burst sequences.
 - **Request:** if the real one disconnects (stall warning, attitude or
   servo limits), PSX should too.
 
+### A bad ground elevation throws a parked aircraft off the ground
+
+*Confirmed (2026-10-29, 2026-11-06).* PSX applies any `Elev` (Qi198)
+it gets at once, even a jump of thousands of feet under a parked
+aircraft. MSFS (via PSX.NET.MSFS.Router) sometimes sends garbage for a
+few seconds: 17 and ~1,148 ft at EIDW (real ~216 ft) after a connect or
+situ load on 10-29, which threw the aircraft ~900 ft up; and 73, 24 and
+31 ft at VOBL (2,935 ft) on 11-06 13:09Z with the aircraft parked,
+engines off. PSX dropped it 2,900 ft and crashed it (crash freeze).
+
+- **Workaround:** frankenrouter drops such spikes when the aircraft is on
+  the ground and slow and wasn't just repositioned (router changelog,
+  ground elevation spike filter).
+- **Request:** on the ground, ignore (or ramp) an elevation change that
+  big unless the aircraft was repositioned.
+
 ### Momentary switches stay held if the release is lost
 
 *Confirmed (2026-08-09).* PSX treats momentary switches (e.g. `Qh147`/

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **New: ground elevation spike filter.** On the ground and below
+  40 kt, an `Elev` (Qi198) write from a client that is more than 200 ft
+  from the elevation last let through is dropped, unless the aircraft
+  was repositioned or a situ loaded in the last 120 s. That means a
+  `load1`/`load3`, a `Qs122`, a client writing the position (`Qs121`),
+  or PSX's own position jumping more than 1 nm. A changed elevation that
+  keeps coming for 30 s is accepted after all. Each spike gets a WARNING
+  when it starts and ends, and an `elevation_spike_dropped` (or
+  `_accepted`) sim event. On 2026-11-06 at 13:09Z MSFS sent 73, 24 and
+  31 ft for a parked aircraft at VOBL (2,935 ft); PSX dropped it 2,900 ft
+  and crashed it.
+
 - **Change: console log times are UTC**, marked with a Z (e.g. `14:05:31Z`), like every psxhacks log.
 
 - **Change: `addon=FRANKENWEATHER:MSA` reaches every client** (frankenpilot),

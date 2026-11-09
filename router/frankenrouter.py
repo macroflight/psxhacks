@@ -583,6 +583,11 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         # bang reply)
         self.last_bang = 0.0
 
+        # When the aircraft was last repositioned (Rules.note_reposition()),
+        # and the elevation spike being dropped (Rules.elevation_spike_check())
+        self.last_reposition = 0.0
+        self.elev_spike = None
+
         # Variables that we re-initialize after upstream (re)connection
         self.last_load1 = None
         self.last_load3 = 0.0
