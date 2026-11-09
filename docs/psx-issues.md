@@ -317,7 +317,7 @@ oscillated at ~117 messages/s and flooded every client.
 
 ### The autothrottle stops moving the levers for 8-20 s after a WxBurst (10.191+)
 
-*Confirmed (2026-11-08), not yet reported.* Since PSX 10.191 (changelog
+*Confirmed (2026-11-08), reported to Aerowinx (forum, 2026-11-09).* Since PSX 10.191 (changelog
 191.09: "For turbulence induced airspeed deviation peaks, the autothrottle
 is now more tolerant and accordingly remains dormant until the tolerance is
 exceeded"), the A/T in SPD mode leaves the thrust levers where they are for
