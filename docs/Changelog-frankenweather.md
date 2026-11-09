@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Workaround: weak speed-down and gust turbulence bursts no longer freeze
+  PSX's autothrottle.** Since PSX 10.191 the A/T stops moving the thrust
+  levers for 8-12 s after them (headless test, 10.190 doesn't). In flight
+  gust bursts are sent as speed bursts, and weak speed-down bursts as fewer
+  stronger ones, the same total. On by default, `--no-psx-at-workaround`
+  turns it off; to be removed once Aerowinx fixes it.
+
 - **Change: above FL200 fewer up/down bumps of random turbulence, a quarter
   from FL350**, same sizes; bank, yaw and speed bumps unchanged, mountain
   waves unchanged. PSX's SINK burst drains energy (measured on the headless

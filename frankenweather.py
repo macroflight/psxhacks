@@ -1970,6 +1970,15 @@ _BURST_BANK = 100
 _BURST_YAW = 200
 _BURST_SPD = 300
 _BURST_GUST = 400
+# PSX 10.191+ autothrottle workaround (--no-psx-at-workaround; remove once Aerowinx fixes it).
+# Since 191.09 PSX's A/T in SPD mode stops moving the thrust levers for 8-12 s after weak GUST
+# bursts (GUST 401-408: 8 s) and weak SPD-minus bursts (-301 to -329: 9-12 s), however far IAS
+# then falls below the MCP speed; from -332 / 409 on, and SINK, BANK, YAW and SPD-plus, it
+# responds within 1-2 s (headless test sim, 10.178-10.195, 2026-11-08, docs/psx-issues.md).
+# In flight our GUST bursts become SPD bursts, and an SPD-minus burst weaker than this is sent at
+# this strength instead, with probability magnitude/this, so the speed kicks add up to the same per
+# minute, in fewer and bigger ones (_at_workaround()).
+_AT_SPD_MINUS_MIN = 35
 _BURST_NAMES = {_BURST_SINK: "SINK", _BURST_BANK: "BANK", _BURST_YAW: "YAW",
                 _BURST_SPD: "SPD", _BURST_GUST: "GUST"}
 _BURST_SUMMARY_S = 60.0               # the burst summary log line's period (_log_burst_summary())
@@ -2135,6 +2144,19 @@ def _turb_type(kind: str) -> str:
     if kind.endswith("+shear"):
         return "shear"
     return "sigmet" if kind == "mtw" else kind
+
+
+def _at_workaround(base, label, direction, magnitude):
+    """Return (base, label, magnitude) of a burst that won't freeze PSX's A/T; 0 = skip it.
+
+    GUST becomes SPD; an SPD-minus burst weaker than _AT_SPD_MINUS_MIN is sent at that
+    strength with probability magnitude / _AT_SPD_MINUS_MIN (the same speed kicks per minute).
+    """
+    if base == _BURST_GUST:
+        base, label = _BURST_SPD, 'spd'
+    if base == _BURST_SPD and direction < 0 and magnitude < _AT_SPD_MINUS_MIN:
+        magnitude = _AT_SPD_MINUS_MIN if random.random() < magnitude / _AT_SPD_MINUS_MIN else 0
+    return base, label, magnitude
 
 
 def _pick_burst(state, intensity):
@@ -4084,6 +4106,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if thin_sink and random.random() >= _high_alt_sink_factor(self.ac_alt_ft):
             return
         magnitude = min(99, random.randint(1, max(1, int(intensity * 99))))
+        if not on_ground and not self.args.no_psx_at_workaround:
+            base, label, magnitude = _at_workaround(base, label, direction, magnitude)
+            if magnitude < 1:
+                return
         if base == _BURST_SINK and not on_ground and limit_updown:
             magnitude = self._updown_budget(direction, magnitude, intensity)
             if magnitude < 1:
@@ -10829,6 +10855,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         parser.add_argument(
             '--log-web-requests', action='store_true',
             help="Log every request to the standalone web UI (off by default).")
+        parser.add_argument(
+            '--no-psx-at-workaround', action='store_true',
+            help="Send weak SPD-minus and GUST turbulence bursts as they are. By default they "
+                 "are changed (GUST to SPD, weak SPD-minus ones fewer and stronger, same total) "
+                 "because "
+                 "PSX 10.191 and later freeze the autothrottle for 8-12 s after them.")
         parser.add_argument(
             '--no-datis-override', action='store_true',
             help="Disable overriding PSX's own D-ATIS/MetarsUp (Qs464) reply with VATSIM "

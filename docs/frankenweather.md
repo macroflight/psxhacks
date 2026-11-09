@@ -848,6 +848,19 @@ the stall in a few minutes at full thrust; with a quarter it holds its
 speed. Mountain waves keep all their up/down bursts: their downdrafts
 really cost energy, and there the answer is to descend or turn away.
 
+### PSX autothrottle workaround (`--no-psx-at-workaround`)
+
+PSX 10.191 and later have an autothrottle bug: after a weak gust or a weak
+"speed down" turbulence burst, the A/T in SPD mode leaves the thrust levers
+where they are for 8 to 12 seconds, however far the speed then falls below
+the MCP speed (docs/psx-issues.md). Stronger bursts and the up/down, bank
+and yaw bursts don't do it. So in flight frankenweather sends its gust
+bursts as speed bursts, and replaces weak "speed down" bursts by fewer
+stronger ones (the same speed kicks per minute, so the turbulence feels the
+same). `--no-psx-at-workaround` sends them unchanged. This goes once
+Aerowinx fixes the bug. PSX's own gust bursts from a gusty surface wind
+can't be changed: expect the A/T to lag on gusty approaches.
+
 ### Turbulence gustiness and PIREPs
 
 The turbulence frankenweather works out itself from physics (the
