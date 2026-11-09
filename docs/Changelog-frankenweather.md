@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Fix (`--advanced-zones`): a CB only starts drifting once it has grown.**
+  A cell that started drifting during its fade-in kept its first step
+  (1/8) for its whole life (main sim, 2026-11-06: 1/8 for 30-60 minutes
+  instead of 5/8). Headless test: "waits until its CB has grown", then the
+  VYYY CB started drifting at its full 6/8.
+
 - **Fix: during an Open-Meteo outage, zone weather older than 90 minutes is
   no longer used.** It's the weather of the time it was downloaded (not a
   forecast for now): a simulated outage used data 8.6 hours old from an

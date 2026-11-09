@@ -7253,6 +7253,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     zone_num in self._zone_pinned or zone_num not in self.zone_positions)
             if skip or self._is_cb_free_zone(zone_num) or _fw_drift.cb_oktas(wx) <= 0:
                 continue
+            if self._cb_still_growing(zone_num, wx):
+                # A drifting cell keeps the CB it starts with: it would stay at
+                # its first growth step for its whole life (main sim, FTECH2,
+                # 2026-11-06: 1/8 for 30-60 min instead of 5/8)
+                self.logger.debug("CB drift: Zone %d waits until its CB has grown", zone_num)
+                continue
             centre = _fw_drift.wxmode_pos(new_modes[i])
             pos = _fw_drift.cb_position(self.geod, new_modes[i], self.sim_time_ms())
             if centre is None or pos is None:
@@ -7286,6 +7292,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 zone_num, name, _fw_drift.pos_text(lat, lon), cell.heading_deg, cell.speed_kt,
                 cell.start_oktas, cell.lifetime_s / 60.0)
             self._state_changed_event.set()
+
+    def _cb_still_growing(self, zone_num: int, wx: str) -> bool:
+        """Return True if zone_num's CB (wx) hasn't yet grown to its fade target (_fade_cb_wx())."""
+        target = self._zone_cb_fade_target.get(zone_num)
+        if not target or self.args.cb_growth:
+            return False
+        try:
+            cur, goal = wx.split(';'), target.split(';')
+            return int(goal[9]) > int(cur[9]) or float(goal[10]) > float(cur[10])
+        except (IndexError, ValueError):
+            return False
 
     def _end_drift(self, zone_num: int, why: str, retire: bool) -> None:
         """Stop zone_num drifting; with retire it stays where it is, CB-free, until moved."""
