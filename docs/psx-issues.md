@@ -296,7 +296,7 @@ warning that ended it. Reproduced twice with different burst sequences.
 
 - **Cost:** a turbulence encounter the crew doesn't react to ends in the
   ocean with the autopilot still on.
-- **Workaround:** frankenweather's testing profile keeps wave turbulence
+- **Workaround:** frankenweather's turbulence (version 2) keeps wave turbulence
   below 50% and has no bank/gust bursts in wave.
 - **To check first:** what a real 747-400 autopilot does in a stall (it
   has no envelope protection; does it disconnect, and when?).

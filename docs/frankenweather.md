@@ -673,23 +673,26 @@ with a dashed outline; hovering over an area says which. With
 `--no-sigmet`, or with the Off or PSX preset, the map shows the SIGMETs PSX
 downloaded, all dashed.
 
-### Turbulence profile: stable and testing
+### Turbulence versions: default and next
 
-The turbulence has a profile, chosen on the router's /efb page
-(Turbulence Profile: Stable/Testing), in the configuration file
-(`[turbulence]` `profile`), with `profile` on the turbulence API, or with
-`--turb-profile stable|testing` on the command line. `--turb-profile`
-overrides the configuration file at startup and whenever the settings
-are reloaded or reset; switching on the /efb page still works for the
-session, and the file only changes when you save the settings. Without
-it, the file's profile is used, or stable. "Stable" is the released
-turbulence. "Testing" also turns on changes
-being tried out before they may become the default, so they can be
-compared in the sim (also with seat shakers) without changing anyone's
-normal turbulence. What testing changes:
+The turbulence has a version number. The default is **version 2**
+(until 2026-11-10 the "testing" profile; version 1 was "stable", which
+is gone). A "next" version, when there is one, turns on changes being
+tried out before they become the default, so they can be compared in the
+sim (also with seat shakers) without changing anyone's normal turbulence.
+Choose it on the router's /efb page (Turbulence Version: Default/Next;
+Next is greyed out while there is no next version, as now), in the
+configuration file (`[turbulence]` `profile`), with `profile` on the
+turbulence API, or with `--turb-profile default|next` on the command
+line. `--turb-profile` overrides the configuration file at startup and
+whenever the settings are reloaded or reset; switching on the /efb page
+still works for the session, and the file only changes when you save
+the settings. The old names `stable` and `testing` mean default. The log
+shows the version in effect ("turbulence v2"). What version 2 changed
+from version 1:
 
 - **Realistic turbulence: light chop, with moderate, severe and extreme
-  as rare events** (see [Turbulence events](#turbulence-events-testing-profile)
+  as rare events** (see [Turbulence events](#turbulence-events-version-2)
   below). The continuous turbulence is at most light chop (34%), except
   inside a CB's cloud, where it's severe.
   Moderate patches, severe clusters and extreme encounters happen at
@@ -704,7 +707,7 @@ normal turbulence. What testing changes:
   out above it. At most 20%, light bumps: PSX's own gusts (from the
   METAR) already shake the aircraft on a windy day.
   The console's reason says "Boundary layer: ... (testing)".
-- **Turbulence inside TS/TC SIGMET areas** (with `--sigmet`, TS/TC
+- **Turbulence inside TS/TC SIGMET areas** (with the SIGMET system, TS/TC
   handled): the zones' CBs only cover part of a big thunderstorm area,
   so flying through one was mostly smooth. Now, everywhere inside the
   area below its top, faded in near its edges, a minimum plus a level
@@ -739,7 +742,7 @@ normal turbulence. What testing changes:
   autothrottle takes the speed and the descent stays steady, as real
   crews fly it. In severe wave, fly by hand.
 
-### Turbulence events (testing profile)
+### Turbulence events (version 2)
 
 Real turbulence is mostly smooth or light. Moderate comes in patches a
 minute or two long, and severe is something an aircraft hits, not
@@ -751,7 +754,7 @@ profile instead holds one level per source for minutes, which in a SEV
 TURB SIGMET gave severe-class shaking (peaks over 2 g) for minutes at a
 time.
 
-In the testing profile:
+In turbulence version 2:
 
 - **The continuous turbulence is at most light chop** (34%, about
   0.09 g at cruise). A TURB SIGMET is mostly light chop (22-34%, about
@@ -817,7 +820,7 @@ default) is real-world odds. Presets: Realistic (1/1/1), Eventful
 a few hours of flying; Eventful makes it likely on a flight through a
 SEV TURB SIGMET.
 
-**Trigger** (Turbulence page, testing profile; API `trigger`:
+**Trigger** (Turbulence page; API `trigger`:
 `moderate`, `severe` or `extreme`) starts an event right away, for
 testing and training.
 
@@ -937,7 +940,7 @@ refreshed every minute, when the flight level changes and when entering
 or leaving a turbulence area. The popup closes by itself after a few
 seconds.
 
-In the testing profile the continuous turbulence is at most light chop
+In turbulence version 2 the continuous turbulence is at most light chop
 and moderate or worse comes as events, so the rating follows that: a
 level is smooth when it's at light chop (22%) or more less than a
 quarter of the time, otherwise light; moderate near a CB and rough

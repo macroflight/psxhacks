@@ -57,7 +57,7 @@ from frankenturb.disk_cache import DiskCache
 from frankenturb.openmeteo import CLIENT as _OM_CLIENT
 from frankenturb import turbulence_events as _turb_events
 from frankenturb.intensity_profile import (
-    DEFAULT_BANDS, REALISTIC_BANDS, REALISTIC_SEV_BANDS, GustinessProfile,
+    REALISTIC_BANDS, REALISTIC_SEV_BANDS, GustinessProfile,
     LayeredIntensityProfile)
 from fw_cb import (
     WX_DEFAULTS as _WX_DEFAULTS,
@@ -355,7 +355,7 @@ _SIGMET_TURB_QUALIFIER_SCALE = {"SEV": 1.0, "MOD": 2.0 / 3.0}
 # side of a boundary), per type: TURB is mostly thin clear-air turbulence
 # layers, a mountain wave is much deeper, so a level change helps less.
 _SIGMET_TURB_LAYERS = {"TURB": (2000.0, 300.0), "MTW": (6000.0, 500.0)}
-# Testing profile: turbulence everywhere inside a TS/TC SIGMET area, below
+# Turbulence v2: turbulence everywhere inside a TS/TC SIGMET area, below
 # its top, between the zones' CBs (see _sigmet_convective_turbulence()):
 # the zones' CB turbulence only reaches half way to the next zone, so a
 # whole FRQ TS area at FL350 was smooth (flight test 2026-10-25). Varies like
@@ -369,8 +369,8 @@ _SIGMET_CONV = {"ISOL": (0.03, 0.15), "OCNL": (0.06, 0.25), "FRQ": (0.10, 0.35),
                 "EMBD": (0.10, 0.35), "OBSC": (0.08, 0.30), "SQL": (0.12, 0.45),
                 "CONVECTIVE": (0.08, 0.30)}
 _SIGMET_CONV_DEFAULT = (0.06, 0.25)
-# Testing profile: wave/MTW bursts that don't drive FLCH into oscillation
-# (_pick_wave_burst_testing()). A wave phase changing this fast (per s, a
+# Turbulence v2: wave/MTW bursts that don't drive FLCH into oscillation
+# (_pick_wave_burst_v2()). A wave phase changing this fast (per s, a
 # sine of about a 2 min period) gives sink bursts at the full rate.
 _WAVE_PHASE_RATE_FULL = 0.05
 # ... and keep this fraction of their speed bursts. Gust bursts become
@@ -389,7 +389,7 @@ _WAVE_SPD_KEEP = 0.25
 # (_pick_burst()); without them it would be glassy smooth, so the testing
 # profile makes them up/down bursts there instead (rate-gated like the rest)
 _WAVE_LIGHT_BELOW = 0.25
-# Testing profile: the continuous turbulence's up/down bursts one way
+# Turbulence v2: the continuous turbulence's up/down bursts one way
 # within this many seconds add up to at most the largest single burst
 # (_updown_budget()), whatever the kind. A run of them a second or two
 # apart pumps PSX's lightly damped pitch ringing (3.5-4 s a cycle): in
@@ -398,7 +398,7 @@ _WAVE_LIGHT_BELOW = 0.25
 # to +13.8 deg (SCIZ FL330, 2026-10-26). Turbulence events' bursts (and
 # manual turbulence) are not limited: their effect is meant to be real.
 _UPDOWN_WINDOW_S = 8.0
-# Testing profile: an MTW SIGMET lifts the terrain model's own wave to at
+# Turbulence v2: an MTW SIGMET lifts the terrain model's own wave to at
 # most this factor times it plus this much (_mtw_state()).
 _MTW_LIFT_FACTOR = 2.0
 _MTW_LIFT_ADD = 0.20
@@ -428,15 +428,10 @@ _GAIRMET_LAYERS = (2000.0, 300.0)
 # "PIREPs" (router /efb PIREP button): the ride at whole flight levels this
 # far above and below the current one (FL010-FL470), refreshed this often,
 # on a flight level change and when the driving source changes
-# (pirep_levels_coro()). A level's ride is rated by the long-run share of
-# time its turbulence is at _PIREP_MODERATE effective intensity or more
-# (moderate or worse): a smooth layer of a SEV SIGMET is there 9% of the
-# time, a rough one 63%; a MOD area's 4% to 48%.
+# (pirep_levels_coro()).
 _PIREP_RANGE_FT = 4000
 _PIREP_INTERVAL_S = 60.0
-_PIREP_MODERATE = 0.25
-_PIREP_RIDES = ((0.10, "smooth"), (0.20, "light"), (0.35, "moderate"), (math.inf, "rough"))
-# Testing profile: the continuous turbulence is at most light chop
+# The continuous turbulence is at most light chop
 # (_TURB_BG_MAX; a SEV TURB SIGMET's REALISTIC_SEV_BANDS sit at 22-34 %),
 # and moderate and worse come as events. Rated against 25 % every TURB
 # SIGMET level came out "rough" (frankensim 2026-10-29, FAJO E01 at
@@ -1567,7 +1562,7 @@ def _max_cb(wx: str, other: str) -> str:
 # light 747 from 278 kt to the stall in 1.5 min at full thrust; BANK, YAW and
 # SPD bursts cost nothing; with every 4th SINK burst a heavy 747 held 277-280 kt.
 # Not for mountain waves (their up/down drafts really cost energy) nor the
-# testing profile's single turbulence events.
+# turbulence v2's single turbulence events.
 _SINK_FACTOR_FULL_FT = 20000.0      # all SINK bursts up to here
 _SINK_FACTOR_MIN_FT = 35000.0       # _SINK_FACTOR_MIN from here up
 _SINK_FACTOR_MIN = 0.25
@@ -1963,19 +1958,19 @@ def _parse_psx_wind(wx_str):
         return None
 
 
-def _intensity_label(intensity, testing=False):
+def _intensity_label(intensity):
     """Map 0–1 intensity to a human-readable severity label.
 
-    testing: the testing profile's calibration, where the continuous
-    turbulence up to 0.34 is light chop (REALISTIC_SEV_BANDS) and
-    moderate patches (0.38-0.50, _turb_events.MODERATE_LEVEL) are
-    moderate, 0.50 included; a CB core (_TURB_CB_CORE) severe.
+    Turbulence version 2's calibration: the continuous turbulence up to 0.34
+    is light chop (REALISTIC_SEV_BANDS), moderate patches (0.38-0.50,
+    _turb_events.MODERATE_LEVEL) are moderate, 0.50 included; a CB core
+    (_TURB_CB_CORE) severe.
     """
     if intensity < 0.10:
         return "none"
-    if intensity < (0.35 if testing else 0.25):
+    if intensity < 0.35:
         return "light"
-    if intensity < (0.55 if testing else 0.50):
+    if intensity < 0.55:
         return "moderate"
     if intensity < 0.75:
         return "severe"
@@ -2016,10 +2011,27 @@ def _burst_channels_text(bursts: list) -> str:
     return ", ".join(channels)
 
 
-# Turbulence profile (TURBCOMMAND "profile", /efb): "stable" is the
-# released behaviour; "testing" also turns on changes being evaluated
-# before they become the default (see _turb_testing()).
-_TURB_PROFILES = ("stable", "testing")
+# Turbulence profile (TURBCOMMAND "profile", /efb, --turb-profile): "default" is the
+# released turbulence, version _TURB_VERSION; "next" turns on changes being evaluated
+# before they become the default, version _TURB_NEXT_VERSION, when there is one (else
+# the choice is greyed out). Version 1 was the old "stable" profile, version 2 the old
+# "testing" one (the default since 2026-11-10); both old names now mean "default".
+_TURB_PROFILES = ("default", "next")
+_TURB_PROFILE_ALIASES = {"stable": "default", "testing": "default"}
+_TURB_VERSION = 2
+_TURB_NEXT_VERSION: Optional[int] = None
+
+
+def _turb_profile_name(name: Optional[str]) -> Optional[str]:
+    """Return the _TURB_PROFILES name for name (old names map to default), or None.
+
+    "next" without a next version (_TURB_NEXT_VERSION None) gives "default".
+    """
+    name = _TURB_PROFILE_ALIASES.get(name, name)
+    if name == "next" and _TURB_NEXT_VERSION is None:
+        return "default"
+    return name if name in _TURB_PROFILES else None
+
 
 _TURB_TYPES = ('wave', 'rotor', 'mechanical', 'shear', 'cb', 'pirep', 'cape', 'gairmet',
                'sigmet')
@@ -2124,7 +2136,7 @@ def _sign(v):
 # SPD bursts had no visible effect on the ground.
 _TURB_MIN_TAS_KT = 30.0
 _GROUND_TURB_CAP = 0.30
-# Testing profile: the continuous turbulence is at most light chop (p95
+# Turbulence v2: the continuous turbulence is at most light chop (p95
 # about 0.09 g at FL350); moderate and stronger come as events
 # (frankenturb/turbulence_events.py, _turb_event_step()), at real-world
 # odds times the crew's multipliers (0 turns a kind off, at most
@@ -2535,7 +2547,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                                        blend_ft=_SIGMET_TURB_LAYERS[h][1])
             for h in _fw_sigmet.TURB_HAZARDS}
         self._sigmet_turb_alt_ft: float = 0.0
-        # Testing profile: the varying level of TS/TC area turbulence
+        # Turbulence v2: the varying level of TS/TC area turbulence
         self._sigmet_conv_profile = LayeredIntensityProfile(
             layer_ft=_SIGMET_TURB_LAYERS["TURB"][0], blend_ft=_SIGMET_TURB_LAYERS["TURB"][1])
         # The TURB/MTW SIGMET areas at the aircraft's position, for PIREPs:
@@ -2817,8 +2829,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._turb_psx_wind = None             # (dir_deg, speed_kt) or None
         self._turb_lateral_size_bias: int = 50
         self._turb_rate: int = 100             # 0-100, injection rate scale
-        self._turb_profile: str = "stable"     # _TURB_PROFILES
-        # Testing profile: rare turbulence events (_turb_event_step()), the
+        self._turb_profile: str = "default"     # _TURB_PROFILES
+        # Turbulence v2: rare turbulence events (_turb_event_step()), the
         # crew's multiplier per kind, the kind of area the aircraft is in
         # ((area, reason), _turb_area_class()) and the last events, for the
         # web UI
@@ -2830,7 +2842,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._turb_event_log: collections.deque = collections.deque(maxlen=20)
         self._flight_log_last = 0.0
         # (monotonic time, vertical) of the last wave/MTW burst decision,
-        # see _pick_wave_burst_testing()
+        # see _pick_wave_burst_v2()
         self._wave_vert_prev: Optional[tuple] = None
         # (monotonic time, direction, size) of the recent up/down bursts,
         # see _updown_budget()
@@ -4185,8 +4197,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return
         if on_ground:
             base, direction, label = _pick_ground_burst()
-        elif self._turb_testing() and state.kind in ('wave', 'mtw'):
-            picked = self._pick_wave_burst_testing(state, intensity)
+        elif state.kind in ('wave', 'mtw'):
+            picked = self._pick_wave_burst_v2(state, intensity)
             if picked is None:
                 return
             base, direction, label = picked
@@ -4511,7 +4523,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         switch on the web UI or /efb still changes it for the session. The
         config file only changes if the settings are saved.
         """
-        wanted = self.args.turb_profile if self.args else None
+        # Old config files say "stable" or "testing": both are "default" now
+        self._turb_profile = _turb_profile_name(self._turb_profile) or "default"
+        wanted = _turb_profile_name(self.args.turb_profile if self.args else None)
         if wanted and self._turb_profile != wanted:
             self.logger.info("Turbulence profile %s from --turb-profile (the settings say %s)",
                              wanted, self._turb_profile)
@@ -4660,11 +4674,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             if 0 <= v <= 200:
                 self._turb_msfs_magnitude = v
                 changed = True
-        if cmd.get("profile") in _TURB_PROFILES:
-            self._turb_profile = cmd["profile"]
-            self.logger.info("Turbulence profile → %s", self._turb_profile)
-            self._apply_turb_profile_bands()
-            changed = True
+        if cmd.get("profile") is not None:
+            wanted = _turb_profile_name(cmd["profile"])
+            if wanted:
+                self._turb_profile = wanted
+                self.logger.info("Turbulence profile → %s (version %s)", self._turb_profile,
+                                 self._turb_version())
+                self._apply_turb_profile_bands()
+                changed = True
         if isinstance(cmd.get("event_mult"), dict):
             for kind, val in cmd["event_mult"].items():
                 if kind in self._turb_event_mult:
@@ -4672,13 +4689,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                                                       max(0.0, float(val)))
             changed = True
         if cmd.get("trigger") in _turb_events.KINDS:
-            if self._turb_testing():
-                event = self._turb_events.trigger(cmd["trigger"], self._turb_area[0])
-                self._log_turb_event_start(event)
-                changed = True
-            else:
-                self.logger.warning("Turbulence event trigger ignored: events need the "
-                                    "testing turbulence profile")
+            event = self._turb_events.trigger(cmd["trigger"], self._turb_area[0])
+            self._log_turb_event_start(event)
+            changed = True
         if changed:
             # Every change is logged: a pilot's report is checked against
             # the settings at the time
@@ -4766,6 +4779,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     "manual_turb_intensity": self._turb_manual_turb_intensity,
                     "intensity_bias": self._turb_intensity_bias,
                     "profile": self._turb_profile,
+                    "version": self._turb_version(),
+                    "next_version": _TURB_NEXT_VERSION,
                     "event_mult": dict(self._turb_event_mult),
                     "event_area": self._turb_area[0],
                     "event_area_reason": self._turb_area[1],
@@ -4837,15 +4852,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         return cape_sample, per_level
 
     def _pirep_minimum(self, kind: str) -> Optional[float]:
-        """Return the raw intensity of a kind that is _PIREP_MODERATE effective, or None.
+        """Return the raw intensity of a kind that is _PIREP_LIGHT_CHOP effective, or None.
 
         Effective means after the intensity biases from the turbulence
-        page; None when the kind is switched off. In the testing profile
-        _PIREP_LIGHT_CHOP instead (_PIREP_RIDES_TESTING).
+        page; None when the kind is switched off (_PIREP_RIDES_TESTING).
         """
         bias = self._turb_intensity_bias * self._turb_type_effective_bias(kind) / 10000.0
-        level = _PIREP_LIGHT_CHOP if self._turb_testing() else _PIREP_MODERATE
-        return level / bias if bias > 0 else None
+        return _PIREP_LIGHT_CHOP / bias if bias > 0 else None
 
     def _pirep_share(self, state: Optional[TurbulenceState], level_ft: float) -> float:
         """Return the long-run share of time a source is moderate or worse at level_ft (PIREPs).
@@ -4871,14 +4884,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         """Return the PIREP ride report per flight level (pirep_levels_coro()).
 
         fls are flight levels in thousands of feet, here the current one.
-        Each level's ride is rated by _PIREP_RIDES from the largest long-run
-        share of time any source there is moderate or worse
-        (_pirep_share(), _gairmet_share() and _sigmet_share_at()). In the
-        testing profile by _PIREP_RIDES_TESTING from the share at light chop
-        or more; moderate near a CB, rough inside its cloud.
+        Each level's ride is rated by _PIREP_RIDES_TESTING from the largest
+        long-run share of time any source there is at light chop or more
+        (_pirep_share(), _gairmet_share() and _sigmet_share_at()); moderate
+        near a CB, rough inside its cloud.
         """
-        testing = self._turb_testing()
-        rides = _PIREP_RIDES_TESTING if testing else _PIREP_RIDES
+        rides = _PIREP_RIDES_TESTING
         cape_sample, per_level = physics
         cb = self._get_nearest_cb(lat, lon)
         top_wind_dir = (self._turb_engine.wind_dir_at(cb.cloud_top_ft_msl)
@@ -4898,7 +4909,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         self._sigmet_share_at(level_ft))
             ride = next(label for limit, label in rides if share < limit)
             cb_here = sources[1]
-            if testing and cb_here is not None:
+            if cb_here is not None:
                 if (cb_here.reason or "").startswith("CB interior"):
                     ride = "rough"
                 elif cb_here.intensity >= 0.2:
@@ -5068,10 +5079,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     if _eff(cape_state) > _eff(state):
                         state = cape_state
 
-                # Testing profile: the light bumps of an ordinary breezy or
-                # sunny day (frankenturb/boundary_layer.py)
+                # The light bumps of an ordinary breezy or sunny day
+                # (frankenturb/boundary_layer.py)
                 bl_state = None
-                if self._turb_testing() and cape_sample is not None:
+                if cape_sample is not None:
                     terrain_m = self._turb_engine.grid.elevation_at(lat, lon) or 0.0
                     bl_state, drivers_bl = self._apply_gust(compute_boundary_layer_turbulence(
                         max(0.0, alt_ft - terrain_m / 0.3048), cape_sample), alt_ft)
@@ -5136,18 +5147,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     state.intensity * self._turb_intensity_bias *
                     self._turb_type_effective_bias(state.kind) / 10000.0 * msfs_factor,
                 )
-                if self._turb_testing():
-                    self._turb_area = self._turb_area_class({
-                        "terrain": terrain_state, "cb": cb_state, "pirep": pirep_state,
-                        "gairmet": gairmet_state, "sigmet": sigmet_state, "mtw": mtw_state,
-                        "conv": conv_state})
-                    state, effective_intensity = self._turb_event_step(
-                        state, effective_intensity,
-                        self._turb_enabled and not low_speed and not self._on_ground())
+                self._turb_area = self._turb_area_class({
+                    "terrain": terrain_state, "cb": cb_state, "pirep": pirep_state,
+                    "gairmet": gairmet_state, "sigmet": sigmet_state, "mtw": mtw_state,
+                    "conv": conv_state})
+                state, effective_intensity = self._turb_event_step(
+                    state, effective_intensity,
+                    self._turb_enabled and not low_speed and not self._on_ground())
                 self._turb_effective_intensity = self._shown_intensity(effective_intensity)
                 if self._turb_enabled and not low_speed and not self._turb_event_burst_sent:
-                    # like events, a CB core isn't up/down limited (testing profile)
-                    limit = self._turb_testing() and state.kind != "event"
+                    # like events, a CB core isn't up/down limited
+                    limit = state.kind != "event"
                     self._maybe_inject_burst(
                         state, effective_intensity, tas_kt,
                         limit_updown=limit and self._turb_area[0] != "cb_core")
@@ -5204,7 +5214,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     continue
                 last_print = now
 
-                intensity_label = _intensity_label(effective_intensity, self._turb_testing())
+                intensity_label = _intensity_label(effective_intensity)
                 enabled_str = "ON " if self._turb_enabled else "OFF"
                 kind_str = state.kind
                 vert_str = f"{state.vertical:+.2f}" if not _isnan(state.vertical) else "rand"
@@ -5562,9 +5572,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 f"{entry['qualifier']} MTW SIGMET {entry['fir']} {entry['series']}")
         return turb_state, mtw_state
 
-    def _pick_wave_burst_testing(self, state: TurbulenceState,
-                                 intensity: float) -> Optional[tuple]:
-        """Return a wave/MTW burst like _pick_burst(), or None to skip it (testing profile).
+    def _pick_wave_burst_v2(self, state: TurbulenceState,
+                            intensity: float) -> Optional[tuple]:
+        """Return a wave/MTW burst like _pick_burst(), or None to skip it (turbulence v2).
 
         _pick_burst() gives sink bursts in the direction of the wave's
         phase and speed/gust bursts in the direction of its gust, so they
@@ -5600,7 +5610,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         return base, _sign(rate), label
 
     def _updown_budget(self, direction: int, magnitude: int, intensity: float) -> int:
-        """Return how much of an up/down burst to send (testing profile; 0: none).
+        """Return how much of an up/down burst to send (turbulence v2; 0: none).
 
         Bursts one way within _UPDOWN_WINDOW_S add up to at most the
         largest single burst at this intensity, so a run of them can't
@@ -5644,7 +5654,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         "sigmet": the SIGMET turbulence settings apply. The zones' own CB
         turbulence still applies where it's stronger.
         """
-        if not (self._turb_testing() and self._own_sigmets_applied):
+        if not self._own_sigmets_applied:
             return None
         level = self._sigmet_conv_profile.value(alt_ft)
         best, entry, scale, best_floor = 0.0, None, 0.0, 0.0
@@ -5681,10 +5691,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if terrain_state.kind not in ("wave", "rotor"):
             return TurbulenceState(intensity=intensity, kind="mtw",
                                    reason=f"{label} (no terrain wave found)")
-        if self._turb_testing():
-            # A SEV MTW SIGMET lifted a 2-4 % terrain wave to 61 % (EGPF, 2026-10-25)
-            intensity = min(intensity,
-                            terrain_state.intensity * _MTW_LIFT_FACTOR + _MTW_LIFT_ADD)
+        # A SEV MTW SIGMET lifted a 2-4 % terrain wave to 61 % (EGPF, 2026-10-25)
+        intensity = min(intensity, terrain_state.intensity * _MTW_LIFT_FACTOR + _MTW_LIFT_ADD)
         if (terrain_state.intensity * self._turb_type_effective_bias(terrain_state.kind) >=
                 intensity * self._turb_type_effective_bias("mtw")):
             return None
@@ -5725,24 +5733,26 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "hold_end": math.floor((now + st["ramp_left_s"] + st["hold_left_s"]) * 10) / 10,
         }
 
-    def _turb_testing(self) -> bool:
-        """Return True if the "testing" turbulence profile is on (see _TURB_PROFILES)."""
-        return self._turb_profile == "testing"
+    def _turb_next(self) -> bool:
+        """Return True if the "next" turbulence version is on (there is none today)."""
+        return self._turb_profile == "next" and _TURB_NEXT_VERSION is not None
+
+    def _turb_version(self) -> int:
+        """Return the turbulence version in effect (_TURB_VERSION or _TURB_NEXT_VERSION)."""
+        return _TURB_NEXT_VERSION if self._turb_next() else _TURB_VERSION
 
     def _apply_turb_profile_bands(self) -> None:
         """Give the varying SIGMET/G-AIRMET/PIREP levels the profile's bands.
 
-        Testing: smooth and light only (REALISTIC_BANDS; TURB SIGMETs mostly
+        Version 2: smooth and light only (REALISTIC_BANDS; TURB SIGMETs mostly
         light chop, REALISTIC_SEV_BANDS); moderate and stronger come as
         events (_turb_event_step()).
         """
-        testing = self._turb_testing()
         for hazard, profile in self._sigmet_turb_profiles.items():
-            profile.set_bands(DEFAULT_BANDS if not testing else
-                              REALISTIC_SEV_BANDS if hazard == "TURB" else REALISTIC_BANDS)
+            profile.set_bands(REALISTIC_SEV_BANDS if hazard == "TURB" else REALISTIC_BANDS)
         for profile in (self._sigmet_conv_profile, self._gairmet_turb_profile,
                         self._pirep_turb_profile):
-            profile.set_bands(REALISTIC_BANDS if testing else DEFAULT_BANDS)
+            profile.set_bands(REALISTIC_BANDS)
 
     def _turb_area_class(self, sources: dict) -> tuple:
         """Return (area, reason): the kind of area (_turb_events.AREA_RATES) the aircraft is in.
@@ -5785,7 +5795,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
     def _turb_event_step(self, state: TurbulenceState, intensity: float,
                          airborne: bool) -> tuple:
-        """Return (state, intensity) to inject after the events (testing profile).
+        """Return (state, intensity) to inject after the events (turbulence v2).
 
         The continuous turbulence is capped at _TURB_BG_MAX, inside a CB's
         cloud held within _TURB_CB_CORE instead (and its bursts aren't
@@ -5969,21 +5979,20 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                                              timezone.utc).strftime("%Y-%m-%d %H:%MZ")
         except (TypeError, ValueError, OverflowError, OSError):
             pass
-        event = self._turb_events.current() if self._turb_testing() else None
+        event = self._turb_events.current()
         self.logger.info(
             "Flight: %s hdg %03.0f TAS %.0f kt pitch %.1f bank %.1f%s | UTC %s, PSX %s | "
-            "wind %s%s | turbulence %.0f%% %s (%s: %s)%s | profile %s%s",
+            "wind %s%s | turbulence %.0f%% %s (%s: %s)%s | turbulence v%s%s",
             self._flight_position_text(), hdg % 360, tas_kt, pitch, bank,
             " on ground" if self._on_ground() else "",
             datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ"), psx_utc, wind,
             " in MSFS cloud" if self.msfs_in_cloud else "",
-            effective_intensity * 100, _intensity_label(effective_intensity, self._turb_testing()),
+            effective_intensity * 100, _intensity_label(effective_intensity),
             state.kind, state.reason or "-",
             "" if self._turb_enabled else " (OFF)",
-            self._turb_profile,
+            self._turb_version(),
             (f", area {self._turb_area[0]}, event {event.kind if event else 'none'}, "
-             f"likelihood {'/'.join(f'{m:g}' for m in self._turb_event_mult.values())}")
-            if self._turb_testing() else "")
+             f"likelihood {'/'.join(f'{m:g}' for m in self._turb_event_mult.values())}"))
 
     @staticmethod
     def _gust_family(kind: str) -> Optional[str]:
@@ -11096,11 +11105,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "diff data to as timestamped JSON, one file per flight, updated on every "
                  "WxCorridor refresh while the enroute wind importer is enabled.")
         parser.add_argument(
-            '--turb-profile', choices=_TURB_PROFILES, default=None,
-            help="Turbulence profile to use: stable (the released behaviour) or testing "
-                 "(also the changes being evaluated). Overrides the profile in the config "
-                 "file; the file itself only changes if you save the settings. Without it, "
-                 "the config file's profile is used, or stable.")
+            '--turb-profile', choices=_TURB_PROFILES + tuple(_TURB_PROFILE_ALIASES), default=None,
+            help="Turbulence profile: default (the released turbulence) or next (changes "
+                 "being evaluated, when there are any). Overrides the profile in the config "
+                 "file; the file itself only changes if you save the settings. The old "
+                 "names stable and testing mean default.")
         parser.add_argument(
             '--config-file', type=str, default=_DEFAULT_CONFIG_FILE, metavar='PATH',
             help="TOML file for every setting the web GUI can change (MSFS sync, enroute "
@@ -11267,7 +11276,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._apply_turb_profile_option()      # also without a config file
         self._apply_turb_profile_bands()
         self._startup_config_dict = self._build_config_dict()
-        self.logger.info("Turbulence profile: %s", self._turb_profile)
+        self.logger.info("Turbulence profile: %s (version %s)", self._turb_profile,
+                         self._turb_version())
         # Trigger initial TURBSTATE broadcast so the router has config data immediately.
         self._turb_state_changed_event.set()
 

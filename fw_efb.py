@@ -287,25 +287,36 @@ def sigmet_hint(w):
     return hint + '.'
 
 
-# FrankenWeather turbulence profiles (TURBCOMMAND "profile")
-TURB_PROFILES = (('stable', 'Stable'), ('testing', 'Testing'))
+# FrankenWeather turbulence profiles (TURBCOMMAND "profile"). Since 2026-11-10 "default"
+# (turbulence version 2) and "next" (a version being evaluated, greyed out while there is
+# none); an older FrankenWeather reports "stable"/"testing" and no version.
+TURB_PROFILES = (('default', 'Default'), ('next', 'Next'))
+TURB_PROFILES_OLD = (('stable', 'Stable'), ('testing', 'Testing'))
 
 
 def turb_profile_html(w):
-    """Render the Stable/Testing turbulence profile chips, or '' for an older FrankenWeather."""
+    """Render the turbulence version chips (Default / Next), or '' for an older FrankenWeather."""
     if w['turb_profile'] is None:
         return ''
+    version, nxt = w.get('turb_version'), w.get('turb_next_version')
+    if version is None:   # older FrankenWeather: its own Stable/Testing profiles
+        choices = [(p, label, True) for p, label in TURB_PROFILES_OLD]
+    else:
+        default = version if w['turb_profile'] != 'next' else None
+        choices = [('default', f'Default (v{default})' if default else 'Default', True),
+                   ('next', f'Next (v{nxt})' if nxt else 'Next', bool(nxt))]
+    greyed = ' disabled style="opacity:0.4" title="No next version to try at the moment"'
     chips = ''.join(
         f'<form class="efb-inline" method="post" action="/api/efb/turb-profile">'
         f'<input type="hidden" name="profile" value="{profile}">'
-        f'<button type="submit" '
+        f'<button type="submit"{"" if usable else greyed} '
         f'class="efb-chip efb-chip-sm{" active" if w["turb_profile"] == profile else ""}">'
         f'{label}</button></form>\n'
-        for profile, label in TURB_PROFILES)
+        for profile, label, usable in choices)
     # Greyed out while extra turbulence is off: the profile has no effect then
     off = '' if w['turb_enabled'] else ' style="opacity:0.4;pointer-events:none"'
     return (f'<div{off}>'
-            '<div class="efb-eyebrow" style="margin-top:0.6rem">Turbulence Profile</div>\n'
+            '<div class="efb-eyebrow" style="margin-top:0.6rem">Turbulence Version</div>\n'
             f'<div class="efb-chip-row">{chips}</div></div>\n')
 
 
@@ -369,9 +380,10 @@ def help_html(w):
                 ''.join(f'<p><b>{label}:</b> {text}</p>\n' for label, text in items))
     profile = ''
     if w['turb_profile'] is not None:
-        profile = section('Turbulence Profile', (
-            ('Stable', 'the released turbulence'),
-            ('Testing', 'also the changes being tried out before they become the default')))
+        profile = section('Turbulence Version', (
+            ('Default', 'the released turbulence'),
+            ('Next', 'the changes being tried out before they become the default; greyed '
+                     'out when there are none to try')))
     return (
         '<div style="text-align:right;color:#7e97ba;font-size:0.75rem">Tap to close</div>\n' +
         section('PANIC and RESTORE DEFAULTS', (
@@ -715,8 +727,11 @@ def weather_status(ctx, now=None):  # pylint: disable=too-many-locals
         'src_vatsim_age': vatsim_age, 'src_vatsim_source_name': metar_src_name,
         'turb_available': turb_available,
         'turb_enabled': bool((turbstate or {}).get('enabled', True)),
-        # "stable"/"testing"; None from a FrankenWeather without profiles
+        # "default"/"next" ("stable"/"testing" from an older FrankenWeather); None from
+        # a FrankenWeather without profiles
         'turb_profile': (turbstate or {}).get('profile'),
+        'turb_version': (turbstate or {}).get('version'),
+        'turb_next_version': (turbstate or {}).get('next_version'),
         'turb_kind': (turbstate or {}).get('active_kind', 'none'),
         # What's injected (biases and MSFS factor applied); FrankenWeather
         # before 1.16.0 only sends the computed intensity
@@ -839,7 +854,7 @@ def register_control_routes(routes, ctx, logger, page='/efb'):  # pylint: disabl
     @routes.post('/api/efb/turb-profile')
     async def handle_efb_turb_profile_post(request):
         data = await request.post()
-        if data.get('profile') in dict(TURB_PROFILES):
+        if data.get('profile') in dict(TURB_PROFILES + TURB_PROFILES_OLD):
             logger.info("API: EFB turbulence profile -> %s", data.get('profile'))
             await ctx.send_turb_cmd({'profile': data.get('profile')})
         raise web.HTTPFound(page)

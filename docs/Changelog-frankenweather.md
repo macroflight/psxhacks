@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Change: the "testing" turbulence is now the default, as turbulence
+  version 2; "stable" (version 1) is gone.** The profiles are now
+  `default` and `next` (a version being evaluated; greyed out on the /efb
+  page while there is none). Old settings and `--turb-profile stable` or
+  `testing` give the default. The log and TURBSTATE show the version.
+
 - **Fix: the wind corridor is written in Format D, so PSX can't reject it.**
   In Format A one name PSX couldn't find in its navigation database made it
   reject the whole corridor (`(__600)`, `VECTORS`, runways like `DE01R`,

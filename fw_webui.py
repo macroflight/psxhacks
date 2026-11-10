@@ -230,7 +230,7 @@ _TURB_KIND_LABELS = {
     'cape': 'CAPE convective', 'gairmet': 'G-AIRMET', 'sigmet': 'SIGMET',
     'mtw': 'Mountain wave SIGMET',
 }
-# Testing turbulence profile: likelihood multipliers per event kind
+# Turbulence version 2 events: likelihood multipliers per event kind
 # (frankenturb/turbulence_events.py), and the presets offered
 _TURB_EVENT_KINDS = ('moderate', 'severe', 'extreme')
 _TURB_EVENT_MAX = {'moderate': 10, 'severe': 100, 'extreme': 1000}
@@ -2887,20 +2887,22 @@ def _list_event_logs(log_dir: str) -> list:
 
 def _turb_events_html(tstate: dict) -> str:
     """Return the turbulence page's events card: likelihoods, trigger, the last events."""
-    testing = tstate.get('profile') == 'testing'
+    # Events: turbulence version 2 and later (frankenweather before 2026-11-10: the
+    # "testing" profile)
+    testing = (tstate.get('version') or 0) >= 2 or tstate.get('profile') == 'testing'
     mult = tstate.get('event_mult') or dict.fromkeys(_TURB_EVENT_KINDS, 1.0)
     active = tstate.get('event_active')
     html = (
         '<div class="card"><h3 style="margin:0 0 0.5em">Turbulence events</h3>'
         '<p style="font-size:0.85em;color:#94a3b8;margin:0 0 0.75em">'
-        'Testing profile only. The continuous turbulence is at most light chop; moderate '
+        'The continuous turbulence is at most light chop; moderate '
         'patches, severe clusters (5-30 s) and extreme encounters come as rare events, at '
         'real-world odds for the kind of area the aircraft is in. The likelihoods make a kind '
         'more (or less) likely without making it stronger; 0 turns it off. '
         'Severe and extreme events are not softened for the autopilot.</p>')
     if not testing:
         html += ('<p style="font-size:0.85em;color:#f59e0b;margin:0">The turbulence profile is '
-                 f'"{_esc(tstate.get("profile", "stable"))}": no events.</p>')
+                 f'"{_esc(tstate.get("profile", "stable"))}" (version 1): no events.</p>')
     html += (
         f'<p style="font-size:0.85em;margin:0 0 0.5em">Area: '
         f'<b>{_esc(tstate.get("event_area", "clean"))}</b> '
