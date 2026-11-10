@@ -1,5 +1,16 @@
 # frankenpilot changelog
 
+## Unreleased
+
+- Fix: a turnaround in the same session (taxi in, shutdown, start, taxi out)
+  stayed in the after-landing phase, so the next departure runway was
+  "crossed" (strobes only) and the runway entry flow never ran (WorldFlight1
+  at YBBN, 2026-11-10: 10 hours after landing). Now a new flight starts once
+  every engine has been shut down after landing with the aircraft stopped
+  for a minute, or when the FMC gets a new origin airport (headless test:
+  new flight 82 s after the fuel cutoffs). The crossing log line no longer
+  calls the FMC departure runway "not the departure runway".
+
 ## 0.1.1 (2026-11-10)
 
 - Version bump so the build system publishes a fresh frankenpilot EXE with

@@ -478,6 +478,8 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.flown = False
         self.dep_elev = None
         self.touchdown_hdg = None
+        self.landed_dep = None          # FMC origin when we landed (a new one = a new flight)
+        self.shutdown_since = None      # TAXI_IN: no engine running, stopped, since
         self.exit_off_since, self.exit_on, self.exit_why = None, None, ""
         self.stby_want = None          # standby altimeter target: 'STD', hPa*100 or None
         self.alt_task = None           # the altimeter sync task (one at a time)
@@ -921,7 +923,7 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             if not self.flown and time.monotonic() - self.airborne_at > 60:
                 self.flown = True
             if on_ground and self.flown:
-                self.phase, self.touchdown_hdg = 'ROLLOUT', hdg
+                self.phase, self.touchdown_hdg, self.landed_dep = 'ROLLOUT', hdg, dep
                 self.logger.info("Landed, touchdown heading %.0f", hdg)
             elif on_ground:
                 self.phase = 'GROUND'       # a bounce or a situ quirk: not a flight
@@ -934,6 +936,8 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
                 self.on_runway_exit()
         elif self.phase == 'TAXI_IN' and not on_ground:
             self.phase, self.airborne_at = 'AIRBORNE', time.monotonic()   # touch and go
+        elif self.phase == 'TAXI_IN' and self.turnaround(gs, dep):
+            return      # a new flight starts next tick (phase GROUND)
         # --- rules by phase
         if self.phase in ('GROUND', 'TAXI_IN') and on_ground:
             self.check_runway(lat, lon, hdg, gs)
@@ -947,6 +951,38 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         if self.phase == 'AIRBORNE':
             self.check_step_climb(alt)
             self.check_flap_speeds()
+
+    def no_engine_running(self):
+        """Return True when no engine runs (every N1 below 18 %; EngParam fields 13-16)."""
+        try:
+            n1 = [int(v) for v in self.psx.get("EngParam").split(";")[13:17]]
+        except (AttributeError, ValueError):
+            return False
+        return len(n1) == 4 and max(n1) < 180
+
+    def turnaround(self, gs, dep):
+        """After landing (TAXI_IN): start a new flight when this one is over; True if so.
+
+        Over when every engine has been shut down with the aircraft stopped for a
+        minute, or when the FMC has a new origin (a quick turnaround with engines
+        running). Without this a turnaround in the same session stayed in TAXI_IN:
+        the next departure runway was "crossed" and the runway entry flow never ran
+        (WorldFlight1, YBBN 2026-11-10: 10 hours in TAXI_IN).
+        """
+        if self.no_engine_running() and gs < 1:
+            if self.shutdown_since is None:
+                self.shutdown_since = time.monotonic()
+            stopped_s = time.monotonic() - self.shutdown_since
+            why = "all engines shut down after landing" if stopped_s >= 60 else None
+        else:
+            self.shutdown_since = None
+            why = (f"new FMC origin {dep} (landed with {self.landed_dep})"
+                   if dep and self.landed_dep and dep != self.landed_dep else None)
+        if not why:
+            return False
+        self.decide(f"{why}: that flight is over, the next taxi is a new departure")
+        self.reset_flight()
+        return True
 
     # --- runway entry / crossing
 
@@ -980,9 +1016,11 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         elif on and not self.crossing and not self.runway_entry_done \
                 and self.actions['crossing_strobes']:
             self.crossing = True
-            self.decide(f"on runway {on.strip()}, not the departure runway "
-                        f"({dep_rwy or 'none in the FMC'}) and not lined up ({where}): "
-                        "crossing it, strobes on until clear")
+            what = ("the FMC departure runway, but after landing (taxiing in), so not a takeoff"
+                    if is_dep and self.phase == 'TAXI_IN' else
+                    f"not the departure runway ({dep_rwy or 'none in the FMC'}) and not lined up")
+            self.decide(f"on runway {on.strip()}, {what} ({where}): crossing it, strobes on "
+                        "until clear")
             self.spawn(self.write("LtStrobe", 1, f"Strobes on: crossing runway {on.strip()}"))
         elif not on and self.crossing:
             self.crossing = False

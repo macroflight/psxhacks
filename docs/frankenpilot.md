@@ -30,7 +30,10 @@ after connecting before deciding, so that every slave sim has reported in.
 
 Loading a situation starts a new flight: anything frankenpilot was still
 doing for the previous one is dropped. A situation loaded in the air is not
-a takeoff (no after-liftoff or thrust reduction flows).
+a takeoff (no after-liftoff or thrust reduction flows). A turnaround in the same session starts a new flight too: after a
+landing, once every engine has been shut down with the aircraft stopped for
+a minute, or when the FMC gets a new origin airport, the next taxi is a new
+departure (runway entry flow on the departure runway).
 
 ## How it behaves
 
