@@ -1,5 +1,10 @@
 # frankenpilot changelog
 
+## 0.1.1 (2026-11-10)
+
+- Version bump so the build system publishes a fresh frankenpilot EXE with
+  everything in 0.1.0. No other changes.
+
 ## 0.1.0 (2026-11-10)
 
 - **Change: console log times are UTC**, marked with a Z (e.g. `14:05:31Z`), like every psxhacks log.
