@@ -535,6 +535,9 @@ is usually the better side.
   `--orchestration-rate` times a second (1-20, default 5), instead of the
   15 s writes. Needs a router with `[filtering] orchestration_names`
   (on by default); an older router passes the writes on as before.
+  frankenweather's CB turbulence sees the zones with the same delay, so a
+  CB that appears close by (a test CB, say) starts shaking the aircraft
+  when MSFS shows it, not 10 s before.
 - **CB test page** (`/weather/cbtest`, in frankenweather's own web UI and
   every router's):
   switches advanced zones on and off (it starts as `--advanced-zones`

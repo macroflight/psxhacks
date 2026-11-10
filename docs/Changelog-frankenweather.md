@@ -1,5 +1,13 @@
 # frankenweather changelog
 
+## Unreleased
+
+- **Change (`--advanced-zones`): CB turbulence starts when MSFS shows the CB.**
+  The routers give PSX.NET.Orchestration zone weather changes
+  `--orchestration-delay` (10 s) late; CB turbulence now uses the zones with
+  the same delay. A test CB 20 nm ahead gave 51 % CB turbulence in the second
+  it was written, 10 s before MSFS drew it (WorldFlight1, 2026-11-10).
+
 ## 2.7.0 (2026-11-10)
 
 - **Docs: zone placement and relocation described as the code does it.**

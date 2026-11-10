@@ -536,6 +536,10 @@ _PUSH_COOLDOWN_S = 5.0                # ignore Wx echo-backs for this long after
 # (or a situ load) changes one, handle_owned_change() logs it and
 # _restore_owned() writes ours back, _OWNED_RESTORE_DELAY_S after the last
 # such change (a situ load changes them all in one burst).
+# Zone weather keys whose writes reach PSX.NET.Orchestration late (_wx_as_drawn())
+_WX_DRAWN_KEYS = frozenset(["WxBasic"] + [f"Wx{n}" for n in range(1, 8)] +
+                           [f"WxMode{n}" for n in range(1, 8)])
+
 _OWNED_KEYS = ("WxAutoSet", "WxBasic") + tuple(
     f"{prefix}{i}" for prefix in ("WxMode", "Wx", "Metar") for i in range(1, 8))
 _OWNED_RESTORE_DELAY_S = 2.0
@@ -2570,6 +2574,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # routers apply it; see orchestration_feed_coro()), set in run()
         self._orch_delay_s = 0.0
         self._orch_rate_hz = 5.0   # how often the routers send them the drifting zones
+        # Our own zone weather writes as Orchestration gets them (_orch_delay_s late): CB
+        # turbulence uses that view (_wx_as_drawn()); key -> deque of (time.monotonic(), value)
+        self._wx_writes: dict = {}
+        self._wx_drawn: dict = {}   # key -> the value Orchestration has now (before _wx_writes)
         self._orch_announced = (None, 0.0)   # (what was sent, time.monotonic())
         self._orch_ever_announced = False
         self._cb_test_message = ""   # the last CB test command's result (STATE "cb_test")
@@ -2911,10 +2919,33 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if not self._psx_send(key, value):
             return
         self._own_write = key
+        if key in _WX_DRAWN_KEYS:
+            writes = self._wx_writes.setdefault(key, collections.deque())
+            if not writes:
+                self._wx_drawn[key] = current
+            writes.append((time.monotonic(), value))
         try:
             self.psx._set(key, value)  # pylint: disable=protected-access
         finally:
             self._own_write = None
+
+    def _wx_as_drawn(self, key: str) -> Optional[str]:
+        """Return zone weather key (Wx1-7, WxMode1-7, WxBasic) as PSX.NET.Orchestration has it now.
+
+        With --advanced-zones the routers give Orchestration every zone weather
+        write _orch_delay_s (10 s) late, so MSFS shows a new CB that much later
+        than PSX has it. CB turbulence uses this view: it starts when the CB is
+        seen, not 10 s before (a test CB 20 nm ahead gave 51 % CB turbulence in
+        the second it was written, WorldFlight1 2026-11-10).
+        """
+        delay = self._orch_delay_s if self._drift_enabled() else 0.0
+        writes = self._wx_writes.get(key)
+        if delay <= 0 or not writes:
+            return self.psx.get(key)
+        cutoff = time.monotonic() - delay
+        while writes and writes[0][0] <= cutoff:
+            self._wx_drawn[key] = writes.popleft()[1]
+        return self._wx_drawn.get(key) if writes else self.psx.get(key)
 
     def _airport_station_only_metar(self) -> bool:
         """Return True if airport zones get a station-only METAR (see _station_only_metar()).
@@ -4624,7 +4655,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self._turb_state_changed_event.set()
 
     def _get_nearest_cb(self, lat: float, lon: float):
-        """Collect CB data from PSX cache and return the nearest active storm cell."""
+        """Return the nearest active storm cell, from the zones as MSFS shows them now.
+
+        See _wx_as_drawn().
+        """
         raw_time = self.psx.get("TimeEarth")
         try:
             time_earth_ms = int(raw_time) if raw_time else int(time.time() * 1000)
@@ -4633,20 +4667,20 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
         zone_positions = {}
         for zone_i in range(1, 8):
-            raw = self.psx.get(f"WxMode{zone_i}")
+            raw = self._wx_as_drawn(f"WxMode{zone_i}")
             if raw:
                 pos = parse_wx_zone_position(raw)
                 if pos is not None:
                     zone_positions[zone_i] = pos
 
         zone_cb_data = {}
-        planet_raw = self.psx.get("WxBasic")
+        planet_raw = self._wx_as_drawn("WxBasic")
         if planet_raw:
             planet_cb = parse_wx_zone_basic(planet_raw)
             if planet_cb is not None:
                 zone_cb_data[0] = planet_cb
         for zone_i in range(1, 8):
-            raw = self.psx.get(f"Wx{zone_i}")
+            raw = self._wx_as_drawn(f"Wx{zone_i}")
             if raw:
                 cb_data = parse_wx_zone_basic(raw)
                 if cb_data is not None:
