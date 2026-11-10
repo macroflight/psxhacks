@@ -571,6 +571,8 @@
 # ---------------------------------------------------------------------------
 #$StartFrankenpush  = $true   # FrankenPush
 #$FrankenpushOptions  = @("--simevents","--logon-code=CHANGEME","--upload-autosave-from=C:\fs\psx\Aerowinx\Situations")
+# PinguEye (Flight Centre radar display) traffic from the PSX.NET.vPilot plugin on the vPilot PC (opt-in):
+#$FrankenpushOptions += @("--vpilot-api=ws://192.168.1.20:10781/api/v1/events")
 #$FrankenpushRepo    = $null
 
 

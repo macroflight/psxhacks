@@ -125,6 +125,17 @@ _STATIONARY_SPEED_THRESHOLD_KT = 5.0
 # Between full sends only changed fields are sent to reduce bandwidth.
 _FULL_SEND_INTERVAL = 300.0
 
+# PinguEye (Flight Centre's radar display): the traffic vPilot knows about, from the
+# PSX.NET.vPilot plugin's event stream (--vpilot-api), sent as "pingueye_traffic"
+# while Flight Centre asks for it ("pingueye_request") and we're airborne. See
+# docs/frankenpush.md and Flight Centre's interface description (v1, 2026-11-10).
+PINGUEYE_VERSION = 1
+_PINGUEYE_MIN_INTERVAL_S = 2.0
+_PINGUEYE_DEFAULT_INTERVAL_S = 5.0
+_PINGUEYE_DEFAULT_MAX = 300
+# An aircraft vPilot hasn't updated for this long is left out (it updates every few s)
+_PINGUEYE_STALE_S = 60.0
+
 # Delay between the crew clearing a flight_deck_doorbell call (CallFrCabin
 # reset to 0) and telling Flight Centre, so its status display doesn't
 # reset the "ring the doorbell" button the instant the crew's mic selector
@@ -279,6 +290,14 @@ def _parse_route_waypoints(route):
     return waypoints
 
 
+def _great_circle_nm(lat1, lon1, lat2, lon2):
+    """Return the great-circle distance in nm between two positions (degrees)."""
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    h = (math.sin((p2 - p1) / 2) ** 2 +
+         math.cos(p1) * math.cos(p2) * math.sin(math.radians(lon2 - lon1) / 2) ** 2)
+    return 3440.065 * 2 * math.asin(math.sqrt(min(1.0, h)))
+
+
 def _print_version_mismatch_warning():
     """Print a prominent console warning that frankenpush is out of date."""
     print()
@@ -308,6 +327,14 @@ class Script():  # pylint: disable=too-many-instance-attributes
         # can't be garbage-collected mid-flight and any exception gets
         # logged instead of silently dropped.
         self._fire_and_forget_tasks = set()
+        # PinguEye: vPilot's traffic (callsign -> latest state, see _on_vpilot_event()),
+        # our own vPilot callsign, the latest pingueye_request on this portal connection
+        # (None: none yet, so nothing is sent), and whether we are sending
+        self._vp_traffic: dict = {}
+        self._vp_own_callsign = None
+        self._pingueye_request = None
+        self._pingueye_sending = False
+        self._on_ground = None
         self.logger = None
         self.psx = None
         self.psx_connected = False
@@ -430,6 +457,13 @@ class Script():  # pylint: disable=too-many-instance-attributes
         else:
             density_ratio = 0.2971 * math.exp(-1.5769e-4 * (alt_m - 11000.0))
         return tas_kt * math.sqrt(max(density_ratio, 1e-9))
+
+    def _on_on_ground(self, _key, value):
+        """Note whether the aircraft is on the ground (PinguEye's "radar" is on in the air)."""
+        try:
+            self._on_ground = int(value) != 0
+        except (TypeError, ValueError):
+            self._on_ground = None
 
     def _on_position(self, _key, value):
         """Parse PiBaHeAlTas (pitch;bank;heading_rad;alt_ft*1e3;tas_kt*1e3;lat_rad;lon_rad)."""
@@ -1086,6 +1120,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.psx.subscribe("AcTailNo", self._on_tail_number)
             self.psx.subscribe("CfgRego", self._on_tail_number)
             self.psx.subscribe("PiBaHeAlTas", self._on_position)
+            self.psx.subscribe("OnGround", self._on_on_ground)
             self.psx.subscribe("FmcFltNo", self._on_flight_number)
             self.psx.subscribe("FmcRteViAcMo", self._on_route_mode)
             self.psx.subscribe("FmcRte1", self._on_route1)
@@ -1269,6 +1304,10 @@ class Script():  # pylint: disable=too-many-instance-attributes
                             # call" here could fire a resolved event for a
                             # request nobody is tracking anymore.
                             self._doorbell_call_active = False
+                            # PinguEye: wait for a new pingueye_request on every
+                            # connection (an older Flight Centre never sends one)
+                            self._pingueye_request = None
+                            self._pingueye_sending = False
                             while not self._reverse_sync_queue.empty():
                                 self._reverse_sync_queue.get_nowait()
                             self._queue_initial_status()
@@ -1279,9 +1318,11 @@ class Script():  # pylint: disable=too-many-instance-attributes
                                 self._drain_ws(ws))
                             reverse_sync_task = asyncio.ensure_future(
                                 self._reverse_sync_loop(ws))
+                            pingueye_task = asyncio.ensure_future(
+                                self._pingueye_loop(ws))
                             try:
                                 await asyncio.wait(
-                                    [send_task, drain_task, reverse_sync_task],
+                                    [send_task, drain_task, reverse_sync_task, pingueye_task],
                                     return_when=asyncio.FIRST_COMPLETED)
                                 close_code = ws.close_code
                                 if close_code == 4001:
@@ -1301,8 +1342,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
                                 send_task.cancel()
                                 drain_task.cancel()
                                 reverse_sync_task.cancel()
+                                pingueye_task.cancel()
                                 await asyncio.gather(
-                                    send_task, drain_task, reverse_sync_task,
+                                    send_task, drain_task, reverse_sync_task, pingueye_task,
                                     return_exceptions=True)
 
                 except aiohttp.ClientResponseError as exc:
@@ -1358,6 +1400,160 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.psx.send("addon", "FRANKENPUSH:VATSIM:" +
                           json.dumps(data, separators=(",", ":")))
 
+    # ------------------------------------------------------------------ PinguEye
+
+    def _on_pingueye_request(self, data):
+        """Note Flight Centre's pingueye_request: whether, how often and how much to send."""
+        try:
+            interval = float(data.get("interval_s") or _PINGUEYE_DEFAULT_INTERVAL_S)
+            max_aircraft = int(data.get("max_aircraft") or _PINGUEYE_DEFAULT_MAX)
+        except (TypeError, ValueError):
+            interval, max_aircraft = _PINGUEYE_DEFAULT_INTERVAL_S, _PINGUEYE_DEFAULT_MAX
+        request = {"send": bool(data.get("send")),
+                   "interval_s": max(_PINGUEYE_MIN_INTERVAL_S, interval),
+                   "max_aircraft": max(0, max_aircraft)}
+        if request != self._pingueye_request:
+            self.logger.info("Flight Centre: PinguEye %s (every %.0f s, at most %d aircraft)%s",
+                             "wants traffic" if request["send"] else "doesn't want traffic",
+                             request["interval_s"], request["max_aircraft"],
+                             "" if self.args.vpilot_api else
+                             " - not sent: no --vpilot-api")
+        self._pingueye_request = request
+
+    def _pingueye_wanted(self):
+        """Return True to send traffic: opt-in, Flight Centre asks, radar on (airborne)."""
+        req = self._pingueye_request
+        return bool(self.args.vpilot_api and req and req["send"] and self._on_ground is False)
+
+    def _pingueye_message(self, radar_on):
+        """Return a pingueye_traffic message: a complete snapshot (empty when radar_on is False)."""
+        aircraft = []
+        if radar_on:
+            now = time.monotonic()
+            own = (self._vp_own_callsign or "").upper()
+            for callsign, a in self._vp_traffic.items():
+                age = now - a["t"]
+                if callsign == own or age > _PINGUEYE_STALE_S:
+                    continue
+                entry = {"callsign": callsign, "type": a.get("type"), "lat": round(a["lat"], 5),
+                         "lon": round(a["lon"], 5), "alt_ft": round(a["alt"]), "alt_type": "true",
+                         "pressure_alt_ft": round(a["palt"]) if a.get("palt") else None,
+                         "gs_kt": round(a["gs"]) if a.get("gs") is not None else None,
+                         "hdg_deg": round(a["hdg"], 1) if a.get("hdg") is not None else None,
+                         "pitch_deg": round(a["pitch"], 1) if a.get("pitch") is not None else None,
+                         "bank_deg": round(a["bank"], 1) if a.get("bank") is not None else None,
+                         "age_s": round(age, 1)}
+                aircraft.append({k: v for k, v in entry.items() if v is not None})
+            if self._lat is not None:
+                aircraft.sort(key=lambda e: _great_circle_nm(self._lat, self._lon,
+                                                             e["lat"], e["lon"]))
+            aircraft = aircraft[:self._pingueye_request["max_aircraft"]]
+        return {"type": "pingueye_traffic", "protocol_version": PUSH_PROTOCOL_VERSION,
+                "pingueye_version": PINGUEYE_VERSION,
+                "sent_at": datetime.datetime.now(datetime.timezone.utc).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"),
+                "source": "vpilot", "radar_on": radar_on, "aircraft": aircraft}
+
+    async def _pingueye_loop(self, ws):
+        """Send pingueye_traffic while wanted (_pingueye_wanted()), radar_on false when it stops.
+
+        Never before a pingueye_request with send true on this connection.
+        """
+        while True:
+            if self._pingueye_wanted():
+                message = self._pingueye_message(True)
+                await ws.send_json(message)
+                if not self._pingueye_sending:
+                    self.logger.info("PinguEye: sending vPilot traffic to Flight Centre "
+                                     "(%d aircraft now)", len(message["aircraft"]))
+                self._pingueye_sending = True
+                await asyncio.sleep(self._pingueye_request["interval_s"])
+                continue
+            if self._pingueye_sending:
+                await ws.send_json(self._pingueye_message(False))
+                self._pingueye_sending = False
+                req = self._pingueye_request
+                why = ("on the ground" if self._on_ground else
+                       "Flight Centre doesn't want it" if req and not req["send"] else
+                       "no longer wanted")
+                self.logger.info("PinguEye: stopped sending traffic (%s)", why)
+            await asyncio.sleep(1.0)
+
+    def _on_vpilot_event(self, event):
+        """Apply one event from the PSX.NET.vPilot plugin's stream to _vp_traffic.
+
+        aircraft.added/updated/deleted keep the latest state per callsign; heading is in
+        radians and speed is ground speed in knots (checked against the VATSIM feed:
+        median 0.3 deg / 0.0 kt off, 2,849 matches, 2026-11-05), altitude true feet,
+        pitch/bank degrees; a pressure altitude of 0 (on add) means unknown.
+        network.connected/api.status give our own callsign (left out of the snapshot);
+        network.disconnected empties the list.
+        """
+        kind = event.get("type") or ""
+        data = event.get("data") or {}
+        if kind == "api.status":
+            net = data.get("network") or {}
+            self._vp_own_callsign = net.get("callsign") if net.get("connected") else None
+            return
+        if kind == "network.connected":
+            self._vp_own_callsign = data.get("callsign")
+            return
+        if kind == "network.disconnected":
+            self._vp_traffic.clear()
+            self._vp_own_callsign = None
+            return
+        callsign = (data.get("callsign") or "").strip().upper()
+        if not callsign or not kind.startswith("aircraft."):
+            return
+        if kind == "aircraft.deleted":
+            self._vp_traffic.pop(callsign, None)
+            return
+        try:
+            lat, lon = float(data["latitude"]), float(data["longitude"])
+            alt = float(data["altitude"])
+        except (KeyError, TypeError, ValueError):
+            return
+        entry = self._vp_traffic.setdefault(callsign, {})
+        if data.get("typeCode"):
+            entry["type"] = str(data["typeCode"]).strip().upper()
+
+        def num(key):
+            try:
+                return float(data[key])
+            except (KeyError, TypeError, ValueError):
+                return None
+        heading = num("heading")
+        entry.update(lat=lat, lon=lon, alt=alt, palt=num("pressureAltitude") or None,
+                     gs=num("speed"), pitch=num("pitch"), bank=num("bank"),
+                     hdg=math.degrees(heading) % 360 if heading is not None else None,
+                     t=time.monotonic())
+
+    async def vpilot_traffic_coro(self):
+        """Keep the PSX.NET.vPilot plugin's aircraft list from its event stream (--vpilot-api)."""
+        url = self.args.vpilot_api
+        headers = {"Host": self.args.vpilot_api_host} if self.args.vpilot_api_host else None
+        try:
+            while True:
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.ws_connect(url, heartbeat=30, headers=headers) as ws:
+                            self.logger.info("vPilot: connected to %s", url)
+                            async for msg in ws:
+                                if msg.type != aiohttp.WSMsgType.TEXT:
+                                    continue
+                                try:
+                                    self._on_vpilot_event(json.loads(msg.data))
+                                except (ValueError, TypeError, AttributeError):
+                                    continue
+                    self.logger.info("vPilot: connection closed")
+                except (aiohttp.ClientError, OSError) as exc:
+                    self.logger.warning("vPilot: no connection to %s: %s", url, exc)
+                self._vp_traffic.clear()
+                await asyncio.sleep(15.0)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in vpilot_traffic_coro", exc)
+            self.logger.critical(traceback.format_exc())
+
     async def _handle_portal_message(self, data):  # pylint: disable=too-many-branches
         """Apply one message from Flight Centre (doorbell/crew_message/psx_print).
 
@@ -1369,6 +1565,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
         ~/to-psxhacks.md's 2026-10-19 update.
         """
         msg_type = data.get("type")
+        if msg_type == "pingueye_request":
+            self._on_pingueye_request(data)
+            return
         if msg_type == "flight_deck_doorbell":
             call = data.get("call")
             if call not in _DOORBELL_CALL_CODES:
@@ -1722,7 +1921,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 exc, inspect.currentframe().f_code.co_name)
             self.logger.critical(traceback.format_exc())
 
-    async def monitor_coro(self):
+    async def monitor_coro(self):  # pylint: disable=too-many-branches
         """Monitor the coroutines and start/restart as needed."""
         try:
             self.logger.debug("Starting %s", inspect.currentframe().f_code.co_name)
@@ -1750,6 +1949,8 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 if self.args.upload_autosave_from:
                     all_coros.append(
                         ("AutosaveMonitor", self._monitor_autosave_coro))
+                if self.args.vpilot_api:
+                    all_coros.append(("VpilotTraffic", self.vpilot_traffic_coro))
                 if self.args.worldflight_shop_alerts:
                     all_coros.append(
                         ("WorldFlightShop", self.worldflight_shop_coro))
@@ -1822,6 +2023,16 @@ class Script():  # pylint: disable=too-many-instance-attributes
             action='store_true',
             help="Forward SIMEVENTS from the router to Flight Centre.",
         )
+        parser.add_argument(
+            '--vpilot-api', type=str, default=None, metavar='URL',
+            help="Send the traffic vPilot knows about to Flight Centre's PinguEye (opt-in): "
+                 "the PSX.NET.vPilot plugin's event stream on the MSFS PC, e.g. "
+                 "ws://192.168.1.20:10781/api/v1/events. Sent only while Flight Centre "
+                 "asks for it and the aircraft is airborne.",
+        )
+        parser.add_argument(
+            '--vpilot-api-host', type=str, default=None, metavar='HOST:PORT',
+            help=argparse.SUPPRESS)   # Host header through a tunnel (the plugin checks it)
         parser.add_argument(
             '--worldflight-shop-alerts',
             action='store_true',

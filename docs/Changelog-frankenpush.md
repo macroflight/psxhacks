@@ -1,5 +1,14 @@
 # frankenpush changelog
 
+## Unreleased
+
+- **New (opt-in): PinguEye traffic.** With `--vpilot-api ws://<vPilot
+  PC>:10781/api/v1/events`, frankenpush sends Flight Centre's PinguEye the
+  traffic vPilot knows about (from the PSX.NET.vPilot plugin's event stream):
+  a complete snapshot every few seconds while Flight Centre asks for it and
+  the aircraft is airborne, then one final "radar off". See
+  docs/frankenpush.md.
+
 ## 1.5.0 (2026-11-10)
 
 - **Change: console log times are UTC**, marked with a Z (e.g. `14:05:31Z`), like every psxhacks log.
