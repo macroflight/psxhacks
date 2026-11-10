@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Change: /efb page footer.** The seat controls (slave routers only) are
+  now a compact strip in the bottom row, left of the buttons, instead of a
+  full-width bar at the top. The "frankenpilot" button is now
+  "Frankenpilot". The "In-flight music" button is gone, and with it the
+  `rest_api_efb_music_link_enabled` option (an old config that still has it
+  is accepted; the setting is ignored).
+
 ## 2026-11-10: version 1.42.0
 
 - **New: ground elevation spike filter.** On the ground and below

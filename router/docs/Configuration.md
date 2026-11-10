@@ -97,8 +97,6 @@ layout_observer = 2
   console, a process manager, etc.) and an accidental tap on a
   shared/EFB-embedded screen would be disruptive. A direct API call
   to shut the router down still works regardless of this setting.
-- `rest_api_efb_music_link_enabled`: set to false to hide the
-  "In-flight music" button on the `/efb` page. Defaults to true.
 - `max_new_connections_per_minute_per_ip`: caps how many new connections
   on `port` (the actual PSX protocol port, not `rest_api_port`) a single
   source IP may open within a rolling 60-second window; further attempts

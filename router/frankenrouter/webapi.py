@@ -14,7 +14,6 @@ import sys
 import textwrap
 import time
 import traceback
-import urllib.parse
 
 # Add psxhacks root to sys.path so fw_webui (first-party, at the root) can be imported.
 _PSXHACKS = str(pathlib.Path(__file__).parent.parent.parent)
@@ -1893,7 +1892,7 @@ def _efb_claim_sources_html(info):
 
 
 def _efb_seat_html(info):
-    """Render the "I am in the left/right seat / observer" strip, or '' where seats don't apply.
+    """Render the compact "I am in the left/right seat / observer" controls, or ''.
 
     Slave routers only: the master sim never has a seat, standalone has no
     seats. Clicking a pilot seat someone else holds asks first: they will be
@@ -1919,34 +1918,25 @@ def _efb_seat_html(info):
             f'{html.escape(json.dumps(holder if occupied else ""))})">'
             f'{labels[seat]}{" &#10003;" if current else ""}</button>')
 
-    vatsim = f' &middot; this sim: {html.escape(info["vatsim"])}' if info.get('vatsim') else ''
+    vatsim = f' &middot; {html.escape(info["vatsim"])}' if info.get('vatsim') else ''
 
     def name(sim):
         if sim == 'NOSIM':
             return 'empty'
         return html.escape(sim) + (' (this sim)' if sim == own else '')
+    # Compact, in the bottom row: who sits where is in the tooltip and on the buttons' left
+    title = html.escape(f"Seats: left {name(left)}, right {name(right)}", quote=True)
     return (
-        '<div class="efb-banner" style="background:transparent">'
-        f'Seats: left <b>{name(left)}</b>, right <b>{name(right)}</b>. '
-        f'I am in: {" ".join(buttons)}{vatsim}</div>\n'
+        f'<span title="{title}" style="font-size:0.85em;color:#94a3b8">'
+        f'L: <b>{name(left)}</b> R: <b>{name(right)}</b>{vatsim}</span> {" ".join(buttons)}'
     )
 
 
-def _build_efb_page(router, ctx, page_url):
+def _build_efb_page(router, ctx):
     """Build the compact /efb status+control page for the PSX.NET EFB app."""
     status = _efb_status_dict(router, ctx)
     r, w = status['router'], status['weather']
     loc = _fw_efb.current_location_dict(ctx)
-    music_link = ''
-    if router.config.listen.rest_api_efb_music_link_enabled:
-        music_url = (
-            'https://flightofthepenguins.se/music/player?efb_return=' +
-            urllib.parse.quote(page_url, safe='')
-        )
-        music_link = (
-            f'<a href="{music_url}" '
-            'class="efb-chip efb-chip-sm">In-flight music</a> '
-        )
     return (
         '<!DOCTYPE html>\n<html>\n<head>\n'
         '<meta charset="utf-8">\n'
@@ -1956,7 +1946,6 @@ def _build_efb_page(router, ctx, page_url):
         '</head>\n<body>\n'
         f'<div id="efb-errors">{_efb_errors_html(r["errors"])}</div>\n'
         f'<div id="efb-claim-sources">{_efb_claim_sources_html(r)}</div>\n'
-        f'<div id="efb-seat">{_efb_seat_html(r)}</div>\n'
         '<div class="efb-grid wide">' +
         _efb_status_card(r, w) + _fw_efb.controls_card(w) +
         _fw_efb.location_wx_card(loc, w, w['sigmet_hazards']) +
@@ -1966,12 +1955,15 @@ def _build_efb_page(router, ctx, page_url):
         f'{_fw_efb.help_html(w)}</div>\n'
         '<div id="efb-problems" class="efb-popup" onclick="efbProblemsClose()">'
         f'{_efb_problems_html(r)}</div>\n'
-        '<div style="text-align:right;margin-top:0.5rem">'
+        '<div style="display:flex;flex-wrap:wrap;justify-content:space-between;'
+        'align-items:center;gap:0.4rem;margin-top:0.5rem">'
+        f'<div id="efb-seat">{_efb_seat_html(r)}</div>'
+        '<div style="margin-left:auto">'
         '<button type="button" class="efb-chip efb-chip-sm" onclick="efbPirep()">'
-        'PIREP</button> ' +
-        music_link +
-        '<a href="/frankenpilot" class="efb-chip efb-chip-sm">frankenpilot</a> '
-        '<a href="/" class="efb-chip efb-chip-sm">Full router/weather control panel</a></div>\n'
+        'PIREP</button> '
+        '<a href="/frankenpilot" class="efb-chip efb-chip-sm">Frankenpilot</a> '
+        '<a href="/" class="efb-chip efb-chip-sm">Full router/weather control panel</a>'
+        '</div></div>\n'
         '<script>\n'
         'function efbPoll() {\n'
         '  fetch("/api/efb/status").then(function(r) { return r.json(); })'
@@ -2789,13 +2781,13 @@ class RouterWebAPI:  # pylint: disable=too-few-public-methods
             _fw_webui.register_cb_test_routes(routes, _efb_ctx)
 
             @routes.get('/efb')
-            async def handle_efb_get(request):
+            async def handle_efb_get(_):
                 # Served state (router/weather/turb status) changes continuously
                 # and can be changed from elsewhere (FrankenWeather's own web UI,
                 # a config file load, etc.) -- never let a browser serve a stale
                 # cached copy of this page on reload.
                 return web.Response(
-                    text=_build_efb_page(router, _efb_ctx, str(request.url)),
+                    text=_build_efb_page(router, _efb_ctx),
                     content_type='text/html',
                     headers={'Cache-Control': 'no-store'})
 

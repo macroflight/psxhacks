@@ -72,14 +72,6 @@ class _RouterConfigListen:  # pylint: disable=missing-class-docstring,too-few-pu
         if not isinstance(self.wait_for_upstream_welcome, bool):
             raise RouterConfigError("wait_for_upstream_welcome must be true or false")
 
-        # When true (default), the /efb page shows an "In-flight music" button
-        # linking to the flightofthepenguins.se music player. Set to false to
-        # hide it for users who don't want/use that feature.
-        self.rest_api_efb_music_link_enabled = data.get(
-            'rest_api_efb_music_link_enabled', True)
-        if not isinstance(self.rest_api_efb_music_link_enabled, bool):
-            raise RouterConfigError("rest_api_efb_music_link_enabled must be true or false")
-
         # Caps how many new client connections a single source IP may open
         # on the PSX listen port within a rolling 60s window; further
         # attempts are rejected (connection closed immediately, no access
