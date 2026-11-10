@@ -1671,6 +1671,18 @@ def _wx_wind_qnh(wx: str) -> tuple:
     return wind_dir, wind_spd, qnh_hpa
 
 
+def _obs_note(zone: dict) -> str:
+    """Return " radar=<0-3> lightning=yes|no" for a zone's log line: what saw it besides OM.
+
+    RainViewer echo 0 none, 1 light, 2 moderate, 3 heavy; with CAPE >= 300 J/kg a
+    moderate echo allows up to 4/8 CB and a heavy one 6/8 even without Open-Meteo
+    showers (fw_cb.om_cb_fields()). Without this a radar-made CB looked like one
+    from nothing (WorldFlight1 2026-11-10: zone 4, showers 0.00 mm/h, CB 4/8).
+    """
+    return (f" radar={zone.get('radar_echo', 0)}"
+            f" lightning={'yes' if zone.get('lightning') else 'no'}")
+
+
 def om_to_wx_string(om: dict, radar_echo: int = 0,  # pylint: disable=too-many-locals
                     lightning: bool = False) -> str:
     """Convert Open-Meteo current-weather dict to PSX Wx semicolon string."""
@@ -9352,11 +9364,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                                if _per_zone[i]['sigmet_label'] else "")
                 cb_part = (f"  CB {cb_oktas} oktas"
                            f" base={parts[11]}ft tops={parts[10]}ft"
-                           f" ({sigmet_note}WMO={wmo_code} showers={showers_mm:.2f}mm/h)"
+                           f" ({sigmet_note}WMO={wmo_code} showers={showers_mm:.2f}mm/h"
+                           f"{_obs_note(_per_zone[i])})"
                            f"{growth_note}")
             elif _cape_to_cb_oktas(cape, cin) > 0 and showers_mm < 0.5:
                 cb_part = (f"  (CAPE suppressed: WMO={wmo_code}"
-                           f" showers={showers_mm:.2f}mm/h)")
+                           f" showers={showers_mm:.2f}mm/h{_obs_note(_per_zone[i])})")
             else:
                 cb_part = ""
             cb_suffixes.append(f"  CAPE={cape:.0f} J/kg{cb_part}")

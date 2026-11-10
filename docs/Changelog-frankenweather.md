@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Log: the zone weather lines show the radar echo and lightning** (`radar=0-3
+  lightning=yes|no`). A CB made by a RainViewer echo (with CAPE) had no visible
+  reason when Open-Meteo forecast no showers.
+
 - **Change (`--advanced-zones`): CB turbulence starts when MSFS shows the CB.**
   The routers give PSX.NET.Orchestration zone weather changes
   `--orchestration-delay` (10 s) late; CB turbulence now uses the zones with
