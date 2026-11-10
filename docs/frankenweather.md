@@ -1018,13 +1018,13 @@ default; toggleable from the `/weather/enroute-wind` web page (or the
   `4850N`), since PSX itself only matches those formats by coordinates,
   not name. When a coordinate match is used, the page shows both names.
 
-- **Waypoint list.** Built from the FMC's active route, but any
-  waypoint that's part of a SID, STAR, or approach procedure — and any
-  `(...)`-style pseudo-waypoint PSX generates for those procedures —
-  is excluded, since real dispatch wind corridors don't cover them
-  either. The list only grows or hard-resets on an actual reroute;
-  waypoints PSX itself trims from the front of the route once passed
-  stay on the page (dimmed) instead of disappearing.
+- **Waypoint list.** Built from the FMC's active route: every entry
+  with a real position, SID/STAR/approach fixes and lat/lon waypoints
+  included (on a long SID or STAR their winds matter). Pseudo-waypoints
+  without a reliable position (`(__600)` constraints, intercepts,
+  `VECTORS`) are left out. The list only grows or hard-resets on an
+  actual reroute; waypoints PSX itself trims from the front of the
+  route once passed stay on the page (dimmed) instead of disappearing.
 
 - **Fetching.** Once enabled, wind and temperature for the remaining
   waypoints are pulled from Open-Meteo's pressure-level forecast, once
@@ -1036,10 +1036,8 @@ default; toggleable from the `/weather/enroute-wind` web page (or the
   existing corridor is left in place rather than making PSX recalculate
   for no reason. The same dedup applies to the hourly refetch: if it
   happens to return identical wind data, the corridor isn't resent
-  either. PSX's Format A always needs exactly 6
-  flight levels per waypoint, or it may reject the whole corridor: the
-  levels used are the flight-plan snapshot's own 6 levels when that
-  snapshot is a valid Format-A grid (so the diff compares like-for-like),
+  either. Six levels are fetched: the flight-plan snapshot's own 6 when
+  that snapshot is a valid grid (so the diff compares like-for-like),
   otherwise a fixed default set (10 000 / 18 000 / 24 000 / 30 000 /
   34 000 / 39 000 ft).
 
@@ -1052,7 +1050,25 @@ default; toggleable from the `/weather/enroute-wind` web page (or the
   until it works.
 
 - **Writing to PSX.** The fetched data is written back to PSX as a
-  Format-A wind corridor, and `Qs497` (the PSX variable controlling
+  **Format-D** wind corridor: each point carries its own latitude and
+  longitude, and PSX doesn't look the names up in its navigation
+  database. In Format A one name PSX can't find (`VECTORS`, `(__600)`,
+  a runway, an approach fix like `CF21`, an FMC lat/lon point `LL01`, or
+  a fix missing from an older AIRAC) made PSX reject the whole corridor:
+  the flight then ran in the planet weather, and when a later corridor
+  parsed, the OAT jumped (+42 °C at FL400 on WorldFlight1, 2026-11-10;
+  several smaller jumps during WorldFlight). Format D takes 5 levels per
+  point: points within 150 nm of the route's first or last point get the
+  lowest five, the others drop the second lowest. Points closer than
+  25 nm to the previous one are left out (they'd get the same Open-Meteo
+  wind), and the last two passed waypoints stay at the start of the
+  corridor, also after a reroute or DIRECT TO, so the aircraft is never
+  ahead of the corridor's first point. Names are reduced to letters and
+  digits (PSX still parses them: `LIV/07` broke a corridor). In flight,
+  frankenweather compares PSX's wind and OAT with the corridor's at the
+  aircraft, and logs a WARNING ("PSX doesn't seem to use our wind
+  corridor") when they're more than 25 kt or 8 °C apart for 2 minutes.
+  `Qs497` (the PSX variable controlling
   wind corridor use and simulated forecast inaccuracy) is set so its
   first digit is always `2` (embedded: PSX uses the corridor data), the
   second is PSX's Random slider position from the deviation chosen on the

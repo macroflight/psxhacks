@@ -473,3 +473,83 @@ def build_corridor_a(waypoints: list, fl_list_ft: list, wind_by_index: dict) -> 
             rec.rjust(_FORMAT_A_VALUE_WIDTH) for rec in recs)
         sections.append(row)
     return _CORRIDOR_PREFIX + "^".join(sections)
+
+
+# Format D: 3 waypoints per block, 5 levels per waypoint (PSX rejects a 6th: "At FL300
+# invalid latitude: FL240"), each column this wide
+_FORMAT_D_LEVELS = 5
+_FORMAT_D_COLUMNS = 3
+_FORMAT_D_COL_WIDTH = 28
+
+
+def _format_d_name(name: str, index: int) -> str:
+    """Return a Format-D identifier PSX can't mistake for data: letters and digits only.
+
+    PSX ignores the name in Format D but still parses it: "LIV/07" (an FMC
+    place/bearing/distance point) made it reject the corridor ("Invalid
+    format: LIV/07", test sim 2026-11-10), as would a name that looks like a
+    level (FL340, 10000). At most 7 characters; WP<n> if nothing is left.
+    """
+    clean = re.sub(r"[^A-Z0-9]", "", str(name).upper())[:7]
+    if not clean or clean.isdigit() or re.fullmatch(r"FL\d+", clean):
+        clean = f"WP{index + 1}" if not clean else f"W{clean}"[:7]
+    return clean
+
+
+def _format_d_coord(value: float, pos: str, neg: str, deg_width: int) -> str:
+    """Return a Format-D latitude/longitude: hemisphere, degrees, minutes to 0.1 (S3355.8)."""
+    tenths = int(round(abs(value) * 600))       # in 0.1 minutes, so 59.96' never shows as 60.0'
+    deg, rem = divmod(tenths, 600)
+    return f"{pos if value >= 0 else neg}{deg:0{deg_width}d}{rem // 10:02d}.{rem % 10}"
+
+
+def _format_d_level(fl_ft: int) -> str:
+    """Return a Format-D level label: FL390 from 10,000 ft up, feet below (9000)."""
+    return f"FL{int(fl_ft) // 100:03d}" if fl_ft >= 10000 else str(int(fl_ft))
+
+
+def encode_wind_d(fl_ft: int, wind_dir: float, wind_spd: float, oat_c: float) -> str:
+    """Return one Format-D record, e.g. 'FL290 294/038 -35' (full direction, 3-digit speed).
+
+    Clamped like encode_wind_a(): a record that breaks the layout makes PSX
+    reject the whole corridor.
+    """
+    direction = int(round(wind_dir)) % 360
+    spd = max(0, min(999, int(round(wind_spd))))
+    t = max(-99, min(99, int(round(oat_c))))
+    return f"{_format_d_level(fl_ft)} {direction:03d}/{spd:03d} {t:+03d}"
+
+
+def build_corridor_d(waypoints: list, levels_by_index: dict, wind_by_index: dict) -> str:
+    """Build a Format-D corridor: every point at its own latitude/longitude.
+
+    PSX ignores the identifiers in Format D ("it will not search the
+    navigation database"), so no point can make it reject the corridor the
+    way an unknown name does in Format A ("Not in database", "Invalid
+    format"; test sim 2026-11-10: even VECTORS, (__600), LL01 were accepted).
+    ``waypoints`` is ``[(name, lat, lon), ...]``; ``levels_by_index`` gives
+    each waypoint's _FORMAT_D_LEVELS levels in feet (highest first is how
+    PSX writes them); ``wind_by_index`` is ``{index: {fl_ft: (dir, spd, oat)}}``
+    as for build_corridor_a(). A missing level gets calm wind and an ISA
+    temperature.
+    """
+    rows = []
+    for start in range(0, len(waypoints), _FORMAT_D_COLUMNS):
+        group = list(enumerate(waypoints))[start:start + _FORMAT_D_COLUMNS]
+
+        def line(cells):
+            return ''.join(c.ljust(_FORMAT_D_COL_WIDTH) for c in cells).rstrip()
+        rows.append(line([_format_d_name(wp[0], i) for i, wp in group]))
+        rows.append(line([_format_d_coord(float(wp[1]), 'N', 'S', 2) for _, wp in group]))
+        rows.append(line([_format_d_coord(float(wp[2]), 'E', 'W', 3) for _, wp in group]))
+        for row in range(_FORMAT_D_LEVELS):
+            cells = []
+            for i, _wp in group:
+                fl = sorted(levels_by_index[i], reverse=True)[row]
+                data = wind_by_index.get(i, {}).get(fl)
+                if data is None:
+                    data = (0.0, 0.0, 15.0 - 1.98 * (fl / 1000.0))
+                cells.append(encode_wind_d(fl, *data))
+            rows.append(line(cells))
+        rows.append('')
+    return _CORRIDOR_PREFIX + "^".join(rows).rstrip('^')

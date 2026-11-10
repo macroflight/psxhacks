@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Fix: the wind corridor is written in Format D, so PSX can't reject it.**
+  In Format A one name PSX couldn't find in its navigation database made it
+  reject the whole corridor (`(__600)`, `VECTORS`, runways like `DE01R`,
+  approach fixes like `CF21`/`PU20`, FMC lat/lon points `LL01`): the flight
+  ran in the planet weather, and when a later corridor parsed the OAT
+  jumped (+42 C at FL400 on WorldFlight1 2026-11-10, +22 C on 11-09,
+  several smaller ones during WorldFlight). Format D places every point at
+  its own latitude/longitude and ignores names (5 levels per point).
+  Pseudo-waypoints without a position are left out, SID/STAR fixes and
+  lat/lon points kept, points closer than 25 nm thinned out, and the last
+  two passed waypoints stay at the start, also after a reroute. A new
+  in-flight check logs a WARNING when PSX's wind or OAT is more than 25 kt
+  or 8 C off the corridor for 2 minutes.
+
 - **Change: the SIGMET system and CB drift (advanced zones) are on by
   default**, and NOAA is the default METAR source (VATSIM is the fallback).
   `--no-sigmet` and `--no-advanced-zones` turn them off; the old

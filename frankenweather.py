@@ -869,33 +869,27 @@ def get_airports(url: str, cache_path: str) -> tuple:
 _FMC_WAYPOINT_PREFIX_LEN = 10
 _FMC_WAYPOINT_SENTINEL_LATLON = "9.0/9.0"
 
-# Field 1 of an FmcRte entry tags the waypoint with whatever it's "on": an
-# airway/track identifier for a plain enroute leg (e.g. "N261B", "P2", or a
-# North Atlantic Track "NATW"), or a SID/STAR/approach construct name for a
-# terminal-procedure leg (e.g. "CELTK7", "SIRI1H", "APPR_TRANS", "ILS_27L",
-# "MISSED_APPR"). Airway/track identifiers always lead with 1-2 letters then
-# digits (NAT tracks are the sole all-letter exception); procedure names lead
-# with a longer alphabetic fix name before any digit — that's the reliable
-# split, since plenty of legitimate enroute fixes (e.g. NAT-track waypoints)
-# would otherwise look identical to STAR fixes by name alone.
-_AIRWAY_TAG_RE = re.compile(r'[A-Z]{1,2}\d{1,4}[A-Z]?')
-_NAT_TRACK_TAG_RE = re.compile(r'NAT[A-Z]')
+# Corridor points closer than this to the previous one are left out (same Open-Meteo wind)
+_CORRIDOR_MIN_SPACING_NM = 25.0
+# Passed waypoints kept at the start of the corridor (the aircraft stays inside it)
+_CORRIDOR_PASSED_KEPT = 2
+# Corridor points within this distance of the route's first or last point get lower levels
+_CORRIDOR_TERMINAL_NM = 150.0
 
 
-def _is_airway_or_track_tag(tag: str) -> bool:
-    """Return True if an FmcRte field-1 tag looks like an airway/track id, not a procedure name."""
-    return bool(_AIRWAY_TAG_RE.fullmatch(tag) or _NAT_TRACK_TAG_RE.fullmatch(tag))
+def _corridor_pseudo_waypoint(name: str) -> bool:
+    """Return True for FMC entries without a reliable position: "(__600)", VECTORS."""
+    return name.startswith("(") or name in ("VECTORS", "MANSEQ", "DISCON")
 
 
 def _parse_fmc_route_waypoints(route: str) -> list:
     """Extract [(name, lat_deg, lon_deg), ...] entries from a PSX FmcRte string.
 
-    Waypoints tagged with a SID/STAR/approach procedure name (see
-    _is_airway_or_track_tag) are excluded — this also transparently covers
-    every "("-prefixed pseudo-waypoint (top of descent, intercepts,
-    runway-relative markers, ...), since those are always procedure-tagged,
-    and real dispatch wind corridors never cover SID/STAR/approach construct
-    fixes in the first place.
+    Every entry with a real position is kept, SID/STAR/approach fixes and lat/lon
+    waypoints (LL01...) included: the corridor is Format D, where PSX places
+    each point at its latitude/longitude and ignores the name. Pseudo-waypoints
+    without a reliable position ("(__600)" constraints, intercepts, VECTORS)
+    are left out (_corridor_pseudo_waypoint()).
     """
     if not route or "#" not in route:
         return []
@@ -907,8 +901,6 @@ def _parse_fmc_route_waypoints(route: str) -> list:
         fields = entry.split("'")
         if len(fields) < 4:
             continue
-        if fields[1] and not _is_airway_or_track_tag(fields[1]):
-            continue  # part of a SID/STAR/approach procedure — skip
         name = fields[0][_FMC_WAYPOINT_PREFIX_LEN:].strip().upper()
         latlon = fields[3]
         if not name or latlon == _FMC_WAYPOINT_SENTINEL_LATLON:
@@ -918,6 +910,8 @@ def _parse_fmc_route_waypoints(route: str) -> list:
             lat_deg = math.degrees(float(lat_str))
             lon_deg = math.degrees(float(lon_str))
         except ValueError:
+            continue
+        if _corridor_pseudo_waypoint(name) or not (-90 <= lat_deg <= 90 and -180 <= lon_deg <= 180):
             continue
         waypoints.append((name, lat_deg, lon_deg))
     return waypoints
@@ -2151,6 +2145,15 @@ _TURB_EVENT_MULT_MAX = {"moderate": 10.0, "severe": 100.0, "extreme": 1000.0}
 # turbulence goes to the log, so a pilot's report (too rough, too
 # smooth, just right) can be checked without --debug (_log_flight_status())
 _FLIGHT_LOG_S = 60.0
+# In-flight check that PSX uses our wind corridor (_check_corridor_oat()): PSX's OAT this
+# far from the corridor's for this long means it doesn't (rejected it, or a waypoint
+# it couldn't place); back within _CORRIDOR_OAT_OK_C is fine again
+_CORRIDOR_OAT_OFF_C = 8.0
+_CORRIDOR_OAT_OK_C = 5.0
+_CORRIDOR_WIND_OFF_KT = 25.0    # wind vector difference (WorldFlight1 2026-11-10: 35 kt
+_CORRIDOR_WIND_OK_KT = 15.0     # off while PSX had rejected the corridor; OAT only 4.5 C)
+_CORRIDOR_OAT_OFF_S = 120.0
+_CORRIDOR_OAT_MAX_NM = 200.0
 
 
 def _pick_ground_burst():
@@ -2589,6 +2592,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # Our own zone weather writes as Orchestration gets them (_orch_delay_s late): CB
         # turbulence uses that view (_wx_as_drawn()); key -> deque of (time.monotonic(), value)
         self._wx_writes: dict = {}
+        # The wind corridor we wrote last: [(lat, lon, {fl_ft: (dir, spd, oat)})]
+        # (_check_corridor_oat())
+        self._corridor_oats: list = []
+        self._corridor_oat_off_since: Optional[float] = None
+        self._corridor_oat_warned = False
         self._wx_drawn: dict = {}   # key -> the value Orchestration has now (before _wx_writes)
         self._orch_announced = (None, 0.0)   # (what was sent, time.monotonic())
         self._orch_ever_announced = False
@@ -3352,7 +3360,18 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "FMC route changed (%d → %d waypoints, not a simple pass-trim) — "
             "resetting enroute wind fetch state",
             len(persistent_names), len(new_live_names))
+        passed = sorted(self._waypoint_passed)[-_CORRIDOR_PASSED_KEPT:]
+        carry = [(self._enroute_waypoints[i], self._waypoint_om_wind.get(i)) for i in passed]
         self._set_route_waypoints(new_live)
+        if carry and new_live:
+            # Keep the waypoints just flown at the start of the corridor, so a
+            # DIRECT TO or reroute doesn't put the corridor's start ahead of the
+            # aircraft (they stay "passed": no new fetch, frozen winds)
+            self._enroute_waypoints = [w for w, _ in carry] + list(new_live)
+            self._waypoint_passed = set(range(len(carry)))
+            self._waypoint_om_wind = {k: wind for k, (_, wind) in enumerate(carry) if wind}
+            self.logger.info("Enroute wind: kept %s (passed) at the start of the corridor",
+                             ", ".join(w[0] for w, _ in carry))
 
     def _set_route_waypoints(self, waypoints: list) -> None:
         """Replace both the live and persistent waypoint lists; refetch everything."""
@@ -5313,6 +5332,43 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._inject_wx_slow_transit()
         self.psx_send_and_set("WxCorridorSel", value)
 
+    def _corridor_levels(self, wps: list) -> dict:
+        """Return {k: 5 levels (ft)} for the Format-D corridor points wps.
+
+        Format D takes 5 levels per point (_current_fl_list_ft() gives 6):
+        points within _CORRIDOR_TERMINAL_NM of the route's first or last point
+        drop the highest level, the others the second lowest.
+        """
+        fls = sorted(self._current_fl_list_ft())
+        if len(fls) < 5:
+            fls = sorted(set(fls) | {10000, 18000, 24000, 30000, 34000, 39000})
+        ends = self._enroute_waypoints[:1] + self._enroute_waypoints[-1:]
+        levels = {}
+        for k, (_, lat, lon) in enumerate(wps):
+            terminal = any(self._dist_nm(lat, lon, e[1], e[2]) < _CORRIDOR_TERMINAL_NM
+                           for e in ends)
+            levels[k] = fls[:5] if terminal else [fls[0]] + fls[-4:]
+        return levels
+
+    def _corridor_points(self, offset: int) -> list:
+        """Return the _enroute_waypoints indices for the corridor, in route order.
+
+        The last _CORRIDOR_PASSED_KEPT passed waypoints, then the remaining
+        route (offset is where it starts), each at least _CORRIDOR_MIN_SPACING_NM
+        from the previous point kept (closer ones get the same Open-Meteo wind);
+        the first and last are always kept.
+        """
+        wps = self._enroute_waypoints
+        candidates = list(range(max(0, offset - _CORRIDOR_PASSED_KEPT), len(wps)))
+        kept = []
+        for n, i in enumerate(candidates):
+            last = n == len(candidates) - 1
+            if kept and not last and self._dist_nm(wps[kept[-1]][1], wps[kept[-1]][2],
+                                                   wps[i][1], wps[i][2]) < _CORRIDOR_MIN_SPACING_NM:
+                continue
+            kept.append(i)
+        return kept
+
     def _apply_enroute_wind_injection(self) -> None:
         """Build a fresh Format-A corridor from route_waypoints + fetched OM wind.
 
@@ -5329,12 +5385,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if not self.route_waypoints:
             return
         offset = len(self._enroute_waypoints) - len(self.route_waypoints)
-        wind_by_live_index = {
-            i: self._waypoint_om_wind[offset + i]
-            for i in range(len(self.route_waypoints))
-            if self._waypoint_om_wind.get(offset + i)
-        }
-        if not wind_by_live_index:
+        # The last _CORRIDOR_PASSED_KEPT passed waypoints (frozen winds) and the
+        # remaining route: the aircraft stays inside the corridor, and a reroute
+        # doesn't move its start ahead of the aircraft (see _corridor_points())
+        points = self._corridor_points(offset)
+        wind_by_point = {k: self._waypoint_om_wind[i] for k, i in enumerate(points)
+                         if self._waypoint_om_wind.get(i)}
+        if not wind_by_point:
             # Open-Meteo gave us nothing: a corridor now would be calm wind and
             # ISA temperatures everywhere, replacing the flight plan's (or our
             # last) winds with nothing (2026-10-30, a BACARS uplink during an
@@ -5344,27 +5401,34 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 "leaving PSX's current wind corridor in place",
                 len(self.route_waypoints))
             return
-        missing = [i for i in range(len(self.route_waypoints)) if i not in wind_by_live_index]
+        missing = [k for k in range(len(points)) if k not in wind_by_point]
         if missing:
             # Fill each gap from the nearest waypoint (along the route) that
             # has data: a neighbour's wind beats calm and ISA
-            have = sorted(wind_by_live_index)
-            for i in missing:
-                src = min(have, key=lambda j, i=i: (abs(j - i), j))
-                wind_by_live_index[i] = wind_by_live_index[src]
+            have = sorted(wind_by_point)
+            for k in missing:
+                src = min(have, key=lambda j, k=k: (abs(j - k), j))
+                wind_by_point[k] = wind_by_point[src]
             self.logger.warning(
                 "Enroute wind: no Open-Meteo wind for %s — using the nearest route "
-                "waypoint's", ", ".join(self.route_waypoints[i][0] for i in missing))
-        new_corridor = wind_corridor.build_corridor_a(
-            self.route_waypoints, self._current_fl_list_ft(), wind_by_live_index)
+                "waypoint's", ", ".join(self._enroute_waypoints[points[k]][0] for k in missing))
+        wps = [self._enroute_waypoints[i] for i in points]
+        new_corridor = wind_corridor.build_corridor_d(
+            wps, self._corridor_levels(wps), wind_by_point)
         if new_corridor != self._enroute_last_corridor_txt:
             self._corridor_last_own_value = new_corridor
             self._inject_wx_slow_transit()
             self.psx_send_and_set("WxCorridorTxt", new_corridor)
             self._enroute_last_corridor_txt = new_corridor
+            levels = self._corridor_levels(wps)
+            self._corridor_oats = [
+                (w[1], w[2], {fl: (wind_by_point.get(k, {}).get(fl) or
+                                   (0.0, 0.0, 15.0 - 1.98 * fl / 1000.0)) for fl in levels[k]})
+                for k, w in enumerate(wps)]
+            self._corridor_oat_off_since, self._corridor_oat_warned = None, False
             self.logger.info(
-                "Enroute wind: refreshed WxCorridor for %d waypoint(s) (%d passed)",
-                len(self.route_waypoints), len(self._waypoint_passed))
+                "Enroute wind: refreshed WxCorridor with %d point(s): %s",
+                len(points), " ".join(self._enroute_waypoints[i][0] for i in points))
             # Notify other addons that we actually wrote a new corridor to PSX --
             # not on every hourly poll, only when the dedup check above let a
             # genuinely different corridor through (new wind data, or a reroute).
@@ -5803,6 +5867,83 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return f"{pos if value >= 0 else neg}{int(deg):0{width}d} {minutes:04.1f}"
         return f"{dm(lat, 'N', 'S', 2)} {dm(lon, 'E', 'W', 3)} {alt_ft:,.0f} ft"
 
+    def _corridor_expected(self, alt_ft: float) -> Optional[tuple]:
+        """Return ((u, v) wind kt, OAT C, nm, point index) of our corridor at the aircraft, or None.
+
+        The nearest corridor point within _CORRIDOR_OAT_MAX_NM, its levels
+        interpolated to alt_ft (held at the top and bottom level). u/v are the
+        wind's east/north components toward where it comes from.
+        """
+        if not self._corridor_oats or self.ac_lat is None or self.ac_lon is None:
+            return None
+        nm, k = min((self._dist_nm(self.ac_lat, self.ac_lon, lat, lon), k)
+                    for k, (lat, lon, _) in enumerate(self._corridor_oats))
+        if nm > _CORRIDOR_OAT_MAX_NM:
+            return None
+
+        def uvt(rec):
+            d, spd, t = rec
+            return (spd * math.sin(math.radians(d)), spd * math.cos(math.radians(d)), t)
+        levels = sorted((fl, uvt(rec)) for fl, rec in self._corridor_oats[k][2].items())
+        if alt_ft <= levels[0][0]:
+            u, v, t = levels[0][1]
+        elif alt_ft >= levels[-1][0]:
+            u, v, t = levels[-1][1]
+        else:
+            (fl0, a), (fl1, b) = next((p, q) for p, q in zip(levels, levels[1:]) if alt_ft <= q[0])
+            f = (alt_ft - fl0) / (fl1 - fl0)
+            u, v, t = (x + (y - x) * f for x, y in zip(a, b))
+        return (u, v), t, nm, k
+
+    def _check_corridor_oat(self, alt_ft: float) -> None:  # pylint: disable=too-many-locals
+        """Warn when PSX's OAT or wind shows it isn't using the wind corridor we wrote.
+
+        PSX doesn't report on the network whether it parsed a corridor; one it
+        rejected is shown only on the Instructor's Corridor page, and the
+        aircraft then flies in the planet weather (an OAT jump followed when a
+        later corridor parsed: +42 C at FL400, WorldFlight1 2026-11-10). So
+        above 10,000 ft, with our corridor embedded and still in place, PSX's
+        OAT and wind (MiscFltData) are compared with the corridor's at the
+        aircraft: more than _CORRIDOR_OAT_OFF_C or _CORRIDOR_WIND_OFF_KT off
+        for _CORRIDOR_OAT_OFF_S gives a WARNING.
+        """
+        try:
+            f = (self.psx.get("MiscFltData") or "").split(";")
+            psx_oat, wdir, wspd = int(f[1]) / 10.0, int(f[3]), int(f[4])
+        except (IndexError, ValueError):
+            return
+        ours = self._enroute_last_corridor_txt
+        expected = self._corridor_expected(alt_ft)
+        if (expected is None or alt_ft < 10000 or not ours or
+                self.psx.get("WxCorridorTxt") != ours or
+                not (self.psx.get("WxCorridorSel") or "").startswith("2")):
+            self._corridor_oat_off_since = None
+            return
+        (u, v), oat, nm, k = expected
+        wind_off = math.hypot(wspd * math.sin(math.radians(wdir)) - u,
+                              wspd * math.cos(math.radians(wdir)) - v)
+        oat_off = psx_oat - oat
+        now = time.monotonic()
+        if abs(oat_off) > _CORRIDOR_OAT_OFF_C or wind_off > _CORRIDOR_WIND_OFF_KT:
+            if self._corridor_oat_off_since is None:
+                self._corridor_oat_off_since = now
+            lasting = now - self._corridor_oat_off_since >= _CORRIDOR_OAT_OFF_S
+            if lasting and not self._corridor_oat_warned:
+                self._corridor_oat_warned = True
+                self.logger.warning(
+                    "Enroute wind: PSX doesn't seem to use our wind corridor: at %.0f ft PSX "
+                    "has %03d/%d kt %.1f C, the corridor %03.0f/%.0f kt %.1f C (point %d, "
+                    "%.0f nm away; %.0f kt, %.1f C off for %.0f s). Did PSX reject it? See "
+                    "Instructor > Situation > Weather > Corridor",
+                    alt_ft, wdir, wspd, psx_oat, math.degrees(math.atan2(u, v)) % 360,
+                    math.hypot(u, v), oat, k + 1, nm, wind_off, oat_off,
+                    now - self._corridor_oat_off_since)
+        elif abs(oat_off) <= _CORRIDOR_OAT_OK_C and wind_off <= _CORRIDOR_WIND_OK_KT:
+            if self._corridor_oat_warned:
+                self.logger.info("Enroute wind: PSX's wind and OAT match the wind corridor "
+                                 "again (%.0f kt, %.1f C off)", wind_off, oat_off)
+            self._corridor_oat_off_since, self._corridor_oat_warned = None, False
+
     def _log_flight_status(self, pba: tuple, effective_intensity: float,  # pylint: disable=too-many-locals
                            state: TurbulenceState) -> None:
         """Every _FLIGHT_LOG_S, log the flight, weather and turbulence (also when smooth).
@@ -5816,6 +5957,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._flight_log_last = now
         pitch, bank, hdg = (math.degrees(v) for v in pba[:3])
         alt_ft, tas_kt = pba[3], pba[4]
+        self._check_corridor_oat(alt_ft)
         wind = "-"
         profile = self._turb_engine.wind_profile() if self._turb_engine else None
         if profile is not None:
@@ -10657,6 +10799,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 # tracking/analysis needed, that happens from the logs.
                 # Remove once that investigation is closed.
                 self.psx.send("demand", "LeftPfdAlt")
+                # PSX's OAT for _check_corridor_oat() (MiscFltData is DEMAND too)
+                self.psx.send("demand", "MiscFltData")
 
             self.psx = psx.Client()
             self.psx.onPause = lambda: setattr(self, 'psx_paused', True)
@@ -10682,6 +10826,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             # Qs497: so psx.get() holds PSX's current value and
             # _apply_enroute_wind_qs497() only sends it when it differs
             self.psx.subscribe("WxCorridorSel")
+            self.psx.subscribe("MiscFltData")       # OAT for _check_corridor_oat()
             self.psx.subscribe("MetarsUp", self._handle_metars_up)
             self.psx.subscribe("PrinterText", self._handle_printer_text)
             # The weather variables we control (_OWNED_KEYS): subscribing

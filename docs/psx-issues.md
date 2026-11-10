@@ -568,3 +568,25 @@ traffic, because `Variables.txt` doesn't say:
   (Qs571), all missing from `Variables.txt`; `GpsDrift` also has an
   undocumented 3-field transient form.
 - The tropopause cap: PSX reads back 50,000 ft for anything higher.
+
+### One unknown name makes PSX reject the whole wind corridor, and the switch to a valid one spikes the OAT
+
+*Confirmed 2026-11-10 on the headless test sim (10.195); seen on WorldFlight1
+and during WorldFlight.* In a Format A/B/C corridor PSX looks every name up
+in its navigation database. One name it can't find (`VECTORS`, `(__600)`,
+a runway like `DE01R`, an approach fix like `CF21`, an FMC lat/lon point
+`LL01`, a fix missing from the AIRAC) and it rejects the whole corridor.
+That is only shown in red on the Instructor's Corridor page ("Invalid
+format: VECTORS", "Not in database: TAPET"); nothing on the network says
+so, and the aircraft flies in the planet weather. When a valid corridor
+arrives later, in flight, PSX's OAT first spikes and then eases to the
+corridor's value over about 3 minutes: at FL400 -48.8 to -22 C on the
+test sim, -50.5 to -8 C on WorldFlight1 (IAS 261 to 239 kt with the A/T
+holding Mach, AIRSPEED LOW). A rewrite of a valid corridor (even with
+another first point) changes the OAT by less than 1 C.
+
+- **Workaround:** frankenweather writes its corridor in Format D, where
+  each point has its own latitude/longitude and PSX ignores the names (5
+  levels per point; a 6th is rejected; a name with "/" still breaks the
+  layout, so names are reduced to letters and digits). It also warns when
+  PSX's wind or OAT doesn't match its corridor in flight.
