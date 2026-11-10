@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **New: drifting CBs have an arrow on the weather map**, as long as the
+  distance they drift in an hour, labelled with heading and speed (grey
+  and dashed while decaying).
+
 - **Change: the "testing" turbulence is now the default, as turbulence
   version 2; "stable" (version 1) is gone.** The profiles are now
   `default` and `next` (a version being evaluated; greyed out on the /efb

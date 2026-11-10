@@ -502,7 +502,10 @@ is usually the better side.
   the test sim); the dep/dst airport zones never drift. Not more often
   than every 15 s: with zone positions written every 5 s, PSX stopped
   redrawing the radar picture. The radar echo, the CB turbulence and the
-  weather map follow the CB.
+  weather map follow the CB. On the map an orange arrow from each drifting
+  CB shows where it's going: as long as the distance it drifts in an hour
+  (12 nm at least), labelled with its heading and speed ("041°/10 kt");
+  grey and dashed while it's decaying.
 - **What it carries:** the weather the zone had when the drift started,
   never refreshed on the way (no new Open-Meteo data, no snapping to a
   nearby airport, the METAR left as it was, so PSX doesn't rebuild it).

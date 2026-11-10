@@ -619,6 +619,8 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
             'cb_sigmet': zone.get('cb_sigmet'),
             'anchor': bool(zone.get('anchor')),
             'cb_turb': zone.get('cb_turb'),
+            # --advanced-zones: heading/speed of the CB's drift (the map's arrow), or None
+            'drift': zone.get('drift'),
             # Where PSX actually draws this zone's CB, if it has one
             'cb_pos': (_zone_cb_position(ctx.cache_get(f'WxMode{zone_num}') or '', time_earth_ms)
                        if (wx.get('cb_raw') or {}).get('oktas') else None),
@@ -886,6 +888,24 @@ def _build_weather_map_page(ctx):  # pylint: disable=too-many-locals,too-many-st
         "text-shadow:0 0 2px #fff,0 0 2px #fff\">✕</span>'})})"
         ".bindTooltip('<b>CB of WX'+z.zone+'</b><br>'+wx.cb_raw.oktas+\"/8 \"+wx.cb_raw.base"
         "+\"'-\"+wx.cb_raw.top+\"'\",{direction:'top'}).addTo(map);\n"
+        # Drifting CB (advanced zones): an arrow the distance it drifts in an hour (12 nm at least)
+        "  if(z.cb_pos&&z.drift&&z.drift.speed_kt>0){\n"
+        "    var dh=z.drift.heading_deg*Math.PI/180,dl=Math.max(z.drift.speed_kt,12);\n"
+        "    var dpt=function(p,h,nm){return[p[0]+nm/60*Math.cos(h),"
+        "p[1]+nm/60*Math.sin(h)/Math.cos(p[0]*Math.PI/180)];};\n"
+        "    var de=dpt(z.cb_pos,dh,dl);\n"
+        "    var dst={color:z.drift.decaying?'#94a3b8':'#f97316',weight:3,opacity:0.9,"
+        "dashArray:z.drift.decaying?'6 4':null,interactive:false};\n"
+        "    L.polyline([z.cb_pos,de],dst).addTo(map);\n"
+        "    L.polyline([dpt(de,dh+Math.PI*5/6,Math.min(dl/3,6)),de,"
+        "dpt(de,dh-Math.PI*5/6,Math.min(dl/3,6))],dst).addTo(map);\n"
+        "    L.marker(de,{interactive:false,keyboard:false,icon:L.divIcon({className:'',"
+        "iconSize:[0,0],html:'<span style=\"display:inline-block;transform:translate(6px,-50%);"
+        "white-space:nowrap;font-size:11px;font-weight:600;color:'+dst.color+';"
+        "text-shadow:0 0 2px #fff,0 0 2px #fff\">'+('00'+z.drift.heading_deg).slice(-3)"
+        "+'°/'+z.drift.speed_kt+' kt'+(z.drift.decaying?' (decaying)':'')+'</span>'})})"
+        ".addTo(map);\n"
+        "  }\n"
         "  if(z.is_focused)L.circleMarker([z.lat,z.lon],"
         "{radius:14,color:'#3b82f6',weight:2.5,fill:false,opacity:0.9}).addTo(map);\n"
         "  var cbRow=wx.cb_raw"
