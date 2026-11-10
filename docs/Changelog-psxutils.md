@@ -1,6 +1,6 @@
 # psxutils changelog
 
-## Unreleased
+## 1.2.0 (2026-11-10)
 
 - **Change: console log times are UTC**, marked with a Z (e.g. `14:05:31Z`), like every psxhacks log.
 
