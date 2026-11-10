@@ -1,6 +1,6 @@
 # start_scripts changelog
 
-## Unreleased
+## 1.14.0 (2026-11-10)
 
 - **New: frankenpilot.** `$StartFrankenpilot`, `$FrankenpilotOptions` and
   `$FrankenpilotRepo` (see the FrankenPilot section of
