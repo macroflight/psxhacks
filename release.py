@@ -16,7 +16,7 @@ A patch release needs no changelog reminder. A minor release gets a
 suggestion to add a changelog entry. A major release requires typing "YES"
 to confirm the changelog has actually been updated.
 
-<addon> is one of: frankenboostproxy, frankencduproxy, frankenprint, frankenpush,
+<addon> is one of: frankenboostproxy, frankencduproxy, frankenpilot, frankenprint, frankenpush,
 frankenrouter, frankentanker, frankenusb, frankenweather, psxutils,
 start_scripts.
 
@@ -56,6 +56,9 @@ _ADDONS = {
     'frankencduproxy': (
         _ROOT / 'frankencduproxy.version',
         _ROOT / 'docs' / 'Changelog-frankencduproxy.md'),
+    'frankenpilot': (
+        _ROOT / 'frankenpilot.version',
+        _ROOT / 'docs' / 'Changelog-frankenpilot.md'),
     'frankenprint': (
         _ROOT / 'frankenprint.version',
         _ROOT / 'docs' / 'Changelog-frankenprint.md'),
@@ -108,6 +111,9 @@ _ADDON_PATHS = {
         ['frankenboostproxy.py', 'frankenboostproxy.spec',
          'show_boost_gauges.py', 'show_boost_gauges.spec'], []),
     'frankencduproxy': (['frankencduproxy.py', 'frankencduproxy.spec'], []),
+    'frankenpilot': (
+        ['frankenpilot.py', 'frankenpilot.spec', 'fp_cdu.py', 'fp_webui.py',
+         'docs/frankenpilot.md'], []),
     'frankenprint': (['frankenprint.py', 'frankenprint.spec'], []),
     'frankenpush': (['frankenpush.py', 'frankenpush.spec'], []),
     'frankenrouter': (['router/'], ['router']),
