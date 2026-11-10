@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026-11-10: version 1.42.0
 
 - **New: ground elevation spike filter.** On the ground and below
   40 kt, an `Elev` (Qi198) write from a client that is more than 200 ft
