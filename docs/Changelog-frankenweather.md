@@ -1,6 +1,6 @@
 # frankenweather changelog
 
-## Unreleased
+## 2.7.0 (2026-11-10)
 
 - **Docs: zone placement and relocation described as the code does it.**
   Altitude (18,000 ft) only sets how far behind the aircraft a zone must
