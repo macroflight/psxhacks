@@ -90,8 +90,9 @@ updated every few minutes as the aircraft moves.
 Features:
 
 - Zones snap to the nearest real airport when one is within 25 nm; the
-  weather for that zone is taken from the live VATSIM METAR for that
-  airport when available, otherwise from Open-Meteo.
+  weather for that zone is taken from the airport's live METAR when
+  available (NOAA by default, VATSIM as the fallback; `--primary-metar-source
+  vatsim` swaps them), otherwise from Open-Meteo.
 
 - A zone whose weather comes from Open-Meteo gets a METAR with only its
   name, the time it was placed and a remark saying why
@@ -107,7 +108,7 @@ Features:
   suppression when CIN is high. CB tops are at most 2,000 ft above a
   typical tropopause for the latitude and season (about 33,000-39,000 ft
   in the mid-latitudes, 30,000 ft in a polar winter) and never above
-  44,999 ft, PSX's limit. With [`--sigmet`](#sigmets),
+  44,999 ft, PSX's limit. With [the SIGMET system](#sigmets) (on by default),
   frankenweather also places zones in TS/TC SIGMET areas and gives them
   CBs, since TS SIGMETs report observed thunderstorms. METAR convective indicators (TS, TSRA,
   SHRA, GR, LTG, FC, CB sky groups) are also used and can override or
@@ -231,7 +232,7 @@ Features:
     In Auto, the details of all seven weather zones; in Manual, the
     manual weather controls, whose weather goes into all seven zones.
   - **Enroute wind**: the enroute wind importer.
-  - **SIGMETs**: only with `--sigmet`, see [SIGMETs](#sigmets).
+  - **SIGMETs**: with the SIGMET system (on by default), see [SIGMETs](#sigmets).
   - **Extra turbulence**: turbulence tuning.
   - **Config and logs**: the configuration file (save/load/reset), the
     time sync toggles, and (in frankenweather's own UI) its log files.
@@ -442,7 +443,7 @@ to about 15 minutes for a big one. "Remove CB near dep/arr" and
 CB-free zones remove CBs at once, and a zone that's moved starts fresh,
 so this never holds a zone back.
 
-Inside a TS or TC SIGMET area (with `--sigmet`), zones are kept at least
+Inside a TS or TC SIGMET area (with the SIGMET system), zones are kept at least
 70 nm apart, and the all-around placement at startup, after a
 reposition and while maneuvering keeps them at least 60 nm from the
 aircraft. PSX draws a CB's echo by the distance to the nearest other
@@ -471,10 +472,10 @@ pages. The console's per-zone log line gains a `[CB ramp: ...]` suffix
 with the signed oktas/min and ft/min rate and the target whenever that
 zone's CB is actively changing.
 
-### CBs drifting with the wind (`--advanced-zones`, testing)
+### CBs drifting with the wind (advanced zones)
 
-`--advanced-zones` is a temporary option for testing, off by default.
-With it, CBs move with the wind, as real thunderstorm cells do, so a
+Advanced zones are on by default (`--no-advanced-zones` turns them off; the
+CB test page switches them at runtime). CBs move with the wind, as real thunderstorm cells do, so a
 pilot deviating around one has to think about where it's going: upwind
 is usually the better side.
 
@@ -540,8 +541,8 @@ is usually the better side.
   when MSFS shows it, not 10 s before.
 - **CB test page** (`/weather/cbtest`, in frankenweather's own web UI and
   every router's):
-  switches advanced zones on and off (it starts as `--advanced-zones`
-  says) and sets the Orchestration delay and rate; and puts test CBs where you ask, for checking how
+  switches advanced zones on and off (they start on, or off with
+  `--no-advanced-zones`) and sets the Orchestration delay and rate; and puts test CBs where you ask, for checking how
   they look on the radar and in MSFS. Each takes a weather zone and gets a
   fake 8/8 CB (3,000-40,000 ft) that stays until removed, fixed to the
   ground (or drifting) as the aircraft flies on. Buttons: remove the test
@@ -557,14 +558,14 @@ is usually the better side.
 
 ### SIGMETs
 
-`--sigmet` (experimental, off by default) turns on frankenweather's
-SIGMET system. Without it, frankenweather doesn't use SIGMETs at all: it
+frankenweather's SIGMET system is on by default (`--no-sigmet` turns it
+off). Without it, frankenweather doesn't use SIGMETs at all: it
 only has PSX download them regularly, and PSX handles them itself. The
 router's /efb SIGMET presets are then Off (turns off PSX's "SIGMETs
 embedded in the planet weather model", so no SIGMETs are used at all)
 and PSX.
 
-With `--sigmet`:
+With the SIGMET system on:
 
 - frankenweather downloads SIGMETs from aviationweather.gov itself
   (international and US) every 10 minutes, or right away with the
@@ -583,8 +584,8 @@ With `--sigmet`:
     "SIGMETs embedded in the planet weather model".
   - **Normal**: frankenweather's SIGMET system handles TS, TC, TURB and
     MTW, PSX gets the rest (VA and ICE). This is the default.
-  - **PSX**: frankenweather's SIGMET system is switched off, as without
-    `--sigmet`: PSX handles every SIGMET itself, and frankenweather only
+  - **PSX**: frankenweather's SIGMET system is switched off, as with
+    `--no-sigmet`: PSX handles every SIGMET itself, and frankenweather only
     asks it to download fresh ones regularly.
 
   With Normal, a different choice of types on the SIGMETs page shows as
@@ -668,8 +669,8 @@ every type (zoom out to see the ones further away), one colour per type,
 with a legend for the types in view, and marks each zone's CB at its
 actual position. Areas frankenweather doesn't use with the current
 settings (PSX gets them, or nobody does with the Off preset) are drawn
-with a dashed outline; hovering over an area says which. Without
-`--sigmet`, or with the Off or PSX preset, the map shows the SIGMETs PSX
+with a dashed outline; hovering over an area says which. With
+`--no-sigmet`, or with the Off or PSX preset, the map shows the SIGMETs PSX
 downloaded, all dashed.
 
 ### Turbulence profile: stable and testing

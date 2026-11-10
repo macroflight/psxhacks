@@ -10809,13 +10809,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "many nm away (matches PSX's own zone-of-influence radius; "
                  "deliberately independent of --cruise-behind-dist/--low-alt-dist).")
         parser.add_argument(
-            '--primary-metar-source', choices=('vatsim', 'noaa'), default='vatsim',
-            help="EXPERIMENTAL: which METAR source to prefer when both VATSIM and "
-                 "NOAA have data for the same station. Only the primary source's "
-                 "cache is refreshed outside the full Open-Meteo-outage fallback "
-                 "path (where both are always consulted regardless of this "
-                 "setting), so leaving this at the default 'vatsim' is identical "
-                 "to behavior before this option existed.")
+            '--primary-metar-source', choices=('vatsim', 'noaa'), default='noaa',
+            help="Which METAR source to prefer when both VATSIM and NOAA have "
+                 "data for the same station (default noaa). Only the primary "
+                 "source's cache is refreshed outside the full Open-Meteo-outage "
+                 "fallback path (where both are always consulted regardless of "
+                 "this setting).")
         parser.add_argument(
             '--metar-live-refresh', action='store_true',
             help="EXPERIMENTAL: once a zone has been assigned a real (fresh, "
@@ -10827,17 +10826,18 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "timeout; never changes which airport a zone snaps to, and never "
                  "turns a cache miss/stale METAR into a hit. Off by default.")
         parser.add_argument(
-            '--sigmet', action='store_true',
-            help="EXPERIMENTAL: frankenweather's SIGMET system. Downloads "
-                 "SIGMETs from aviationweather.gov itself (every 10 "
-                 "minutes) instead of letting PSX do it, and handles the "
-                 "SIGMET types chosen on the web UI's new SIGMETs page "
-                 "itself: thunderstorms (TS) and tropical cyclones (TC) as "
-                 "CBs in its weather zones, turbulence (TURB) and mountain "
-                 "wave (MTW) as its own turbulence. PSX gets the other "
-                 "SIGMETs it could parse. Off by default: frankenweather "
-                 "then doesn't use SIGMETs at all and only has PSX download "
-                 "them regularly.")
+            '--no-sigmet', action='store_true',
+            help="Turn off frankenweather's SIGMET system (on by default). With it, "
+                 "frankenweather downloads SIGMETs from aviationweather.gov itself "
+                 "(every 10 minutes) instead of letting PSX do it, and handles the "
+                 "SIGMET types chosen on the web UI's SIGMETs page itself: "
+                 "thunderstorms (TS) and tropical cyclones (TC) as CBs in its "
+                 "weather zones, turbulence (TURB) and mountain wave (MTW) as its "
+                 "own turbulence; PSX gets the other SIGMETs it could parse. "
+                 "Without it frankenweather doesn't use SIGMETs at all and only "
+                 "has PSX download them regularly.")
+        parser.add_argument(   # on by default since 2026-11-10; still accepted, does nothing
+            '--sigmet', action='store_true', help=argparse.SUPPRESS)
         parser.add_argument(
             '--orchestration-delay', type=float, default=10.0, metavar='S',
             help="With --advanced-zones: the routers give PSX.NET.Orchestration "
@@ -10851,15 +10851,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "PSX.NET.Orchestration the drifting zones (1-20, default 5). "
                  "Settable on the CB test page.")
         parser.add_argument(
-            '--advanced-zones', action='store_true',
-            help="TEMPORARY, for testing: CB zones drift with the wind. A zone "
-                 "that gets a CB in cruise (not the anchor or a dep/dst airport "
-                 "zone, not below 10,000 ft or within 50nm of dep/dst) keeps the "
-                 "weather it had and moves with the 850-300 hPa mean wind, 5 "
-                 "degrees right of it, for 30-60 minutes; then its CB fades out. "
-                 "When a cell comes within 10nm of the anchor or a dep/dst "
-                 "airport zone, that zone steps aside and the cell takes its "
-                 "weather. Off by default.")
+            '--no-advanced-zones', action='store_true',
+            help="Turn off CBs drifting with the wind (on by default; also "
+                 "switchable on the CB test page). A zone that gets a CB in cruise "
+                 "(not the anchor or a dep/dst airport zone, not below 10,000 ft or "
+                 "within 50nm of dep/dst) keeps the weather it had and moves with "
+                 "the 850-300 hPa mean wind, 5 degrees right of it, for 30-60 "
+                 "minutes; then its CB fades out. When a cell comes within 10nm of "
+                 "the anchor or a dep/dst airport zone, that zone steps aside and "
+                 "the cell takes its weather.")
+        parser.add_argument(   # on by default since 2026-11-10; still accepted, does nothing
+            '--advanced-zones', action='store_true', help=argparse.SUPPRESS)
         parser.add_argument(
             '--sync-tropopause', action='store_true',
             help="EXPERIMENTAL: keep PSX's Planet Weather page tropopause "
@@ -11021,8 +11023,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 print(f"WARNING: --psx-port-override={self.args.psx_port_override} "
                       f"overrides --psx-port={self.args.psx_port}", file=sys.stderr)
             self.args.psx_port = self.args.psx_port_override
-        self._sigmet_enabled = self.args.sigmet
-        self._advanced_zones = bool(self.args.advanced_zones)
+        self._sigmet_enabled = not self.args.no_sigmet
+        self._advanced_zones = not self.args.no_advanced_zones
         self._orch_delay_s = min(max(float(self.args.orchestration_delay), 0.0), 60.0)
         self._orch_rate_hz = min(max(float(self.args.orchestration_rate), 1.0), 20.0)
 

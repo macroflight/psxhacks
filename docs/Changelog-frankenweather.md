@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Change: the SIGMET system and CB drift (advanced zones) are on by
+  default**, and NOAA is the default METAR source (VATSIM is the fallback).
+  `--no-sigmet` and `--no-advanced-zones` turn them off; the old
+  `--sigmet` and `--advanced-zones` are still accepted and do nothing.
+
 - **Log: the zone weather lines show the radar echo and lightning** (`radar=0-3
   lightning=yes|no`). A CB made by a RainViewer echo (with CAPE) had no visible
   reason when Open-Meteo forecast no showers.

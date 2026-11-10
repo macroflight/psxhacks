@@ -3046,7 +3046,7 @@ def _build_cb_test_page(ctx, message: str = '') -> str:  # pylint: disable=too-m
     body += (sep + button('upwind', 'Upwind of track, moving downwind') +
              button('pair', '315° and 045°, 30 nm') + button('smiley', 'CB smiley') + '</div>\n')
     body += ('<details><summary>About this page</summary><p>Testing only. Advanced zones: CBs '
-             'drift with the wind (started with --advanced-zones). The routers give '
+             'drift with the wind (on by default; off with --no-advanced-zones). The routers give '
              'PSX.NET.Orchestration every weather-zone change the delay late, to match PSX\'s '
              'weather radar, and drifting CBs rate times a second.</p><p>Each test CB takes a '
              'weather zone, gets a fake 8/8 CB (3,000-40,000 ft) and stays until removed; the '
