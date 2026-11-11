@@ -16,8 +16,8 @@
   the limits are reported to Flight Centre. Fixed false "PILOT OVERRIDE"
   stops: a command arriving while the last one's knob turns were still being
   sent double counted them. The log says what an override was.
-- **Telemetry: `gs_kt` and `trk_deg`** (ground speed, true track) for Flight
-  Centre's formation geometry; the formation autopilot's MCP speed never ends
+- **Telemetry: `gs_kt`, `trk_deg` and `mag_var_deg`** (ground speed, true
+  track, magnetic variation) for Flight Centre's formation geometry; the formation autopilot's MCP speed never ends
   up above the Mach/IAS limit (it showed .853 with the 0.85 limit).
 - **PinguEye on the ground:** when PinguEye's operator switches the radar on
   while the aircraft is on the ground (`on_ground` in Flight Centre's

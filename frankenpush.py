@@ -833,6 +833,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 # true track over the ground from our own positions (None when slow)
                 "gs_kt": self._ground_speed,
                 "trk_deg": self._true_track(),
+                # PSX's magnetic variation here, east positive (MiscFltData), for the
+                # airborne station's "SET HDG 041 MAG" (Flight Centre 2026-11-11)
+                "mag_var_deg": (self._misc or {}).get("magvar"),
             })
 
         # Scalar fields — only when changed or full.

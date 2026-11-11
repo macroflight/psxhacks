@@ -116,9 +116,11 @@ frankenpush.py ... --formation-autopilot
 - **Not for close formation:** Flight Centre's positions are a few seconds
   old (vPilot) or older (the VATSIM data feed).
 
-The telemetry also carries `gs_kt` (PSX's ground speed) and `trk_deg` (the
-true track over the ground, from our positions; none below 30 kt), which
-Flight Centre uses for the formation geometry.
+The telemetry also carries `gs_kt` (PSX's ground speed), `trk_deg` (the
+true track over the ground, from our positions; none below 30 kt) and
+`mag_var_deg` (PSX's magnetic variation here, east positive), which Flight
+Centre uses for the formation geometry and to show pilots flying by hand
+the magnetic heading to set.
 
 The interface (v1, `formation_version` 1) is defined by Flight Centre. The
 decisions are in `fp_formation.py` (unit tests: `python3 -m unittest
