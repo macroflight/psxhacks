@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Fix: telemetry `pitch_deg` and `bank_deg` are now in degrees.** They were
+  a tenth of the real angle (PSX's unit is 1e-5 rad, divided as if 1e-6);
+  Flight Centre's "My sim" page now shows the right values.
+
 - **New (opt-in): formation autopilot.** With `--formation-autopilot`,
   PinguEye's airborne station can fly the aircraft into formation with
   another one: frankenpush turns the MCP heading, speed, altitude and V/S

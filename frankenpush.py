@@ -354,7 +354,6 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self._tas_kt = None
         self._pitch_deg = None
         self._bank_deg = None
-        self._bank_true_deg = None
         self._tail_number = None
         self._flight_number = None
         self._vatsim_status_key = None   # last logged Flight Centre vatsim_status
@@ -497,15 +496,13 @@ class Script():  # pylint: disable=too-many-instance-attributes
             parts = value.split(';')
             if len(parts) != 7:
                 return
-            pitch_mrad, bank_mrad, heading_rad, alt_x1000, tas_x1000, lat_rad, lon_rad = (
+            pitch_e5, bank_e5, heading_rad, alt_x1000, tas_x1000, lat_rad, lon_rad = (
                 float(p) for p in parts)
-            self._pitch_deg = math.degrees(pitch_mrad / 1_000_000)
-            self._bank_deg = math.degrees(bank_mrad / 1_000_000)
-            # The real unit is 1e-5 rad (a 15 deg turn reads -25754, right wing down
-            # negative; flighttest/sim.py agrees); _pitch_deg/_bank_deg above are 10x
-            # too small but Flight Centre gets them that way, so only the formation
-            # autopilot uses the true bank for now.
-            self._bank_true_deg = math.degrees(bank_mrad / 100_000)
+            # PSX's unit is 1e-5 rad (a 15 deg turn reads -25754, right wing down
+            # negative; flighttest/sim.py agrees). Until 2026-11-11 this divided by 1e6,
+            # sending Flight Centre a tenth of the real angles.
+            self._pitch_deg = math.degrees(pitch_e5 / 100_000)
+            self._bank_deg = math.degrees(bank_e5 / 100_000)
             self._heading_deg = math.degrees(heading_rad) % 360
             self._alt_ft = alt_x1000 / 1000
             self._tas_kt = tas_x1000 / 1000
@@ -1635,7 +1632,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
             # feet, an island's terrain looked higher than FL360: "TOO LOW" (2026-11-11)
             "elev_ft": self._elev_ft / 100.0 if self._elev_ft is not None else None,
             "gw_t": fp_formation.gross_weight_t(self._eicas_grwt, self._true_zfw),
-            "heading_true": self._heading_deg, "bank_deg": self._bank_true_deg,
+            "heading_true": self._heading_deg, "bank_deg": self._bank_deg,
             "track_true": fp_formation.track_from_samples(list(self._track_samples)),
             "magvar": misc.get("magvar"), "hdg_true_ref": bool(self._hdg_true_ref),
             "mcp_hdg": self._mcp_hdg, "mcp_spd": self._mcp_spd_raw,
