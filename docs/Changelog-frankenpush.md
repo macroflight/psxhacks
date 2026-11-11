@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **PinguEye on the ground:** when PinguEye's operator switches the radar on
+  while the aircraft is on the ground (`on_ground` in Flight Centre's
+  request), the traffic is sent on the ground too.
+
 - **New (opt-in): PinguEye traffic.** With `--vpilot-api ws://<vPilot
   PC>:10781/api/v1/events`, frankenpush sends Flight Centre's PinguEye the
   traffic vPilot knows about (from the PSX.NET.vPilot plugin's event stream):

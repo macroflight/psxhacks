@@ -1417,13 +1417,16 @@ class Script():  # pylint: disable=too-many-instance-attributes
             max_aircraft = int(data.get("max_aircraft") or _PINGUEYE_DEFAULT_MAX)
         except (TypeError, ValueError):
             interval, max_aircraft = _PINGUEYE_DEFAULT_INTERVAL_S, _PINGUEYE_DEFAULT_MAX
+        # on_ground (2026-11-11): the operator switched our radar on while on the ground
         request = {"send": bool(data.get("send")),
                    "interval_s": max(_PINGUEYE_MIN_INTERVAL_S, interval),
-                   "max_aircraft": max(0, max_aircraft)}
+                   "max_aircraft": max(0, max_aircraft),
+                   "on_ground": data.get("on_ground") is True}
         if request != self._pingueye_request:
-            self.logger.info("Flight Centre: PinguEye %s (every %.0f s, at most %d aircraft)%s",
+            self.logger.info("Flight Centre: PinguEye %s (every %.0f s, at most %d aircraft%s)%s",
                              "wants traffic" if request["send"] else "doesn't want traffic",
                              request["interval_s"], request["max_aircraft"],
+                             ", also on the ground" if request["on_ground"] else "",
                              "" if self.args.vpilot_api else
                              " - not sent: no --vpilot-api")
         self._pingueye_request = request
@@ -1431,12 +1434,15 @@ class Script():  # pylint: disable=too-many-instance-attributes
     def _pingueye_wanted(self):
         """Return True to send traffic: opt-in, Flight Centre asks, radar on.
 
-        The radar is on once the aircraft has been airborne for _PINGUEYE_AIRBORNE_S.
+        The radar is on once the aircraft has been airborne for _PINGUEYE_AIRBORNE_S, or
+        at once (also on the ground) while the request says on_ground (ÉireEye's operator
+        switched it on).
         """
         req = self._pingueye_request
         since = self._airborne_since
         airborne = since is not None and time.monotonic() - since >= _PINGUEYE_AIRBORNE_S
-        return bool(self.args.vpilot_api and req and req["send"] and airborne)
+        return bool(self.args.vpilot_api and req and req["send"] and
+                    (airborne or req.get("on_ground")))
 
     def _pingueye_message(self, radar_on):
         """Return a pingueye_traffic message: a complete snapshot (empty when radar_on is False)."""
@@ -1486,7 +1492,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 await ws.send_json(self._pingueye_message(False))
                 self._pingueye_sending = False
                 req = self._pingueye_request
-                why = ("on the ground" if self._on_ground else
+                why = ("on the ground" if self._on_ground and not (req or {}).get("on_ground") else
                        "Flight Centre doesn't want it" if req and not req["send"] else
                        "no longer wanted")
                 self.logger.info("PinguEye: stopped sending traffic (%s)", why)

@@ -30,8 +30,10 @@ frankenpush.py ... --vpilot-api ws://192.168.1.20:10781/api/v1/events
   (`pingueye_request` with `send: true`, which Flight Centre sends while
   someone has PinguEye open); and the aircraft has been airborne for 10 s
   (the "radar" is on; the delay ignores PSX's on-ground flag flickering
-  for a few seconds on the ground). Every `interval_s` Flight Centre asks for, never more often than
-  every 2 s.
+  for a few seconds on the ground). If PinguEye's operator switches the
+  radar on while the aircraft is on the ground (`on_ground: true` in the
+  request), it's sent on the ground too, at once. Every `interval_s`
+  Flight Centre asks for, never more often than every 2 s.
 - **What's sent:** `pingueye_traffic`, a complete snapshot each time:
   every aircraft vPilot knows (no radar filtering; Flight Centre does that),
   nearest first, at most `max_aircraft`, with callsign, type, position,
