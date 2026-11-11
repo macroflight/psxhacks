@@ -421,6 +421,8 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self._hdg_true_ref = None       # HdgTru
         self._elev_ft = None            # Elev: terrain under the aircraft
         self._ground_speed = None       # GroundSpeed (DEMAND)
+        self._eicas_grwt = None         # EicasGrWt: gross weight, 0.1 t (or 0.1 klb)
+        self._true_zfw = None           # TrueZfw, lb
         self._misc = None               # MiscFltData (DEMAND): IAS, OAT, wind, magvar
         self._track_samples = collections.deque(maxlen=40)   # (t, lat, lon) for the track
         self._formation = None          # fp_formation.Formation, made in main()
@@ -586,7 +588,8 @@ class Script():  # pylint: disable=too-many-instance-attributes
         except ValueError:
             return
         attr = {"McpBankLim": "_bank_limit", "HdgTru": "_hdg_true_ref", "Elev": "_elev_ft",
-                "GroundSpeed": "_ground_speed"}.get(key)
+                "GroundSpeed": "_ground_speed", "EicasGrWt": "_eicas_grwt",
+                "TrueZfw": "_true_zfw"}.get(key)
         if attr:
             setattr(self, attr, n)
 
@@ -1200,7 +1203,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
             # Formation autopilot (always subscribed: the subscribe-once rule, CLAUDE.md)
             for name in ("McpPshCmdL", "McpPshCmdC", "McpPshCmdR", "McpPshAltHld"):
                 self.psx.subscribe(name, self._on_mcp_button)
-            for name in ("McpBankLim", "HdgTru", "Elev", "GroundSpeed"):
+            for name in ("McpBankLim", "HdgTru", "Elev", "GroundSpeed", "EicasGrWt", "TrueZfw"):
                 self.psx.subscribe(name, self._on_int_var)
             self.psx.subscribe("MiscFltData", self._on_misc_flt_data)
             self.psx.subscribe("FltDkDoorTurn", self._on_fltdk_door_turn)
@@ -1594,14 +1597,15 @@ class Script():  # pylint: disable=too-many-instance-attributes
         pitch = afds[2] if len(afds) > 2 else None
         held = afds[7] if len(afds) > 7 and pitch == fp_formation.AFDS_ALT and afds[7] > -9000 \
             else None
-        baro = None
+        baro = press = None
         raw = self._left_pfd_alt_raw
         if raw and len(raw) > 1:
             try:
                 parts = raw[1:].split(";")
                 baro = float(parts[1] if raw[0] == "s" else parts[0])
+                press = float(parts[1])       # the STD (pressure) altitude
             except (ValueError, IndexError):
-                baro = None
+                baro = press = None
         vs_lit = bool((self._mcp_buttons.get("McpPshVs") or 0) & 8)
         misc = self._misc or {}
         snap = {name: self._mcp_buttons.get(name, 0)
@@ -1610,7 +1614,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
             "thr": afds[0] if afds else None, "roll": afds[1] if len(afds) > 1 else None,
             "pitch": pitch, "alt_held_ft": held, "bank_limit": self._bank_limit,
             "flap_lever": self._flap_lever, "on_ground": self._on_ground,
-            "alt_ft": self._alt_ft, "baro_alt_ft": baro, "elev_ft": self._elev_ft,
+            "alt_ft": self._alt_ft, "baro_alt_ft": baro, "press_alt_ft": press,
+            "elev_ft": self._elev_ft,
+            "gw_t": fp_formation.gross_weight_t(self._eicas_grwt, self._true_zfw),
             "heading_true": self._heading_deg, "bank_deg": self._bank_true_deg,
             "track_true": fp_formation.track_from_samples(list(self._track_samples)),
             "magvar": misc.get("magvar"), "hdg_true_ref": bool(self._hdg_true_ref),

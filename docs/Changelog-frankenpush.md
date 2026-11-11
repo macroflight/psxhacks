@@ -9,6 +9,13 @@
   engaged with SPD, HDG SEL, ALT or V/S and the bank limit at AUTO, and
   stops at once on any pilot input, an autopilot disconnect or 10 s without
   guidance (printed on PSX's printer). See docs/frankenpush.md.
+- **Formation autopilot: weight-aware limits and fixes from the first live
+  tests.** The minimum speed follows weight and altitude (VREF30 + 80 kt,
+  1.3 g buffet), it never climbs above the altitude where a 1,000 ft/min climb
+  is still possible, and a V/S climb losing speed is stopped with ALT HOLD;
+  the limits are reported to Flight Centre. Fixed false "PILOT OVERRIDE"
+  stops: a command arriving while the last one's knob turns were still being
+  sent double counted them. The log says what an override was.
 - **Telemetry: `gs_kt` and `trk_deg`** (ground speed, true track) for Flight
   Centre's formation geometry; the formation autopilot's MCP speed never ends
   up above the Mach/IAS limit (it showed .853 with the 0.85 limit).

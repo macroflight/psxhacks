@@ -74,24 +74,43 @@ frankenpush.py ... --formation-autopilot
   - **Speed:** the commanded ground speed turned into IAS or Mach (the MCP's
     IAS/MACH mode as it is) from our own TAS and ground speed. Never more
     than 330 kt IAS or Mach 0.85 (whichever is lower), VMO/MMO minus a
-    margin, never less than 240 kt; changes of 2 kt / 0.005 Mach or more
-    (a window above the limits is always pulled back).
+    margin; changes of 2 kt / 0.005 Mach or more (a window outside the
+    limits is always corrected).
+  - **Minimum speed** for the weight and altitude (PSX doesn't expose its
+    amber band): the highest of 240 kt, VREF30 + 80 kt and the 1.3 g
+    buffet-onset speed, plus 5 kt. From PSX's EICAS gross weight; a rough
+    747-400 model that errs high (e.g. 350 t: 253 kt low down, about
+    270 kt at FL350).
   - **Altitude:** the MCP altitude; a new altitude is flown in **V/S at
     1,000 ft/min** (frankenpush presses V/S and sets the V/S wheel) and PSX
     captures it in ALT. frankenpush presses ALT HOLD only if V/S is still on
     within 100 ft of it.
+  - **Maximum altitude:** never above the altitude where the weight still
+    allows a 1,000 ft/min climb (roughly the 747-400 maximum altitude chart
+    minus 2,000 ft: about FL323 at 315 t, FL305 at 350 t). Above it already,
+    it holds the altitude instead of climbing.
+  - **Climb protection:** V/S doesn't protect the speed. In a V/S climb with
+    the speed more than 10 kt below the MCP speed it presses ALT HOLD and
+    doesn't climb again for a minute, and not until the speed is back. (On
+    the first live test a heavy aircraft left climbing in V/S at FL349
+    stalled and crashed.)
 - **Pilot override:** any MCP heading, speed, altitude or V/S change, or
   mode change, frankenpush didn't make (except PSX's own ALT capture and
   IAS/Mach changeover), or the autopilot disconnecting: it stops at once
   ("disengaged, PILOT OVERRIDE" or "AUTOPILOT DISCONNECTED") and touches
-  nothing more. Engage again from the station.
+  nothing more. Engage again from the station. The log says what changed
+  ("PILOT OVERRIDE: MCP HDG 109, expected 104"). A mode in PSX's fault form
+  (e.g. V/S failing near a stall) stops it as "AFDS FAULT".
 - **No guidance:** no command for 10 s, or the connection to Flight Centre
   lost: it stops, the MCP stays as it is, and PSX's printer says
   "FORMATION AUTOPILOT / DISENGAGED hhmmZ / NO GUIDANCE / MCP LEFT AS IT
   WAS". A new engagement needs Flight Centre to have gone quiet for 6 s
   first (it stops sending when it hears "disengaged").
 - **Reports:** `formation_status` (engaged / standby / disengaged / refused,
-  with the reason) on every change and with every 5th command. The log has
+  with the reason) on every change and with every 5th command, with the
+  limits in use: `min_ias_kt`, `max_ias_kt`, `speed_limited` ("min"/"max"
+  while the commanded speed is clamped), `max_alt_ft` and `altitude_limited`
+  ("max" while the commanded altitude is above it). The log has
   a line for every state change and for every command that turns a knob
   ("Formation autopilot (seq 105): Hdg +15, Alt +10, press Vs, V/S +1000").
 - **Not for close formation:** Flight Centre's positions are a few seconds
