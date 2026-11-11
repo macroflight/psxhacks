@@ -329,14 +329,16 @@ class Formation:  # pylint: disable=too-many-instance-attributes
             wrong.append("FLAPS NOT UP")
         return ", ".join(wrong) or None
 
-    def _refusal(self, sim: dict) -> Optional[str]:
+    def _refusal(self, sim: dict) -> Optional[tuple]:
+        """Return (reason, detail for the log) if we won't steer at all, or None."""
         if not self.enabled:
-            return "NOT ENABLED"
+            return "NOT ENABLED", None
         if sim.get("on_ground") is True:
-            return "ON THE GROUND"
+            return "ON THE GROUND", None
         alt, elev = sim.get("alt_ft"), sim.get("elev_ft")
         if alt is not None and elev is not None and alt - elev < MIN_AGL_FT:
-            return "TOO LOW"
+            return "TOO LOW", (f"{alt - elev:.0f} ft above the terrain (altitude {alt:.0f} ft, "
+                               f"terrain {elev:.0f} ft)")
         return None
 
     # ------------------------------------------------------- Flight Centre
@@ -367,7 +369,13 @@ class Formation:  # pylint: disable=too-many-instance-attributes
             self.valid_for = 10.0
         refusal = self._refusal(sim)
         if refusal:
-            statuses = self._set_state("refused", refusal)
+            statuses = self._set_state("refused", *refusal)
+            if not statuses and silence >= REENGAGE_SILENCE_S:
+                # A new engagement refused for the same reason: say so (the state didn't change)
+                detail = f": {refusal[1]}" if refusal[1] else ""
+                self.events.append("formation autopilot: new engagement refused "
+                                   f"({refusal[0]}){detail}")
+                statuses = [self.status()]
             return [], statuses or self._every_nth()
         if self.state == "refused":
             self.state = "off"                    # its reason has gone (checked just above)
@@ -735,6 +743,20 @@ class TestFormation(unittest.TestCase):  # pylint: disable=too-many-public-metho
         self.assertEqual((st[0]["state"], st[0]["reason"]), ("standby", "NO DATA FROM PSX YET"))
         clock.t += 3
         _, st = f.on_steer(_steer(2), _sim())
+        self.assertEqual(st[0]["state"], "engaged")
+
+    def test_refusal_logged_and_cleared(self):
+        """TOO LOW is logged with the heights, again on a new engagement, and clears when gone."""
+        f, clock = self.make()
+        _, st = f.on_steer(_steer(1), _sim(alt_ft=900.0, elev_ft=100.0))
+        self.assertEqual(st[0]["reason"], "TOO LOW")
+        self.assertIn("800 ft above the terrain", f.events[-1])
+        clock.t += 30
+        _, st = f.on_steer(_steer(2), _sim(alt_ft=900.0, elev_ft=100.0))
+        self.assertEqual(st[0]["state"], "refused")
+        self.assertIn("new engagement refused (TOO LOW)", f.events[-1])
+        clock.t += 30
+        _, st = f.on_steer(_steer(3), _sim())
         self.assertEqual(st[0]["state"], "engaged")
 
     def test_refused_low_and_ground(self):

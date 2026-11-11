@@ -64,7 +64,8 @@ frankenpush.py ... --formation-autopilot
 - **Only when the crew has set it up:** the centre autopilot **CMD C**
   engaged (and not L or R), A/T mode **SPD**, roll mode **HDG SEL**, pitch
   mode **ALT** or **V/S**, bank limit **AUTO**, flaps up, airborne and at
-  least 1,000 ft above the ground. frankenpush never selects any of these
+  least 1,000 ft above the ground (true altitude minus PSX's terrain
+  elevation under the aircraft). frankenpush never selects any of these
   itself. Until they hold it reports "standby" with what's missing (e.g.
   "NOT HDG SEL, NOT ALT OR V/S") and starts as soon as they do.
 - **What it turns:** only the MCP knobs, the way a pilot would.
@@ -117,8 +118,9 @@ frankenpush.py ... --formation-autopilot
   old (vPilot) or older (the VATSIM data feed).
 
 The telemetry also carries `gs_kt` (PSX's ground speed), `trk_deg` (the
-true track over the ground, from our positions; none below 30 kt) and
-`mag_var_deg` (PSX's magnetic variation here, east positive), which Flight
+true track over the ground, from our positions; none below 30 kt),
+`mag_var_deg` (PSX's magnetic variation here, east positive) and
+`pressure_alt_ft` (the altimeter on STD; `alt_ft` is the true altitude), which Flight
 Centre uses for the formation geometry and to show pilots flying by hand
 the magnetic heading to set.
 

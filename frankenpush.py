@@ -419,7 +419,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self._mcp_buttons: dict = {}    # McpPsh* MCPMOM values (bit 8 = light)
         self._bank_limit = None         # McpBankLim, 0 = AUTO
         self._hdg_true_ref = None       # HdgTru
-        self._elev_ft = None            # Elev: terrain under the aircraft
+        self._elev_ft = None            # Elev: terrain under the aircraft, raw (ft x 100)
         self._ground_speed = None       # GroundSpeed (DEMAND)
         self._eicas_grwt = None         # EicasGrWt: gross weight, 0.1 t (or 0.1 klb)
         self._true_zfw = None           # TrueZfw, lb
@@ -836,6 +836,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 # PSX's magnetic variation here, east positive (MiscFltData), for the
                 # airborne station's "SET HDG 041 MAG" (Flight Centre 2026-11-11)
                 "mag_var_deg": (self._misc or {}).get("magvar"),
+                # Pressure altitude (the captain's PFD on STD); alt_ft is the true
+                # altitude (PiBaHeAlTas), not the altimeter (Flight Centre 2026-11-11)
+                "pressure_alt_ft": self._pressure_alt(),
             })
 
         # Scalar fields — only when changed or full.
@@ -1583,6 +1586,16 @@ class Script():  # pylint: disable=too-many-instance-attributes
         for name in ("LeftPfdAlt", "MiscFltData", "GroundSpeed"):
             self.psx.send("demand", name)
 
+    def _pressure_alt(self):
+        """Return our pressure altitude (ft, 1013.25 hPa) from LeftPfdAlt, or None."""
+        raw = self._left_pfd_alt_raw
+        if not raw or len(raw) < 2:
+            return None
+        try:
+            return round(float(raw[1:].split(";")[1]))
+        except (ValueError, IndexError):
+            return None
+
     def _true_track(self):
         """Return our true track (deg, 1 decimal) from recent positions, or None below 30 kt."""
         if self._ground_speed is None or self._ground_speed < 30:
@@ -1618,7 +1631,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
             "pitch": pitch, "alt_held_ft": held, "bank_limit": self._bank_limit,
             "flap_lever": self._flap_lever, "on_ground": self._on_ground,
             "alt_ft": self._alt_ft, "baro_alt_ft": baro, "press_alt_ft": press,
-            "elev_ft": self._elev_ft,
+            # Elev (Qi198) is ft x 100 (the router's spike filter agrees); read as plain
+            # feet, an island's terrain looked higher than FL360: "TOO LOW" (2026-11-11)
+            "elev_ft": self._elev_ft / 100.0 if self._elev_ft is not None else None,
             "gw_t": fp_formation.gross_weight_t(self._eicas_grwt, self._true_zfw),
             "heading_true": self._heading_deg, "bank_deg": self._bank_true_deg,
             "track_true": fp_formation.track_from_samples(list(self._track_samples)),
