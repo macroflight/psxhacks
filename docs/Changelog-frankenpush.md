@@ -6,7 +6,7 @@
   PC>:10781/api/v1/events`, frankenpush sends Flight Centre's PinguEye the
   traffic vPilot knows about (from the PSX.NET.vPilot plugin's event stream):
   a complete snapshot every few seconds while Flight Centre asks for it and
-  the aircraft is airborne, then one final "radar off". See
+  the aircraft has been airborne for 10 s, then one final "radar off". See
   docs/frankenpush.md.
 
 ## 1.5.0 (2026-11-10)

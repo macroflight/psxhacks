@@ -135,6 +135,9 @@ _PINGUEYE_DEFAULT_INTERVAL_S = 5.0
 _PINGUEYE_DEFAULT_MAX = 300
 # An aircraft vPilot hasn't updated for this long is left out (it updates every few s)
 _PINGUEYE_STALE_S = 60.0
+# The "radar" comes on only after this long airborne: OnGround flickers to 0 for a few
+# seconds on the ground (situ loads, elevation corrections; seen live 2026-11-10)
+_PINGUEYE_AIRBORNE_S = 10.0
 
 # Delay between the crew clearing a flight_deck_doorbell call (CallFrCabin
 # reset to 0) and telling Flight Centre, so its status display doesn't
@@ -335,6 +338,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self._pingueye_request = None
         self._pingueye_sending = False
         self._on_ground = None
+        self._airborne_since = None    # time.monotonic() when OnGround last became 0
         self.logger = None
         self.psx = None
         self.psx_connected = False
@@ -464,6 +468,10 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self._on_ground = int(value) != 0
         except (TypeError, ValueError):
             self._on_ground = None
+        if self._on_ground is not False:
+            self._airborne_since = None
+        elif self._airborne_since is None:
+            self._airborne_since = time.monotonic()
 
     def _on_position(self, _key, value):
         """Parse PiBaHeAlTas (pitch;bank;heading_rad;alt_ft*1e3;tas_kt*1e3;lat_rad;lon_rad)."""
@@ -1421,9 +1429,14 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self._pingueye_request = request
 
     def _pingueye_wanted(self):
-        """Return True to send traffic: opt-in, Flight Centre asks, radar on (airborne)."""
+        """Return True to send traffic: opt-in, Flight Centre asks, radar on.
+
+        The radar is on once the aircraft has been airborne for _PINGUEYE_AIRBORNE_S.
+        """
         req = self._pingueye_request
-        return bool(self.args.vpilot_api and req and req["send"] and self._on_ground is False)
+        since = self._airborne_since
+        airborne = since is not None and time.monotonic() - since >= _PINGUEYE_AIRBORNE_S
+        return bool(self.args.vpilot_api and req and req["send"] and airborne)
 
     def _pingueye_message(self, radar_on):
         """Return a pingueye_traffic message: a complete snapshot (empty when radar_on is False)."""
