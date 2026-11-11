@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Change: /efb says when the master router is too old for seats.** Seat
+  assignment needs frankenrouter 1.42.0 or newer on the master router; an
+  older master ignores the seat buttons, so a slave stayed "Observer" with
+  no explanation. A slave router's /efb now shows a warning with the
+  master's version instead of the buttons.
+
 - **Change: /efb page footer.** The seat controls (slave routers only) are
   now a compact strip in the bottom row, left of the buttons, instead of a
   full-width bar at the top. The "frankenpilot" button is now

@@ -354,6 +354,15 @@ master, which stores the result in SHAREDINFO (`seat_left_simulator`,
 `seat_right_simulator`) and broadcasts it. SHAREDINFO is the only source
 of truth for who sits where; add-ons such as frankenpilot follow it.
 
+The **master router must run frankenrouter 1.42.0 or newer**: an older
+master drops SEAT requests without a word and never sends the seat fields,
+so every slave stays an observer whatever the buttons say. A slave router's
+`/efb` shows a warning instead of the seat buttons when the master's
+ROUTERINFO reports an older version. The master also refuses a request for
+its own sim (the master sim never has a seat): check that the slave sims'
+`simulator` names differ from the master's. The master logs every request
+(`SEAT: ...` when applied, `Ignoring FRDP SEAT ...` with the reason).
+
 - One sim per pilot seat; every other connected slave sim is an
   observer. The master sim never has a seat (it has no pilot controls).
 - Taking an occupied pilot seat moves its occupant to the other pilot

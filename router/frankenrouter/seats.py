@@ -15,6 +15,23 @@ import unittest
 
 NOSIM = "NOSIM"
 SEATS = ("LEFT", "RIGHT", "OBSERVER")
+# The first frankenrouter version whose master assigns seats; an older master
+# drops SEAT requests without a word and never sends the seat fields.
+MIN_MASTER_VERSION = (1, 42, 0)
+
+
+def master_too_old(version):
+    """Return True when a master router reporting version can't assign seats.
+
+    version: the master's ROUTERINFO "version" ("1.41.1"). Unknown or
+    unparseable versions (None, "unknown", development builds) give False:
+    only warn when we know.
+    """
+    try:
+        parts = tuple(int(p) for p in str(version).split(".")[:3])
+    except ValueError:
+        return False
+    return len(parts) == 3 and parts < MIN_MASTER_VERSION
 
 
 def assign(left, right, sim, seat):
@@ -125,6 +142,17 @@ class TestSeats(unittest.TestCase):
         """Disconnected sims lose their seats; nobody is promoted."""
         self.assertEqual(vacate_missing("A", "B", {"B", "C"}), (NOSIM, "B", ["A"]))
         self.assertEqual(vacate_missing("A", "B", {"A", "B"}), ("A", "B", []))
+
+    def test_master_too_old(self):
+        """Only a known version older than 1.42.0 is too old."""
+        self.assertTrue(master_too_old("1.41.1"))
+        self.assertTrue(master_too_old("1.9.0"))
+        self.assertFalse(master_too_old("1.42.0"))
+        self.assertFalse(master_too_old("1.43.2"))
+        self.assertFalse(master_too_old("2.0.0"))
+        self.assertFalse(master_too_old(None))
+        self.assertFalse(master_too_old("unknown"))
+        self.assertFalse(master_too_old("1.42"))
 
 
 if __name__ == "__main__":

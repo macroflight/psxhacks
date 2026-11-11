@@ -29,6 +29,7 @@ import fw_webui as _fw_webui  # noqa: E402  pylint: disable=wrong-import-positio
 from . import variables as _variables  # noqa: E402  pylint: disable=wrong-import-position
 from . import crewalertness  # noqa: E402  pylint: disable=wrong-import-position
 from . import logpages  # noqa: E402  pylint: disable=wrong-import-position
+from . import seats  # noqa: E402  pylint: disable=wrong-import-position
 
 
 _STATIC_DIR = pathlib.Path(__file__).parent / 'static'
@@ -1790,6 +1791,7 @@ def _efb_status_dict(router, ctx):  # pylint: disable=too-many-locals
             'seat_left': router.sharedinfo.get('seat_left_simulator', 'NOSIM'),
             'seat_right': router.sharedinfo.get('seat_right_simulator', 'NOSIM'),
             'own_seat': router.own_seat(),
+            'master_version': router.master_router_version(),
             'vatsim': _vatsim_label(router.vatsim_connection(), router.vatsim_mode()),
         })
 
@@ -1902,6 +1904,11 @@ def _efb_seat_html(info):
     """
     if not info.get('is_slave') or 'own_seat' not in info:
         return ''
+    if seats.master_too_old(info.get('master_version')):
+        # An older master drops SEAT requests: say so instead of buttons that do nothing
+        return ('<span style="font-size:0.85em;color:#f59e0b">Seats: the master router '
+                f'({html.escape(str(info["master_version"]))}) is too old for seat assignment; '
+                'it needs frankenrouter 1.42.0 or newer.</span>')
     own, left, right = info['own_sim'], info['seat_left'], info['seat_right']
     labels = {'LEFT': 'Left seat', 'RIGHT': 'Right seat', 'OBSERVER': 'Observer'}
     holders = {'LEFT': left, 'RIGHT': right}

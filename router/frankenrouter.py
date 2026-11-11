@@ -803,6 +803,13 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                                                     info.get('vatsim_mode', 'unknown'))
         return sims
 
+    def master_router_version(self):
+        """Return the master router's version from its ROUTERINFO (last 2 minutes), or None."""
+        for info in self.routerinfo.values():
+            if info.get('type') == 'master' and time.time() - info.get('received', 0) < 120:
+                return info.get('version')
+        return None
+
     def own_seat(self):
         """Return this router's sim's seat (LEFT/RIGHT/OBSERVER) per SHAREDINFO."""
         return seats.seat_of(self.sharedinfo.get('seat_left_simulator', seats.NOSIM),

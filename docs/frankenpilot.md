@@ -11,7 +11,10 @@ a crew member would. PSX keeps doing the voice call-outs and checklists.
   when 0 or 1 slave sims are connected, off with 2 or more. It sits in the
   pilot seat nobody is in, as assigned on the routers' seat buttons
   (`/efb`, `/utils/sims`). The router's frankenpilot page can force it on or
-  off regardless of the number of sims. Run it in the master sim.
+  off regardless of the number of sims. Run it in the master sim. Seat
+  assignment needs frankenrouter 1.42.0 or newer on the master router: with
+  an older master the seat buttons do nothing and every sim stays an
+  observer. With both pilot seats empty frankenpilot sits in the right seat.
 - **Local** (a plain PSX main server, or a standalone frankenrouter): on by
   default; `--enabled off` switches it off. Its seat is `--seat left|right`,
   or by default the seat of PSX's own Human Pilot (Instructor > Situation >
