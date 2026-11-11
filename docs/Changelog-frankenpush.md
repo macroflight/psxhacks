@@ -9,6 +9,9 @@
   engaged with SPD, HDG SEL, ALT or V/S and the bank limit at AUTO, and
   stops at once on any pilot input, an autopilot disconnect or 10 s without
   guidance (printed on PSX's printer). See docs/frankenpush.md.
+- **Telemetry: `gs_kt` and `trk_deg`** (ground speed, true track) for Flight
+  Centre's formation geometry; the formation autopilot's MCP speed never ends
+  up above the Mach/IAS limit (it showed .853 with the 0.85 limit).
 - **PinguEye on the ground:** when PinguEye's operator switches the radar on
   while the aircraft is on the ground (`on_ground` in Flight Centre's
   request), the traffic is sent on the ground too.

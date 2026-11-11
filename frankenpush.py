@@ -826,6 +826,10 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 "bank_deg": self._bank_deg,
                 "ias_kt": round(self._ias_kt, 1) if self._ias_kt is not None else None,
                 "vs_fpm": round(self._vs_fpm) if self._vs_fpm is not None else None,
+                # Flight Centre's request 2026-11-11 (formation): PSX's ground speed, and the
+                # true track over the ground from our own positions (None when slow)
+                "gs_kt": self._ground_speed,
+                "trk_deg": self._true_track(),
             })
 
         # Scalar fields — only when changed or full.
@@ -1572,6 +1576,13 @@ class Script():  # pylint: disable=too-many-instance-attributes
             return
         for name in ("LeftPfdAlt", "MiscFltData", "GroundSpeed"):
             self.psx.send("demand", name)
+
+    def _true_track(self):
+        """Return our true track (deg, 1 decimal) from recent positions, or None below 30 kt."""
+        if self._ground_speed is None or self._ground_speed < 30:
+            return None
+        track = fp_formation.track_from_samples(list(self._track_samples))
+        return round(track, 1) if track is not None else None
 
     def _formation_snapshot(self):
         """Return the PSX state fp_formation.Formation decides on."""

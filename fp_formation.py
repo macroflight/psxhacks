@@ -122,8 +122,15 @@ def mcp_speed(cmd_gs: float, gs: float, tas: float, ias: float, oat_c: float,  #
     ratio = min(ratio, top)
     ratio = max(ratio, MIN_IAS_KT / max(ias, 1.0))
     if mach_mode:
-        return int(round(mach * ratio * 1000))
-    return int(round(ias * ratio))
+        return min(int(round(mach * ratio * 1000)), int(max_mach * 1000 + 1e-6))
+    return min(int(round(ias * ratio)), int(max_ias + 1e-6))
+
+
+def over_limit(window: int, max_ias: float, max_mach: float) -> bool:
+    """Return True if an McpWdoSpd value is above the formation limits."""
+    if window >= MCP_MACH_FROM:
+        return window > int(max_mach * 1000 + 1e-6)
+    return window > int(max_ias + 1e-6)
 
 
 class Formation:  # pylint: disable=too-many-instance-attributes
@@ -367,10 +374,13 @@ class Formation:  # pylint: disable=too-many-instance-attributes
         if None not in (raw, sim.get("gs"), sim.get("tas"), sim.get("ias"), sim.get("oat_c")) \
                 and raw <= 950:
             mach_mode = raw >= MCP_MACH_FROM
+            max_ias = float(limits.get("max_ias_kt") or 330)
+            max_mach = float(limits.get("max_mach") or 0.85)
             want = mcp_speed(cmd_gs, sim["gs"], sim["tas"], sim["ias"], sim["oat_c"], mach_mode,
-                             float(limits.get("max_ias_kt") or 330),
-                             float(limits.get("max_mach") or 0.85))
-            if abs(want - raw) >= (SPD_STEP_MACH if mach_mode else SPD_STEP_KT):
+                             max_ias, max_mach)
+            # Small changes wait for the step, but a window over the limits is always fixed
+            if abs(want - raw) >= (SPD_STEP_MACH if mach_mode else SPD_STEP_KT) or \
+                    (want != raw and over_limit(raw, max_ias, max_mach)):
                 actions += turns("McpTurnSpd", want - raw)
                 self._expect_turn("mcp_spd", raw, want, now)
         # Altitude: the window, then V/S towards it or ALT HOLD near it
@@ -570,10 +580,20 @@ class TestFormation(unittest.TestCase):
         mach = mcp_speed(500, 480, 480, 280, -54, True, 330, 0.85)
         self.assertEqual(mach, 850)      # M0.85 cap in Mach mode
 
+    def test_mach_limit_exact(self):
+        """Never above the limit (M.850, 330 kt), and a window over it is pulled back."""
+        self.assertEqual(mcp_speed(700, 400, 480, 280, -40, True, 330, 0.85), 850)
+        self.assertEqual(mcp_speed(700, 400, 400, 320, 0, False, 330, 0.85), 330)
+        f, _ = self.make()
+        actions, _ = f.on_steer(_steer(1, spd=700.0), _sim(mcp_spd=853, gs=480.0, tas=480.0))
+        self.assertIn(("turn", "McpTurnSpd", -3), actions)
+
     def test_heading_drift_and_variation(self):
-        """Track to MCP heading: minus drift, minus variation unless TRUE."""
+        """True track to MCP heading: minus drift, minus variation (east +) unless TRUE."""
         self.assertEqual(mcp_heading(90, 85, 90, 0, True), 85)
         self.assertEqual(mcp_heading(90, 90, 90, 6.6, False), 83)
+        # Canaries, 4.5 W (MiscFltData -45): true track 042, no wind -> MAG 046.5 -> 46
+        self.assertEqual(mcp_heading(42, 42, 42, -4.5, False), 46)
         self.assertEqual(mcp_heading(2, 358, 3, 0, True), 357)
 
     def test_pilot_override(self):

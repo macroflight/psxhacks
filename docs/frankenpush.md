@@ -74,7 +74,8 @@ frankenpush.py ... --formation-autopilot
   - **Speed:** the commanded ground speed turned into IAS or Mach (the MCP's
     IAS/MACH mode as it is) from our own TAS and ground speed. Never more
     than 330 kt IAS or Mach 0.85 (whichever is lower), VMO/MMO minus a
-    margin, never less than 240 kt; changes of 2 kt / 0.005 Mach or more.
+    margin, never less than 240 kt; changes of 2 kt / 0.005 Mach or more
+    (a window above the limits is always pulled back).
   - **Altitude:** the MCP altitude; a new altitude is flown in **V/S at
     1,000 ft/min** (frankenpush presses V/S and sets the V/S wheel) and PSX
     captures it in ALT. frankenpush presses ALT HOLD only if V/S is still on
@@ -95,6 +96,10 @@ frankenpush.py ... --formation-autopilot
   ("Formation autopilot (seq 105): Hdg +15, Alt +10, press Vs, V/S +1000").
 - **Not for close formation:** Flight Centre's positions are a few seconds
   old (vPilot) or older (the VATSIM data feed).
+
+The telemetry also carries `gs_kt` (PSX's ground speed) and `trk_deg` (the
+true track over the ground, from our positions; none below 30 kt), which
+Flight Centre uses for the formation geometry.
 
 The interface (v1, `formation_version` 1) is defined by Flight Centre. The
 decisions are in `fp_formation.py` (unit tests: `python3 -m unittest
