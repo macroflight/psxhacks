@@ -4,7 +4,8 @@ frankenpush connects PSX (through a frankenrouter or directly) to PSCC
 Flight Centre: it pushes the aircraft's telemetry over Flight Centre's
 `/ws/push` WebSocket and handles what Flight Centre sends back (doorbell,
 crew messages, printer text, VATSIM status). See the changelog for the
-details of each feature; this page so far describes PinguEye.
+details of each feature; this page so far describes PinguEye and the
+formation autopilot.
 
 ## PinguEye: vPilot traffic for Flight Centre's radar display (opt-in)
 
@@ -46,3 +47,55 @@ frankenpush.py ... --vpilot-api ws://192.168.1.20:10781/api/v1/events
   connection to the vPilot plugin.
 
 The interface itself (v1, `pingueye_version` 1) is defined by Flight Centre.
+
+## Formation autopilot: PinguEye flies the MCP into formation (opt-in)
+
+PinguEye's airborne station guides our aircraft into formation with another
+one (in trail, or off its left or right wing, 0.2-2 nm). With its formation
+autopilot engaged, Flight Centre sends the heading, ground speed and
+altitude to fly about every 3 seconds (`formation_steer`), and with
+`--formation-autopilot` frankenpush flies them with PSX's MCP. Without the
+option it answers "refused, NOT ENABLED" and never touches the MCP.
+
+```text
+frankenpush.py ... --formation-autopilot
+```
+
+- **Only when the crew has set it up:** the centre autopilot **CMD C**
+  engaged (and not L or R), A/T mode **SPD**, roll mode **HDG SEL**, pitch
+  mode **ALT** or **V/S**, bank limit **AUTO**, flaps up, airborne and at
+  least 1,000 ft above the ground. frankenpush never selects any of these
+  itself. Until they hold it reports "standby" with what's missing (e.g.
+  "NOT HDG SEL, NOT ALT OR V/S") and starts as soon as they do.
+- **What it turns:** only the MCP knobs, the way a pilot would.
+  - **Heading:** the commanded track, minus the drift (measured from the
+    track over the ground with the wings level) and the magnetic variation
+    (unless the heading reference is TRUE). It changes by 1 degree or more.
+  - **Speed:** the commanded ground speed turned into IAS or Mach (the MCP's
+    IAS/MACH mode as it is) from our own TAS and ground speed. Never more
+    than 330 kt IAS or Mach 0.85 (whichever is lower), VMO/MMO minus a
+    margin, never less than 240 kt; changes of 2 kt / 0.005 Mach or more.
+  - **Altitude:** the MCP altitude; a new altitude is flown in **V/S at
+    1,000 ft/min** (frankenpush presses V/S and sets the V/S wheel) and PSX
+    captures it in ALT. frankenpush presses ALT HOLD only if V/S is still on
+    within 100 ft of it.
+- **Pilot override:** any MCP heading, speed, altitude or V/S change, or
+  mode change, frankenpush didn't make (except PSX's own ALT capture and
+  IAS/Mach changeover), or the autopilot disconnecting: it stops at once
+  ("disengaged, PILOT OVERRIDE" or "AUTOPILOT DISCONNECTED") and touches
+  nothing more. Engage again from the station.
+- **No guidance:** no command for 10 s, or the connection to Flight Centre
+  lost: it stops, the MCP stays as it is, and PSX's printer says
+  "FORMATION AUTOPILOT / DISENGAGED hhmmZ / NO GUIDANCE / MCP LEFT AS IT
+  WAS". A new engagement needs Flight Centre to have gone quiet for 6 s
+  first (it stops sending when it hears "disengaged").
+- **Reports:** `formation_status` (engaged / standby / disengaged / refused,
+  with the reason) on every change and with every 5th command. The log has
+  a line for every state change and for every command that turns a knob
+  ("Formation autopilot (seq 105): Hdg +15, Alt +10, press Vs, V/S +1000").
+- **Not for close formation:** Flight Centre's positions are a few seconds
+  old (vPilot) or older (the VATSIM data feed).
+
+The interface (v1, `formation_version` 1) is defined by Flight Centre. The
+decisions are in `fp_formation.py` (unit tests: `python3 -m unittest
+fp_formation`).

@@ -26,6 +26,7 @@ Setup:
 
 import argparse
 import asyncio
+import collections
 import datetime
 import inspect
 import json
@@ -39,6 +40,7 @@ import unicodedata
 
 import aiohttp
 
+import fp_formation
 import psx
 from psxhacks_version import get_version
 
@@ -352,6 +354,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self._tas_kt = None
         self._pitch_deg = None
         self._bank_deg = None
+        self._bank_true_deg = None
         self._tail_number = None
         self._flight_number = None
         self._vatsim_status_key = None   # last logged Flight Centre vatsim_status
@@ -410,6 +413,19 @@ class Script():  # pylint: disable=too-many-instance-attributes
 
         # AFDS FMA modes (Qs434, ECON — parsed tuple or None)
         self._fma = None
+        # Formation autopilot (fp_formation.py, --formation-autopilot): PSX state it needs
+        self._afds_raw = None
+        self._mcp_spd_raw = None        # McpWdoSpd as PSX sends it (IAS kt / Mach x 1000)
+        self._mcp_buttons: dict = {}    # McpPsh* MCPMOM values (bit 8 = light)
+        self._bank_limit = None         # McpBankLim, 0 = AUTO
+        self._hdg_true_ref = None       # HdgTru
+        self._elev_ft = None            # Elev: terrain under the aircraft
+        self._ground_speed = None       # GroundSpeed (DEMAND)
+        self._misc = None               # MiscFltData (DEMAND): IAS, OAT, wind, magvar
+        self._track_samples = collections.deque(maxlen=40)   # (t, lat, lon) for the track
+        self._formation = None          # fp_formation.Formation, made in main()
+        self._formation_lock = asyncio.Lock()
+        self._formation_notify = False  # tell Flight Centre our state on the next connection
 
         # Control surface levers (ECON)
         self._flap_lever = None     # Qh389 FlapLever 0-6
@@ -483,6 +499,11 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 float(p) for p in parts)
             self._pitch_deg = math.degrees(pitch_mrad / 1_000_000)
             self._bank_deg = math.degrees(bank_mrad / 1_000_000)
+            # The real unit is 1e-5 rad (a 15 deg turn reads -25754, right wing down
+            # negative; flighttest/sim.py agrees); _pitch_deg/_bank_deg above are 10x
+            # too small but Flight Centre gets them that way, so only the formation
+            # autopilot uses the true bank for now.
+            self._bank_true_deg = math.degrees(bank_mrad / 100_000)
             self._heading_deg = math.degrees(heading_rad) % 360
             self._alt_ft = alt_x1000 / 1000
             self._tas_kt = tas_x1000 / 1000
@@ -494,6 +515,8 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self._ias_kt = self._tas_to_ias(self._tas_kt, self._alt_ft)
 
         now = time.monotonic()
+        if not self._track_samples or now - self._track_samples[-1][0] >= 0.5:
+            self._track_samples.append((now, self._lat, self._lon))
         if self._prev_alt_ft_for_vs is not None and self._prev_ts_for_vs is not None:
             dt = now - self._prev_ts_for_vs
             if dt > 0:
@@ -510,6 +533,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         # 0-399 = IAS mode (direct knots).
         try:
             n = int(value)
+            self._mcp_spd_raw = n
             if n > 950:
                 self._mcp_spd = None
             elif n >= 400:
@@ -531,11 +555,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
         except ValueError:
             pass
 
-    def _on_mcp_psh_vs(self, _key, value):
+    def _on_mcp_psh_vs(self, key, value):
         try:
             self._mcp_psh_vs = int(value)
         except ValueError:
             pass
+        self._on_mcp_button(key, value)
 
     def _on_mcp_alt(self, _key, value):
         try:
@@ -545,6 +570,33 @@ class Script():  # pylint: disable=too-many-instance-attributes
 
     def _on_afds(self, _key, value):
         self._fma = _parse_afds_fma(value)
+        self._afds_raw = value
+
+    def _on_mcp_button(self, key, value):
+        """McpPshCmdL/C/R, McpPshVs, McpPshAltHld (MCPMOM: bit 8 = light, 8192 = test)."""
+        try:
+            self._mcp_buttons[key] = int(value)
+        except ValueError:
+            pass
+
+    def _on_int_var(self, key, value):
+        """McpBankLim, HdgTru, Elev, GroundSpeed: plain integers."""
+        try:
+            n = int(value)
+        except ValueError:
+            return
+        attr = {"McpBankLim": "_bank_limit", "HdgTru": "_hdg_true_ref", "Elev": "_elev_ft",
+                "GroundSpeed": "_ground_speed"}.get(key)
+        if attr:
+            setattr(self, attr, n)
+
+    def _on_misc_flt_data(self, _key, value):
+        """MiscFltData: IAS x10; OAT x10; TAT x10; wind dir; wind speed; magnetic variation x10."""
+        try:
+            f = [int(x) for x in value.split(';')[:6]]
+            self._misc = {"ias": f[0] / 10.0, "oat_c": f[1] / 10.0, "magvar": f[5] / 10.0}
+        except (ValueError, IndexError):
+            pass
 
     def _on_left_pfd_alt(self, _key, value):
         self._left_pfd_alt_raw = value or None
@@ -1114,7 +1166,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.psx.onConnect = connected
             self.psx.onDisconnect = disconnected
             self.psx.onPause = lambda: None
-            self.psx.onResume = lambda: self.psx.send("demand", "LeftPfdAlt")
+            self.psx.onResume = self._send_demands
 
             # PSX lexicon names (confirmed from session captures):
             #   Qs0 = CfgRego (confirmed) a.k.a. AcTailNo,
@@ -1141,6 +1193,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.psx.subscribe("McpWdoAlt", self._on_mcp_alt)
             self.psx.subscribe("McpPshVs", self._on_mcp_psh_vs)
             self.psx.subscribe("Afds", self._on_afds)
+            # Formation autopilot (always subscribed: the subscribe-once rule, CLAUDE.md)
+            for name in ("McpPshCmdL", "McpPshCmdC", "McpPshCmdR", "McpPshAltHld"):
+                self.psx.subscribe(name, self._on_mcp_button)
+            for name in ("McpBankLim", "HdgTru", "Elev", "GroundSpeed"):
+                self.psx.subscribe(name, self._on_int_var)
+            self.psx.subscribe("MiscFltData", self._on_misc_flt_data)
             self.psx.subscribe("FltDkDoorTurn", self._on_fltdk_door_turn)
             self.psx.subscribe("CallFrCabin", self._on_call_fr_cabin)
             self.psx.subscribe("CfgVariant", self._on_cfg_variant)
@@ -1253,7 +1311,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
                     last_full_at = now
                 send_count += 1
                 if send_count % 5 == 0:
-                    self.psx.send("demand", "LeftPfdAlt")
+                    self._send_demands()
                 n_events = len(update.get("simevents") or [])
                 if self.args.show_sent_to_fc:
                     self.logger.info("Sent to FC: %s", json.dumps(update, indent=2))
@@ -1319,6 +1377,10 @@ class Script():  # pylint: disable=too-many-instance-attributes
                             while not self._reverse_sync_queue.empty():
                                 self._reverse_sync_queue.get_nowait()
                             self._queue_initial_status()
+                            if self._formation_notify:
+                                # Stopped steering while the connection was down: say so
+                                self._formation_notify = False
+                                self._reverse_sync_queue.put_nowait(self._formation.status())
 
                             send_task = asyncio.ensure_future(
                                 self._portal_send_loop(ws))
@@ -1328,9 +1390,11 @@ class Script():  # pylint: disable=too-many-instance-attributes
                                 self._reverse_sync_loop(ws))
                             pingueye_task = asyncio.ensure_future(
                                 self._pingueye_loop(ws))
+                            formation_task = asyncio.ensure_future(self._formation_loop())
                             try:
                                 await asyncio.wait(
-                                    [send_task, drain_task, reverse_sync_task, pingueye_task],
+                                    [send_task, drain_task, reverse_sync_task, pingueye_task,
+                                     formation_task],
                                     return_when=asyncio.FIRST_COMPLETED)
                                 close_code = ws.close_code
                                 if close_code == 4001:
@@ -1351,9 +1415,11 @@ class Script():  # pylint: disable=too-many-instance-attributes
                                 drain_task.cancel()
                                 reverse_sync_task.cancel()
                                 pingueye_task.cancel()
+                                formation_task.cancel()
                                 await asyncio.gather(
                                     send_task, drain_task, reverse_sync_task, pingueye_task,
-                                    return_exceptions=True)
+                                    formation_task, return_exceptions=True)
+                                self._formation_connection_lost()
 
                 except aiohttp.ClientResponseError as exc:
                     self.logger.warning("Portal HTTP error %s: %s", exc.status, exc.message)
@@ -1498,6 +1564,127 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 self.logger.info("PinguEye: stopped sending traffic (%s)", why)
             await asyncio.sleep(1.0)
 
+    # --- formation autopilot (fp_formation.py) ---
+
+    def _send_demands(self):
+        """Demand PSX's DEMAND variables we read (again: harmless, and covers reconnects)."""
+        if self.psx is None:
+            return
+        for name in ("LeftPfdAlt", "MiscFltData", "GroundSpeed"):
+            self.psx.send("demand", name)
+
+    def _formation_snapshot(self):
+        """Return the PSX state fp_formation.Formation decides on."""
+        afds = []
+        try:
+            afds = [int(x) for x in (self._afds_raw or "").split(";")[:9] if x != ""]
+        except ValueError:
+            afds = []
+        pitch = afds[2] if len(afds) > 2 else None
+        held = afds[7] if len(afds) > 7 and pitch == fp_formation.AFDS_ALT and afds[7] > -9000 \
+            else None
+        baro = None
+        raw = self._left_pfd_alt_raw
+        if raw and len(raw) > 1:
+            try:
+                parts = raw[1:].split(";")
+                baro = float(parts[1] if raw[0] == "s" else parts[0])
+            except (ValueError, IndexError):
+                baro = None
+        vs_lit = bool((self._mcp_buttons.get("McpPshVs") or 0) & 8)
+        misc = self._misc or {}
+        snap = {name: self._mcp_buttons.get(name, 0)
+                for name in ("McpPshCmdL", "McpPshCmdC", "McpPshCmdR")}
+        snap.update({
+            "thr": afds[0] if afds else None, "roll": afds[1] if len(afds) > 1 else None,
+            "pitch": pitch, "alt_held_ft": held, "bank_limit": self._bank_limit,
+            "flap_lever": self._flap_lever, "on_ground": self._on_ground,
+            "alt_ft": self._alt_ft, "baro_alt_ft": baro, "elev_ft": self._elev_ft,
+            "heading_true": self._heading_deg, "bank_deg": self._bank_true_deg,
+            "track_true": fp_formation.track_from_samples(list(self._track_samples)),
+            "magvar": misc.get("magvar"), "hdg_true_ref": bool(self._hdg_true_ref),
+            "mcp_hdg": self._mcp_hdg, "mcp_spd": self._mcp_spd_raw,
+            "mcp_alt": self._mcp_alt // 100 if self._mcp_alt is not None else None,
+            "mcp_vs": self._mcp_vs // 100 if (self._mcp_vs is not None and vs_lit) else None,
+            "gs": self._ground_speed, "tas": self._tas_kt, "ias": misc.get("ias"),
+            "oat_c": misc.get("oat_c"),
+        })
+        return snap
+
+    def _formation_flush(self, statuses):
+        """Log the formation autopilot's events and queue its formation_status messages."""
+        for line in self._formation.events:
+            self.logger.info("%s", line)
+        self._formation.events.clear()
+        for status in statuses:
+            self._reverse_sync_queue.put_nowait(status)
+            if status["state"] == "disengaged" and status["reason"] == "NO GUIDANCE":
+                self._formation_print("NO GUIDANCE")
+
+    def _formation_print(self, reason):
+        """Tell the crew on PSX's printer that the formation autopilot stopped steering."""
+        if not self.psx_connected:
+            return
+        stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%H%MZ")
+        lines = ["FORMATION AUTOPILOT", f"DISENGAGED {stamp}", reason,
+                 "MCP LEFT AS IT WAS"]
+        self.psx.send("PrinterText", "^".join(lines))
+
+    def _on_formation_steer(self, data):
+        """Apply one formation_steer from Flight Centre (fp_formation.Formation decides)."""
+        actions, statuses = self._formation.on_steer(data, self._formation_snapshot())
+        self._formation_flush(statuses)
+        if actions:
+            self.logger.info("Formation autopilot (seq %s): %s", data.get("seq"), ", ".join(
+                f"{a[1].replace('McpTurn', '')} {a[2]:+d}" if a[0] == "turn" else
+                f"press {a[1].replace('McpPsh', '')}" if a[0] == "press" else
+                f"V/S {a[1] * 100:+d}" for a in actions))
+            self._track_task(self._formation_do(actions))
+
+    async def _formation_do(self, actions):
+        """Send the knob turns and button presses, in order, while still engaged."""
+        async with self._formation_lock:
+            for action in actions:
+                if not self.psx_connected or self._formation.state != "engaged":
+                    return
+                if action[0] == "turn":
+                    self.psx.send(action[1], str(action[2]))
+                    await asyncio.sleep(0.1)      # DELTA events: at most 10 Hz here
+                elif action[0] == "press":
+                    value = self._mcp_buttons.get(action[1]) or 0
+                    self.psx.send(action[1], str(value | 1))
+                    await asyncio.sleep(1.0)
+                elif action[0] == "vs":
+                    # V/S just pressed: PSX shows the current V/S; set ours
+                    for _ in range(20):
+                        if self._mcp_vs is not None and \
+                                (self._mcp_buttons.get("McpPshVs") or 0) & 8:
+                            break
+                        await asyncio.sleep(0.1)
+                    current = (self._mcp_vs or 0) // 100
+                    self._formation.set_vs_expected(current, action[1])
+                    for turn in fp_formation.turns("McpTurnVs", action[1] - current):
+                        self.psx.send(turn[1], str(turn[2]))
+                        await asyncio.sleep(0.1)
+
+    async def _formation_loop(self):
+        """Watch for pilot overrides and timeouts twice a second (per portal connection)."""
+        while True:
+            await asyncio.sleep(0.5)
+            _, statuses = self._formation.tick(self._formation_snapshot())
+            self._formation_flush(statuses)
+
+    def _formation_connection_lost(self):
+        """Stop steering when the portal connection drops; tell the crew, later Flight Centre."""
+        was = self._formation.state
+        self._formation.on_connection_lost()
+        if was in ("standby", "engaged"):
+            self._formation_notify = True
+            for line in self._formation.events:
+                self.logger.info("%s", line)
+            self._formation.events.clear()
+            self._formation_print("NO GUIDANCE")
+
     def _on_vpilot_event(self, event):
         """Apply one event from the PSX.NET.vPilot plugin's stream to _vp_traffic.
 
@@ -1586,6 +1773,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
         msg_type = data.get("type")
         if msg_type == "pingueye_request":
             self._on_pingueye_request(data)
+            return
+        if msg_type == "formation_steer":
+            self._on_formation_steer(data)
             return
         if msg_type == "flight_deck_doorbell":
             call = data.get("call")
@@ -2053,6 +2243,13 @@ class Script():  # pylint: disable=too-many-instance-attributes
             '--vpilot-api-host', type=str, default=None, metavar='HOST:PORT',
             help=argparse.SUPPRESS)   # Host header through a tunnel (the plugin checks it)
         parser.add_argument(
+            '--formation-autopilot', action='store_true',
+            help="Accept steering commands from Flight Centre's PinguEye formation "
+                 "autopilot (opt-in): it then turns the MCP heading, speed, altitude and "
+                 "V/S knobs (and switches between ALT HOLD and V/S) to fly into formation, "
+                 "only while CMD C is engaged with SPD, HDG SEL, ALT or V/S and the bank "
+                 "limit at AUTO. See docs/frankenpush.md.")
+        parser.add_argument(
             '--worldflight-shop-alerts',
             action='store_true',
             help="Show an EICAS master caution alert when a purchase is made in the "
@@ -2099,6 +2296,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
     async def run(self):
         """Start everything."""
         self.handle_args()
+        self._formation = fp_formation.Formation(self.args.formation_autopilot)
 
         log_format = "%(asctime)s: %(message)s"
         logging.Formatter.converter = time.gmtime    # log times in UTC, like every psxhacks log
