@@ -3773,6 +3773,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 errors.append(f"More than one sim is online on VATSIM (not as observer): "
                               f"{', '.join(pilots)}")
         if self.config.identity.type == 'master':
+            errors.extend(self._same_sim_name_errors())
             for pattern in MASTER_ADDON_PATTERNS:
                 matches = self._find_network_clients_matching(pattern)
                 if len(matches) > 1:
@@ -3781,6 +3782,24 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                         f" ({len(matches)} clients in:"
                         f" {', '.join(sim for sim, _ in matches)})")
         return errors
+
+    def _same_sim_name_errors(self):
+        """Return an error for each slave router using the master's own simulator name.
+
+        Master only. The routers tell sims apart by [identity] simulator, so a
+        slave sim named like the master sim is taken for the master sim: it
+        never gets a seat (apply_seat_request()), and per-sim filtering (vPilot
+        status, ACP) treats it as the master's own. An easy mistake when one
+        person runs a local master and slave (2026-11-11). From the slave
+        routers' ROUTERINFO (last 60 s), so routers further down count too.
+        """
+        own = self.config.identity.simulator
+        now = time.time()
+        return [f"Slave router {info.get('router_name', '?')} uses the master's simulator "
+                f"name {own}: give the slave sim its own [identity] simulator name"
+                for uuid, info in sorted(self.routerinfo.items())
+                if uuid != self.uuid and info.get('type') == 'slave' and
+                info.get('simulator_name') == own and now - info.get('received', 0) < 60]
 
     def get_warnings(self):  # pylint: disable=too-many-branches,too-many-locals
         """Return warnings for this router (printed locally, not sent in ROUTERINFO)."""

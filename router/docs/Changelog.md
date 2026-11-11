@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **New: the master router reports a `(ROUTER)` error when a slave router
+  uses the master's simulator name.** The routers tell sims apart by
+  `[identity] simulator`, so such a slave sim was taken for the master sim
+  and could never get a seat, with no explanation. The error names the
+  slave router; give the slave sim its own name.
+
 - **Change: /efb says when the master router is too old for seats.** Seat
   assignment needs frankenrouter 1.42.0 or newer on the master router; an
   older master ignores the seat buttons, so a slave stayed "Observer" with

@@ -40,7 +40,12 @@ that that section can be listed more than once in the file. E.g
 ### `[identity]`
 
 - `simulator`: a string desribing the name of the simulator the router
-  is located in.
+  is located in. Every sim in a shared cockpit needs its own name: the
+  routers tell sims apart by it. A slave sim with the master sim's name is
+  taken for the master sim (it can never get a seat, for one), so the
+  master router reports a `(ROUTER)` error when a slave router connects
+  with its name. This is easy to get wrong when you run a master and a
+  slave router yourself: name them e.g. "CRAVE-MASTER" and "CRAVE".
 - `router`: a name describing the router. If you only have one router
   in your sim, you can use the same name as for the simulator.
 - `type`: set this to "master" (master router in a shared cockpit
