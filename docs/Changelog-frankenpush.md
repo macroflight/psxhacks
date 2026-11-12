@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Formation autopilot: LEAD TOO SLOW.** A lead slower than we can fly
+  (its ground speed needs an IAS below our minimum) is refused, and after
+  20 s of it an engagement stops, instead of overrunning the slot and
+  weaving behind it.
+- **Logon code no longer accepted:** when Flight Centre refuses a logon code
+  that worked earlier in the same run (the sim was deleted or got a new code),
+  the log says so plainly instead of the generic "rejected" message.
+- **Telemetry: `frankenpush_version`** in every full message, so Flight
+  Centre (and its API) can show which version a sim runs.
+
 - **Fix: telemetry `pitch_deg` and `bank_deg` are now in degrees.** They were
   a tenth of the real angle (PSX's unit is 1e-5 rad, divided as if 1e-6);
   Flight Centre's "My sim" page now shows the right values.

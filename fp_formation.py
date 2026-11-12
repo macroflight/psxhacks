@@ -19,8 +19,12 @@ Rules (from the user and Flight Centre's interface):
   ALT HOLD and V/S (at 1,000 ft/min) for altitude changes.
 - Any MCP or mode change it didn't make itself is a pilot override: stop
   at once, touch nothing more.
+- A lead slower than we can fly (its ground speed needs an IAS below our
+  minimum): a new engagement is refused, and steering stops after
+  LEAD_SLOW_S ("LEAD TOO SLOW", the user 2026-11-12: no weaving behind it).
 """
 
+# pylint: disable=too-many-lines
 import math
 import time
 import unittest
@@ -58,6 +62,8 @@ VS_GRACE_S = 4.0
 # After a disengage, a new engagement needs Flight Centre to have gone quiet
 # this long first (it stops sending once it hears "disengaged")
 REENGAGE_SILENCE_S = 6.0
+LEAD_SLOW_S = 20.0           # a lead too slow for this long stops an engagement
+LEAD_SLOW_MARGIN_KT = 2.0    # IAS below our minimum before the lead counts as too slow
 # Send a formation_status with every Nth command even without a change
 STATUS_EVERY = 5
 # Climb protection: V/S doesn't protect the speed (a heavy aircraft climbing at
@@ -277,6 +283,7 @@ class Formation:  # pylint: disable=too-many-instance-attributes
         self.timed_out = False      # disengaged by NO GUIDANCE: tell the crew
         self.drift = 0.0            # last drift (track - heading) measured wings level
         self.climb_blocked_until = -1e9   # climb protection (CLIMB_*)
+        self.lead_slow_since: Optional[float] = None
         # Limits we fly to now, reported in formation_status (Flight Centre 2026-11-11)
         self.limits = {"min_ias_kt": None, "max_ias_kt": None, "speed_limited": None,
                        "max_alt_ft": None, "altitude_limited": None}
@@ -343,7 +350,7 @@ class Formation:  # pylint: disable=too-many-instance-attributes
 
     # ------------------------------------------------------- Flight Centre
 
-    def on_steer(self, msg: dict, sim: dict):  # pylint: disable=too-many-return-statements,too-many-branches
+    def on_steer(self, msg: dict, sim: dict):  # pylint: disable=too-many-return-statements,too-many-branches,too-many-statements
         """Handle one formation_steer; return (actions, statuses)."""
         now = self.clock()
         try:
@@ -368,6 +375,13 @@ class Formation:  # pylint: disable=too-many-instance-attributes
         except (TypeError, ValueError):
             self.valid_for = 10.0
         refusal = self._refusal(sim)
+        slow = self._lead_slow(msg, sim, now)
+        if slow and not refusal:
+            if self.state == "engaged":
+                if now - self.lead_slow_since >= LEAD_SLOW_S:
+                    return [], self._set_state("disengaged", "LEAD TOO SLOW", slow)
+            elif self.state != "disengaged" or silence >= REENGAGE_SILENCE_S:
+                refusal = ("LEAD TOO SLOW", slow)
         if refusal:
             statuses = self._set_state("refused", *refusal)
             if not statuses and silence >= REENGAGE_SILENCE_S:
@@ -400,6 +414,29 @@ class Formation:  # pylint: disable=too-many-instance-attributes
         elif flags != (self.limits["speed_limited"], self.limits["altitude_limited"]):
             statuses = [self.status()]
         return actions, statuses or self._every_nth()
+
+    def _lead_slow(self, msg: dict, sim: dict, now: float) -> Optional[str]:
+        """Return why the lead is too slow for us (log detail), or None; tracks since when."""
+        try:
+            lead_gs = float((msg.get("lead") or {})["gs_kt"])
+        except (KeyError, TypeError, ValueError):
+            lead_gs = None
+        if lead_gs is None or None in (sim.get("gs"), sim.get("tas"), sim.get("ias")):
+            self.lead_slow_since = None
+            return None
+        limits = msg.get("limits") or {}
+        press = sim.get("press_alt_ft") or sim.get("baro_alt_ft") or sim.get("alt_ft") or 0.0
+        top = max_ias_here(press, float(limits.get("max_ias_kt") or 330),
+                           float(limits.get("max_mach") or 0.85))
+        floor = min(min_ias_for(sim["gw_t"], press) if sim.get("gw_t") else MIN_IAS_KT, top)
+        need = sim["ias"] * max(sim["tas"] + (lead_gs - sim["gs"]), 1.0) / max(sim["tas"], 1.0)
+        if need >= floor - LEAD_SLOW_MARGIN_KT:
+            self.lead_slow_since = None
+            return None
+        if self.lead_slow_since is None:
+            self.lead_slow_since = now
+        return (f"the lead's {lead_gs:.0f} kt ground speed needs {need:.0f} kt IAS here, "
+                f"our minimum is {math.ceil(floor):.0f} kt")
 
     def _every_nth(self) -> list:
         return [self.status()] if self.count % STATUS_EVERY == 0 else []
@@ -686,8 +723,9 @@ def _sim(**kw):
     return base
 
 
-def _steer(seq, hdg=90.0, spd=480.0, alt=35000.0, engaged=True):
+def _steer(seq, hdg=90.0, spd=480.0, alt=35000.0, engaged=True, lead_gs=None):  # pylint: disable=too-many-arguments,too-many-positional-arguments
     return {"type": "formation_steer", "engaged": engaged, "seq": seq, "valid_for_s": 10,
+            **({"lead": {"callsign": "LEAD1", "gs_kt": lead_gs}} if lead_gs is not None else {}),
             "command": {"heading_deg": hdg, "speed_kt": spd, "altitude_ft": alt},
             "limits": {"max_ias_kt": 330, "max_mach": 0.85, "vs_fpm": 1000}}
 
@@ -887,6 +925,38 @@ class TestFormation(unittest.TestCase):  # pylint: disable=too-many-public-metho
         clock.t += 3
         actions, st = f.on_steer(_steer(2), _sim(mcp_spd=300))
         self.assertEqual((f.state, actions), ("disengaged", []))
+
+    def test_lead_too_slow_refused(self):
+        """A new engagement on a lead slower than our minimum is refused."""
+        f, _ = self.make()
+        _, st = f.on_steer(_steer(1, lead_gs=400.0), _sim())   # needs ~233 kt IAS < 240
+        self.assertEqual((st[0]["state"], st[0]["reason"]), ("refused", "LEAD TOO SLOW"))
+        _, st = f.on_steer(_steer(2, lead_gs=430.0), _sim())   # needs ~251 kt: fine
+        self.assertEqual(f.state, "engaged")
+
+    def test_lead_too_slow_while_engaged(self):
+        """A lead too slow for LEAD_SLOW_S stops an engagement."""
+        f, clock = self.make()
+        f.on_steer(_steer(1, lead_gs=480.0), _sim())
+        self.assertEqual(f.state, "engaged")
+        f.on_steer(_steer(2, lead_gs=400.0), _sim())
+        clock.t += 15
+        f.on_steer(_steer(3, lead_gs=400.0), _sim())
+        self.assertEqual(f.state, "engaged")                    # brief: keep going
+        clock.t += 6
+        _, st = f.on_steer(_steer(4, lead_gs=400.0), _sim())
+        self.assertEqual((st[0]["state"], st[0]["reason"]), ("disengaged", "LEAD TOO SLOW"))
+
+    def test_lead_slow_briefly_recovers(self):
+        """A moment of a slow lead doesn't stop it."""
+        f, clock = self.make()
+        f.on_steer(_steer(1, lead_gs=480.0), _sim())
+        f.on_steer(_steer(2, lead_gs=400.0), _sim())
+        clock.t += 15
+        f.on_steer(_steer(3, lead_gs=470.0), _sim())
+        clock.t += 15
+        f.on_steer(_steer(4, lead_gs=400.0), _sim())
+        self.assertEqual(f.state, "engaged")
 
     def test_seq_and_disengage(self):
         """Old seq ignored; engaged false stops at once."""

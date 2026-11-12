@@ -7,6 +7,18 @@ crew messages, printer text, VATSIM status). See the changelog for the
 details of each feature; this page so far describes PinguEye and the
 formation autopilot.
 
+## Logon code
+
+frankenpush logs on with the sim's logon code from Flight Centre's My sim
+page (`--logon-code`, remembered in `~/.frankenpush_cache.json`) at
+`--portal-url` (default the live Flight Centre). If Flight Centre refuses
+the code, the log says "Portal rejected logon code" and frankenpush retries
+every 30 s. If a code that worked earlier in the same run stops working (the
+sim was deleted, or its logon code renewed, on Flight Centre; the Flight
+Centre test site drops every sim when it is updated), the log says "Portal NO
+LONGER accepts the logon code": get the new code and restart frankenpush
+with it.
+
 ## PinguEye: vPilot traffic for Flight Centre's radar display (opt-in)
 
 PinguEye is Flight Centre's air-defence-radar style display. With
@@ -102,6 +114,11 @@ frankenpush.py ... --formation-autopilot
   nothing more. Engage again from the station. The log says what changed
   ("PILOT OVERRIDE: MCP HDG 109, expected 104"). A mode in PSX's fault form
   (e.g. V/S failing near a stall) stops it as "AFDS FAULT".
+- **Lead too slow:** if the lead's ground speed would need an IAS below our
+  minimum speed (by more than 2 kt), frankenpush won't fly formation behind
+  it: a new engagement is "refused, LEAD TOO SLOW", and while steering it
+  stops after 20 s of that ("disengaged, LEAD TOO SLOW"; a moment of it, e.g.
+  in a turn, is fine). The log gives the speeds.
 - **No guidance:** no command for 10 s, or the connection to Flight Centre
   lost: it stops, the MCP stays as it is, and PSX's printer says
   "FORMATION AUTOPILOT / DISENGAGED hhmmZ / NO GUIDANCE / MCP LEFT AS IT
@@ -123,6 +140,9 @@ true track over the ground, from our positions; none below 30 kt),
 `pressure_alt_ft` (the altimeter on STD; `alt_ft` is the true altitude), which Flight
 Centre uses for the formation geometry and to show pilots flying by hand
 the magnetic heading to set.
+
+Every full telemetry message (the first after connecting, then periodically)
+also carries `frankenpush_version`, which Flight Centre shows for the sim.
 
 The interface (v1, `formation_version` 1) is defined by Flight Centre. The
 decisions are in `fp_formation.py` (unit tests: `python3 -m unittest

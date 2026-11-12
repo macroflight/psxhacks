@@ -816,6 +816,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
         tick, so checking them for change adds cost without saving bandwidth.
         """
         update = {"protocol_version": PUSH_PROTOCOL_VERSION}
+        if full:
+            # Flight Centre's API shows it (request 2026-11-12); one full message is enough
+            update["frankenpush_version"] = str(__version__)
 
         # Position and derived real-time values — always include when we have a fix.
         if self._lat is not None:
@@ -1357,11 +1360,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
             if stationary and (self._tas_kt or 0) >= _STATIONARY_SPEED_THRESHOLD_KT:
                 return
 
-    async def push_loop_coro(self):  # pylint: disable=too-many-statements
+    async def push_loop_coro(self):  # pylint: disable=too-many-statements,too-many-branches
         """Maintain a WebSocket connection to the portal and send position updates."""
         ws_url = self.args.portal_url.rstrip('/') + '/ws/push'
         headers = {"Authorization": f"Bearer {self.args.logon_code}"}
         backoff = 2.0
+        logon_worked = False  # the portal accepted the code earlier in this run
 
         try:
             self.logger.debug("Starting %s", inspect.currentframe().f_code.co_name)
@@ -1372,6 +1376,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
                         async with session.ws_connect(
                                 ws_url, headers=headers, heartbeat=30) as ws:
                             self.logger.info("Connected to portal")
+                            connected_at = time.monotonic()
                             backoff = 2.0  # reset on successful connection
                             # Forget any doorbell request from a previous
                             # connection -- Flight Centre resets its own
@@ -1407,10 +1412,21 @@ class Script():  # pylint: disable=too-many-instance-attributes
                                      formation_task],
                                     return_when=asyncio.FIRST_COMPLETED)
                                 close_code = ws.close_code
+                                if close_code != 4001 and time.monotonic() - connected_at > 10:
+                                    logon_worked = True  # a rejected code is closed at once
                                 if close_code == 4001:
-                                    self.logger.error(
-                                        "Portal rejected logon code — "
-                                        "check the code shown on your My sim page")
+                                    if logon_worked:
+                                        # e.g. the sim was deleted or got a new logon code on
+                                        # Flight Centre (the test site drops all sims on update)
+                                        self.logger.error(
+                                            "Portal NO LONGER accepts the logon code (it did "
+                                            "earlier) -- the sim was deleted or its logon code "
+                                            "renewed on Flight Centre; get the new code from "
+                                            "your My sim page and restart frankenpush")
+                                    else:
+                                        self.logger.error(
+                                            "Portal rejected logon code — "
+                                            "check the code shown on your My sim page")
                                     backoff = 30.0  # long pause on auth failure
                                 elif close_code == 4002:
                                     _print_version_mismatch_warning()
