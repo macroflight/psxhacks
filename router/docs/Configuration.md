@@ -249,7 +249,7 @@ keep_hours = 168
   other clients see a frozen/rubberbanding position. When enabled, a
   master or standalone router that hasn't seen a fresh
   `Qs121` for more than 1 second re-sends the last cached value,
-  alternating a physically-imperceptible ±1 µrad bank wobble so each
+  alternating a physically-imperceptible ±0.0006° (one 1e-5 rad unit) bank wobble so each
   keepalive is a distinct value (some PSX main clients ignore an
   identical repeat). Only sent once the aircraft is confirmed on the
   ground (`Qi257` "OnGround" == 1) - the same trick applied to a

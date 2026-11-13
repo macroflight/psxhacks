@@ -2817,8 +2817,8 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
 
         if acft_state is not None:
             PiBaHeAlTas = acft_state.split(';')
-            pitch = math.degrees(float(PiBaHeAlTas[0]) / 1000000)
-            bank = math.degrees(float(PiBaHeAlTas[1]) / 1000000)
+            pitch = math.degrees(float(PiBaHeAlTas[0]) / 100000)  # PSX unit: 1e-5 rad
+            bank = math.degrees(float(PiBaHeAlTas[1]) / 100000)  # PSX unit: 1e-5 rad
             heading_true = math.degrees(float(PiBaHeAlTas[2]))
             alt_true_ft = float(PiBaHeAlTas[3]) / 1000
             tas = float(PiBaHeAlTas[4]) / 1000
@@ -4475,7 +4475,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         when it has not been updated for more than 1 s.
 
         PSX main clients may ignore an identical Qs121 value. We alternate ±1
-        µrad on bank (index 1) so each keepalive is unique while remaining
+        unit (1e-5 rad, 0.0006 deg) on bank (index 1) so each keepalive is unique while remaining
         physically imperceptible on a stationary aircraft.
         """
         if self.config.identity.type not in ['master', 'standalone']:
@@ -4487,7 +4487,7 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
         age = self.cache.get_age('Qs121')
         if age <= 1.0:
             return
-        # Qi257 (OnGround): the ±1 µrad bank wobble is imperceptible for a
+        # Qi257 (OnGround): the ±1-unit (1e-5 rad) bank wobble is imperceptible for a
         # stationary aircraft on the ground, but the same trick applied to
         # an airborne (but momentarily motionless, e.g. frozen/paused)
         # aircraft is not a safe assumption. Qi257==1 means on the ground,

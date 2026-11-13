@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Fix: pitch and bank in the router log's aircraft status line were 10
+  times too small.** PSX sends them in units of 1e-5 rad.
+
 - **New: the master router reports a `(ROUTER)` error when a slave router
   uses the master's simulator name.** The routers tell sims apart by
   `[identity] simulator`, so such a slave sim was taken for the master sim
