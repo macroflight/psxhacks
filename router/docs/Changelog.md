@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.43.0 (2026-11-13)
 
 - **New: FrankenPilot on the `/services` page** (Start/Stop/Restart), like
   the other master-sim add-ons. Needs the updated `frankencontrol.py` on
