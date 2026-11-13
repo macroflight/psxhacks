@@ -72,6 +72,7 @@ SERVICES: dict[str, ServiceSpec] = {
     "cmc_psx": ServiceSpec("CMC-PSX", "cmc_psx", "java_jar", "CMC-PSX.jar"),
     "frankentanker": ServiceSpec("FrankenTanker", "frankentanker", "python", "frankentanker.py"),
     "frankenpush": ServiceSpec("FrankenPush", "frankenpush", "python", "frankenpush.py"),
+    "frankenpilot": ServiceSpec("FrankenPilot", "frankenpilot", "python", "frankenpilot.py"),
     # Prefix "psx_simlink", not "psx_simlink_bridge": releases ship as e.g.
     # psx_simlink_bridge_windows_v1_0b.exe, but some installs have it as
     # plain psx_simlink.exe. Keep in sync with stop_psx_simlink_bridge.ps1.

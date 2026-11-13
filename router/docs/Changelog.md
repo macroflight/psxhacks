@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **New: FrankenPilot on the `/services` page** (Start/Stop/Restart), like
+  the other master-sim add-ons. Needs the updated `frankencontrol.py` on
+  the master sim; the router page itself shows whatever FrankenControl
+  reports.
+
 - **Fix: pitch and bank in the router log's aircraft status line were 10
   times too small.** PSX sends them in units of 1e-5 rad.
 
