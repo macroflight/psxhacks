@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Fix: engine anti-ice could go on on the ground while engines were still
+  starting: "all engines running" was N1 18 % or more, which an engine
+  passes before its start is complete (FTECH1 at EFHK, 2026-11-13: ON 22 s
+  before engines 3 and 4 finished). Now it waits until every start switch
+  is back in, plus 60 s. Wing anti-ice is still only ever switched in flight.
+
 - Fix: a turnaround in the same session (taxi in, shutdown, start, taxi out)
   stayed in the after-landing phase, so the next departure runway was
   "crossed" (strobes only) and the runway entry flow never ran (WorldFlight1

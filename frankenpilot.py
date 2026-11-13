@@ -56,6 +56,7 @@ EICAS_A = {
     'ANTI-ICE NAC': 129, 'ANTI-ICE WING': 130, 'ICING WING': 131,
 }
 EICAS_C = {'ICING NAC': 47}
+ENGINES_SETTLED_S = 60.0   # ground anti-ice: wait after the last engine start (user, 11-13)
 # Readable fuel panel switch names for the log
 FUEL_LABELS = {
     'FuelCtrL': "center pump L", 'FuelCtrR': "center pump R",
@@ -498,6 +499,7 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.cloud_exit_at = None      # when we last left cloud while icing
         self.icing_clear_since = None  # TAT > 10 C since
         self.icing_nac_waiting = False  # >ICING NAC on the ground before all engines ran
+        self.engines_started_at = None  # when all engines were first running and started
         self.stby_std_above, self.arrival_qnh_done, self.prev_alt = None, None, None
         self.step_cruise_since = None   # level in VNAV PTH cruise since (step climbs)
         self.step_next_look = 0.0       # when to read VNAV CRZ 2/3 next
@@ -561,12 +563,27 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             return None
 
     def engines_running(self):
-        """Return True when all four engines run (N1 at least 18 %, EngParam fields 13-16)."""
+        """Return True when all four engines run and are started.
+
+        N1 at least 18 % (EngParam fields 13-16) AND every start switch back in
+        (EngStartSw1-4 = 0: starter cut out). N1 passes 18 % while an engine is
+        still starting (FTECH1 2026-11-13: engine anti-ice went on 22 s before
+        engines 3 and 4 finished their start).
+        """
         try:
             n1 = [int(v) for v in self.psx.get("EngParam").split(";")[13:17]]
+            starting = [int(self.psx.get(f"EngStartSw{n}") or 0) for n in (1, 2, 3, 4)]
         except (AttributeError, ValueError):
             return False
-        return len(n1) == 4 and min(n1) >= 180
+        return len(n1) == 4 and min(n1) >= 180 and not any(starting)
+
+    def engines_settled(self, now):
+        """Return True once all engines have been running and started for ENGINES_SETTLED_S."""
+        if not self.engines_running():
+            self.engines_started_at = None
+            return False
+        self.engines_started_at = self.engines_started_at or now
+        return now - self.engines_started_at >= ENGINES_SETTLED_S
 
     def eicas(self, cat):
         """Return the set of message numbers in an EICAS list (A or C)."""
@@ -659,7 +676,8 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
     def setup_psx(self):
         """Subscribe to everything frankenpilot reads."""
         for name in ("id", "CfgPin2Prog", "PiBaHeAlTas", "OnGround", "GroundSpeed",
-                     "MiscFltData", "EngParam", "Tla", "FlapLever", "SpdBrkLever", "GearLever",
+                     "MiscFltData", "EngParam", "EngStartSw1", "EngStartSw2", "EngStartSw3",
+                     "EngStartSw4", "Tla", "FlapLever", "SpdBrkLever", "GearLever",
                      "Autobr", "ApuStart",
                      "PackSel1", "PackSel2", "PackSel3", "LtLandOubL", "LtLandOubR", "LtLandInbL",
                      "LtLandInbR", "LtRwyTurnL", "LtRwyTurnR", "LtTaxi", "LtStrobe", "LtWing",
@@ -1470,10 +1488,10 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.anti_ice_off(now, on_ground, tat, new_a)
 
     def anti_ice_on(self, now, on_ground, in_icing, tat, new_c):
-        """Engine anti-ice on; on the ground only once all engines run (after engine start)."""
+        """Engine anti-ice on; on the ground only 60 s after the last engine start is complete."""
         if EICAS_C['ICING NAC'] in new_c:
             self.icing_nac_waiting = True
-        if on_ground and not self.engines_running():
+        if on_ground and not self.engines_settled(now):
             return
         if self.icing_nac_waiting and EICAS_C['ICING NAC'] in self.last_eicas['C']:
             self.icing, self.icing_nac_waiting = True, False

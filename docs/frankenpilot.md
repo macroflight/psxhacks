@@ -107,8 +107,9 @@ config file (`[actions]`, names in brackets).
   - Manual system, and fog on the ground: 30 s in a row in cloud.
   - Not in climb and cruise at SAT -40 C or colder (Boeing), and not on a
     descent where TAT will be above 10 C within a minute.
-  - On the ground, once all four engines are running (never before engine
-    start), also when the departure weather means icing conditions right
+  - On the ground, engine anti-ice only 60 s after all four engines are
+    running and started (N1 18 % or more and every start switch back in;
+    never before or during engine start), also when the departure weather means icing conditions right
     after takeoff at 10 C or colder: visibility 1,600 m or less,
     precipitation, or BKN/OVC (5 oktas or more) below 3,000 ft (FEW/SCT
     alone don't count). The departure weather is its METAR in PSX, or, when
