@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **New: the departure and destination METARs are refreshed every 10
+  minutes within 100 nm** of the airport, from the active METAR source
+  (NOAA or VATSIM), instead of every 30 minutes with the bulk download.
+
+- **Deprecated: `--metar-live-refresh`** no longer has any effect and logs
+  a warning; remove it from your startup script. It only ever refreshed
+  VATSIM METARs, so with NOAA (the default source since 2.7.0) it did
+  nothing, and VATSIM's METARs were often older than NOAA's anyway (35
+  minutes behind on 2026-11-13). The new departure/destination refresh
+  replaces it.
+
 - **New: drifting CBs have an arrow on the weather map**, as long as the
   distance they drift in an hour, labelled with heading and speed (grey
   and dashed while decaying).

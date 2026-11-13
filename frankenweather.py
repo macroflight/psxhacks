@@ -284,15 +284,23 @@ _STATIONS_CACHE = os.path.join(os.path.expanduser("~"), ".cache", "frankenweathe
 _DEFAULT_CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".frankenweather.toml")
 _VATSIM_ALL_URL = "https://metar.vatsim.net/all"
 _VATSIM_CACHE_MAX_S = 1800             # re-fetch VATSIM METARs every 30 minutes
-# EXPERIMENTAL (--metar-live-refresh): metar.vatsim.net also serves a
+# Departure/destination METAR refresh: metar.vatsim.net also serves a
 # comma-separated subset of stations at the same path (confirmed live:
 # https://metar.vatsim.net/EGLL,KLAX returns both in one response, same
 # one-line-per-station format as /all; an unknown ICAO is silently omitted,
-# never an error). Used for a short-timeout, per-cycle refresh of just the
-# airports actually in use as zones, so they can be fresher than the 30-
-# minute bulk cache without polling /all more often for everyone else.
-_VATSIM_LIVE_URL = "https://metar.vatsim.net/{icaos}"
-_VATSIM_LIVE_TIMEOUT_S = 30.0
+# never an error). aviationweather.gov's data API does the same for NOAA's
+# reports ("METAR EGLL 130820Z ..." lines). Within _AIRPORT_METAR_REFRESH_NM
+# of the FMC departure or destination airport, that airport's METAR is
+# fetched from the active source (--primary-metar-source) every
+# _AIRPORT_METAR_REFRESH_S, so it is not up to 30 minutes old (the bulk caches
+# refresh every 30 minutes). Replaced --metar-live-refresh (2026-11-13), which
+# only ever applied to VATSIM-sourced zones and so did nothing with NOAA, the
+# default source since 2.7.0.
+_VATSIM_STATIONS_URL = "https://metar.vatsim.net/{icaos}"
+_NOAA_STATIONS_URL = "https://aviationweather.gov/api/data/metar?ids={icaos}&format=raw"
+_STATIONS_FETCH_TIMEOUT_S = 30.0
+_AIRPORT_METAR_REFRESH_S = 600
+_AIRPORT_METAR_REFRESH_NM = 100.0
 # Secondary METAR source used only for the METAR-fallback path, when VATSIM's
 # own (ATC/pilot-reported) network doesn't cover a station near enough to be
 # useful -- NOAA's hourly cycle files have much broader, non-VATSIM-dependent
@@ -2390,6 +2398,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self.vatsim_cache_time = 0.0
         # NOAA METAR cache (secondary source, METAR-fallback path only): ICAO → raw METAR
         self.noaa_metar_cache: dict = {}
+        self._airport_metar_fetched: dict = {}   # icao -> time of its last dep/dst refresh
         self.noaa_metar_cache_time = 0.0
 
         # Last MetarsUp (Qs464) value we wrote ourselves, so we can recognize
@@ -8411,36 +8420,75 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.logger.warning("VATSIM METAR cache refresh failed: %s", exc)
             return False
 
-    async def _fetch_vatsim_live(
+    async def _fetch_station_metars(
             self, session: aiohttp.ClientSession, icaos: set) -> dict:
-        """EXPERIMENTAL (--metar-live-refresh): fetch just these ICAOs, fresh.
+        """Fetch just these ICAOs' current METARs from the active source.
 
-        One batch request (metar.vatsim.net accepts a comma-separated list
-        at the same path as a single station) with a short
-        _VATSIM_LIVE_TIMEOUT_S timeout, so a slow/unresponsive VATSIM
-        doesn't hold up a zone update cycle. Returns {} on any failure or
-        timeout -- callers fall back to whatever cached METAR they already
-        had, which is the whole point: this only ever refines an
-        already-selected zone/airport, never decides placement.
+        One request (both sources accept a comma-separated list), short
+        timeout, so a slow server doesn't hold up a zone update. Returns
+        icao -> raw line in the bulk caches' format ("EGLL 130820Z ..."), or
+        {} on any failure -- callers keep what they already had.
         """
         if not icaos:
             return {}
-        url = _VATSIM_LIVE_URL.format(icaos=",".join(sorted(icaos)))
+        noaa = self.args.primary_metar_source == 'noaa'
+        url = (_NOAA_STATIONS_URL if noaa else _VATSIM_STATIONS_URL).format(
+            icaos=",".join(sorted(icaos)))
+        name = "NOAA" if noaa else "VATSIM"
         try:
             async with session.get(
-                    url, timeout=aiohttp.ClientTimeout(total=_VATSIM_LIVE_TIMEOUT_S)) as r:
+                    url, timeout=aiohttp.ClientTimeout(total=_STATIONS_FETCH_TIMEOUT_S)) as r:
                 if r.status != 200:
-                    self.logger.warning("VATSIM METAR live fetch: HTTP %d", r.status)
+                    self.logger.warning("%s METAR fetch for %s: HTTP %d",
+                                        name, ",".join(sorted(icaos)), r.status)
                     return {}
-                text = await r.text()
-                metars = _parse_vatsim_metar_lines(text)
-                self.logger.debug(
-                    "VATSIM METAR live fetch: %d/%d requested stations returned",
-                    len(metars), len(icaos))
-                return metars
+                text = (await r.read()).decode("utf-8", errors="replace")
         except Exception as exc:  # pylint: disable=broad-exception-caught
-            self.logger.warning("VATSIM METAR live fetch failed: %s", exc)
+            self.logger.warning("%s METAR fetch for %s failed: %s",
+                                name, ",".join(sorted(icaos)), exc)
             return {}
+        lines = []
+        for line in text.splitlines():
+            parts = line.strip().split(maxsplit=1)
+            if len(parts) == 2 and parts[0] in ("METAR", "SPECI"):
+                line = parts[1]
+            lines.append(line)
+        metars = _parse_vatsim_metar_lines("\n".join(lines))
+        return {icao: raw for icao, raw in metars.items() if icao in icaos}
+
+    async def _refresh_airport_metars(self, session: aiohttp.ClientSession) -> None:
+        """Every 10 min, a fresh METAR for the FMC departure/destination when within 100 nm.
+
+        Fetched from the active source (--primary-metar-source) and put into
+        that source's cache if it is newer than what the cache has (same
+        newest-observation rules as the NOAA cycle files), so the zone update
+        that follows uses it.
+        """
+        if self.ac_lat is None:
+            return
+        now = time.time()
+        due = set()
+        for icao in (self.fmc_dep_icao, self.fmc_dst_icao):
+            if not icao or icao not in self.airports:
+                continue
+            if now - self._airport_metar_fetched.get(icao, 0.0) < _AIRPORT_METAR_REFRESH_S:
+                continue
+            lat, lon = self.airports[icao]
+            if self._dist_nm(self.ac_lat, self.ac_lon, lat, lon) <= _AIRPORT_METAR_REFRESH_NM:
+                due.add(icao)
+        if not due:
+            return
+        for icao in due:
+            self._airport_metar_fetched[icao] = now
+        noaa = self.args.primary_metar_source == 'noaa'
+        cache = self.noaa_metar_cache if noaa else self.vatsim_cache
+        utc_now = datetime.now(timezone.utc)
+        for icao, line in (await self._fetch_station_metars(session, due)).items():
+            old = cache.get(icao)
+            if line != old and _noaa_metar_better(line, old, utc_now):
+                cache[icao] = line
+                self.logger.info("Airport METAR refresh (%s): %s",
+                                 "NOAA" if noaa else "VATSIM", line)
 
     async def _refresh_noaa_metar_cache(self, session: aiohttp.ClientSession) -> bool:
         """Fetch NOAA's current-hour METAR cycle file and update the local cache.
@@ -9103,6 +9151,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # Refresh --primary-metar-source's cache if stale; fails over to the
         # other source as a stand-in on failure (see _refresh_primary_metar_cache()).
         await self._refresh_primary_metar_cache(session)
+        await self._refresh_airport_metars(session)
         metar_cache = self._metar_lookup_cache()
 
         # Find all airports within snapping range for each zone
@@ -9248,29 +9297,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         for i in range(7):
             if i not in locked:
                 self._zone_snap[i + 1] = (positions[i], (*snap_positions[i], snap_icaos[i]))
-
-        # EXPERIMENTAL (--metar-live-refresh): try a fresher live VATSIM reading
-        # for every zone that already got a real METAR from VATSIM above. Never
-        # touches zone/airport selection -- that's already final by this point --
-        # and silently keeps the existing cached text for any ICAO the live fetch
-        # doesn't return (not in VATSIM's live data, or the fetch failed/timed out).
-        if self.args.metar_live_refresh:
-            live_icaos = {
-                snap_icaos[i] for i in range(7)
-                if raw_metars[i] is not None and metar_sources[i] == "VATSIM"
-            }
-            if live_icaos:
-                live_metars = await self._fetch_vatsim_live(session, live_icaos)
-                if live_metars:
-                    self.vatsim_cache.update(live_metars)
-                for i in range(7):
-                    if metar_sources[i] != "VATSIM":
-                        continue
-                    fresh = live_metars.get(snap_icaos[i])
-                    if fresh is not None and fresh != raw_metars[i]:
-                        self.logger.debug(
-                            "Zone %d → %s: live VATSIM METAR refresh", i + 1, snap_icaos[i])
-                        raw_metars[i] = fresh
 
         # Fetch Open-Meteo for all 7 zones — CB always comes from OM even for METAR zones
         om_batch, fetch_failed, oldest_s = await self._fetch_om_batch(snap_positions)
@@ -10970,16 +10996,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "fallback path (where both are always consulted regardless of "
                  "this setting).")
         parser.add_argument(
-            '--metar-live-refresh', action='store_true',
-            help="EXPERIMENTAL: once a zone has been assigned a real (fresh, "
-                 "cached) METAR by the normal selection rule, additionally try a "
-                 "short-timeout live fetch of just that airport's current METAR "
-                 "straight from VATSIM, to get something fresher than the bulk "
-                 "cache (which only refreshes every 30 minutes). Falls back "
-                 "silently to the already-selected cached METAR on failure or "
-                 "timeout; never changes which airport a zone snaps to, and never "
-                 "turns a cache miss/stale METAR into a hit. Off by default.")
-        parser.add_argument(
             '--no-sigmet', action='store_true',
             help="Turn off frankenweather's SIGMET system (on by default). With it, "
                  "frankenweather downloads SIGMETs from aviationweather.gov itself "
@@ -11171,6 +11187,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             '--turb-rate', type=int, default=None, help=argparse.SUPPRESS)
         parser.add_argument(
             '--turb-intensity-bias', type=int, default=None, help=argparse.SUPPRESS)
+        parser.add_argument(
+            '--metar-live-refresh', action='store_true', help=argparse.SUPPRESS)
         self.args = parser.parse_args()
         if self.args.psx_port_override is not None:
             if self.args.psx_port_override != self.args.psx_port:
@@ -11195,6 +11213,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         ('turb_rate', None),
         ('turb_intensity_bias', None),
         ('turb_config_file', 'turbulence settings are now part of --config-file'),
+        ('metar_live_refresh', 'the departure and destination METARs are now refreshed '
+         'every 10 min within 100 nm, from whichever METAR source is active'),
     )
 
     def _warn_removed_args(self) -> None:

@@ -94,6 +94,11 @@ Features:
   available (NOAA by default, VATSIM as the fallback; `--primary-metar-source
   vatsim` swaps them), otherwise from Open-Meteo.
 
+- Within 100 nm of the FMC departure or destination airport, that
+  airport's METAR is fetched from the active METAR source every 10
+  minutes (the bulk METAR download is only refreshed every 30 minutes),
+  so the weather there follows a new METAR or SPECI within minutes.
+
 - A zone whose weather comes from Open-Meteo gets a METAR with only its
   name, the time it was placed and a remark saying why
   (e.g. `X328 231230Z RMK FRANKENWX MODEL WX`), so PSX's Instructor
