@@ -163,10 +163,11 @@ it.
 - **Step climbs** (`step_climb`, NG FMC): when VNAV says a step climb is
   due ("STEP TO FL350 / AT NOW" on VNAV CRZ page 2/3), frankenpilot sets
   the MCP altitude to VNAV's STEP TO level and pushes the altitude knob
-  once. Whether the step comes from the LEGS page or from VNAV's automatic
-  steps (STEP size) doesn't matter. Only when all of this holds: level in
-  cruise in VNAV PTH, STEP not 0, the MCP altitude still at the cruise
-  altitude, and not online on VATSIM (online, ATC gives the step climb).
+  once. Never online on VATSIM (online, ATC gives the step climbs).
+  Offline, whenever the aircraft is level in cruise in VNAV PTH with A/T
+  SPD and VNAV CRZ lists a STEP TO level with AT NOW. The STEP size
+  doesn't matter (VNAV lists a STEP TO level even with STEP 0), and
+  neither does the step's origin (LEGS page or VNAV's automatic steps).
   PSX doesn't put VNAV's next step on the network (docs/psx-issues.md), so
   frankenpilot reads the page on its own side's CDU: when that CDU already
   shows VNAV CRZ 2/3 every 30 s; otherwise 5 minutes after levelling off,

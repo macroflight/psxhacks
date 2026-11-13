@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Change: step climbs follow one rule: never online on VATSIM; offline,
+  level in VNAV PTH with A/T SPD, climb to the STEP TO level VNAV CRZ
+  lists once it says AT NOW. The STEP size and the MCP altitude no longer
+  matter (FTECH1, 2026-11-13: stayed at FL300 for hours with STEP 0 and
+  VNAV showing a step to FL340).
+
 - Fix: engine anti-ice could go on on the ground while engines were still
   starting: "all engines running" was N1 18 % or more, which an engine
   passes before its start is complete (FTECH1 at EFHK, 2026-11-13: ON 22 s

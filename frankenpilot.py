@@ -2090,19 +2090,19 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             self.step_busy = False
 
     def step_climb_blocker(self, page):
-        """Return why a due step climb mustn't be done, or None."""
-        if page['step_size'] in ("", "0"):
-            return "STEP is 0 (no step climbs)"
+        """Return why a due step climb mustn't be done, or None.
+
+        The rule (user, 2026-11-13): never online on VATSIM; offline, in level
+        VNAV PTH with A/T SPD (check_step_climb()), climb to the STEP TO level
+        VNAV CRZ lists once it says AT NOW. The STEP size doesn't matter (FTECH1
+        sat at FL300 for hours with STEP 0 and VNAV showing a step to FL340),
+        nor does the MCP altitude: it is set to the STEP TO level first.
+        """
         if not page['step_to_ft']:
             return "no STEP TO level"
         online = self.vatsim_online()
         if online[0] is not False:
             return f"{online[1]} (ATC gives step climbs online)"
-        crz = page['crz_alt'] or ""
-        crz_ft = int(crz[2:]) * 100 if crz.startswith("FL") else (int(crz) if crz else None)
-        mcp = self.get_int("McpWdoAlt")
-        if mcp is None or crz_ft is None or mcp * 100 != crz_ft:
-            return f"MCP altitude {mcp}00 isn't the cruise altitude {crz}"
         return None
 
     async def cdu_key(self, side, name):
