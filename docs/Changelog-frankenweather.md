@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Deprecated: `--sync-tropopause`** no longer has any effect and logs a
+  warning; remove it from your startup script. In a test flight through
+  the tropopause (two headless sims side by side, 2026-11-13), PSX's
+  temperatures aloft were identical to 0.1 C with the tropopause set from
+  Open-Meteo (35,212 ft, -54 C) and with PSX's default (38,000 ft, -67 C):
+  the wind/temperature corridor frankenweather writes sets them.
+
 - **Fix: two programs sharing the terrain cache could break a tile
   download** when both fetched the same tile at once (they wrote the same
   temporary file; one read a half-written tile, the other crashed). Each
