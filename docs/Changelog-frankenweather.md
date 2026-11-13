@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Fix: two programs sharing the terrain cache could break a tile
+  download** when both fetched the same tile at once (they wrote the same
+  temporary file; one read a half-written tile, the other crashed). Each
+  download now has a temporary file of its own.
+
 - **New: the departure and destination METARs are refreshed every 10
   minutes within 100 nm** of the airport, from the active METAR source
   (NOAA or VATSIM), instead of every 30 minutes with the bulk download.

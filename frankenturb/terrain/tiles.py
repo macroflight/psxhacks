@@ -8,6 +8,7 @@ Available from AWS S3 (no credentials required):
 import logging
 import math
 import os
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -18,6 +19,11 @@ import requests  # pylint: disable=import-error
 from ..disk_cache import remove_stale_tmp
 
 log = logging.getLogger(__name__)
+
+# The process umask, read once at import (os.umask can only be read by setting it,
+# which is not thread-safe later on, while tiles download in threads).
+_UMASK = os.umask(0o022)
+os.umask(_UMASK)
 
 COPERNICUS_BASE = "https://copernicus-dem-30m.s3.amazonaws.com"
 TILE_LIST_URL = f"{COPERNICUS_BASE}/tileList.txt"
@@ -271,13 +277,20 @@ class TileCache:
         r = requests.get(url, timeout=120, stream=True)
         r.raise_for_status()
 
-        # Write to a temp file then rename so we never leave a partial tile.
-        tmp = dest.with_suffix(".tmp")
+        # Write to a temp file of our own, then rename it into place, so we never
+        # leave a partial tile. The temp name is unique (mkstemp): with a fixed
+        # name, two processes sharing the cache that download the same tile at
+        # once wrote into the same file, one renamed it while the other was still
+        # writing, and both failed (one read a half-written tile, the other found
+        # its temp file gone; two headless frankenweathers, 2026-11-13).
+        fd, tmp_name = tempfile.mkstemp(prefix=dest.stem + ".", suffix=".tmp", dir=dest.parent)
+        tmp = Path(tmp_name)
         try:
-            with tmp.open("wb") as f:
+            with os.fdopen(fd, "wb") as f:
                 for chunk in r.iter_content(chunk_size=_CHUNK):
                     f.write(chunk)
-            tmp.rename(dest)
+            os.chmod(tmp, 0o666 & ~_UMASK)   # mkstemp makes it 0600; tiles stay shareable
+            os.replace(tmp, dest)
         except Exception:
             tmp.unlink(missing_ok=True)
             raise
