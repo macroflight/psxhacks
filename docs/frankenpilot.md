@@ -73,7 +73,8 @@ config file (`[actions]`, names in brackets).
   destination on the descent, not 10,000 ft above sea level): landing and
   logo lights off / on (`lights_10000`).
 - **5,000 ft above the destination**: autobrake 4 if none is set
-  (`autobrake_5000`; level in `autobrake_setting`).
+  (`autobrake_5000`; level in `autobrake_setting`). A setting the crew
+  already made is left alone, and the log says so.
 - **After runway exit** (landed, slower than 30 kt and off every runway for
   3 seconds, using PSX's runway data: turning onto another runway or
   backtracking is still on a runway; without runway data, turned more than

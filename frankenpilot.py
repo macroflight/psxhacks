@@ -1009,10 +1009,12 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         for rwy in parse_local_runways(self.psx.get("LocalRwys")):
             cross, t, rhdg = runway_position(lat, lon, rwy)
             if cross <= self.params['runway_half_width_m'] and -0.05 <= t <= 1.05:
-                aligned = heading_diff(hdg, rhdg) < 20 or heading_diff(hdg, rhdg + 180) < 20
                 where = (f"{cross:.0f} m from the centreline, heading {hdg:.0f} "
                          f"(runway {rhdg % 360:.0f}/{(rhdg + 180) % 360:.0f}), {gs:.0f} kt")
-                return rwy[0], rwy[3], aligned, where
+                if heading_diff(hdg, rhdg + 180) < 20:
+                    # name the end we're moving along: 22, not 04 (FTECH1 RJTT 11-13)
+                    return rwy[3], rwy[0], True, where
+                return rwy[0], rwy[3], heading_diff(hdg, rhdg) < 20, where
         return None, None, False, ""
 
     def check_runway(self, lat, lon, hdg, gs):
@@ -1037,9 +1039,10 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             what = ("the FMC departure runway, but after landing (taxiing in), so not a takeoff"
                     if is_dep and self.phase == 'TAXI_IN' else
                     f"not the departure runway ({dep_rwy or 'none in the FMC'}) and not lined up")
-            self.decide(f"on runway {on.strip()}, {what} ({where}): crossing it, strobes on "
-                        "until clear")
-            self.spawn(self.write("LtStrobe", 1, f"Strobes on: crossing runway {on.strip()}"))
+            self.decide(f"on runway {on.strip()}/{other.strip()}, {what} ({where}): crossing it, "
+                        "strobes on until clear")
+            self.spawn(self.write("LtStrobe", 1,
+                                  f"Strobes on: crossing runway {on.strip()}/{other.strip()}"))
         elif not on and self.crossing:
             self.crossing = False
             self.decide("off the runway again: crossing done, strobes off")
@@ -1165,6 +1168,12 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
                             f"autobrake {self.params['autobrake_setting']}")
                 text = f"Descent: autobrake {self.params['autobrake_setting']} (none set)"
                 self.spawn(self.write("Autobr", setting, text))
+            elif self.actions['autobrake_5000']:
+                current = {v: k for k, v in AUTOBRAKE.items()}.get(self.get_int("Autobr"), '?')
+                self.decide(f"descending through {alt:.0f} ft = "
+                            f"{self.params['autobrake_agl_ft']:.0f} ft above the destination "
+                            f"({dst or '?'}, {dst_elev:.0f} ft): autobrake {current} already set "
+                            "by the crew, left alone")
         self.above_autobrake_alt = ab_above
 
     async def lights_10000(self, on):

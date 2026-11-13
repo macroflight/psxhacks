@@ -1,5 +1,15 @@
 # frankenpilot changelog
 
+## Unreleased
+
+- Fix: the log named a runway by its first end whatever the direction
+  (FTECH1 at RJTT, 2026-11-13: "last on runway 04" after landing on 22).
+  It now names the end the aircraft is moving along, and both ends
+  ("04/22") when crossing a runway.
+- Change: at 5,000 ft above the destination the log now also says when
+  the crew had already set an autobrake and frankenpilot left it alone
+  (before, nothing was logged then).
+
 ## 0.2.0 (2026-11-13)
 
 - Change: step climbs follow one rule: never online on VATSIM; offline,
