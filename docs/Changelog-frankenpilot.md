@@ -1,6 +1,6 @@
 # frankenpilot changelog
 
-## Unreleased
+## 0.2.0 (2026-11-13)
 
 - Change: step climbs follow one rule: never online on VATSIM; offline,
   level in VNAV PTH with A/T SPD, climb to the STEP TO level VNAV CRZ
