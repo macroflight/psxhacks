@@ -1,6 +1,6 @@
 # frankenweather changelog
 
-## Unreleased
+## 2.8.0 (2026-11-13)
 
 - **Deprecated: `--sync-tropopause`** no longer has any effect and logs a
   warning; remove it from your startup script. In a test flight through
