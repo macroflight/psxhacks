@@ -1,5 +1,11 @@
 # start_scripts changelog
 
+## 1.14.1 (2026-11-13)
+
+- The override example file has commented examples for frankenpush's
+  opt-in PinguEye traffic (`--vpilot-api`) and formation autopilot
+  (`--formation-autopilot`).
+
 ## 1.14.0 (2026-11-10)
 
 - **New: frankenpilot.** `$StartFrankenpilot`, `$FrankenpilotOptions` and
