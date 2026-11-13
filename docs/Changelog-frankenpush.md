@@ -1,6 +1,6 @@
 # frankenpush changelog
 
-## Unreleased
+## 1.6.0 (2026-11-13)
 
 - **Formation autopilot: LEAD TOO SLOW.** A lead slower than we can fly
   (its ground speed needs an IAS below our minimum) is refused, and after
