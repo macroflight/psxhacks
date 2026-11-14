@@ -123,7 +123,10 @@ class Sim:
     def _connect(self) -> socket.socket:
         sock = socket.create_connection((self.host, self.port))
         sock.settimeout(1.0)
-        sock.sendall(f"name={self.name}:flighttest\n".encode())
+        # Every send is a new connection: without this, a frankenrouter's
+        # post-connect quarantine drops our weather/situ writes (night 2026-11-14).
+        # PSX itself ignores the addon line.
+        sock.sendall(f"name={self.name}:flighttest\naddon=FRANKENROUTER:1:NO_QUARANTINE\n".encode())
         return sock
 
     def send(self, lines: list, settle_s: float = 3.0, interval_s: float = 0.0) -> None:

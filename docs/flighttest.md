@@ -10,6 +10,10 @@ altitude and track.
 It writes to the sim: it repositions the aircraft, presses MCP buttons,
 and sets the registration, FMC route and flight number. Use it only on a
 test sim, connected to a router port (or a PSX Main Server) of its own.
+Each write opens a new connection that sends
+`addon=FRANKENROUTER:1:NO_QUARANTINE`, so a frankenrouter doesn't drop
+its weather and situ writes as coming from a just-connected client (the
+router logs a warning for each one).
 
 ## How it flies
 
