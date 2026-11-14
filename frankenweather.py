@@ -73,6 +73,7 @@ import fw_efb as _fw_efb  # pylint: disable=wrong-import-order
 import fw_webui as _fw_webui  # pylint: disable=wrong-import-order
 import fw_sigmet as _fw_sigmet  # pylint: disable=wrong-import-order
 import fw_drift as _fw_drift  # pylint: disable=wrong-import-order
+import fw_holdover as _fw_holdover  # pylint: disable=wrong-import-order
 from psxhacks_version import get_version
 
 
@@ -2556,6 +2557,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._cb_test_motion: dict = {}   # test CB zone -> (heading, speed) it was placed with
         # --advanced-zones, switchable at runtime on the CB test page (set in run())
         self._advanced_zones = False
+        # --realistic-holdover: AntiIceFluid (Qi178) as last seen, and the de-icing
+        # tool's value frankenweather replaced (value, time.monotonic()) -- if the
+        # tool writes that value again soon after, frankenweather backs off
+        self._fluid_last: Optional[int] = None
+        self._fluid_replaced: Optional[tuple] = None
+        self._fluid_backoff_value: Optional[int] = None
+        self._holdover_status = "off"
+        self._holdover_efb_minutes: dict = {}
         # Delay (s) for the weather-zone writes PSX.NET.Orchestration gets (the
         # routers apply it; see orchestration_feed_coro()), set in run()
         self._orch_delay_s = 0.0
@@ -8295,6 +8304,83 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 self.logger.info("Airport METAR refresh (%s): %s",
                                  "NOAA" if noaa else "VATSIM", line)
 
+    # --- --realistic-holdover (fw_holdover.py)
+
+    def _holdover_metar(self) -> tuple:
+        """Return (icao, METAR) for the airport the aircraft is at (within 5 nm), or (None, None).
+
+        The active METAR source first, then the other one.
+        """
+        if self.ac_lat is None or not self.airports:
+            return None, None
+        noaa = self.args.primary_metar_source == 'noaa'
+        caches = (self.noaa_metar_cache, self.vatsim_cache) if noaa else \
+                 (self.vatsim_cache, self.noaa_metar_cache)
+        for icao, _, _, _ in self._airports_within_nm(self.ac_lat, self.ac_lon, 5.0):
+            for cache in caches:
+                if cache and cache.get(icao):
+                    return icao, cache[icao]
+        return None, None
+
+    def handle_anti_ice_fluid(self, _key: str, value: str) -> None:  # pylint: disable=too-many-return-statements
+        """--realistic-holdover: replace a de-icing tool's fixed holdover time with the FAA one.
+
+        PSX only counts AntiIceFluid down, a minute at a time, so a rise on
+        the ground is a new fluid application (PSX.NET.EFB's De-Icing page,
+        PSX's Instructor). Its value tells the fluid type
+        (--holdover-efb-minutes); the departure airport's METAR tells the
+        weather.
+        """
+        try:
+            new = int(value)
+        except (TypeError, ValueError):
+            return
+        old, self._fluid_last = self._fluid_last, new
+        if not self.args.realistic_holdover or old is None or new <= old or not self._on_ground():
+            return
+        now = time.monotonic()
+        replaced = self._fluid_replaced
+        if replaced and new == replaced[0] and now - replaced[1] < 120:
+            self.logger.warning("Holdover: the de-icing tool set %d min again right after "
+                                "frankenweather replaced it: left alone for this de-icing "
+                                "(not fighting it)", new)
+            self._fluid_replaced, self._fluid_backoff_value = None, new
+            self._holdover_status = f"backed off: the de-icing tool keeps {new} min"
+            return
+        if new == self._fluid_backoff_value:
+            return
+        self._fluid_backoff_value = None
+        fluid = self._holdover_efb_minutes.get(new)
+        if fluid is None:
+            self.logger.info("Holdover: anti-icing fluid set to %d min, which isn't a known fluid "
+                             "type value (--holdover-efb-minutes): left alone", new)
+            self._holdover_status = f"{new} min: unknown fluid type, left alone"
+            return
+        icao, metar = self._holdover_metar()
+        if not metar:
+            self.logger.info("Holdover: Type %s fluid applied (%d min) but no METAR for an airport "
+                             "within 5 nm: left alone", fluid, new)
+            self._holdover_status = f"Type {fluid} {new} min: no METAR here, left alone"
+            return
+        day = _fw_holdover.solar_elevation_deg(self.ac_lat, self.ac_lon,
+                                               datetime.now(timezone.utc)) > 0.0
+        oat = _fw_holdover.metar_temperature_c(metar.split())
+        condition, why = _fw_holdover.condition_from_metar(metar, None, day)
+        minutes, how = _fw_holdover.holdover_minutes(fluid, condition,
+                                                     oat if oat is not None else 0.0)
+        if minutes is None or minutes == new:
+            self.logger.info("Holdover: Type %s fluid applied, %d min; %s: %s; %s -> left alone",
+                             fluid, new, icao, why, how)
+            self._holdover_status = f"Type {fluid} {new} min ({icao}: {how})"
+            return
+        self.logger.info("Holdover: Type %s fluid applied, the de-icing tool set %d min; "
+                         "%s METAR %s; %s; %s -> AntiIceFluid %d",
+                         fluid, new, icao, metar, why, how, minutes)
+        self._fluid_replaced = (new, now)
+        self._fluid_last = minutes
+        self._holdover_status = f"Type {fluid}: {minutes} min instead of {new} ({icao}: {how})"
+        self.psx_send_and_set("AntiIceFluid", str(minutes))
+
     async def _refresh_noaa_metar_cache(self, session: aiohttp.ClientSession) -> bool:
         """Fetch NOAA's current-hour METAR cycle file and update the local cache.
 
@@ -10685,6 +10771,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.psx.subscribe("WxClust")
             self.psx.subscribe("AcftHeight")
             self.psx.subscribe("OnGround")
+            self.psx.subscribe("AntiIceFluid", self.handle_anti_ice_fluid)
 
             await self.psx.connect(self.args.psx_host, self.args.psx_port)
             self.logger.warning("psx.connect() returned — this should not happen")
@@ -10834,6 +10921,19 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "the cell takes its weather.")
         parser.add_argument(   # on by default since 2026-11-10; still accepted, does nothing
             '--advanced-zones', action='store_true', help=argparse.SUPPRESS)
+        parser.add_argument(
+            '--realistic-holdover', action='store_true',
+            help="Realistic anti-icing fluid holdover times (testing). When a de-icing tool "
+                 "(PSX.NET.EFB's De-Icing page) sets PSX's fixed holdover time on the ground, "
+                 "frankenweather replaces it with the FAA holdover time for that fluid type in "
+                 "the airport's current METAR weather (snow intensity from visibility, freezing "
+                 "drizzle/rain/fog, rain on a cold-soaked wing; 1 minute where the FAA gives none, "
+                 "at most PSX's 45). See docs/frankenweather.md.")
+        parser.add_argument(
+            '--holdover-efb-minutes', default="14:I", metavar='MIN:TYPE,...',
+            help="With --realistic-holdover: the fixed times the de-icing tool sets, and the "
+                 "fluid type each one means (I, II or IV), e.g. 14:I,20:II,35:IV. Other values "
+                 "are left alone (14 = PSX.NET.EFB Type I).")
         parser.add_argument(
             '--new-zone-infront-range', type=_parse_nm_range, default=(150.0, 250.0),
             metavar='MIN,MAX',
@@ -10985,6 +11085,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._advanced_zones = not self.args.no_advanced_zones
         self._orch_delay_s = min(max(float(self.args.orchestration_delay), 0.0), 60.0)
         self._orch_rate_hz = min(max(float(self.args.orchestration_rate), 1.0), 20.0)
+        try:
+            self._holdover_efb_minutes = _fw_holdover.parse_fluid_minutes(
+                self.args.holdover_efb_minutes)
+        except ValueError as exc:
+            parser.error(f"--holdover-efb-minutes: {exc}")
+        if self.args.realistic_holdover:
+            self._holdover_status = "waiting for a de-icing"
 
     # (arg_name, replacement_hint or None for the generic "just remove it" message)
     _REMOVED_ARGS = (

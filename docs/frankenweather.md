@@ -969,6 +969,46 @@ departure MSA, the arrival QNH below the destination MSA). Each airport is
 worked out once (a few seconds, in the background); in cruise nothing is
 done.
 
+### Realistic de-icing holdover times (`--realistic-holdover`, testing)
+
+PSX's anti-icing fluid is a holdover timer (AntiIceFluid, 0-45 minutes):
+while it runs, no ice builds up; when it reaches 0, PSX ices again at its
+usual rate. De-icing tools set it to a fixed time per fluid type
+(PSX.NET.EFB's De-Icing page: Type I 14 minutes), whatever the weather.
+
+With `--realistic-holdover`, frankenweather replaces that time with the
+holdover time the FAA guidelines (winter 2026-2027) give for the fluid in
+the airport's current weather:
+
+- It notices the de-icing: on the ground, the timer going up (PSX only ever
+  counts it down). The value says the fluid type: `--holdover-efb-minutes`,
+  default `14:I` (add the de-icing tool's other times, e.g.
+  `14:I,20:II,35:IV`); other values are left alone.
+- The weather is the METAR of the airport the aircraft is at (within
+  5 nm), from the active METAR source: snow, with its intensity from the
+  visibility, day or night and temperature (FAA Table 57, so `1SM -SN` at
+  night is moderate snow), snow with freezing fog, freezing drizzle, light
+  freezing rain, freezing fog or mist, rain on a cold-soaked wing, snow
+  mixed with rain.
+- The time is the middle of the FAA range for Type I (aluminium surfaces),
+  generic Type II or generic Type IV (undiluted), at most 45 minutes (PSX's
+  limit, so Type IV in light snow simply gets 45). Heavy snow, moderate or
+  heavy freezing rain, ice pellets and hail have no FAA holdover time:
+  1 minute. With no precipitation or fog the tool's time is kept (PSX
+  doesn't ice on the ground then anyway).
+- After takeoff there is no protection, as in reality: PSX itself runs the
+  timer down to 0 during the takeoff run, from about 70 kt (tested
+  2026-11-14), and empties any value written in flight within seconds.
+- If the de-icing tool writes its own time back right after
+  frankenweather replaced it, frankenweather leaves it alone for that
+  de-icing rather than fight it.
+
+Each decision is logged in plain words, e.g. `Holdover: Type I fluid
+applied, the de-icing tool set 14 min; ESPA METAR ...; -SN, visibility
+1800 m, night, -3 C: moderate snow (FAA Table 57); FAA Type I, moderate
+snow, -3 C: 6-11 min -> 8 min -> AntiIceFluid 8`. The de-icing itself (the
+ice removed) is not changed. Off by default.
+
 ### Time sync
 
 Keeps PSX's clocks (`TimeEarth`, and both cockpit clocks `TimeClockL`/

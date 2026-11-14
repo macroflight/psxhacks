@@ -1,5 +1,13 @@
 # frankenweather changelog
 
+## Unreleased
+
+- **New (testing): `--realistic-holdover`.** When a de-icing tool (such as
+  PSX.NET.EFB's De-Icing page) sets PSX's fixed anti-icing fluid holdover
+  time on the ground, frankenweather replaces it with the FAA holdover time
+  for that fluid type in the airport's current METAR weather. Fluid types by the tool's times:
+  `--holdover-efb-minutes` (default `14:I`). See docs/frankenweather.md.
+
 ## 2.8.0 (2026-11-13)
 
 - **Deprecated: `--sync-tropopause`** no longer has any effect and logs a
