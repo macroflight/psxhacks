@@ -57,12 +57,16 @@ _INTENSITY_MAP = {
     "NEG": 0.0,
     "SMTH": 0.0,
     "SMTH-LGHT": 0.08,
+    "SMTH-LGT": 0.08,     # aviationweather.gov's spellings (LGT, not LGHT)
     "LGHT": 0.17,
+    "LGT": 0.17,
     "LGHT-MOD": 0.25,
+    "LGT-MOD": 0.25,
     "MOD": 0.37,
     "MOD-SEV": 0.50,
     "SEV": 0.60,
     "SEV-EXTM": 0.75,
+    "SEV-EXTRM": 0.75,
     "EXTM": 0.85,
     "EXTRM": 0.85,
 }
@@ -84,11 +88,77 @@ class PirepRecord:  # pylint: disable=too-many-instance-attributes
     raw_int: str         # original AWC intensity code (e.g. "MOD-SEV")
 
 
+def bbox_around(lat: float, lon: float, radius_nm: float) -> str:
+    """Return aviationweather.gov's bbox ("minLat,minLon,maxLat,maxLon") around a point."""
+    dlat = radius_nm / 60.0
+    dlon = radius_nm / (60.0 * max(0.1, math.cos(math.radians(lat))))
+    return (f"{max(-90.0, lat - dlat):.2f},{max(-180.0, lon - dlon):.2f},"
+            f"{min(90.0, lat + dlat):.2f},{min(180.0, lon + dlon):.2f}")
+
+
 def _approx_nm(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Equirectangular great-circle approximation in nautical miles."""
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1) * math.cos(math.radians((lat1 + lat2) / 2.0))
     return math.degrees(math.sqrt(dlat ** 2 + dlon ** 2)) * 60.0
+
+
+def _hundreds_ft(value) -> Optional[float]:
+    """Return a level given in hundreds of feet (AWC's fltLvl, tbBas1, tbTop1) in feet, or None."""
+    try:
+        return float(value) * 100.0
+    except (TypeError, ValueError):
+        return None
+
+
+def _intensity(item: dict) -> tuple[float, str]:
+    """Return (0-1 intensity, AWC code) of a PIREP's turbulence.
+
+    aviationweather.gov's JSON has tbInt1 (and tbInt2 for a second group,
+    e.g. "CONS LGT CHOP OCNL MOD CHOP": tbInt1 LGT, tbInt2 MOD -- halfway
+    between the two); older feeds had tbInt.
+    """
+    first = (item.get("tbInt1") or item.get("tbInt") or "").strip().upper()
+    second = (item.get("tbInt2") or "").strip().upper()
+    intensity = _INTENSITY_MAP.get(first, 0.0)
+    other = _INTENSITY_MAP.get(second, 0.0)
+    if other > intensity:
+        return (intensity + other) / 2.0, f"{first} OCNL {second}"
+    return intensity, first
+
+
+def _layer_ft(item: dict) -> tuple[Optional[float], Optional[float]]:
+    """Return (base_ft, top_ft) of a PIREP's turbulence (MSL), or (None, None).
+
+    The turbulence layer (tbBas1/tbTop1, hundreds of feet) if reported,
+    else the flight level (fltLvl); older feeds had altitudeFtMsl(Base/Top).
+    """
+    base, top = _hundreds_ft(item.get("tbBas1")), _hundreds_ft(item.get("tbTop1"))
+    if base is None and top is None:
+        level = _hundreds_ft(item.get("fltLvl"))
+        if level is None:
+            try:
+                top = float(item.get("altitudeFtMslTop") or item.get("altitudeFtMsl"))
+                base = float(item.get("altitudeFtMslBase") or item.get("altitudeFtMsl"))
+            except (TypeError, ValueError):
+                return None, None
+        else:
+            base = top = level
+    base = base if base is not None else top
+    top = top if top is not None else base
+    return min(base, top), max(base, top)
+
+
+def _age_min(item: dict, now: float) -> float:
+    """Return the PIREP's age in minutes (obsTime: epoch seconds, or ISO text in older feeds)."""
+    obs = item.get("obsTime")
+    if isinstance(obs, (int, float)):
+        return (now - float(obs)) / 60.0
+    try:
+        obs_dt = datetime.datetime.fromisoformat((obs or "").replace("Z", "+00:00"))
+        return (now - obs_dt.timestamp()) / 60.0
+    except (ValueError, AttributeError, TypeError):
+        return 60.0
 
 
 def _parse_record(
@@ -97,37 +167,25 @@ def _parse_record(
     query_lon: float,
     now: float,
 ) -> Optional[PirepRecord]:
-    """Parse one AWC JSON item into a PirepRecord, or None if unusable."""
-    raw_int = (item.get("tbInt") or "").strip()
-    if not raw_int:
-        return None
-    intensity = _INTENSITY_MAP.get(raw_int.upper(), 0.0)
+    """Parse one AWC JSON item into a PirepRecord, or None if unusable.
+
+    Field names as aviationweather.gov sends them since its 2025 API
+    (tbInt1, lat/lon, fltLvl, obsTime in epoch seconds); the older names
+    (tbInt, latitude/longitude, altitudeFtMsl*, ISO obsTime) are still
+    read. Until 2026-11-14 only the old names were, so no turbulence
+    PIREP was ever used from the new API.
+    """
+    intensity, raw_int = _intensity(item)
     if intensity < 0.05:
         return None
-
     try:
-        plat = float(item["latitude"])
-        plon = float(item["longitude"])
+        plat = float(item["lat"] if "lat" in item else item["latitude"])
+        plon = float(item["lon"] if "lon" in item else item["longitude"])
     except (KeyError, TypeError, ValueError):
         return None
-
-    try:
-        raw_top = item.get("altitudeFtMslTop") or item.get("altitudeFtMsl")
-        raw_base = item.get("altitudeFtMslBase") or item.get("altitudeFtMsl")
-        alt_top = float(raw_top)
-        alt_base = float(raw_base)
-    except (TypeError, ValueError):
+    alt_base, alt_top = _layer_ft(item)
+    if alt_top is None or (alt_top == 0 and alt_base == 0):
         return None
-    if alt_top == 0 and alt_base == 0:
-        return None
-
-    try:
-        obs_str = (item.get("obsTime") or "").replace("Z", "+00:00")
-        obs_dt = datetime.datetime.fromisoformat(obs_str)
-        age_min = (now - obs_dt.timestamp()) / 60.0
-    except (ValueError, AttributeError):
-        age_min = 60.0
-
     return PirepRecord(
         lat=plat,
         lon=plon,
@@ -135,7 +193,7 @@ def _parse_record(
         alt_top_ft=alt_top,
         alt_base_ft=alt_base,
         intensity=intensity,
-        age_min=age_min,
+        age_min=_age_min(item, now),
         distance_nm=_approx_nm(query_lat, query_lon, plat, plon),
         raw_int=raw_int,
     )
@@ -160,21 +218,22 @@ class PirepFetcher:
                 abs(lon - self._cache_lon) > BUCKET_DEG)
 
     def _fetch(self, lat: float, lon: float) -> list[PirepRecord]:
+        # A box around the aircraft: the API refuses lat/lon/distance
+        # ("Must specify bounding box or stations ID and radial distance",
+        # HTTP 400, which used to look like "no coverage" here)
         params = {
-            "lat": f"{lat:.2f}",
-            "lon": f"{lon:.2f}",
-            "distance": str(SEARCH_RADIUS_NM),
+            "bbox": bbox_around(lat, lon, SEARCH_RADIUS_NM),
             "age": str(MAX_AGE_H),
             "format": "json",
         }
         try:
             resp = requests.get(AWC_PIREP_URL, params=params, timeout=10)
             resp.raise_for_status()
-            data = resp.json()
+            data = resp.json() if resp.text.strip() else []
         except requests.HTTPError as exc:
             if exc.response is not None and exc.response.status_code == 400:
-                log.debug("PIREP: no coverage at (%.2f, %.2f)", lat, lon)
-                return []  # out-of-coverage area, not a transient error
+                log.warning("PIREP fetch refused: %s", exc.response.text[:120])
+                return []  # a request the API doesn't accept: retrying won't help
             log.warning("PIREP fetch failed: %s", exc)
             return self._cache
         except Exception as exc:  # pylint: disable=broad-except

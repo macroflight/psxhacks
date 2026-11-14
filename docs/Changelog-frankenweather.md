@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Fix: turbulence PIREPs were never used.** aviationweather.gov's PIREP
+  data names its fields differently since its new API (`tbInt1`, `lat`,
+  `lon`, `fltLvl`, `obsTime` in seconds; intensities spelled `LGT`), and
+  frankenweather only read the old names, so no turbulence PIREP got
+  through (0 of 13 in a live sample, 13 of 13 now). Its PIREP search also
+  needs a box now (the old position-and-radius query is refused, which
+  frankenweather took for "no PIREPs here"). PIREPs within 40 nm
+  and 3,000 ft of the aircraft drive turbulence again, as designed. "CONS
+  LGT OCNL MOD" counts halfway between light and moderate.
 - **New (testing): Advanced Icing (`--advanced-icing`, or the router's
   /efb toggle).** Makes in-flight icing realistic: PSX ices at one
   moderate rate in any cloud; frankenweather keeps only the realistic
