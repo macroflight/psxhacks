@@ -30,6 +30,8 @@ from typing import Optional
 
 import requests  # pylint: disable=import-error
 
+from frankenturb.pirep import bbox_around
+
 log = logging.getLogger(__name__)
 
 # PSX's own accretion (test sim, 10.195): kg per minute per wing, and the
@@ -161,14 +163,20 @@ def parse_wx_layers(wx: str, elev_ft: float) -> dict:
     return out
 
 
-def layer_at(layers: dict, alt_ft: float, agl_ft: Optional[float]) -> Optional[tuple]:
+def layer_at(layers: dict, alt_ft: float, agl_ft: Optional[float],
+             in_cb_cell: bool = False) -> Optional[tuple]:
     """Return (kind, oktas, top_ft_msl) of the cloud the aircraft is in, or None.
 
-    kind: "convective" (CB layer), "layer" (low/high layer) or "fog"
-    (visibility under 1,000 m, below 1,000 ft above the ground).
+    kind: "convective" (in the CB cell: in_cb_cell, within the CB layer's
+    heights), "layer" (low/high layer) or "fog" (visibility under 1,000 m,
+    below 1,000 ft above the ground). PSX's CB layer is a cell 7 nm from
+    the zone centre, not cloud all over the zone: away from the cell PSX
+    doesn't ice in it (test sim 2026-11-14), so it only counts in the cell.
     """
     for name, kind in (("cb", "convective"), ("low", "layer"), ("high", "layer")):
         lay = layers.get(name)
+        if name == "cb" and not in_cb_cell:
+            continue
         if lay and lay[1] <= alt_ft <= lay[2]:
             return kind, lay[0], lay[2]
     if layers.get("vis_m", 9999) < 1000 and agl_ft is not None and agl_ft < 1000:
@@ -446,10 +454,8 @@ class IcingReports:
     def _get(self, url: str, params: dict):
         try:
             resp = requests.get(url, params=params, timeout=15)
-            if resp.status_code == 400:
-                return []      # outside the PIREP coverage
             resp.raise_for_status()
-            data = resp.json()
+            data = resp.json() if resp.text.strip() else []
             return data if isinstance(data, list) else []
         except Exception as exc:  # pylint: disable=broad-except
             log.warning("Advanced Icing: %s fetch failed: %s", url.rsplit("/", 1)[-1], exc)
@@ -461,9 +467,8 @@ class IcingReports:
         at = self._pirep_at
         if (at is None or now_m - at[0] > CACHE_S or abs(lat - at[1]) > BUCKET_DEG or
                 abs(lon - at[2]) > BUCKET_DEG):
-            data = self._get(PIREP_URL, {"lat": f"{lat:.2f}", "lon": f"{lon:.2f}",
-                                         "distance": str(PIREP_RADIUS_NM), "age": "2",
-                                         "format": "json"})
+            data = self._get(PIREP_URL, {"bbox": bbox_around(lat, lon, PIREP_RADIUS_NM),
+                                         "age": "2", "format": "json"})
             if data is not None:
                 self._pireps = [p for p in (parse_icing_pirep(i) for i in data) if p]
                 log.info("Advanced Icing: %d icing PIREPs within %d nm", len(self._pireps),

@@ -1016,8 +1016,10 @@ the ground PSX's icing, the de-icing and the holdover stay as they are):
     from -1 C. At 250 kt and 10,000 ft that means no ice above about
     SAT -3 C, where PSX ices to about SAT -2 C.
   - **Which cloud**: the layer in PSX's weather at the aircraft. Layer
-    cloud starts at 0.6 of PSX's rate, convective cloud (the CB layer) at
-    2, freezing fog at 0.3.
+    cloud starts at 0.6 of PSX's rate, convective cloud at 2 (inside the
+    CB cell, where frankenweather's CB turbulence core is: PSX's CB layer
+    is one cell, and PSX doesn't ice in it away from the cell), freezing
+    fog at 0.3.
   - **Temperature** (after the US icing forecast's temperature map):
     most water at -4 to -8 C, half at 0 C, falling to 0.15 at -25 C and
     below (trace), none below -40 C.

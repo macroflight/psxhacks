@@ -8451,11 +8451,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return None
         alt = self.ac_alt_ft or 0.0
         layers, elev = self._icing_layers()
+        cb = self._get_nearest_cb(self.ac_lat, self.ac_lon)
+        in_cb_cell = cb is not None and cb.range_edge_nm <= 0.0
         sigmet = (_fw_icing.sigmet_ice(self._own_sigmets_in_use(), self.ac_lat, self.ac_lon, alt)
                   if self._own_sigmets_applied else None)
         return _fw_icing.Conditions(
             sat_c=sat, tat_c=_fw_icing.tat_c(sat, tas), alt_ft=alt,
-            cloud=_fw_icing.layer_at(layers, alt, alt - elev), precip=layers.get("precip", 0),
+            cloud=_fw_icing.layer_at(layers, alt, alt - elev, in_cb_cell),
+            precip=layers.get("precip", 0),
             freezing_precip=self._icing_freezing_precip(), pirep=pirep, sigmet=sigmet,
             gairmet=gairmet)
 
