@@ -551,6 +551,29 @@ neither explains jumps of 0.23 ft.
   height on the gear from the weight itself and to be corrected by the
   master's slower position updates.
 
+### The fuel temperature doesn't behave like a tank
+
+*Seen 2026-11-14 (test sim, PSX 10.195).* With 76 t in the wing tanks,
+90 minutes at FL370 (SAT -56 C, TAT -25 C) took PSX's fuel temperature
+(`FuelQty`'s last field, hundredths of a degree C; -117 showed -1 C on the
+upper EICAS) from +2.4 to -7.3 C: a little faster in the first 10
+minutes, then a straight line of about 0.6 C per hour that didn't level
+off. Parked at +8 C it warmed in a straight line at 5.6 C per hour. With
+31 t at FL372 it cooled from +20 C at about 34 C per hour and warmed
+from -45 C at about 11 C per hour, settling somewhere around -25 C.
+Real wing tanks follow the skin temperature with a lag of a few hours
+(shorter with less fuel), so after a long cold cruise the fuel is often
+well below zero (FUEL TEMP LOW on polar flights, frost over the tanks
+after landing). A written fuel temperature is kept and PSX carries on
+from it, and it doesn't change the fuel burn (A/B at +20, -30, -45 C).
+
+- **Workaround:** frankenweather's Advanced Icing models the wing tank
+  temperature and writes PSX's (read-modify-write of `FuelQty`, at most
+  once a minute).
+- **For Aerowinx:** the fuel temperature could tend towards the skin
+  temperature with a time constant of hours, shorter with less fuel (and
+  not cool in a straight line near 0 C with a heavy load).
+
 ## Documentation
 
 Things we had to learn from the forum, other addons' authors, or live

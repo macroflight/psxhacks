@@ -441,6 +441,10 @@ _GAIRMET_LAYERS = (2000.0, 300.0)
 _ICING_TICK_S = 10.0
 _ICING_FIELD7 = None
 _ICING_FZ_METAR_NM = 30.0
+_FUEL_WRITE_MIN_S = 60.0      # Advanced Icing fuel temperature: write PSX's at most this often
+_FUEL_JUMP_C = 5.0            # PSX's own fuel temperature this far off: a situation load, adopt it
+_FUEL_JUMP_KG = 3000.0        # fuel this much lower in one step: a situation load, start over
+_FUEL_LOG_S = 600.0           # log the fuel temperature model this often
 _ICING_FZ_RE = re.compile(r"(?<![A-Z])[-+]?(?:VC)?(FZRA|FZDZ)(?![A-Z])")
 # "PIREPs" (router /efb PIREP button): the ride at whole flight levels this
 # far above and below the current one (FL010-FL470), refreshed this often,
@@ -2585,6 +2589,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._icing_status = "off"
         self._icing_minute: dict = {}
         self._icing_reports = _fw_icing.IcingReports()
+        # Advanced Icing's wing tank temperature model (C; None = take PSX's),
+        # the fuel mass and time it was last stepped at, our last write to PSX
+        # (time.monotonic()) and what it's doing (web/efb)
+        self._fuel_model_c: Optional[float] = None
+        self._fuel_prev_kg = 0.0
+        self._fuel_prev_t = 0.0
+        self._fuel_written_t = 0.0
+        self._fuel_logged_t = 0.0
+        self._fuel_status = ""
         # Delay (s) for the weather-zone writes PSX.NET.Orchestration gets (the
         # routers apply it; see orchestration_feed_coro()), set in run()
         self._orch_delay_s = 0.0
@@ -8474,7 +8487,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         """--advanced-icing: every _ICING_TICK_S keep the realistic share of PSX's ice growth.
 
         In flight only (on the ground PSX's icing, the de-icing and the
-        holdover stay as they are). Where PSX ices (in its cloud, fog or
+        holdover stay as they are); the fuel temperature model
+        (_fuel_tick()) runs on the ground too. Where PSX ices (in its cloud, fog or
         precipitation) frankenweather writes Icing back with factor x
         PSX's growth since the last look (fw_icing.icing_factor()); where
         PSX doesn't but a report says it ices (fw_icing.clear_air_factor())
@@ -8494,7 +8508,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         """Run one Advanced Icing step (advanced_icing_coro())."""
         if not self._adv_icing or not self.psx or self.ac_lat is None:
             self._icing_prev = None
+            self._fuel_model_c = None
             return
+        self._fuel_tick()
         if self._on_ground():
             self._icing_prev = None
             self._icing_status = "on the ground: PSX's own icing, de-icing and holdover"
@@ -8542,6 +8558,55 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 self._icing_prev = [float(i) for i in ints]
                 written = ints[0]
         self._icing_log(psx_growth, written - prev[0], (label, factor, why, mode))
+
+    def _fuel_tick(self) -> None:
+        """Step the wing tank temperature model and keep PSX's fuel temperature on it.
+
+        PSX barely cold-soaks its fuel (fw_icing's fuel section); PSX keeps a
+        written temperature and carries on from it. Starts from PSX's own
+        value (a situation file carries one); a jump in PSX's value or a
+        sudden drop in fuel (a situation load) starts it over.
+        """
+        fq = _fw_icing.parse_fuelqty(self.psx.get("FuelQty") or "")
+        try:
+            sat = int((self.psx.get("MiscFltData") or "").split(";")[1]) / 10.0
+            tas = int((self.psx.get("PiBaHeAlTas") or "").split(";")[4]) / 1000.0
+        except (IndexError, ValueError):
+            return
+        if fq is None:
+            return
+        now = time.monotonic()
+        model = self._fuel_model_c
+        stale = now - self._fuel_prev_t > 4 * _ICING_TICK_S
+        restart = model is None or stale or fq.total_kg < self._fuel_prev_kg - _FUEL_JUMP_KG
+        if not restart and now - self._fuel_written_t > _ICING_TICK_S:
+            restart = abs(fq.temp_c - model) > _FUEL_JUMP_C
+        if restart:
+            if model is not None:
+                self.logger.info("Advanced Icing: fuel temperature model starts over at PSX's "
+                                 "%+.1f C", fq.temp_c)
+            self._fuel_model_c, self._fuel_prev_kg, self._fuel_prev_t = fq.temp_c, fq.total_kg, now
+            return
+        on_ground = self._on_ground()
+        if on_ground and fq.total_kg > self._fuel_prev_kg + 50.0:
+            model = _fw_icing.fuel_uplift_c(model, self._fuel_prev_kg, fq.total_kg, sat)
+        target = _fw_icing.fuel_target_c(sat, _fw_icing.tat_c(sat, tas), on_ground)
+        tau = _fw_icing.fuel_tau_h(fq.wing_kg, on_ground)
+        model = _fw_icing.fuel_step(model, target, tau, now - self._fuel_prev_t)
+        self._fuel_model_c, self._fuel_prev_kg, self._fuel_prev_t = model, fq.total_kg, now
+        self._fuel_status = (f"fuel {model:+.1f} C, tending towards {target:+.0f} C "
+                             f"(time constant {tau:.1f} h)")
+        if now - self._fuel_logged_t >= _FUEL_LOG_S:
+            self._fuel_logged_t = now
+            self.logger.info("Advanced Icing: %s; PSX %+.1f C, wing tanks %.0f t",
+                             self._fuel_status, fq.temp_c, fq.wing_kg / 1000.0)
+        due = now - self._fuel_written_t >= _FUEL_WRITE_MIN_S
+        if due and abs(model - fq.temp_c) >= _fw_icing.FUEL_WRITE_DIFF_C:
+            # PSX's FuelQty carries the tank quantities too: send them as just read
+            self.psx_send_and_set("FuelQty", _fw_icing.fuelqty_with_temp(fq, model))
+            self._fuel_written_t = now
+            self.logger.info("Advanced Icing: fuel temperature %+.1f C (PSX had %+.1f C), "
+                             "towards %+.0f C", model, fq.temp_c, target)
 
     def _icing_log(self, psx_growth: float, kept: float, text: tuple) -> None:
         """Log a minute's Advanced Icing (left wing kg PSX added vs kept) when ice was building."""
@@ -9813,6 +9878,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             # Advanced Icing (testing): on/off (router /efb toggle) and what it's doing
             "advanced_icing": self._adv_icing,
             "advanced_icing_status": self._icing_status,
+            "advanced_icing_fuel": self._fuel_status,
             "cb_airport_mode": self._cb_airport_mode,
             # Routers before 1.26.0 only know this on/off form
             "avoid_cb_near_airport": self._cb_airport_mode != "off",
@@ -10959,6 +11025,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.psx.subscribe("OnGround")
             self.psx.subscribe("AntiIceFluid", self.handle_anti_ice_fluid)
             self.psx.subscribe("Icing")              # --advanced-icing
+            self.psx.subscribe("FuelQty")            # --advanced-icing fuel temperature
 
             await self.psx.connect(self.args.psx_host, self.args.psx_port)
             self.logger.warning("psx.connect() returned — this should not happen")

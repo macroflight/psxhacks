@@ -1056,6 +1056,39 @@ the ground PSX's icing, the de-icing and the holdover stay as they are):
   (0.35 x PSX's rate): layer cloud 8/8, SAT -12 C, top -16 C; last minute
   left wing PSX +11 kg, kept +4 kg`.
 
+**Fuel temperature** (Advanced Icing on, in flight and on the ground):
+
+- PSX's own fuel temperature doesn't behave like a tank. On the test
+  sim (2026-11-14), with 76 t in the wing tanks, 90 minutes at FL370
+  (TAT -25 C) took it from +2.4 to -7.3 C, a straight line of about 0.6 C
+  per hour that never levels off; parked at +8 C it warmed at 5.6 C per
+  hour. With 31 t at FL372 it cooled from +20 C at about 34 C per hour
+  and warmed from -45 C at about 11 C per hour. Real wing tanks follow the skin temperature with a
+  lag of a few hours: after a long cruise the fuel is often well below
+  zero (the cause of frost over the tanks after landing, even above
+  freezing, and of FUEL TEMP LOW on long cold flights).
+- frankenweather runs its own wing tank model and keeps PSX's fuel
+  temperature on it (FuelQty's last field, hundredths of a degree C, as
+  the EICAS shows it). PSX keeps a written fuel temperature and carries
+  on from it. The fuel tends towards the skin temperature (in flight SAT
+  plus 90 % of the rise to TAT, on the ground the outside air) with a
+  time constant of 6 hours with full wing tanks, shorter as they empty
+  (at least 1 hour), 1.5 times longer on the ground. Refuelling mixes in
+  fuel at the outside temperature (between +5 and +30 C). Example: 76 t
+  in the wing tanks at FL370 and TAT -25 C cool from +2 C to about -4 C
+  in the first hour and -16 C after four.
+- It starts from PSX's own value (a situation file carries one) and
+  starts over when PSX's value jumps or the fuel drops suddenly (a
+  situation load). It writes when PSX is 0.5 C or more off, at most once
+  a minute. FuelQty also carries the tank quantities, so each write sends
+  them as just read from PSX.
+- The fuel temperature doesn't change PSX's fuel burn: an A/B in cruise
+  with it written to +20, -30 and -45 C burned the same (within 0.3 %,
+  falling smoothly with the weight). Below the FMC's minimum (-37 C by
+  default) PSX shows FUEL TEMP LOW, as it should.
+- The /efb Advanced Icing line shows the model's temperature and where
+  it's heading.
+
 **Limits of this first version**:
 
 - Tested on the test sim (2026-11-14): with Advanced Icing off, PSX got
@@ -1075,7 +1108,8 @@ the ground PSX's icing, the de-icing and the holdover stay as they are):
   anti-ice may come on where real detectors would see nothing.
 - The factors are estimates from the research, not measured on a real
   747; they will be tuned in testing.
-- Not yet: cold-soaked fuel frost on the ground, ground icing rates by
+- Not yet: frost from cold-soaked fuel on the ground (the fuel
+  temperature is there now), ground icing rates by
   precipitation intensity, engine (fan) ice in long idle descents.
 
 ### Realistic de-icing holdover times (`--realistic-holdover`, testing)
@@ -1084,8 +1118,9 @@ PSX's anti-icing fluid is a holdover timer (AntiIceFluid, 0-45 minutes):
 while it runs, no ice builds up; when it reaches 0, PSX ices again at its
 usual rate. De-icing tools set it to a fixed time per fluid type
 (PSX.NET.EFB 10.2.70's De-Icing page predicts Type I 14, Type II 28 and
-Type IV 40 minutes; whether those change with the weather is still to be
-checked).
+Type IV 40 minutes, the same in snow at -3 C as in clear weather:
+checked on a real sim 2026-11-14, where it also wrote AntiIceFluid=14
+for Type I in the snow).
 
 With `--realistic-holdover`, frankenweather replaces that time with the
 holdover time the FAA guidelines (winter 2026-2027) give for the fluid in

@@ -514,3 +514,85 @@ class IcingReports:
                     point_in_polygon(lat, lon, a.polygon):
                 return LIGHT_MOD, a.text
         return None
+
+
+# --- Fuel temperature (wing tanks) ---------------------------------------
+#
+# PSX's fuel temperature doesn't behave like a tank: on the test sim
+# (2026-11-14), with 76 t in the wing tanks, 90 minutes at FL370 (TAT -25 C)
+# took it from +2.4 to -7.3 C, a straight line of about 0.6 C per hour that
+# never levels off (parked at +8 C it warmed at +5.6 C per hour); with 31 t
+# it cooled from +20 C at about 34 C per hour. Real wing tanks follow the skin
+# temperature with a lag of a few hours: after a long cruise the fuel is
+# often well below zero, which is what puts frost (or, in rain, clear ice) on
+# the wings over the tanks after landing even above freezing. PSX keeps a written fuel temperature
+# and carries on from it (the last FuelQty field, hundredths of a degree C),
+# so frankenweather runs this model and keeps PSX's fuel temperature on it.
+
+FUEL_SKIN_RECOVERY = 0.9      # skin temperature = SAT + this x (TAT - SAT) in flight
+FUEL_TAU_FULL_H = 6.0         # time constant with full wing tanks (estimate) ...
+FUEL_TAU_MIN_H = 1.0          # ... shorter as they empty, down to this
+FUEL_TAU_GROUND_X = 1.5       # parked: no forced airflow, slower
+WING_FUEL_FULL_KG = 108000.0  # 747-400 mains 1-4 and reserves 2/3
+FUEL_UPLIFT_MIN_C = 5.0       # fuel from a hydrant or truck: about the
+FUEL_UPLIFT_MAX_C = 30.0      # outside temperature, within these limits
+FUEL_WRITE_DIFF_C = 0.5       # write PSX's fuel temperature when this far off
+_LB_KG = 0.45359237
+
+
+@dataclass
+class FuelQty:
+    """PSX's FuelQty: the raw fields, wing tank and total mass (kg), fuel temperature (C)."""
+
+    fields: list
+    wing_kg: float
+    total_kg: float
+    temp_c: float
+
+
+def parse_fuelqty(value: str) -> Optional[FuelQty]:
+    """Parse PSX's FuelQty ("d" + tanks in 0.1 lb ... ; temperature in 0.01 C;), or None.
+
+    The first six tanks are the wing tanks (mains 1-4, reserves 2/3;
+    checked against the Instructor Station), the first nine all tanks.
+    """
+    fields = (value or "").strip().rstrip(";").split(";")
+    if len(fields) < 11 or not fields[0].startswith("d"):
+        return None
+    try:
+        tanks = [int(fields[0][1:])] + [int(x) for x in fields[1:9]]
+        temp = int(fields[-1]) / 100.0
+    except ValueError:
+        return None
+    return FuelQty(fields, sum(tanks[:6]) / 10.0 * _LB_KG, sum(tanks) / 10.0 * _LB_KG, temp)
+
+
+def fuelqty_with_temp(fq: FuelQty, temp_c: float) -> str:
+    """Return FuelQty's value with only the temperature changed."""
+    return ";".join(fq.fields[:-1] + [str(round(temp_c * 100))]) + ";"
+
+
+def fuel_target_c(sat_c: float, tat_c_: float, on_ground: bool) -> float:
+    """Return the skin temperature the wing tanks tend towards."""
+    if on_ground:
+        return sat_c
+    return sat_c + FUEL_SKIN_RECOVERY * (tat_c_ - sat_c)
+
+
+def fuel_tau_h(wing_kg: float, on_ground: bool) -> float:
+    """Return the tanks' time constant (hours): less fuel follows the skin faster."""
+    tau = max(FUEL_TAU_MIN_H, FUEL_TAU_FULL_H * min(1.0, wing_kg / WING_FUEL_FULL_KG))
+    return tau * (FUEL_TAU_GROUND_X if on_ground else 1.0)
+
+
+def fuel_step(temp_c: float, target_c: float, tau_h: float, seconds: float) -> float:
+    """Return the fuel temperature after seconds of tending towards target_c."""
+    return target_c + (temp_c - target_c) * math.exp(-seconds / (tau_h * 3600.0))
+
+
+def fuel_uplift_c(temp_c: float, old_kg: float, new_kg: float, oat_c: float) -> float:
+    """Return the temperature after refuelling from old_kg to new_kg (fuel at about OAT)."""
+    if new_kg <= old_kg or new_kg <= 0.0:
+        return temp_c
+    uplift = min(FUEL_UPLIFT_MAX_C, max(FUEL_UPLIFT_MIN_C, oat_c))
+    return (temp_c * max(0.0, old_kg) + uplift * (new_kg - old_kg)) / new_kg

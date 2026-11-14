@@ -280,6 +280,9 @@ def advanced_icing_row(w):
     if w.get('advanced_icing') is None:
         return ''
     status = html.escape(w.get('advanced_icing_status') or '')
+    fuel = html.escape(w.get('advanced_icing_fuel') or '')
+    if fuel:
+        status = f'{status}<br>{fuel}' if status else fuel
     return ('<div class="efb-eyebrow" style="margin-top:0.6rem">Advanced Icing (testing)</div>\n' +
             bool_chip_row('/api/efb/toggle', 'advanced_icing', bool(w['advanced_icing']),
                           'On', 'Off', small=True) +

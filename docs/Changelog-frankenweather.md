@@ -18,7 +18,10 @@
   freezing, trace to light in most layer cloud, more in convective cloud,
   severe in freezing rain or drizzle) and adds ice where icing PIREPs,
   ICE SIGMETs (no longer given to PSX while it's on) or US G-AIRMET ICE
-  areas say it's worse. See docs/frankenweather.md.
+  areas say it's worse. It also models the wing tank fuel temperature
+  (PSX's own cooled only 0.6 C an hour at FL370 with a heavy load) and keeps PSX's
+  fuel temperature on it, so long cold flights cool the fuel well below
+  zero as in reality. See docs/frankenweather.md.
 - **Changed: CB turbulence core at most 10 nm in radius** (5 nm at the
   default lateral size bias of 50 %). It was half the distance to the
   nearest other zone, up to 200 nm over sparse zones such as the open
