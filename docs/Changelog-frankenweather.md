@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Changed: CB turbulence core at most 10 nm in radius** (5 nm at the
+  default lateral size bias of 50 %). It was half the distance to the
+  nearest other zone, up to 200 nm over sparse zones such as the open
+  ocean, while PSX's radar shows every zone CB the same size (red about
+  6 nm, amber about 19 nm across). Crossing a CB now takes about a minute
+  in the core instead of up to six.
 - **New (testing): `--realistic-holdover`.** When a de-icing tool (such as
   PSX.NET.EFB's De-Icing page) sets PSX's fixed anti-icing fluid holdover
   time on the ground, frankenweather replaces it with the FAA holdover time

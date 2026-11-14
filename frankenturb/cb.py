@@ -16,8 +16,9 @@ four cell lat/lon positions (in radians).
 Lateral radius
 --------------
 For local zones the CB radius is half the distance to the nearest
-neighbouring known zone center, measured around the CB cell itself.
-A fallback of 30 nm is used when fewer than two positions are known.
+neighbouring known zone center, measured around the CB cell itself, at
+most CB_CORE_MAX_NM (10 nm); then times the lateral size bias.
+The cap is used when fewer than two positions are known.
 For planet-weather clusters the radius scales with cloud depth:
 10 nm (0 ft) to 40 nm (28 000 ft).
 """
@@ -30,6 +31,13 @@ from typing import Optional
 # CB is always 7 nm from the weather zone center.
 _CB_OFFSET_NM = 7.0
 CB_OFFSET_NM = _CB_OFFSET_NM   # public, for frankenweather's drifting CBs (fw_drift.py)
+# Largest local-zone CB core radius before the lateral size bias (nm). PSX
+# draws a zone CB the same size on the radar however far apart the zones
+# are (test sim, 2026-11-14: red ~6x5 nm, amber ~19 nm across with the
+# nearest other zone 10 to 400 nm away), so over sparse zones (open ocean)
+# an uncapped core reached 200 nm and a pass spent ~6 min inside it.
+# 10 nm = the amber echo's radius; 5 nm at the default 50 % bias.
+CB_CORE_MAX_NM = 10.0
 _EARTH_RADIUS_M = 6_371_000.0
 _NM_TO_M = 1_852.0
 _M_TO_NM = 1.0 / _NM_TO_M
@@ -292,9 +300,11 @@ def zone_cb_radius_nm(
 ) -> float:
     """Return the lateral radius (nm) of a local zone's CB, around the CB cell.
 
-    zone_positions and lat_scale are as for find_nearest_cb().
+    zone_positions and lat_scale are as for find_nearest_cb(). At most
+    CB_CORE_MAX_NM before lat_scale, like PSX's fixed-size radar echo.
     """
-    return _nearest_neighbor_radius_nm(zone_idx, zone_positions) * lat_scale
+    return min(_nearest_neighbor_radius_nm(zone_idx, zone_positions, CB_CORE_MAX_NM),
+               CB_CORE_MAX_NM) * lat_scale
 
 
 def _nearest_neighbor_radius_nm(

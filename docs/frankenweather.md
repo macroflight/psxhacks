@@ -184,9 +184,11 @@ Features:
   and allows tuning of intensity per turbulence type. CB turbulence is
   centred on the CB itself, where PSX draws it on the radar (7 nm from
   its zone's centre): a core (CB interior) of half the distance to the
-  nearest other zone, times the CB lateral size bias -- the closer the
-  zones, the smaller PSX's radar return too -- and a flank zone beyond
-  it of up to 20 nm, depending on how big the CB is. DEM tiles (about
+  nearest other zone but at most 10 nm, times the CB lateral size bias
+  (5 nm at the default 50 %) -- PSX draws a CB on the radar the same
+  size however far apart the zones are (red about 6 nm, amber about
+  19 nm across) -- and a flank zone beyond it of up to 20 nm, depending
+  on how big the CB is. DEM tiles (about
   33 MB each, 1°×1°) are downloaded on demand and cached at
   `~/.cache/frankenturb/terrain/`, up to 10 GB in total
   (`--terrain-cache-gb`, 0 for no limit). Above the limit the least
