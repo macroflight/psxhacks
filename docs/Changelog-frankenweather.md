@@ -11,6 +11,20 @@
   frankenweather took for "no PIREPs here"). PIREPs within 40 nm
   and 3,000 ft of the aircraft drive turbulence again, as designed. "CONS
   LGT OCNL MOD" counts halfway between light and moderate.
+- **New: Cold weather page** in the web UI (and the router's): the fuel
+  temperature, how fast it's warming or cooling, and when it reaches FUEL
+  TEMP LOW and the fuel's freezing point; buttons to heat or chill the
+  fuel by 10 C; fuel cooling PSX default or Realistic; Advanced Icing on/off;
+  and a log of everything Advanced Icing, the fuel temperature and the
+  realistic holdover did (also in the log file). The settings are saved
+  in the config file.
+- **New: prevent fuel freezing (on by default).** PSX starves the engines
+  as soon as the fuel is a little below its freezing point (2 C below: a
+  large thrust loss; 10 C below: all four engines flame out), while real
+  fuel keeps flowing to about 6 C below it. frankenweather now keeps PSX's
+  fuel at least 2 C above the freezing point; FUEL TEMP LOW still comes at
+  the FMC's minimum. Switch off on the Cold weather page or with
+  `--no-prevent-fuel-freezing`.
 - **New (testing): Advanced Icing (`--advanced-icing`, or the router's
   /efb toggle).** Makes in-flight icing realistic: PSX ices at one
   moderate rate in any cloud; frankenweather keeps only the realistic
@@ -18,10 +32,13 @@
   freezing, trace to light in most layer cloud, more in convective cloud,
   severe in freezing rain or drizzle) and adds ice where icing PIREPs,
   ICE SIGMETs (no longer given to PSX while it's on) or US G-AIRMET ICE
-  areas say it's worse. It also models the wing tank fuel temperature
-  (PSX's own cooled only 0.6 C an hour at FL370 with a heavy load) and keeps PSX's
-  fuel temperature on it, so long cold flights cool the fuel well below
-  zero as in reality. See docs/frankenweather.md.
+  areas say it's worse. See docs/frankenweather.md.
+- **New: realistic fuel cooling (`--fuel-cooling realistic`, or the Cold
+  weather page; PSX default for now).** A wing tank fuel temperature
+  model, calibrated against Boeing's figures (typically 3 C an hour, at
+  most 12), that keeps PSX's fuel temperature on it, so long cold flights
+  cool the fuel well below zero as in reality (PSX's own cooled only 0.6 C
+  an hour at FL370 with a heavy load).
 - **Changed: CB turbulence core at most 10 nm in radius** (5 nm at the
   default lateral size bias of 50 %). It was half the distance to the
   nearest other zone, up to 200 nm over sparse zones such as the open

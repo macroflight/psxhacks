@@ -529,9 +529,9 @@ class IcingReports:
 # and carries on from it (the last FuelQty field, hundredths of a degree C),
 # so frankenweather runs this model and keeps PSX's fuel temperature on it.
 
-FUEL_SKIN_RECOVERY = 0.9      # skin temperature = SAT + this x (TAT - SAT) in flight
+FUEL_SKIN_RECOVERY = 0.95     # skin temperature = SAT + this x (TAT - SAT) in flight
 FUEL_TAU_FULL_H = 6.0         # time constant with full wing tanks (estimate) ...
-FUEL_TAU_MIN_H = 1.0          # ... shorter as they empty, down to this
+FUEL_TAU_MIN_H = 3.0          # ... shorter as they empty, down to this
 FUEL_TAU_GROUND_X = 1.5       # parked: no forced airflow, slower
 WING_FUEL_FULL_KG = 108000.0  # 747-400 mains 1-4 and reserves 2/3
 FUEL_UPLIFT_MIN_C = 5.0       # fuel from a hydrant or truck: about the
@@ -596,3 +596,55 @@ def fuel_uplift_c(temp_c: float, old_kg: float, new_kg: float, oat_c: float) -> 
         return temp_c
     uplift = min(FUEL_UPLIFT_MAX_C, max(FUEL_UPLIFT_MIN_C, oat_c))
     return (temp_c * max(0.0, old_kg) + uplift * (new_kg - old_kg)) / new_kg
+
+
+# PSX's fuel types (FuelType, Instructor > Situation > Service) in index
+# order, with the freezing points PSX's Instructor Station gives for them
+FUEL_TYPES = (("Jet A", -40.0), ("Jet A-1", -47.0), ("TS-1", -55.0), ("Jet B", -60.0))
+FUEL_RATE_WINDOW_S = 600.0    # PSX-mode rate: a straight line through this much history
+FUEL_RATE_MIN_SPAN_S = 120.0  # ... once it covers at least this
+
+
+def fuel_type(value) -> Optional[tuple]:
+    """Return (name, freezing point C) for PSX's FuelType value, or None."""
+    try:
+        return FUEL_TYPES[int(value)]
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+def fuel_rate_c_h(samples) -> Optional[float]:
+    """Return the slope (C per hour) of a least-squares line through (seconds, C) samples.
+
+    None until the samples span FUEL_RATE_MIN_SPAN_S.
+    """
+    pts = list(samples)
+    if len(pts) < 2 or pts[-1][0] - pts[0][0] < FUEL_RATE_MIN_SPAN_S:
+        return None
+    n = len(pts)
+    mean_t = sum(p[0] for p in pts) / n
+    mean_c = sum(p[1] for p in pts) / n
+    var = sum((p[0] - mean_t) ** 2 for p in pts)
+    if var <= 0.0:
+        return None
+    cov = sum((p[0] - mean_t) * (p[1] - mean_c) for p in pts)
+    return cov / var * 3600.0
+
+
+def fuel_hours_to(temp_c: float, limit_c: float, rate_c_h: Optional[float],
+                  model: Optional[tuple] = None) -> Optional[float]:
+    """Return hours until the fuel cools to limit_c, or None if it isn't heading there.
+
+    model (target C, time constant h) for the realistic model's exponential
+    approach; without it a straight line at rate_c_h. 0 if already there.
+    """
+    if temp_c <= limit_c:
+        return 0.0
+    if model is not None:
+        target, tau = model
+        if target >= limit_c:
+            return None
+        return tau * math.log((temp_c - target) / (limit_c - target))
+    if rate_c_h is None or rate_c_h >= -0.05:
+        return None
+    return (temp_c - limit_c) / -rate_c_h

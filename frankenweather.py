@@ -445,6 +445,26 @@ _FUEL_WRITE_MIN_S = 60.0      # Advanced Icing fuel temperature: write PSX's at 
 _FUEL_JUMP_C = 5.0            # PSX's own fuel temperature this far off: a situation load, adopt it
 _FUEL_JUMP_KG = 3000.0        # fuel this much lower in one step: a situation load, start over
 _FUEL_LOG_S = 600.0           # log the fuel temperature model this often
+# Fuel cooling (Cold weather page, --fuel-cooling): PSX's own, or frankenweather's
+# realistic wing tank model (fw_icing's fuel section)
+_FUEL_COOLING_MODES = ("psx", "realistic")
+# Prevent fuel freezing (Cold weather page, on by default): PSX starves the engines
+# once the fuel is a little below its freezing point (stack A 2026-11-14, Jet A:
+# fp+1 normal, fp-2 a large thrust loss, fp-10 all four flamed out), far harsher
+# than reality (fuel still flows ~6 C below it), so keep it this much above
+_FUEL_FREEZE_MARGIN_C = 2.0
+_FUEL_FREEZE_LOG_S = 600.0    # while holding it there, log this often
+_FUEL_FREEZE_WRITE_S = 10.0   # ... and write it back at most this often (not the usual minute)
+_FUEL_NUDGE_MAX_C = 10.0      # Cold weather page: heat/chill by at most this per press
+_FUEL_TEMP_LIMITS = (-70.0, 60.0)
+# A step this big in PSX's fuel temperature (a write, a situation load) starts
+# the rate history over
+_FUEL_SAMPLE_JUMP_C = 1.0
+# Cold weather page: the last log lines from Advanced Icing, the fuel
+# temperature and the realistic holdover (as in the log file)
+_COLD_EVENT_PREFIXES = ("Advanced Icing", "Fuel temperature", "Fuel cooling", "Holdover")
+_COLD_EVENTS_MAX = 150
+_COLD_EVENTS_SENT = 40        # ... of which STATE carries this many (it goes to every client)
 _ICING_FZ_RE = re.compile(r"(?<![A-Z])[-+]?(?:VC)?(FZRA|FZDZ)(?![A-Z])")
 # "PIREPs" (router /efb PIREP button): the ride at whole flight levels this
 # far above and below the current one (FL010-FL470), refreshed this often,
@@ -2036,6 +2056,11 @@ _CONFIG_SIGMET_FIELDS = (
 _CONFIG_CB_AVOIDANCE_FIELDS = (
     ("mode", "_cb_airport_mode", str),
 )
+_CONFIG_COLD_WEATHER_FIELDS = (
+    ("fuel_cooling", "_fuel_cooling", str),
+    ("advanced_icing", "_adv_icing", bool),
+    ("prevent_fuel_freezing", "_prevent_fuel_freezing", bool),
+)
 _CONFIG_MANUAL_WX_FIELDS = (
     "hi_oktas", "hi_top", "hi_base", "lo_oktas", "lo_top", "lo_base",
     "cb_oktas", "cb_top", "cb_base", "turb_severity", "turb_top", "turb_base",
@@ -2333,6 +2358,25 @@ class StandaloneFWContext:
 # Main script class
 # ---------------------------------------------------------------------------
 
+class _ColdEventHandler(logging.Handler):
+    """Copy Advanced Icing, fuel temperature and holdover log lines for the Cold weather page."""
+
+    def __init__(self, events: collections.deque):
+        """Append to events: [UTC "HH:MM:SS", message, True if a warning or worse]."""
+        super().__init__(logging.INFO)
+        self.events = events
+
+    def emit(self, record: logging.LogRecord) -> None:
+        """Keep the record if its message starts with one of _COLD_EVENT_PREFIXES."""
+        try:
+            msg = record.getMessage()
+        except (TypeError, ValueError):
+            return
+        if msg.startswith(_COLD_EVENT_PREFIXES):
+            self.events.append([time.strftime("%H:%M:%S", time.gmtime(record.created)), msg,
+                                record.levelno >= logging.WARNING])
+
+
 class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-methods
     """FrankenWeather script."""
 
@@ -2598,6 +2642,20 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._fuel_written_t = 0.0
         self._fuel_logged_t = 0.0
         self._fuel_status = ""
+        # Fuel cooling (Cold weather page): "psx" or "realistic" (the model
+        # above); PSX's fuel temperature history (time.monotonic(), C) for
+        # the rate, and what the Cold weather page shows about the fuel
+        self._fuel_cooling = "psx"
+        # Prevent fuel freezing: keep PSX's fuel _FUEL_FREEZE_MARGIN_C above
+        # its freezing point; when we last logged holding it there
+        self._prevent_fuel_freezing = True
+        self._fuel_floor_logged_t = 0.0
+        self._fuel_samples: collections.deque = collections.deque()
+        self._fuel_info: dict = {}
+        # Cold weather page: recent log lines (UTC "HH:MM:SS", text), filled
+        # by a log handler (_ColdEventHandler) so they match the log file
+        self._cold_events: collections.deque = collections.deque(maxlen=_COLD_EVENTS_MAX)
+        self._cold_event_sent: Optional[list] = None
         # Delay (s) for the weather-zone writes PSX.NET.Orchestration gets (the
         # routers apply it; see orchestration_feed_coro()), set in run()
         self._orch_delay_s = 0.0
@@ -3888,6 +3946,22 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             settings_changed = True
         if "advanced_icing" in cmd:
             self._set_advanced_icing(bool(cmd["advanced_icing"]), "web/efb")
+            settings_changed = True
+        if "fuel_cooling" in cmd:
+            self._set_fuel_cooling(str(cmd["fuel_cooling"]), "web")
+            if self.psx:
+                self._fuel_tick()
+            settings_changed = True
+        if "prevent_fuel_freezing" in cmd:
+            self._set_prevent_fuel_freezing(bool(cmd["prevent_fuel_freezing"]), "web")
+            if self.psx:
+                self._fuel_tick()
+            settings_changed = True
+        if "fuel_nudge" in cmd:
+            try:
+                self._fuel_nudge(float(cmd["fuel_nudge"]))
+            except (TypeError, ValueError):
+                self.logger.warning("fuel_nudge: not a number: %r", cmd["fuel_nudge"])
         if "enroute_wind_enabled" in cmd:
             self._enroute_wind_enabled = bool(cmd["enroute_wind_enabled"])
             self.logger.info("enroute_wind_enabled → %s", self._enroute_wind_enabled)
@@ -4224,6 +4298,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 "handle": dict(self._sigmet_handle)},
             "cb_avoidance": {
                 key: getattr(self, attr) for key, attr, _cast in _CONFIG_CB_AVOIDANCE_FIELDS},
+            "cold_weather": {
+                key: getattr(self, attr) for key, attr, _cast in _CONFIG_COLD_WEATHER_FIELDS},
             "manual_weather": {
                 key: self._manual_wx_params[key] for key in _CONFIG_MANUAL_WX_FIELDS},
             "turbulence": {key: getattr(self, attr) for key, attr, _cast in _CONFIG_TURB_FIELDS},
@@ -4306,6 +4382,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self._cb_airport_mode = "move" if cb_avoidance["avoid_cb_near_airport"] else "off"
         if self._cb_airport_mode not in _CB_AIRPORT_MODES:
             self._cb_airport_mode = "off"
+
+        self._apply_cold_weather_config(config.get("cold_weather", {}))
 
         manual_wx = config.get("manual_weather", {})
         for key in _CONFIG_MANUAL_WX_FIELDS:
@@ -8504,13 +8582,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 self.logger.warning("Advanced Icing: %s", exc)
                 self._icing_prev = None
 
-    async def _icing_tick(self, loop) -> None:  # pylint: disable=too-many-locals
+    async def _icing_tick(self, loop) -> None:  # pylint: disable=too-many-locals,too-many-branches
         """Run one Advanced Icing step (advanced_icing_coro())."""
-        if not self._adv_icing or not self.psx or self.ac_lat is None:
+        self._cold_events_check()
+        if not self.psx or self.ac_lat is None:
             self._icing_prev = None
             self._fuel_model_c = None
             return
         self._fuel_tick()
+        if not self._adv_icing:
+            self._icing_prev = None
+            return
         if self._on_ground():
             self._icing_prev = None
             self._icing_status = "on the ground: PSX's own icing, de-icing and holdover"
@@ -8559,13 +8641,119 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 written = ints[0]
         self._icing_log(psx_growth, written - prev[0], (label, factor, why, mode))
 
-    def _fuel_tick(self) -> None:
-        """Step the wing tank temperature model and keep PSX's fuel temperature on it.
+    def _apply_cold_weather_config(self, cold: dict) -> None:
+        """Apply a config file's [cold_weather] section."""
+        if "fuel_cooling" in cold:
+            self._set_fuel_cooling(str(cold["fuel_cooling"]), "config")
+        if "advanced_icing" in cold:
+            self._set_advanced_icing(bool(cold["advanced_icing"]), "config")
+        if "prevent_fuel_freezing" in cold:
+            self._set_prevent_fuel_freezing(bool(cold["prevent_fuel_freezing"]), "config")
+
+    def _apply_cold_weather_options(self) -> None:
+        """Apply --advanced-icing and --fuel-cooling (they win over the config file)."""
+        if self.args.advanced_icing:
+            self._set_advanced_icing(True, "--advanced-icing")
+        if self.args.fuel_cooling:
+            self._set_fuel_cooling(self.args.fuel_cooling, "--fuel-cooling")
+        if self.args.prevent_fuel_freezing is not None:
+            self._set_prevent_fuel_freezing(self.args.prevent_fuel_freezing,
+                                            "--[no-]prevent-fuel-freezing")
+
+    def _set_prevent_fuel_freezing(self, on: bool, why: str) -> None:
+        """Switch "prevent fuel freezing" on or off."""
+        if on == self._prevent_fuel_freezing:
+            return
+        self._prevent_fuel_freezing = on
+        self._fuel_floor_logged_t = 0.0
+        self.logger.info("Fuel temperature: prevent fuel freezing %s (%s)",
+                         "ON" if on else "OFF", why)
+
+    def _fuel_floor(self) -> Optional[tuple]:
+        """Return (lowest fuel temperature C, fuel type) with prevent fuel freezing on, else None.
+
+        The fuel type's freezing point + _FUEL_FREEZE_MARGIN_C; Jet A's (the
+        highest) when PSX's fuel type is unknown.
+        """
+        if not self._prevent_fuel_freezing:
+            return None
+        ftype = _fw_icing.fuel_type(self.psx.get("FuelType") if self.psx else None)
+        name, freezing = ftype or _fw_icing.FUEL_TYPES[0]
+        return freezing + _FUEL_FREEZE_MARGIN_C, name
+
+    def _fuel_hold_floor(self, fq, floor: tuple, now: float) -> bool:
+        """Write the floor temperature if PSX's fuel is below it; return True if written.
+
+        At most every _FUEL_FREEZE_WRITE_S; logged the first time and then every
+        _FUEL_FREEZE_LOG_S while it keeps holding.
+        """
+        limit, name = floor
+        if fq.temp_c >= limit - 0.05 or now - self._fuel_written_t < _FUEL_FREEZE_WRITE_S:
+            return False
+        self.psx_send_and_set("FuelQty", _fw_icing.fuelqty_with_temp(fq, limit))
+        self._fuel_written_t = now
+        self._fuel_samples.clear()
+        if now - self._fuel_floor_logged_t >= _FUEL_FREEZE_LOG_S:
+            self._fuel_floor_logged_t = now
+            self.logger.info("Fuel temperature: kept at %+.0f C (%s freezes at %+.0f C; PSX had "
+                             "%+.1f C): prevent fuel freezing", limit, name,
+                             limit - _FUEL_FREEZE_MARGIN_C, fq.temp_c)
+        return True
+
+    def _cold_events_check(self) -> None:
+        """Send the state soon after new Advanced Icing/fuel/holdover log lines.
+
+        For the Cold weather page; otherwise the fuel data goes out with the
+        state once a minute.
+        """
+        if self._cold_events and self._cold_events[-1] is not self._cold_event_sent:
+            self._cold_event_sent = self._cold_events[-1]
+            self._state_changed_event.set()
+
+    def _set_fuel_cooling(self, mode: str, why: str) -> None:
+        """Switch the fuel cooling between PSX's own ("psx") and our model ("realistic")."""
+        if mode not in _FUEL_COOLING_MODES:
+            self.logger.warning("Fuel cooling: unknown mode %r (%s)", mode, why)
+            return
+        if mode == self._fuel_cooling:
+            return
+        self._fuel_cooling = mode
+        self._fuel_model_c = None        # the model starts from PSX's value
+        self._fuel_status = ""
+        self.logger.info("Fuel cooling: %s (%s)", "realistic (frankenweather's wing tank model)"
+                         if mode == "realistic" else "PSX's own", why)
+
+    def _fuel_nudge(self, delta_c: float) -> None:
+        """Heat (+) or chill (-) PSX's fuel by delta_c (Cold weather page buttons)."""
+        delta_c = max(-_FUEL_NUDGE_MAX_C, min(_FUEL_NUDGE_MAX_C, delta_c))
+        fq = _fw_icing.parse_fuelqty(self.psx.get("FuelQty") or "") if self.psx else None
+        if fq is None:
+            self.logger.warning("Fuel temperature: can't change it, no fuel data from PSX yet")
+            return
+        new = max(_FUEL_TEMP_LIMITS[0], min(_FUEL_TEMP_LIMITS[1], fq.temp_c + delta_c))
+        floor = self._fuel_floor()
+        if floor is not None and new < floor[0]:
+            new = max(floor[0], min(fq.temp_c, new))
+        self.psx_send_and_set("FuelQty", _fw_icing.fuelqty_with_temp(fq, new))
+        now = time.monotonic()
+        self._fuel_written_t = now
+        self._fuel_samples.clear()
+        if self._fuel_model_c is not None:
+            self._fuel_model_c = new
+        self.logger.info("Fuel temperature: %s by %+.0f C from the web UI: %+.1f -> %+.1f C",
+                         "heated" if delta_c > 0 else "chilled", delta_c, fq.temp_c, new)
+        self._fuel_tick()                    # the Cold weather page shows it at once
+        self._state_changed_event.set()
+
+    def _fuel_tick(self) -> None:  # pylint: disable=too-many-locals,too-many-statements
+        """Follow PSX's fuel temperature; with realistic fuel cooling, keep it on our model.
 
         PSX barely cold-soaks its fuel (fw_icing's fuel section); PSX keeps a
-        written temperature and carries on from it. Starts from PSX's own
-        value (a situation file carries one); a jump in PSX's value or a
-        sudden drop in fuel (a situation load) starts it over.
+        written temperature and carries on from it. The model starts from
+        PSX's own value (a situation file carries one); a jump in PSX's value
+        or a sudden drop in fuel (a situation load) starts it over. Also
+        works out what the Cold weather page shows (_fuel_info): the rate
+        and when the fuel reaches FUEL TEMP LOW and its freezing point.
         """
         fq = _fw_icing.parse_fuelqty(self.psx.get("FuelQty") or "")
         try:
@@ -8576,6 +8764,38 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if fq is None:
             return
         now = time.monotonic()
+        samples = self._fuel_samples
+        if samples and abs(fq.temp_c - samples[-1][1]) >= _FUEL_SAMPLE_JUMP_C:
+            samples.clear()
+        samples.append((now, fq.temp_c))
+        while samples and now - samples[0][0] > _fw_icing.FUEL_RATE_WINDOW_S:
+            samples.popleft()
+        on_ground = self._on_ground()
+        target = _fw_icing.fuel_target_c(sat, _fw_icing.tat_c(sat, tas), on_ground)
+        tau = _fw_icing.fuel_tau_h(fq.wing_kg, on_ground)
+        model_info, rate = None, None
+        if self._fuel_cooling == "realistic":
+            model = self._fuel_step_model(fq, sat, target, tau)
+            if model is not None:
+                model_info = (target, tau)
+                rate = (target - model) / tau
+        else:
+            self._fuel_model_c = None
+            self._fuel_status = ""
+            floor = self._fuel_floor()
+            if floor is not None:
+                self._fuel_hold_floor(fq, floor, now)
+        if model_info is None:
+            rate = _fw_icing.fuel_rate_c_h([(t - now, c) for t, c in samples])
+        self._fuel_set_info(fq, rate, model_info, target)
+
+    def _fuel_step_model(self, fq, sat: float, target: float, tau: float) -> Optional[float]:
+        """Step the realistic model and write PSX's fuel temperature when it's off.
+
+        Return the model's temperature, or None if it (re)started this tick.
+        """
+        now = time.monotonic()
+        on_ground = self._on_ground()
         model = self._fuel_model_c
         stale = now - self._fuel_prev_t > 4 * _ICING_TICK_S
         restart = model is None or stale or fq.total_kg < self._fuel_prev_kg - _FUEL_JUMP_KG
@@ -8583,30 +8803,67 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             restart = abs(fq.temp_c - model) > _FUEL_JUMP_C
         if restart:
             if model is not None:
-                self.logger.info("Advanced Icing: fuel temperature model starts over at PSX's "
-                                 "%+.1f C", fq.temp_c)
+                self.logger.info("Fuel temperature: model starts over at PSX's %+.1f C",
+                                 fq.temp_c)
             self._fuel_model_c, self._fuel_prev_kg, self._fuel_prev_t = fq.temp_c, fq.total_kg, now
-            return
-        on_ground = self._on_ground()
+            return None
         if on_ground and fq.total_kg > self._fuel_prev_kg + 50.0:
+            old = model
             model = _fw_icing.fuel_uplift_c(model, self._fuel_prev_kg, fq.total_kg, sat)
-        target = _fw_icing.fuel_target_c(sat, _fw_icing.tat_c(sat, tas), on_ground)
-        tau = _fw_icing.fuel_tau_h(fq.wing_kg, on_ground)
+            self.logger.info("Fuel temperature: refuelling %.0f -> %.0f kg mixes the fuel "
+                             "from %+.1f to %+.1f C", self._fuel_prev_kg, fq.total_kg, old, model)
         model = _fw_icing.fuel_step(model, target, tau, now - self._fuel_prev_t)
+        floor = self._fuel_floor()
+        if floor is not None and model < floor[0]:
+            if now - self._fuel_floor_logged_t >= _FUEL_FREEZE_LOG_S:
+                self._fuel_floor_logged_t = now
+                self.logger.info("Fuel temperature: model held at %+.0f C (%s freezes at %+.0f C; "
+                                 "it would be %+.1f C): prevent fuel freezing", floor[0],
+                                 floor[1], floor[0] - _FUEL_FREEZE_MARGIN_C, model)
+            model = floor[0]
         self._fuel_model_c, self._fuel_prev_kg, self._fuel_prev_t = model, fq.total_kg, now
         self._fuel_status = (f"fuel {model:+.1f} C, tending towards {target:+.0f} C "
                              f"(time constant {tau:.1f} h)")
         if now - self._fuel_logged_t >= _FUEL_LOG_S:
             self._fuel_logged_t = now
-            self.logger.info("Advanced Icing: %s; PSX %+.1f C, wing tanks %.0f t",
+            self.logger.info("Fuel temperature: %s; PSX %+.1f C, wing tanks %.0f t",
                              self._fuel_status, fq.temp_c, fq.wing_kg / 1000.0)
-        due = now - self._fuel_written_t >= _FUEL_WRITE_MIN_S
+        due = now - self._fuel_written_t >= (
+            _FUEL_FREEZE_WRITE_S if floor is not None and fq.temp_c < floor[0] - 0.05
+            else _FUEL_WRITE_MIN_S)
         if due and abs(model - fq.temp_c) >= _fw_icing.FUEL_WRITE_DIFF_C:
             # PSX's FuelQty carries the tank quantities too: send them as just read
             self.psx_send_and_set("FuelQty", _fw_icing.fuelqty_with_temp(fq, model))
             self._fuel_written_t = now
-            self.logger.info("Advanced Icing: fuel temperature %+.1f C (PSX had %+.1f C), "
-                             "towards %+.0f C", model, fq.temp_c, target)
+            self._fuel_samples.clear()
+            self.logger.info("Fuel temperature: set to %+.1f C (PSX had %+.1f C), towards %+.0f C",
+                             model, fq.temp_c, target)
+        return model
+
+    def _fuel_set_info(self, fq, rate: Optional[float], model_info: Optional[tuple],
+                       target: float) -> None:
+        """Fill _fuel_info for the Cold weather page."""
+        ftype = _fw_icing.fuel_type(self.psx.get("FuelType"))
+        try:
+            min_temp = float(self.psx.get("MinFuelTemp"))
+        except (TypeError, ValueError):
+            min_temp = None
+        temp = self._fuel_model_c if model_info is not None else fq.temp_c
+        info = {"psx_c": round(fq.temp_c, 2), "temp_c": round(temp, 2),
+                "rate_c_h": None if rate is None else round(rate, 2),
+                "target_c": round(target, 1) if model_info is not None else None,
+                "tau_h": round(model_info[1], 2) if model_info is not None else None,
+                "wing_t": round(fq.wing_kg / 1000.0, 1), "total_t": round(fq.total_kg / 1000.0, 1),
+                "mode": self._fuel_cooling, "min_temp_c": min_temp,
+                "fuel_type": ftype[0] if ftype else None,
+                "freezing_c": ftype[1] if ftype else None}
+        if min_temp is not None:
+            info["hours_to_min"] = _fw_icing.fuel_hours_to(temp, min_temp, rate, model_info)
+        if ftype:
+            info["hours_to_freezing"] = _fw_icing.fuel_hours_to(temp, ftype[1], rate, model_info)
+        floor = self._fuel_floor()
+        info["floor_c"] = floor[0] if floor else None
+        self._fuel_info = info
 
     def _icing_log(self, psx_growth: float, kept: float, text: tuple) -> None:
         """Log a minute's Advanced Icing (left wing kg PSX added vs kept) when ice was building."""
@@ -9879,6 +10136,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "advanced_icing": self._adv_icing,
             "advanced_icing_status": self._icing_status,
             "advanced_icing_fuel": self._fuel_status,
+            # Cold weather page: fuel cooling mode, the fuel temperature and
+            # where it's heading, and the recent Advanced Icing/fuel/holdover log
+            "fuel_cooling": self._fuel_cooling,
+            "prevent_fuel_freezing": self._prevent_fuel_freezing,
+            "fuel": dict(self._fuel_info),
+            "cold_events": list(self._cold_events)[-_COLD_EVENTS_SENT:],
             "cb_airport_mode": self._cb_airport_mode,
             # Routers before 1.26.0 only know this on/off form
             "avoid_cb_near_airport": self._cb_airport_mode != "off",
@@ -11025,7 +11288,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.psx.subscribe("OnGround")
             self.psx.subscribe("AntiIceFluid", self.handle_anti_ice_fluid)
             self.psx.subscribe("Icing")              # --advanced-icing
-            self.psx.subscribe("FuelQty")            # --advanced-icing fuel temperature
+            self.psx.subscribe("FuelQty")            # fuel cooling, Cold weather page
+            self.psx.subscribe("FuelType")           # Cold weather page: freezing point
+            self.psx.subscribe("MinFuelTemp")        # Cold weather page: FUEL TEMP LOW
 
             await self.psx.connect(self.args.psx_host, self.args.psx_port)
             self.logger.warning("psx.connect() returned — this should not happen")
@@ -11190,8 +11455,22 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "type each one means (I, II or IV). Other values are left alone. Default: "
                  "PSX.NET.EFB 10.2.70's (Type I 14, Type II 28, Type IV 40 minutes).")
         parser.add_argument(
+            '--fuel-cooling', choices=_FUEL_COOLING_MODES, default=None,
+            help="How the wing tank fuel cools and warms (also on the web UI's Cold weather "
+                 "page): psx (PSX's own; the default for now) or realistic (frankenweather's "
+                 "model: the fuel follows the wing skin temperature over a few hours, as "
+                 "Boeing describes it). Overrides the config file. See docs/frankenweather.md.")
+        parser.add_argument(
+            '--prevent-fuel-freezing', action=argparse.BooleanOptionalAction, default=None,
+            help="Keep PSX's fuel at least 2 C above its freezing point (also on the web UI's Cold "
+                 "weather page; on by default). PSX starves the engines once the fuel is a little "
+                 "below its freezing point (2 C below: a large thrust loss; 10 C below: all four "
+                 "flame out), while real fuel still flows about 6 C below it. Overrides the config "
+                 "file. See docs/frankenweather.md.")
+        parser.add_argument(
             '--advanced-icing', action='store_true',
-            help="Advanced Icing (testing; also switchable on the router's /efb page): makes "
+            help="Advanced Icing (testing; also switchable on the web UI's Cold weather page "
+                 "and the router's /efb page): makes "
                  "PSX's in-flight icing realistic. PSX ices at one moderate rate in any cloud "
                  "below +9 C TAT; frankenweather keeps only the realistic share of that ice (none "
                  "above +2 C TAT, trace to light in most layer cloud, more in convective cloud, "
@@ -11428,6 +11707,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         for handler in handlers:
             handler.formatter.converter = time.gmtime
         self.logger = logging.getLogger(__MYNAME__)
+        logging.getLogger().addHandler(_ColdEventHandler(self._cold_events))
         if self.args.debug:
             self.logger.setLevel(logging.DEBUG)
         if self._event_log_path:
@@ -11454,6 +11734,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._turb_gairmet_fetcher = GairmetFetcher()
         self.logger.info("Turbulence engine initialized")
         self._load_config_file()
+        self._apply_cold_weather_options()
         self._load_sigmet_types()
         self._apply_turb_profile_option()      # also without a config file
         self._apply_turb_profile_bands()

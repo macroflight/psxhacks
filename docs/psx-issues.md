@@ -574,6 +574,29 @@ from it, and it doesn't change the fuel burn (A/B at +20, -30, -45 C).
   temperature with a time constant of hours, shorter with less fuel (and
   not cool in a straight line near 0 C with a heavy load).
 
+## Fuel below its freezing point stops the engines at once
+
+**What happens**: on the test sim (PSX 10.195, 2026-11-14, FL372, 30 t, fuel
+type Jet A, freezing point -40 C) with the fuel temperature held at -39 C
+the engines ran normally (FUEL TEMP LOW only). At -42 C thrust dropped
+within 20 seconds (fuel flow 8.7 to 5.3 t/h, 484 to 294 kt, descent from
+FL372 to about FL260); at -50 C all four engines flamed out. Warmed to
++5 C they relit by themselves within a minute.
+
+**Why it matters**: real jet fuel still flows to the pumps down to its pour
+point, about 6 C below the freezing point, and the freezing point of
+delivered fuel is usually about 3 C below the specification (Boeing AERO,
+"Polar Route Operations", 2001: no restricted fuel flow from low fuel
+temperature in 40 years of service). PSX makes the freezing point a hard
+limit.
+
+**What frankenweather does**: "Prevent fuel freezing" (on by default) keeps
+the fuel at least 2 C above the freezing point of the selected fuel type.
+
+**For Aerowinx**: starve the engines at the pour point (about freezing
+point - 6 C) instead, perhaps with a gradual thrust loss as the fuel gets
+waxy.
+
 ## Documentation
 
 Things we had to learn from the forum, other addons' authors, or live

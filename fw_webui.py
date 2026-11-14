@@ -268,7 +268,7 @@ def _weather_nav(ctx, current: str) -> str:
     """Return the nav buttons every weather page has at the top, linking to all of them.
 
     current is the page being shown ('map', 'zones', 'wind', 'sigmets',
-    'turb', 'config'); its button is highlighted. A Refresh button at the
+    'turb', 'cold', 'config'); its button is highlighted. A Refresh button at the
     end reloads the page. In the router's web UI (ctx.router_home), a
     button back to the router's start page comes first.
     The SIGMETs page only exists with frankenweather's --sigmet.
@@ -279,6 +279,7 @@ def _weather_nav(ctx, current: str) -> str:
     if _sigmets_enabled(ctx):
         pages.append(('sigmets', '/weather/sigmets', 'SIGMETs'))
     pages += [('turb', '/weather/turbulence', 'Extra turbulence'),
+              ('cold', '/weather/cold', 'Cold weather'),
               ('config', '/weather/config', _config_page_title(ctx)),
               ('efb', '/efb', 'EFB page')]
     if getattr(ctx, 'cb_test_enabled', False):   # frankenweather's own UI, or a router's
@@ -2461,6 +2462,164 @@ def _build_weather_sigmets_page(ctx):  # pylint: disable=too-many-locals
     return _page_shell(color_scheme, 'SIGMETs', nav_html, body, extra_head)
 
 
+def _fmt_hours(hours) -> str:
+    """Return hours as "2 h 05 min" / "40 min"."""
+    minutes = int(round(hours * 60.0))
+    if minutes < 60:
+        return f'{minutes} min'
+    return f'{minutes // 60} h {minutes % 60:02d} min'
+
+
+def _cold_eta_text(fuel: dict, key: str, limit) -> str:
+    """Return when the fuel reaches a limit, for the Cold weather page."""
+    hours = fuel.get(key)
+    if limit is None:
+        return '<span style="color:#64748b">unknown (no data from PSX)</span>'
+    if hours is not None:
+        if hours <= 0.0:
+            return '<b style="color:#f87171">reached</b>'
+        color = '#f59e0b' if hours < 2.0 else '#e2e8f0'
+        how = '' if fuel.get('target_c') is not None else ' at the current rate'
+        return f'<b style="color:{color}">in {_fmt_hours(hours)}</b>{how}'
+    target = fuel.get('target_c')
+    if target is not None:
+        return f'not reached (heading for {target:+.0f} °C)'
+    return 'not heading there'
+
+
+def _cold_freezing_text(fuel: dict, freezing) -> str:
+    """Return the freezing point row: prevented (prevent fuel freezing), or when it's reached."""
+    floor = fuel.get('floor_c')
+    if floor is not None:
+        if fuel.get('hours_to_freezing') is not None or (
+                fuel.get('temp_c', 99.0) <= floor + 0.5 and (fuel.get('rate_c_h') or 0.0) <= 0.0):
+            return f'<b style="color:#4ade80">prevented</b>: kept at {floor:+.0f} °C or above'
+        return f'not reached (kept at {floor:+.0f} °C or above)'
+    return _cold_eta_text(fuel, 'hours_to_freezing', freezing)
+
+
+def _cold_rate_text(rate) -> str:
+    """Return the fuel's warming/cooling rate, for the Cold weather page."""
+    if rate is None:
+        return '<span style="color:#64748b">measuring (needs 2 minutes without a jump)</span>'
+    if abs(rate) < 0.05:
+        return 'steady'
+    word = 'cooling' if rate < 0 else 'warming'
+    return f'<b>{word} {abs(rate):.1f} °C per hour</b>'
+
+
+def _build_weather_cold_page(ctx):  # pylint: disable=too-many-locals
+    """Render the /weather/cold page: fuel temperature, fuel cooling, Advanced Icing and its log."""
+    state = ctx.fw_state
+    received_at = ctx.fw_state_received_at
+    age_s = time.time() - received_at if received_at else float('inf')
+
+    def _page(body):
+        return _page_shell(ctx.color_scheme, 'Cold weather', _weather_nav(ctx, 'cold'), body,
+                           '\n<meta http-equiv="refresh" content="20">\n'
+                           '<style>table.cold-log td { padding:2px 6px;vertical-align:top;'
+                           'border-bottom:1px solid #1c2033;font-size:0.88em; }'
+                           'table.cold-log td.t { color:#64748b;white-space:nowrap; }'
+                           '</style>\n')
+
+    cfg = (state or {}).get('config') or {}
+    if state is None or age_s > 300.0:
+        return _page('<div class="card warn"><p style="margin:0">No recent data from '
+                     'frankenweather.</p></div>\n')
+    if 'fuel_cooling' not in cfg:
+        return _page('<div class="card warn"><p style="margin:0">This frankenweather is too '
+                     'old for the Cold weather page.</p></div>\n')
+
+    def _button(field, value, label, active, color='btn-blue'):
+        return (f'<form method="post" action="/api/weather/cold" style="display:inline">'
+                f'<input type="hidden" name="{field}" value="{value}">'
+                f'<button class="btn {color if active else "btn-gray"} btn-sm" '
+                f'style="width:auto">{label}</button></form> ')
+
+    fuel = cfg.get('fuel') or {}
+    mode = cfg.get('fuel_cooling', 'psx')
+    body = ('<p class="note">Cold weather: the wing tank fuel temperature and Advanced '
+            'Icing. Updates every 20 seconds. See docs/frankenweather.md.</p>\n')
+    # --- Fuel temperature
+    body += '<h2>Fuel temperature</h2>\n<div class="card">\n<table>\n'
+    if fuel:
+        temp = fuel.get('temp_c')
+        min_temp, freezing = fuel.get('min_temp_c'), fuel.get('freezing_c')
+        ftype = fuel.get('fuel_type') or 'unknown fuel type'
+        body += (
+            f'<tr><td>Fuel temperature (main tank 1)</td><td><b style="font-size:1.4em">'
+            f'{temp:+.1f} °C</b></td></tr>\n'
+            f'<tr><td>Right now</td><td>{_cold_rate_text(fuel.get("rate_c_h"))}</td></tr>\n')
+        if fuel.get('target_c') is not None:
+            body += (f'<tr><td>Heading for</td><td>{fuel["target_c"]:+.0f} °C (the wing skin; '
+                     f'time constant {fuel["tau_h"]:.1f} h)</td></tr>\n')
+        min_label = f'{min_temp:+.0f} °C' if min_temp is not None else '?'
+        frz_label = f'{freezing:+.0f} °C' if freezing is not None else '?'
+        body += (
+            f'<tr><td>FUEL TEMP LOW ({min_label})</td>'
+            f'<td>{_cold_eta_text(fuel, "hours_to_min", min_temp)}</td></tr>\n'
+            f'<tr><td>Freezing point ({_esc(ftype)}, {frz_label})</td>'
+            f'<td>{_cold_freezing_text(fuel, freezing)}</td></tr>\n'
+            f'<tr><td>Wing tanks / total</td><td>{fuel.get("wing_t", 0):.1f} t / '
+            f'{fuel.get("total_t", 0):.1f} t</td></tr>\n')
+    else:
+        body += '<tr><td>No fuel data from PSX yet.</td></tr>\n'
+    prevent = bool(cfg.get('prevent_fuel_freezing', True))
+    body += (
+        '</table>\n<p style="margin:0.6em 0 0">Prevent fuel freezing ' +
+        _button('prevent_fuel_freezing', '0' if prevent else '1', 'ON' if prevent else 'OFF',
+                prevent, 'btn-green') + '</p>\n'
+        '<p class="note" style="margin:0.3em 0 0">PSX starves the engines once the fuel is '
+        'a little below its freezing point (2 °C below: a large thrust loss; 10 °C '
+        'below: all four flame out), while real fuel still flows about 6 °C below it. '
+        'On: frankenweather keeps the fuel at least 2 °C above the freezing point (FUEL '
+        'TEMP LOW still comes at the FMC\'s '
+        'minimum).</p>\n<p style="margin:0.6em 0 0">' +
+        _button('fuel_nudge', '10', 'Heat +10 °C', True, 'btn-red') +
+        _button('fuel_nudge', '-10', 'Chill −10 °C', True, 'btn-blue') +
+        '</p>\n</div>\n')
+    # --- Fuel cooling
+    body += (
+        '<h2>Fuel cooling</h2>\n<div class="card">\n<p>' +
+        _button('fuel_cooling', 'psx', 'PSX default', mode == 'psx') +
+        _button('fuel_cooling', 'realistic', 'Realistic', mode == 'realistic') + '</p>\n'
+        '<p class="note" style="margin:0"><b>PSX default</b>: PSX\'s own fuel temperature '
+        '(it changes at a steady rate and hardly cold-soaks a full tank). '
+        '<b>Realistic</b>: frankenweather keeps the fuel on its wing tank model: the fuel '
+        'follows the wing skin temperature (slightly below TAT in flight, the outside air on '
+        'the ground) over a few hours, faster with less fuel, as Boeing describes it '
+        '(typically 3 °C per hour, at most 12). Refuelling mixes in fuel at about the outside '
+        'temperature.</p>\n</div>\n')
+    # --- Advanced Icing
+    icing_on = bool(cfg.get('advanced_icing'))
+    status = cfg.get('advanced_icing_status') or ''
+    body += (
+        '<h2>Advanced Icing</h2>\n<div class="card">\n<p>' +
+        _button('advanced_icing', '0' if icing_on else '1', 'ON' if icing_on else 'OFF',
+                icing_on, 'btn-green') +
+        (f' <span>{_esc(status)}</span>' if icing_on and status else '') + '</p>\n'
+        '<p class="note" style="margin:0">Makes PSX\'s in-flight icing realistic: keeps only '
+        'the realistic share of PSX\'s ice (none above +2 °C TAT, trace to light in most layer '
+        'cloud, more in convective cloud, severe in freezing rain/drizzle) and adds ice where '
+        'icing PIREPs, ICE SIGMETs or US G-AIRMET ICE areas say it\'s worse. On the ground '
+        'PSX\'s own icing and de-icing stay. Testing; off by default.</p>\n</div>\n')
+    # --- Log
+    events = list(cfg.get('cold_events') or [])
+    body += ('<h2>Log</h2>\n<p class="note">What Advanced Icing, the fuel temperature and the '
+             'realistic holdover did, newest first (times UTC; the same lines are in '
+             'frankenweather\'s log file).</p>\n<div class="card">\n')
+    if events:
+        body += '<table class="cold-log">\n'
+        for when, text, warn in reversed(events):
+            style = ' style="color:#f59e0b"' if warn else ''
+            body += f'<tr><td class="t">{_esc(when)}</td><td{style}>{_esc(text)}</td></tr>\n'
+        body += '</table>\n'
+    else:
+        body += '<p style="margin:0;color:#64748b">Nothing yet.</p>\n'
+    body += '</div>\n'
+    return _page(body)
+
+
 def _build_weather_enroute_wind_page(ctx):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     """Render the /weather/enroute-wind page: flight-plan vs. Open-Meteo per-waypoint wind."""
     color_scheme = ctx.color_scheme
@@ -2659,6 +2818,10 @@ def register_weather_routes(routes, ctx):  # pylint: disable=too-many-statements
         # Manual weather is now part of the Weather zones page (its Manual mode)
         raise web.HTTPFound('/weather/settings')
 
+    @routes.get('/weather/cold')
+    async def _weather_cold_get(_):
+        return web.Response(text=_paused_or(_build_weather_cold_page), content_type='text/html')
+
     @routes.get('/weather/enroute-wind')
     async def _weather_enroute_wind_get(_):
         return web.Response(
@@ -2715,6 +2878,23 @@ def register_weather_routes(routes, ctx):  # pylint: disable=too-many-statements
         enabled = data.get('enabled') == '1'
         await ctx.send_fw_settings_cmd({"enroute_wind_enabled": enabled})
         raise web.HTTPFound('/weather/enroute-wind')
+
+    @routes.post('/api/weather/cold')
+    async def _weather_cold_post(request):
+        data = await request.post()
+        cmd = {}
+        if data.get('fuel_cooling') in ('psx', 'realistic'):
+            cmd['fuel_cooling'] = data['fuel_cooling']
+        if data.get('fuel_nudge') in ('10', '-10'):
+            cmd['fuel_nudge'] = int(data['fuel_nudge'])
+        if data.get('advanced_icing') in ('0', '1'):
+            cmd['advanced_icing'] = data['advanced_icing'] == '1'
+        if data.get('prevent_fuel_freezing') in ('0', '1'):
+            cmd['prevent_fuel_freezing'] = data['prevent_fuel_freezing'] == '1'
+        if cmd:
+            await ctx.send_fw_settings_cmd(cmd)
+            await asyncio.sleep(1)    # the router: frankenweather's new state comes back
+        raise web.HTTPFound('/weather/cold')
 
     @routes.post('/api/weather/cb-airport-mode')
     async def _weather_cb_airport_mode(request):

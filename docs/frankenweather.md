@@ -241,6 +241,8 @@ Features:
   - **Enroute wind**: the enroute wind importer.
   - **SIGMETs**: with the SIGMET system (on by default), see [SIGMETs](#sigmets).
   - **Extra turbulence**: turbulence tuning.
+  - **Cold weather**: the fuel temperature, fuel cooling, Advanced Icing
+    and their log, see [Cold weather page](#cold-weather-page).
   - **Config and logs**: the configuration file (save/load/reset), the
     time sync toggles, and (in frankenweather's own UI) its log files.
 
@@ -976,9 +978,10 @@ done.
 ### Advanced Icing (`--advanced-icing`, testing)
 
 Makes in-flight icing realistic. Off by default; `--advanced-icing`
-switches it on at startup, and the router's /efb page has an on/off
-toggle (Advanced Icing, under SIGMETs) with a line saying what it's doing
-right now. The toggle isn't saved: a restart goes back to the command line.
+switches it on at startup, and the web UI's Cold weather page and the
+router's /efb page (Advanced Icing, under SIGMETs) have an on/off toggle
+with a line saying what it's doing right now. The setting is saved with
+the other settings in the config file (`--advanced-icing` wins over it).
 
 **What PSX does by itself** (measured on the test sim, PSX 10.180 and
 10.195, 2026-11-13/14):
@@ -1056,7 +1059,9 @@ the ground PSX's icing, the de-icing and the holdover stay as they are):
   (0.35 x PSX's rate): layer cloud 8/8, SAT -12 C, top -16 C; last minute
   left wing PSX +11 kg, kept +4 kg`.
 
-**Fuel temperature** (Advanced Icing on, in flight and on the ground):
+**Fuel temperature** (fuel cooling Realistic, on the Cold weather page or
+`--fuel-cooling realistic`; PSX default for now; in flight and on the
+ground, with or without Advanced Icing):
 
 - PSX's own fuel temperature doesn't behave like a tank. On the test
   sim (2026-11-14), with 76 t in the wing tanks, 90 minutes at FL370
@@ -1071,12 +1076,25 @@ the ground PSX's icing, the de-icing and the holdover stay as they are):
   temperature on it (FuelQty's last field, hundredths of a degree C, as
   the EICAS shows it). PSX keeps a written fuel temperature and carries
   on from it. The fuel tends towards the skin temperature (in flight SAT
-  plus 90 % of the rise to TAT, on the ground the outside air) with a
+  plus 95 % of the rise to TAT, on the ground the outside air) with a
   time constant of 6 hours with full wing tanks, shorter as they empty
-  (at least 1 hour), 1.5 times longer on the ground. Refuelling mixes in
+  (at least 3 hours), 1.5 times longer on the ground. Refuelling mixes in
   fuel at the outside temperature (between +5 and +30 C). Example: 76 t
   in the wing tanks at FL370 and TAT -25 C cool from +2 C to about -4 C
   in the first hour and -16 C after four.
+- Calibration: Boeing's "Polar Route Operations" (AERO, 2001) says the
+  fuel tends towards the boundary layer temperature over the wing skin,
+  slightly below TAT; a change in TAT takes 15 minutes to an hour to show;
+  the fuel cools about 3 C per hour, at most 12 C per hour in the most
+  extreme cold; fuller tanks change more slowly, and the 747-400's long,
+  narrow outboard mains (main 1 has the temperature probe, near the
+  bottom, where the fuel is coldest) cool faster than a 777's. Secondary
+  sources quote about 10 minutes per 1 C for the 747-400 when far off, and
+  Boeing's Chicago to Hong Kong polar trials saw tank temperatures of -38
+  to -41 C at an OAT of -70 C (the model's target there: about -42 C).
+  With these settings full wing tanks 50 C above the target cool about
+  8 C per hour, and no fuel load cools faster than about 13 C per hour.
+  The ground factor and the uplift temperatures are estimates.
 - It starts from PSX's own value (a situation file carries one) and
   starts over when PSX's value jumps or the fuel drops suddenly (a
   situation load). It writes when PSX is 0.5 C or more off, at most once
@@ -1086,8 +1104,9 @@ the ground PSX's icing, the de-icing and the holdover stay as they are):
   with it written to +20, -30 and -45 C burned the same (within 0.3 %,
   falling smoothly with the weight). Below the FMC's minimum (-37 C by
   default) PSX shows FUEL TEMP LOW, as it should.
-- The /efb Advanced Icing line shows the model's temperature and where
-  it's heading.
+- The Cold weather page shows the fuel temperature, the rate and when it
+  reaches FUEL TEMP LOW and the freezing point; the /efb Advanced Icing
+  line shows the model's temperature and where it's heading.
 
 **Limits of this first version**:
 
@@ -1111,6 +1130,50 @@ the ground PSX's icing, the de-icing and the holdover stay as they are):
 - Not yet: frost from cold-soaked fuel on the ground (the fuel
   temperature is there now), ground icing rates by
   precipitation intensity, engine (fan) ice in long idle descents.
+
+### Cold weather page
+
+The web UI's **Cold weather** page (`/weather/cold`, also in the
+router's web UI) brings the cold weather settings together. It updates
+every 20 seconds.
+
+- **Fuel temperature**: PSX's fuel temperature (main tank 1, as on the
+  EICAS), how fast it's warming or cooling right now, where the
+  realistic model is taking it, and when it reaches FUEL TEMP LOW (the
+  FMC's minimum, -37 C by default) and the freezing point of the fuel
+  type set on the Instructor Station (Situation > Service; the
+  freezing points are PSX's: Jet A -40, Jet A-1 -47, TS-1 about -55, Jet B
+  -60 C). With realistic fuel cooling the times follow the model; with
+  PSX's own cooling they are at the rate measured over the last 10
+  minutes (it needs 2 minutes without a jump first).
+- **Prevent fuel freezing** (on by default; `--no-prevent-fuel-freezing` at
+  startup): keeps PSX's fuel at least 2 C above the freezing point of the
+  fuel type, in both fuel cooling modes (and the Chill button stops there).
+  PSX starves the engines once the fuel is a little below its freezing
+  point (test sim 2026-11-14, Jet A: 1 C above normal; 2 C below a large
+  thrust loss, 484 kt to 294 kt and a descent from FL372; 10 C below all
+  four engines flamed out; they relit by themselves within a minute of the
+  fuel being warm again). Real fuel still flows to about 6 C below its
+  freezing point (Boeing), so this keeps PSX nearer reality. FUEL TEMP LOW
+  still comes at the FMC's minimum (-37 C), and with realistic fuel cooling
+  a long cold flight still calls for a descent or more speed to keep the
+  fuel above it. The log says when it holds the fuel ("kept at ...").
+- **Heat +10 C / Chill -10 C**: changes PSX's fuel temperature at once,
+  e.g. to try a cold fuel situation. With realistic fuel cooling the
+  model carries on from the new temperature.
+- **Fuel cooling**: PSX default (PSX's own fuel temperature) or
+  Realistic (frankenweather's wing tank model, see Fuel temperature
+  under [Advanced Icing](#advanced-icing---advanced-icing-testing)).
+  PSX default for now; `--fuel-cooling` sets it at startup.
+- **Advanced Icing**: on/off and what it's doing right now.
+- **Log**: what Advanced Icing, the fuel temperature and the realistic
+  holdover did (ice kept or added and why, Advanced Icing on/off, ICE
+  SIGMETs, PIREP and G-AIRMET downloads, fuel temperature writes,
+  refuelling, model restarts, the buttons, holdover changes), newest
+  first, times UTC. The same lines are in frankenweather's log file.
+
+Fuel cooling, prevent fuel freezing and Advanced Icing are saved with the
+other settings in the config file (section `cold_weather`).
 
 ### Realistic de-icing holdover times (`--realistic-holdover`, testing)
 
