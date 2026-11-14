@@ -1049,13 +1049,22 @@ the ground PSX's icing, the de-icing and the holdover stay as they are):
     moderate-or-worse PIREP within 40 nm or a SEV ICE SIGMET says it
     ices, frankenweather adds ice itself at half that strength (patchy
     cloud PSX's zone doesn't have). PSX's detectors don't see that ice
-    (no >ICING NAC from it), but its anti-ice melts it.
+    (no >ICING NAC from it), but its anti-ice melts it. Only with TAT at
+    or below +3 C: out of cloud PSX melts any ice within seconds above
+    some TAT between +1 and +6 C (though in cloud it ices up to TAT +9 C).
 - The log says once a minute what it did, e.g. `Advanced Icing: light
   (0.35 x PSX's rate): layer cloud 8/8, SAT -12 C, top -16 C; last minute
   left wing PSX +11 kg, kept +4 kg`.
 
 **Limits of this first version**:
 
+- Tested on the test sim (2026-11-14): with Advanced Icing off, PSX got
+  a test SEV ICE SIGMET and iced in clear air (63 kg per wing in 5
+  minutes) and cooled the air to 8 C below the real temperature; with it
+  on, PSX got no ICE SIGMET, didn't ice and kept the real temperature,
+  and frankenweather added ice at FL190 (about 9 kg per wing per minute).
+  With flaps 20 and AUTO anti-ice in cloud, the wing ice built at 0.6 of
+  PSX's rate while the nacelles stayed clean.
 - With AUTO anti-ice (the normal setting) PSX's own detectors switch the
   nacelle anti-ice on within about 30 seconds and the wing anti-ice after
   about a minute and a half of PSX icing, and the ice stays near 0 kg either

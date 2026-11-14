@@ -51,6 +51,10 @@ TRACE, LIGHT, LIGHT_MOD, MODERATE, MOD_SEV, SEVERE = 0.1, 0.3, 0.6, 1.0, 1.7, 2.
 KINETIC_SHARE = 0.4
 LE_COLD_C = -1.0
 LE_WARM_C = 1.0
+# Out of cloud PSX melts ice within seconds above some TAT between +1 C
+# (FL190: ice kept) and +6 C (FL140: gone after every write; test sim
+# 2026-11-14); +3 C assumed, PSX's limit for icing on the ground.
+CLEAR_AIR_MELT_TAT_C = 3.0
 # Below this SAT (C) there is no supercooled water (PSX stops about here too).
 SAT_MIN_C = -40.0
 
@@ -261,9 +265,11 @@ def clear_air_factor(c: Conditions) -> tuple:
 
     Only from reports: a PIREP of moderate or worse close by, or a SEV ICE
     SIGMET -- at half strength (patchy cloud that PSX's zone doesn't have).
+    Not with TAT above CLEAR_AIR_MELT_TAT_C: out of cloud PSX melts any
+    ice within seconds then, though in cloud it keeps icing up to TAT +9 C.
     """
     warm = warm_factor(c.sat_c, c.tat_c)
-    if warm <= 0.0 or c.sat_c <= SAT_MIN_C:
+    if warm <= 0.0 or c.sat_c <= SAT_MIN_C or c.tat_c > CLEAR_AIR_MELT_TAT_C:
         return 0.0, ""
     best, why = 0.0, ""
     if c.pirep is not None and c.pirep[0] >= MODERATE:
