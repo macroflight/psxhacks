@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **New (testing): Advanced Icing (`--advanced-icing`, or the router's
+  /efb toggle).** Makes in-flight icing realistic: PSX ices at one
+  moderate rate in any cloud; frankenweather keeps only the realistic
+  share of that ice (none when the speed keeps the leading edge above
+  freezing, trace to light in most layer cloud, more in convective cloud,
+  severe in freezing rain or drizzle) and adds ice where icing PIREPs,
+  ICE SIGMETs (no longer given to PSX while it's on) or US G-AIRMET ICE
+  areas say it's worse. See docs/frankenweather.md.
 - **Changed: CB turbulence core at most 10 nm in radius** (5 nm at the
   default lateral size bias of 50 %). It was half the distance to the
   nearest other zone, up to 200 nm over sparse zones such as the open
@@ -12,7 +20,7 @@
   PSX.NET.EFB's De-Icing page) sets PSX's fixed anti-icing fluid holdover
   time on the ground, frankenweather replaces it with the FAA holdover time
   for that fluid type in the airport's current METAR weather. Fluid types by the tool's times:
-  `--holdover-efb-minutes` (default `14:I`). See docs/frankenweather.md.
+  `--holdover-efb-minutes` (default `14:I,28:II,40:IV`, PSX.NET.EFB 10.2.70's). See docs/frankenweather.md.
 
 ## 2.8.0 (2026-11-13)
 

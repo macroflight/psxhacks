@@ -74,6 +74,7 @@ import fw_webui as _fw_webui  # pylint: disable=wrong-import-order
 import fw_sigmet as _fw_sigmet  # pylint: disable=wrong-import-order
 import fw_drift as _fw_drift  # pylint: disable=wrong-import-order
 import fw_holdover as _fw_holdover  # pylint: disable=wrong-import-order
+import fw_icing as _fw_icing  # pylint: disable=wrong-import-order
 from psxhacks_version import get_version
 
 
@@ -433,6 +434,14 @@ _TURB_GUST = {
 # layers.
 _GAIRMET_SEV_INTENSITY = 0.75
 _GAIRMET_LAYERS = (2000.0, 300.0)
+# --advanced-icing (fw_icing.py): how often PSX's Icing is looked at (and
+# written back), what Icing's 7th field (PSX's anti-ice timer, which drives
+# the AUTO anti-ice) is written as (None = as PSX has it), and how near a
+# METAR's freezing rain/drizzle counts (below 12,000 ft).
+_ICING_TICK_S = 10.0
+_ICING_FIELD7 = None
+_ICING_FZ_METAR_NM = 30.0
+_ICING_FZ_RE = re.compile(r"(?<![A-Z])[-+]?(?:VC)?(FZRA|FZDZ)(?![A-Z])")
 # "PIREPs" (router /efb PIREP button): the ride at whole flight levels this
 # far above and below the current one (FL010-FL470), refreshed this often,
 # on a flight level change and when the driving source changes
@@ -2565,6 +2574,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._fluid_backoff_value: Optional[int] = None
         self._holdover_status = "off"
         self._holdover_efb_minutes: dict = {}
+        # --advanced-icing (fw_icing.py), switchable on the router's /efb page:
+        # PSX's Icing kg as last seen or written (6 fields), the rounding left
+        # over from the last write, what's going on (web/efb) and the
+        # minute's sums for the log
+        self._adv_icing = False
+        self._icing_prev: Optional[list] = None
+        self._icing_carry: list = [0.0] * 6
+        self._icing_prev_t = 0.0
+        self._icing_status = "off"
+        self._icing_minute: dict = {}
+        self._icing_reports = _fw_icing.IcingReports()
         # Delay (s) for the weather-zone writes PSX.NET.Orchestration gets (the
         # routers apply it; see orchestration_feed_coro()), set in run()
         self._orch_delay_s = 0.0
@@ -3853,6 +3873,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self._manual_wx_force_update = True
             self.fmc_changed_event.set()
             settings_changed = True
+        if "advanced_icing" in cmd:
+            self._set_advanced_icing(bool(cmd["advanced_icing"]), "web/efb")
         if "enroute_wind_enabled" in cmd:
             self._enroute_wind_enabled = bool(cmd["enroute_wind_enabled"])
             self.logger.info("enroute_wind_enabled → %s", self._enroute_wind_enabled)
@@ -8381,6 +8403,160 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._holdover_status = f"Type {fluid}: {minutes} min instead of {new} ({icao}: {how})"
         self.psx_send_and_set("AntiIceFluid", str(minutes))
 
+    # --- --advanced-icing (fw_icing.py)
+
+    def _set_advanced_icing(self, on: bool, why: str) -> None:
+        """Switch Advanced Icing on or off (and ICE SIGMETs with it: ours, or PSX's)."""
+        if on == self._adv_icing:
+            return
+        self._adv_icing = on
+        self._icing_prev = None
+        self._icing_status = "on" if on else "off"
+        self.logger.info("Advanced Icing %s (%s)%s", "ON" if on else "OFF", why,
+                         "" if on or not self._own_sigmets_applied else
+                         ": PSX gets the ICE SIGMETs again")
+        if self._own_sigmets_applied:
+            self._own_sigmet_refresh_event.set()   # ICE SIGMETs: ours now, or PSX's again
+
+    def _icing_freezing_precip(self) -> str:
+        """Return "FZRA at <icao>" (or FZDZ) from a METAR within _ICING_FZ_METAR_NM, else ""."""
+        if self.ac_lat is None or not self.airports:
+            return ""
+        caches = [c for c in (self.noaa_metar_cache, self.vatsim_cache) if c]
+        for icao, _, _, _ in self._airports_within_nm(self.ac_lat, self.ac_lon, _ICING_FZ_METAR_NM):
+            for cache in caches:
+                match = _ICING_FZ_RE.search(cache.get(icao) or "")
+                if match:
+                    return f"{match.group(1)} at {icao}"
+        return ""
+
+    def _icing_layers(self) -> tuple:
+        """Return (parse_wx_layers() of PSX's weather at the aircraft, ground elevation ft)."""
+        zone = self.focused_zone or 0
+        wx = self.psx.get("WxBasic" if zone == 0 else f"Wx{zone}") or ""
+        elev = 0.0
+        if zone:
+            try:
+                elev = float((self.psx.get(f"WxMode{zone}") or "").split(";")[3])
+            except (IndexError, ValueError):
+                elev = 0.0
+        return _fw_icing.parse_wx_layers(wx, elev), elev
+
+    def _icing_conditions(self, pirep, gairmet) -> Optional[_fw_icing.Conditions]:
+        """Return the conditions at the aircraft for fw_icing, or None if PSX's data is missing."""
+        try:
+            sat = int((self.psx.get("MiscFltData") or "").split(";")[1]) / 10.0
+            tas = int((self.psx.get("PiBaHeAlTas") or "").split(";")[4]) / 1000.0
+        except (IndexError, ValueError):
+            return None
+        alt = self.ac_alt_ft or 0.0
+        layers, elev = self._icing_layers()
+        sigmet = (_fw_icing.sigmet_ice(self._own_sigmets_in_use(), self.ac_lat, self.ac_lon, alt)
+                  if self._own_sigmets_applied else None)
+        return _fw_icing.Conditions(
+            sat_c=sat, tat_c=_fw_icing.tat_c(sat, tas), alt_ft=alt,
+            cloud=_fw_icing.layer_at(layers, alt, alt - elev), precip=layers.get("precip", 0),
+            freezing_precip=self._icing_freezing_precip(), pirep=pirep, sigmet=sigmet,
+            gairmet=gairmet)
+
+    def _icing_read(self) -> Optional[list]:
+        """Return PSX's Icing as 7 numbers (kg wing L/R, nacelles 1-4, anti-ice timer), or None."""
+        try:
+            vals = [float(x) for x in (self.psx.get("Icing") or "").split(";")]
+        except ValueError:
+            return None
+        return vals if len(vals) >= 7 else None
+
+    async def advanced_icing_coro(self) -> None:
+        """--advanced-icing: every _ICING_TICK_S keep the realistic share of PSX's ice growth.
+
+        In flight only (on the ground PSX's icing, the de-icing and the
+        holdover stay as they are). Where PSX ices (in its cloud, fog or
+        precipitation) frankenweather writes Icing back with factor x
+        PSX's growth since the last look (fw_icing.icing_factor()); where
+        PSX doesn't but a report says it ices (fw_icing.clear_air_factor())
+        it adds ice. PSX's own anti-ice, detectors and de-icing work on the
+        result as usual.
+        """
+        loop = asyncio.get_running_loop()
+        while True:
+            await asyncio.sleep(_ICING_TICK_S)
+            try:
+                await self._icing_tick(loop)
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                self.logger.warning("Advanced Icing: %s", exc)
+                self._icing_prev = None
+
+    async def _icing_tick(self, loop) -> None:  # pylint: disable=too-many-locals
+        """Run one Advanced Icing step (advanced_icing_coro())."""
+        if not self._adv_icing or not self.psx or self.ac_lat is None:
+            self._icing_prev = None
+            return
+        if self._on_ground():
+            self._icing_prev = None
+            self._icing_status = "on the ground: PSX's own icing, de-icing and holdover"
+            return
+        cur = self._icing_read()
+        if cur is None:
+            return
+        lat, lon, alt = self.ac_lat, self.ac_lon, self.ac_alt_ft or 0.0
+        pirep = await loop.run_in_executor(None, self._icing_reports.pirep, lat, lon, alt)
+        gairmet = await loop.run_in_executor(None, self._icing_reports.gairmet, lat, lon, alt)
+        cond = self._icing_conditions(pirep, gairmet)
+        if cond is None:
+            return
+        cur = self._icing_read() or cur     # PSX may have moved on during the fetches
+        now = time.monotonic()
+        prev, dt = self._icing_prev, now - self._icing_prev_t
+        self._icing_prev, self._icing_prev_t = cur[:6], now
+        if prev is None or dt > 4 * _ICING_TICK_S:
+            self._icing_carry = [0.0] * 6
+            return
+        psx_growth = max(0.0, cur[0] - prev[0])
+        factor, why = _fw_icing.icing_factor(cond)
+        exact, mode = None, "psx"
+        if any(c - p > 0.0 for c, p in zip(cur[:6], prev)):
+            exact = _fw_icing.scaled_icing(cur, prev, factor)
+        elif cond.cloud is None:
+            air, air_why = _fw_icing.clear_air_factor(cond)
+            if air > 0.0:
+                exact, mode = _fw_icing.added_icing(cur, air, dt), "added"
+                factor, why = air, f"{air_why} (no cloud in PSX's weather here)"
+        label = _fw_icing.intensity_label(factor)
+        if psx_growth > 0.0 or mode == "added":
+            self._icing_status = f"{label} ({factor:.2f} x PSX's rate): {why}"
+        else:
+            self._icing_status = "no ice building" + (f" (would be {label}: {why})"
+                                                      if factor > 0.0 else "")
+        written = cur[0]
+        if exact is not None:
+            vals = [e + c for e, c in zip(exact, self._icing_carry)]
+            ints = [max(0, round(v)) for v in vals]
+            self._icing_carry = [v - i for v, i in zip(vals, ints)]
+            if ints != [round(c) for c in cur[:6]]:
+                field7 = _ICING_FIELD7 if _ICING_FIELD7 is not None else round(cur[6])
+                self.psx_send_and_set("Icing", ";".join(str(i) for i in ints) + f";{field7}")
+                self._icing_prev = [float(i) for i in ints]
+                written = ints[0]
+        self._icing_log(psx_growth, written - prev[0], (label, factor, why, mode))
+
+    def _icing_log(self, psx_growth: float, kept: float, text: tuple) -> None:
+        """Log a minute's Advanced Icing (left wing kg PSX added vs kept) when ice was building."""
+        acc = self._icing_minute
+        acc.setdefault("start", time.monotonic())
+        acc["psx"] = acc.get("psx", 0.0) + psx_growth
+        acc["kept"] = acc.get("kept", 0.0) + kept
+        acc["text"] = text
+        if time.monotonic() - acc["start"] < 60.0:
+            return
+        self._icing_minute = {}
+        if acc["psx"] <= 0.0 and acc["kept"] <= 0.0:
+            return
+        label, factor, why, mode = acc["text"]
+        self.logger.info("Advanced Icing: %s (%.2f x PSX's rate): %s; last minute left wing "
+                         "PSX %+.0f kg, %s %+.0f kg", label, factor, why, acc["psx"],
+                         "added" if mode == "added" else "kept", acc["kept"])
+
     async def _refresh_noaa_metar_cache(self, session: aiohttp.ClientSession) -> bool:
         """Fetch NOAA's current-hour METAR cycle file and update the local cache.
 
@@ -9631,6 +9807,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "sigmet_handle": dict(self._sigmet_handle),
             "sigmet_type_on": dict(self._sigmet_type_on),
             "disable_psx_sigmets": self._disable_psx_sigmets,
+            # Advanced Icing (testing): on/off (router /efb toggle) and what it's doing
+            "advanced_icing": self._adv_icing,
+            "advanced_icing_status": self._icing_status,
             "cb_airport_mode": self._cb_airport_mode,
             # Routers before 1.26.0 only know this on/off form
             "avoid_cb_near_airport": self._cb_airport_mode != "off",
@@ -10371,8 +10550,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         return [e for e in self._own_sigmet_entries if self._sigmet_type_on.get(e["hazard"], True)]
 
     def _handled_hazards(self) -> set:
-        """Return the SIGMET types frankenweather handles itself (the rest go to PSX)."""
-        return {h for h, on in self._sigmet_handle.items() if on}
+        """Return the SIGMET types frankenweather handles itself (the rest go to PSX).
+
+        ICE too while Advanced Icing is on (it makes ICE SIGMET icing itself).
+        """
+        return ({h for h, on in self._sigmet_handle.items() if on} |
+                ({"ICE"} if self._adv_icing else set()))
 
     def _use_own_sigmet_data(self) -> None:
         """Point self.sigmets/ts_sigmets at our own downloaded SIGMETs.
@@ -10772,6 +10955,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.psx.subscribe("AcftHeight")
             self.psx.subscribe("OnGround")
             self.psx.subscribe("AntiIceFluid", self.handle_anti_ice_fluid)
+            self.psx.subscribe("Icing")              # --advanced-icing
 
             await self.psx.connect(self.args.psx_host, self.args.psx_port)
             self.logger.warning("psx.connect() returned — this should not happen")
@@ -10826,6 +11010,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 coros.append(("CbFade", self.cb_fade_coro))     # idle with --cb-growth
                 coros.append(("OrchestrationFeed", self.orchestration_feed_coro))
                 coros.append(("CbMotion", self.cb_motion_coro))
+                coros.append(("AdvancedIcing", self.advanced_icing_coro))  # idle unless on
                 for name, coro_fn in coros:
                     if name not in running:
                         self.logger.info("Starting %s...", name)
@@ -10930,10 +11115,19 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "drizzle/rain/fog, rain on a cold-soaked wing; 1 minute where the FAA gives none, "
                  "at most PSX's 45). See docs/frankenweather.md.")
         parser.add_argument(
-            '--holdover-efb-minutes', default="14:I", metavar='MIN:TYPE,...',
-            help="With --realistic-holdover: the fixed times the de-icing tool sets, and the "
-                 "fluid type each one means (I, II or IV), e.g. 14:I,20:II,35:IV. Other values "
-                 "are left alone (14 = PSX.NET.EFB Type I).")
+            '--holdover-efb-minutes', default="14:I,28:II,40:IV", metavar='MIN:TYPE,...',
+            help="With --realistic-holdover: the times the de-icing tool sets, and the fluid "
+                 "type each one means (I, II or IV). Other values are left alone. Default: "
+                 "PSX.NET.EFB 10.2.70's (Type I 14, Type II 28, Type IV 40 minutes).")
+        parser.add_argument(
+            '--advanced-icing', action='store_true',
+            help="Advanced Icing (testing; also switchable on the router's /efb page): makes "
+                 "PSX's in-flight icing realistic. PSX ices at one moderate rate in any cloud "
+                 "below +9 C TAT; frankenweather keeps only the realistic share of that ice (none "
+                 "above +2 C TAT, trace to light in most layer cloud, more in convective cloud, "
+                 "severe in freezing rain/drizzle) and adds ice where icing PIREPs, ICE SIGMETs "
+                 "(taken from PSX) or US G-AIRMET ICE areas say it's worse. See "
+                 "docs/frankenweather.md.")
         parser.add_argument(
             '--new-zone-infront-range', type=_parse_nm_range, default=(150.0, 250.0),
             metavar='MIN,MAX',
@@ -11092,6 +11286,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             parser.error(f"--holdover-efb-minutes: {exc}")
         if self.args.realistic_holdover:
             self._holdover_status = "waiting for a de-icing"
+        if self.args.advanced_icing:
+            self._adv_icing = True
+            self._icing_status = "on"
 
     # (arg_name, replacement_hint or None for the generic "just remove it" message)
     _REMOVED_ARGS = (

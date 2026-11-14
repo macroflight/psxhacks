@@ -275,6 +275,18 @@ def sigmet_type_row(w):
     return f'<div class="efb-chip-row">{"".join(chips)}</div>\n'
 
 
+def advanced_icing_row(w):
+    """Render the Advanced Icing (testing) toggle and what it's doing (if FrankenWeather has it)."""
+    if w.get('advanced_icing') is None:
+        return ''
+    status = html.escape(w.get('advanced_icing_status') or '')
+    return ('<div class="efb-eyebrow" style="margin-top:0.6rem">Advanced Icing (testing)</div>\n' +
+            bool_chip_row('/api/efb/toggle', 'advanced_icing', bool(w['advanced_icing']),
+                          'On', 'Off', small=True) +
+            (f'<div style="font-size:0.75rem;color:#9fb2cc;margin-top:0.25rem">{status}</div>\n'
+             if w['advanced_icing'] and status else ''))
+
+
 def sigmet_hint(w):
     """Return the /efb hint line explaining the SIGMET presets."""
     if not w['sigmet_enabled']:
@@ -359,6 +371,7 @@ def controls_card(w):
         '<div class="efb-eyebrow" style="margin-top:0.6rem">SIGMETs</div>\n' +
         sigmet_preset_row(w) +
         sigmet_type_row(w) +
+        advanced_icing_row(w) +
         '<div class="efb-chip-row efb-section">'
         '<form class="efb-inline" method="post" action="/api/efb/panic">'
         f'<button type="submit" class="efb-chip efb-chip-sm panic"{panic_off}>PANIC</button>'
@@ -716,6 +729,9 @@ def weather_status(ctx, now=None):  # pylint: disable=too-many-locals
         'sigmet_hazards': list((state or {}).get('sigmet_hazards', [])),
         # FrankenWeather with the per-type toggles: {"TS": True, ...}, else None
         'sigmet_type_on': cfg.get('sigmet_type_on'),
+        # FrankenWeather with Advanced Icing (testing): on/off, else None; what it's doing
+        'advanced_icing': cfg.get('advanced_icing'),
+        'advanced_icing_status': cfg.get('advanced_icing_status') or '',
         # FrankenWeather with advanced zones: {"hdg", "kt"} CBs drift with here
         'cb_motion': (state or {}).get('cb_motion'),
         'src_router_color': fw_color, 'src_router_label': fw_label, 'src_router_age': fw_age,
@@ -840,7 +856,7 @@ def register_control_routes(routes, ctx, logger, page='/efb'):  # pylint: disabl
     async def handle_efb_toggle_post(request):
         data = await request.post()
         field = data.get('field')
-        if field in ('enroute_wind_enabled', 'disable_psx_sigmets'):
+        if field in ('enroute_wind_enabled', 'disable_psx_sigmets', 'advanced_icing'):
             await ctx.send_fw_settings_cmd({field: data.get('value') == '1'})
         raise web.HTTPFound(page)
 

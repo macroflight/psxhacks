@@ -593,7 +593,8 @@ With the SIGMET system on:
     any: frankenweather's SIGMET system is switched off, and so is PSX's
     "SIGMETs embedded in the planet weather model".
   - **Normal**: frankenweather's SIGMET system handles TS, TC, TURB and
-    MTW, PSX gets the rest (VA and ICE). This is the default.
+    MTW, PSX gets the rest (VA and ICE). This is the default. With
+    Advanced Icing on (see below), frankenweather keeps the ICE ones too.
   - **PSX**: frankenweather's SIGMET system is switched off, as with
     `--no-sigmet`: PSX handles every SIGMET itself, and frankenweather only
     asks it to download fresh ones regularly.
@@ -603,7 +604,8 @@ With the SIGMET system on:
   for when the system is switched back on, and the setting is saved in
   the configuration file (`[sigmet]` `own`).
 - PSX gets every SIGMET frankenweather could parse of the types it
-  doesn't handle, and always the volcanic ash (VA) and icing (ICE) ones.
+  doesn't handle, and always the volcanic ash (VA) ones, and the icing
+  (ICE) ones unless Advanced Icing is on.
   If anything else changes PSX's SIGMET data (a situ load, another
   addon), frankenweather writes its own back.
 - TS and TC (when handled) become CBs in frankenweather's weather
@@ -971,12 +973,108 @@ departure MSA, the arrival QNH below the destination MSA). Each airport is
 worked out once (a few seconds, in the background); in cruise nothing is
 done.
 
+### Advanced Icing (`--advanced-icing`, testing)
+
+Makes in-flight icing realistic. Off by default; `--advanced-icing`
+switches it on at startup, and the router's /efb page has an on/off
+toggle (Advanced Icing, under SIGMETs) with a line saying what it's doing
+right now. The toggle isn't saved: a restart goes back to the command line.
+
+**What PSX does by itself** (measured on the test sim, PSX 10.180 and
+10.195, 2026-11-13/14):
+
+- It ices at one rate, about 11 kg per wing and 3 kg per nacelle per
+  minute, whenever its weather has any cloud layer at the aircraft (even
+  1/8, and the CB layer), fog or precipitation, and TAT is below about
+  +9 C. The rate doesn't change with coverage, layer, precipitation or
+  temperature, down to about -35 C; PSX stops icing between -35 and -43 C.
+- From the 747's size and speed and typical cloud water that rate is
+  about **moderate** icing (an estimate). Real icing is mostly trace or
+  light; moderate mainly at about -3 to -12 C in thick cloud; severe in
+  freezing rain or drizzle and convective cloud; and none when the
+  aircraft's speed warms the leading edge above freezing. So in most
+  cloud PSX ices too much, and at higher speeds near 0 C it ices when
+  reality doesn't.
+- Inside an ICE SIGMET PSX ices at the same rate, cloud or no cloud, MOD
+  or SEV alike, and lowers the outside air temperature by 5-8 C (about
+  3 C a minute), which fights frankenweather's temperatures.
+
+**What frankenweather does with Advanced Icing on** (in flight only; on
+the ground PSX's icing, the de-icing and the holdover stay as they are):
+
+- Every 10 seconds it looks at PSX's ice (Icing: kg on each wing and
+  nacelle) and works out how much of PSX's growth since the last look is
+  realistic, as a factor on PSX's rate. Where PSX added ice, it writes
+  back a lower value (factor below 1) or a higher one (factor above 1).
+  PSX applies the write at once and carries on from there; its anti-ice,
+  ice detectors (>ICING NAC) and the AUTO anti-ice keep working as
+  before, because PSX is still icing.
+- The factor, from the weather at the aircraft:
+  - **Kinetic heating**: the leading edge is taken to be SAT plus 40 % of
+    the rise from SAT to TAT (estimate, from NACA's finding of heavy glaze
+    still at -7 C at M0.5 and -21 C at M0.9). Above +1 C: no ice; full ice
+    from -1 C. At 250 kt and 10,000 ft that means no ice above about
+    SAT -3 C, where PSX ices to about SAT -2 C.
+  - **Which cloud**: the layer in PSX's weather at the aircraft. Layer
+    cloud starts at 0.6 of PSX's rate, convective cloud (the CB layer) at
+    2, freezing fog at 0.3.
+  - **Temperature** (after the US icing forecast's temperature map):
+    most water at -4 to -8 C, half at 0 C, falling to 0.15 at -25 C and
+    below (trace), none below -40 C.
+  - **Cloud-top temperature** for layer cloud (estimated from the layer's
+    top and 2 C per 1,000 ft): tops colder than -12 C have more ice
+    crystals, down to 0.6.
+  - **Coverage** for layer cloud: 1-2 oktas 0.4, 3-4 oktas 0.7 (the
+    aircraft is in cloud only part of the time).
+  - Precipitation in cloud warmer than -10 C: x1.3.
+  - Freezing rain or drizzle (FZRA/FZDZ) in a METAR within 30 nm, below
+    12,000 ft: severe (2.5).
+- Reports beat the model:
+  - **Icing PIREPs** (aviationweather.gov, US and some others) at the
+    aircraft's level (2,000 ft beyond the reported layer), up to 90
+    minutes old: within 20 nm the PIREP's intensity sets the factor
+    (trace 0.1, light 0.3, light-moderate 0.6, moderate 1, moderate-severe
+    1.7, severe 2.5; NEG = none), fading back to the model by 40 nm.
+  - **ICE SIGMETs**: while Advanced Icing is on (with frankenweather's own
+    SIGMETs, the Normal preset), PSX doesn't get them, so no clear-air
+    icing and no cooled air. Inside one (1,000 ft beyond its levels) in
+    cloud the factor is at least severe (2.5; moderate if the SIGMET says
+    MOD).
+  - **US G-AIRMET ICE** areas (forecasts of moderate icing; base "FZL" =
+    the lowest freezing level in the area): in cloud, at least 0.6.
+  - A forecast area isn't iced everywhere, so SIGMETs and G-AIRMETs only
+    raise the factor in cloud. Where PSX's weather has no cloud but a
+    moderate-or-worse PIREP within 40 nm or a SEV ICE SIGMET says it
+    ices, frankenweather adds ice itself at half that strength (patchy
+    cloud PSX's zone doesn't have). PSX's detectors don't see that ice
+    (no >ICING NAC from it), but its anti-ice melts it.
+- The log says once a minute what it did, e.g. `Advanced Icing: light
+  (0.35 x PSX's rate): layer cloud 8/8, SAT -12 C, top -16 C; last minute
+  left wing PSX +11 kg, kept +4 kg`.
+
+**Limits of this first version**:
+
+- With AUTO anti-ice (the normal setting) PSX's own detectors switch the
+  nacelle anti-ice on within about 30 seconds and the wing anti-ice after
+  about a minute and a half of PSX icing, and the ice stays near 0 kg either
+  way. Advanced Icing then mostly matters when anti-ice is off, manual or
+  inhibited (wing anti-ice is off with the leading-edge flaps out).
+- PSX's detectors still react to PSX's icing even where frankenweather
+  takes all of the ice away (e.g. high speed near 0 C), so the AUTO
+  anti-ice may come on where real detectors would see nothing.
+- The factors are estimates from the research, not measured on a real
+  747; they will be tuned in testing.
+- Not yet: cold-soaked fuel frost on the ground, ground icing rates by
+  precipitation intensity, engine (fan) ice in long idle descents.
+
 ### Realistic de-icing holdover times (`--realistic-holdover`, testing)
 
 PSX's anti-icing fluid is a holdover timer (AntiIceFluid, 0-45 minutes):
 while it runs, no ice builds up; when it reaches 0, PSX ices again at its
 usual rate. De-icing tools set it to a fixed time per fluid type
-(PSX.NET.EFB's De-Icing page: Type I 14 minutes), whatever the weather.
+(PSX.NET.EFB 10.2.70's De-Icing page predicts Type I 14, Type II 28 and
+Type IV 40 minutes; whether those change with the weather is still to be
+checked).
 
 With `--realistic-holdover`, frankenweather replaces that time with the
 holdover time the FAA guidelines (winter 2026-2027) give for the fluid in
@@ -984,8 +1082,8 @@ the airport's current weather:
 
 - It notices the de-icing: on the ground, the timer going up (PSX only ever
   counts it down). The value says the fluid type: `--holdover-efb-minutes`,
-  default `14:I` (add the de-icing tool's other times, e.g.
-  `14:I,20:II,35:IV`); other values are left alone.
+  default `14:I,28:II,40:IV` (PSX.NET.EFB 10.2.70); other values are left
+  alone.
 - The weather is the METAR of the airport the aircraft is at (within
   5 nm), from the active METAR source: snow, with its intensity from the
   visibility, day or night and temperature (FAA Table 57, so `1SM -SN` at

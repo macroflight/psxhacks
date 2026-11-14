@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **New: Advanced Icing toggle on `/efb`** (On/Off under SIGMETs, with a
+  line saying what it's doing), for FrankenWeather's Advanced Icing
+  (testing). Only shown with a FrankenWeather that has it.
+
 ## 1.43.0 (2026-11-13)
 
 - **New: FrankenPilot on the `/services` page** (Start/Stop/Restart), like
