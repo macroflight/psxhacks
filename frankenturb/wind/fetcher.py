@@ -163,6 +163,19 @@ class WindFetcher:  # pylint: disable=too-few-public-methods
             log.info("Wind profile at (%.2f, %.2f): %s", lat, lon, profile)
         return profile
 
+    def peek(self, lat: float, lon: float,
+             sim_time_utc: Optional[datetime] = None) -> Optional[WindProfile]:
+        """Return the WindProfile get() would, if it's already parsed in memory; else None.
+
+        Never downloads or reads the disk, so it's safe to call from the
+        event loop (e.g. the wind at a CB's top for its anvil).
+        """
+        if sim_time_utc is None:
+            sim_time_utc = datetime.now(timezone.utc)
+        if sim_time_utc.tzinfo is None:
+            sim_time_utc = sim_time_utc.replace(tzinfo=timezone.utc)
+        return self._cache.get((_pos_bucket(lat, lon), _time_bucket(sim_time_utc)))
+
     def _parse(  # pylint: disable=too-many-locals
         self,
         data: dict,

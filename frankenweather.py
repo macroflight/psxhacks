@@ -4840,7 +4840,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         rides = _PIREP_RIDES_TESTING
         cape_sample, per_level = physics
         cb = self._get_nearest_cb(lat, lon)
-        top_wind_dir = (self._turb_engine.wind_dir_at(cb.cloud_top_ft_msl)
+        top_wind_dir = (self._turb_engine.wind_dir_at(cb.cloud_top_ft_msl, cb.center_lat,
+                                                      cb.center_lon)
                         if cb is not None and self._turb_engine is not None else None)
         reports = []
         for fl_k, (terrain, pirep_rec, gairmet) in zip(fls, per_level):
@@ -5006,8 +5007,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 cb = self._get_nearest_cb(lat, lon)
                 cb_state = None
                 if cb is not None:
-                    cb_state = compute_cb_turbulence(
-                        alt_ft, cb, self._turb_engine.wind_dir_at(cb.cloud_top_ft_msl))
+                    cb_state = compute_cb_turbulence(   # anvil: the wind at the CB's top
+                        alt_ft, cb, self._turb_engine.wind_dir_at(
+                            cb.cloud_top_ft_msl, cb.center_lat, cb.center_lon))
                     if _eff(cb_state) > _eff(state):
                         state = cb_state
 
@@ -10229,7 +10231,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if cb is None or cb[0] == 0 or zone_num not in zone_positions:
             return None
         coverage, top_ft, base_ft = cb
-        wind_dir = self._turb_engine.wind_dir_at(top_ft) if self._turb_engine else None
+        zlat, zlon = zone_positions[zone_num][0], zone_positions[zone_num][1]
+        wind_dir = (self._turb_engine.wind_dir_at(top_ft, zlat, zlon) if self._turb_engine
+                    else None)
         return {
             "shape": "circle",
             "core_nm": round(zone_cb_radius_nm(zone_num, zone_positions,

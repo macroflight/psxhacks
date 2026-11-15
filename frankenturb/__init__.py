@@ -143,12 +143,19 @@ class TurbulenceEngine:
     # Fixed wind override
     # ------------------------------------------------------------------
 
-    def wind_dir_at(self, alt_ft: float) -> Optional[float]:
+    def wind_dir_at(self, alt_ft: float, lat: Optional[float] = None,
+                    lon: Optional[float] = None) -> Optional[float]:
         """Return the direction (deg) the wind blows from at alt_ft, or None.
 
-        From the last wind profile (or the fixed wind).
+        At (lat, lon) if given and its profile is already in memory (a CB's
+        top wind for its anvil: the wind there, not at the aircraft;
+        WindFetcher.peek(), no download), else from the last wind profile
+        at the aircraft. The fixed wind, when set, everywhere.
         """
-        profile = self._fixed_profile or self._last_profile
+        profile = self._fixed_profile
+        if profile is None and lat is not None and lon is not None:
+            profile = self.wind_fetcher.peek(lat, lon)
+        profile = profile or self._last_profile
         if profile is None:
             return None
         return profile.wind_at(alt_ft * 0.3048)[1]

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **CB anvils point downwind of the wind at the CB.** The anvil turbulence
+  zone above a CB's top (and the map's anvil) followed the wind at the
+  CB's top level at the aircraft, which can be hundreds of miles away and
+  blowing another way. It now uses the wind at the CB itself, when that
+  forecast is already loaded, falling back to the aircraft's otherwise.
 - **New: CB messages for other simulators.** frankenweather now sends an
   `addon=FRANKENWEATHER:CBS` message listing every CB it has in PSX:
   position now, base, tops (including the real top when PSX's 44,999 ft
