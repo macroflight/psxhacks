@@ -188,9 +188,10 @@ Features:
   centred on the CB itself, where PSX draws it on the radar (7 nm from
   its zone's centre): a core (CB interior) of half the distance to the
   nearest other zone but at most 10 nm, times the CB lateral size bias
-  (5 nm at the default 50 %) -- PSX draws a CB on the radar the same
-  size however far apart the zones are (red about 6 nm, amber about
-  19 nm across) -- and a flank zone beyond it of up to 20 nm, depending
+  (5 nm at the default 50 %) -- about the size PSX draws on the radar,
+  which is smaller when another weather zone is near (red about 6 nm,
+  amber about 19 nm across with no zone within 45 nm, 30 % of that with
+  one 7 nm away) -- and a flank zone beyond it of up to 20 nm, depending
   on how big the CB is. DEM tiles (about
   33 MB each, 1°×1°) are downloaded on demand and cached at
   `~/.cache/frankenturb/terrain/`, up to 10 GB in total
@@ -612,8 +613,8 @@ is usually the better side.
   10 nm of the anchor or a dep/dst airport zone, that zone steps aside to
   12 nm from it, and the cell takes its weather (keeping its CB), so the
   local QNH and wind are the same whichever of the two PSX treats as
-  nearest. (The size of PSX's radar echo doesn't depend on nearby zones,
-  measured 2026-11-15: only on the CB's oktas and depth.) An airport zone goes at
+  nearest. (PSX draws both CBs smaller on the radar while the zones are
+  this close: about half size at 12 nm, measured 2026-11-15.) An airport zone goes at
   most 15 nm from its field (otherwise the cell fades instead) and goes
   back as soon as no drifting zone is within 12 nm of the field.
 - **Where to see it:** the log has a `CB drift:` line for every start,

@@ -8322,8 +8322,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         here = self._turb_engine.wind_profile() if self._turb_engine is not None else None
         tropo_here = here.tropopause() if here is not None else None
         cbs = []
+        modes = {n: self.psx.get(f"WxMode{n}") or "" for n in range(1, 8)}
         for zone_num in range(1, 8):
-            mode = self.psx.get(f"WxMode{zone_num}")
+            mode = modes[zone_num]
             cb = _fw_cbmsg.wx_cb(self.psx.get(f"Wx{zone_num}") or "")
             cell = self._drift.get(zone_num)
             if cell is not None and cell.bearing is not None:
@@ -8360,7 +8361,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     "drift": self._cbs_drift(zone_num, now_s),
                     "anvil": _fw_cbmsg.anvil(top, tropo_ft, cb["oktas"], source, top_wind),
                     "surface_wind": _fw_cbmsg.wx_surface_wind(self.psx.get(f"Wx{zone_num}")),
-                    "source": source}))
+                    "source": source,
+                    "nearest_zone_nm": _fw_cbmsg.nearest_zone_nm(modes, zone_num)}))
         return _fw_cbmsg.message(now_s, tropo_here[0] / 0.3048 if tropo_here else None, cbs)
 
     async def cb_messages_coro(self) -> None:

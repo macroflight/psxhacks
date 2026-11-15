@@ -121,8 +121,15 @@ change. The CBS message is **not** delayed: its positions are for `time`.
   minus base). A big or deep CB (3 oktas or more and 22,000 ft or more
   deep, for instance) is about 6 nm red and 18.6 nm amber+red; a small or
   shallow one less: 1 okta 32,000 ft deep 3.2 / 9.9 nm, 2 oktas 12,000 ft
-  deep 1.9 / 5.7 nm, 1 okta 8,000 ft deep barely a dot. The zone's size
-  and nearby zones make no difference.
+  deep 1.9 / 5.7 nm, 1 okta 8,000 ft deep barely a dot. Those are the
+  sizes of a CB with no other zone near it. PSX shrinks the echo when
+  another weather zone's centre is near its zone's centre (any weather,
+  measured centre to centre, not from the CB): amber+red is 30 % of the
+  full size with the nearest zone 7 nm or closer, about 40 % at 10 nm,
+  60 % at 15 nm, 80 % at 22 nm and 90 % from 45 nm (red: 37 % up to
+  10 nm, 75 % from 22 nm). Zones whose names start with the same 4
+  characters don't count. The sizes in the message include this. The
+  zone's radius setting makes no difference.
 
 ## Changes
 

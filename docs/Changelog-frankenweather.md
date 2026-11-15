@@ -18,7 +18,9 @@
   shallow CBs smaller (measured: 1 okta 32,000 ft deep 3.2 / 9.9 nm, 2
   oktas 12,000 ft deep 1.9 / 5.7 nm). They now come from a table of
   measurements by oktas and depth, so PSX.NET.Orchestration and Flight
-  Centre get the size PSX's radar shows.
+  Centre get the size PSX's radar shows. They also include how PSX draws
+  a CB smaller when another weather zone is near its zone (30 % of the
+  full size with a zone 7 nm away, full size from about 45 nm).
 - **New (testing): the weather radar decides where CBs are
   (`--radar-cbs`).** Inside weather radar coverage, frankenweather only
   puts a CB where the radar has a storm cell, puts one wherever it does,
