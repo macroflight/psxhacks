@@ -76,6 +76,7 @@ import fw_webui as _fw_webui  # pylint: disable=wrong-import-order
 import fw_sigmet as _fw_sigmet  # pylint: disable=wrong-import-order
 import fw_drift as _fw_drift  # pylint: disable=wrong-import-order
 import fw_cbmsg as _fw_cbmsg  # pylint: disable=wrong-import-order
+import fw_route as _fw_route  # pylint: disable=wrong-import-order
 import fw_holdover as _fw_holdover  # pylint: disable=wrong-import-order
 import fw_icing as _fw_icing  # pylint: disable=wrong-import-order
 from psxhacks_version import get_version
@@ -447,6 +448,8 @@ _ICING_FZ_METAR_NM = 30.0
 _FUEL_WRITE_MIN_S = 60.0      # Advanced Icing fuel temperature: write PSX's at most this often
 _FUEL_JUMP_C = 5.0            # PSX's own fuel temperature this far off: a situation load, adopt it
 _FUEL_JUMP_KG = 3000.0        # fuel this much lower in one step: a situation load, start over
+_ROUTE_TRACK_S = 30.0         # --route-zones: the track over the ground over this long
+_ROUTE_TRACK_MAX_S = 60.0     # ... at most this long
 _CBS_CHECK_S = 5.0            # CBS messages: look for changes this often
 _CBS_SAME_CB_NM = 20.0        # a zone's CB this far from where it was: a new CB (new id)
 _FUEL_SITU_LOAD_S = 30.0      # fuel changes this soon after a situ load: the load, not a refuel
@@ -2772,6 +2775,20 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # Maneuvering mode detection
         self._hdg_history: list = []   # [(monotonic_time, heading_deg)]
         self._maneuvering: bool = False
+        # --route-zones (_update_route_mode()): following the FMC route ("on"), off it
+        # ("off"), or no route/option ("none"); since when the aircraft has been on
+        # or off it (time.monotonic(), None: not now); where it is on the route
+        # (fw_route.RoutePos); and vectors near the destination (maneuvering until
+        # landing or a new route, the route's waypoint names then)
+        self._route_mode = "none"
+        self._route_on_since: Optional[float] = None
+        self._route_off_since: Optional[float] = None
+        self._route_pos = None
+        self._route_points: list = []
+        self._route_dest_maneuver: Optional[tuple] = None
+        self._route_names: tuple = ()
+        # (time.monotonic(), lat, lon) of the last few minutes: the track over the ground
+        self._route_track_hist: collections.deque = collections.deque(maxlen=60)
 
         # Radar (RainViewer) tile cache — keyed by (tx, ty), cleared on new frame
         self._rv_frame_path: Optional[str] = None
@@ -6587,12 +6604,109 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.zone_wx[self.focused_zone] = new_wx
 
     # ------------------------------------------------------------------
+    # Route-based zone planning (--route-zones)
+    # ------------------------------------------------------------------
+
+    def _route_track(self) -> Optional[float]:
+        """Return the aircraft's track over the ground (deg true), or its heading.
+
+        From where it was _ROUTE_TRACK_S ago (60 s at most): with a crosswind
+        the heading is often 10 degrees or more off the track.
+        """
+        now = time.monotonic()
+        hist = self._route_track_hist
+        if hist and (now - hist[-1][0] > 30.0 or
+                     self._dist_nm(hist[-1][1], hist[-1][2], self.ac_lat, self.ac_lon) > 30.0):
+            hist.clear()   # a pause or a reposition
+        hist.append((now, self.ac_lat, self.ac_lon))
+        past = next((h for h in hist if now - h[0] <= _ROUTE_TRACK_MAX_S), None)
+        if past is None or now - past[0] < _ROUTE_TRACK_S or self._dist_nm(
+                past[1], past[2], self.ac_lat, self.ac_lon) < 0.5:
+            return self.ac_hdg
+        az, _, _ = self.geod.inv(past[2], past[1], self.ac_lon, self.ac_lat)
+        return az % 360.0
+
+    def _update_route_mode(self) -> None:  # pylint: disable=too-many-branches
+        """--route-zones: work out whether the aircraft follows its FMC route (self._route_mode).
+
+        The route: every waypoint of the flight (_enroute_waypoints), then the
+        destination airport. Also starts and ends the maneuvering near the
+        destination (self._route_dest_maneuver).
+        """
+        points = [(lat, lon) for _, lat, lon in self._enroute_waypoints]
+        dst = self.airports.get(self.fmc_dst_icao) if self.fmc_dst_icao else None
+        if dst is not None and (not points or self._dist_nm(*points[-1], *dst) > 1.0):
+            points.append(tuple(dst))
+        names = tuple(w[0] for w in self._enroute_waypoints)
+        if names != self._route_names:
+            # A new route (diversion, new arrival): follow it before it counts
+            if self._route_names and names and self._route_mode == "on":
+                self.logger.info("Route zones: new FMC route — zones planned from the heading "
+                                 "until the aircraft follows it")
+                self._route_mode = "off"
+            self._route_on_since = None
+            self._route_names = names
+        if self._route_dest_maneuver is not None and (
+                self._route_dest_maneuver != names or self._on_ground()):
+            self.logger.info("Route zones: maneuvering near the destination ends (%s)",
+                             "on the ground" if self._on_ground() else "new route")
+            self._route_dest_maneuver = None
+        track = self._route_track()
+        pos = (_fw_route.locate(points, self.ac_lat, self.ac_lon)
+               if self.args.route_zones and len(points) >= 2 and track is not None else None)
+        self._route_points, self._route_pos = points, pos
+        if pos is None:
+            if self._route_mode != "none":
+                self.logger.info("Route zones: no route, zones planned from the heading")
+            self._route_mode, self._route_on_since, self._route_off_since = "none", None, None
+            return
+        now = time.monotonic()
+        trk_off = _fw_route.angle_diff(track, pos.course)
+        following = (abs(pos.xtk_nm) <= _fw_route.ON_ROUTE_XTK_NM and
+                     trk_off <= _fw_route.ON_ROUTE_TRK_DEG)
+        if following:
+            self._route_off_since = None
+            self._route_on_since = self._route_on_since or now
+        else:
+            self._route_on_since = None
+            self._route_off_since = self._route_off_since or now
+        old = self._route_mode
+        if old != "on" and self._route_on_since is not None and (
+                now - self._route_on_since >= _fw_route.ON_ROUTE_ENTER_S):
+            self._route_mode = "on"
+        elif old == "none":
+            self._route_mode = "off"
+        elif old == "on" and self._route_off_since is not None and (
+                now - self._route_off_since >= _fw_route.OFF_ROUTE_EXIT_S):
+            self._route_mode = "off"
+        if self._route_mode != old:
+            self.logger.info("Route zones: %s (%.1fnm %s of the route, track %.0f° off it%s)",
+                             "following the FMC route: zones planned along it"
+                             if self._route_mode == "on" else
+                             "off the FMC route: zones planned from the heading",
+                             abs(pos.xtk_nm), "right" if pos.xtk_nm > 0 else "left", trk_off,
+                             f", {pos.total_nm - pos.along_nm:.0f}nm to go")
+        vectored = abs(pos.xtk_nm) > _fw_route.DEST_XTK_NM or trk_off > _fw_route.DEST_TRK_DEG
+        near_dst = (dst is not None and not self._on_ground() and
+                    self._dist_nm(self.ac_lat, self.ac_lon, *dst) <= _fw_route.DEST_MANEUVER_NM)
+        if self._route_dest_maneuver is None and near_dst and vectored and old == "on":
+            self._route_dest_maneuver = names
+            self.logger.info("MANEUVERING mode: vectors near %s (%.1fnm off the route, track "
+                             "%.0f° off it) — until landing or a new route", self.fmc_dst_icao,
+                             abs(pos.xtk_nm), trk_off)
+
+    # ------------------------------------------------------------------
     # Maneuvering mode detection
     # ------------------------------------------------------------------
 
     def _update_maneuvering_mode(self) -> bool:  # pylint: disable=too-many-return-statements
         """Update self._maneuvering from speed and heading history. Returns True if changed."""
         if self.ac_hdg is None:
+            return False
+        if self._route_dest_maneuver is not None:   # vectors near the destination
+            if not self._maneuvering:
+                self._maneuvering = True
+                return True
             return False
 
         # Below 200 kt (taxi, takeoff roll, approach, landing) always maneuver.
@@ -6801,8 +6915,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 lat_nm = random.uniform(lat_min, lat_max) * random.choice([-1, 1])
                 bearing = (self.ac_hdg + math.degrees(math.atan2(lat_nm, fwd_nm))) % 360.0
                 dist_m = math.sqrt(fwd_nm ** 2 + lat_nm ** 2) * _NM_TO_M
-            lon_c, lat_c, _ = self.geod.fwd(
-                lons=self.ac_lon, lats=self.ac_lat, az=bearing, dist=dist_m)
+            on_route = (None if initial or self._maneuvering or self._route_mode != "on" else
+                        _fw_route.place_ahead(self._route_points, self._route_pos.along_nm,
+                                              fwd_nm, lat_nm))
+            if on_route is not None:   # --route-zones: along the route, through its turns
+                lat_c, lon_c = on_route
+            else:
+                lon_c, lat_c, _ = self.geod.fwd(
+                    lons=self.ac_lon, lats=self.ac_lat, az=bearing, dist=dist_m)
             lon_c = ((lon_c + 180.0) % 360.0) - 180.0
             best_d, best_ap = float('inf'), None
             for ap_icao, ap_lat, ap_lon, _ in airports_nearby:
@@ -7001,13 +7121,24 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         lat, lon, icao = self.zone_positions[zone_num]
         if icao in arpt_icaos:
             return None  # dep/dst airport — never relocate, always relevant
+        limit = (self.args.cruise_behind_dist if in_cruise and not self._maneuvering
+                 else self.args.low_alt_dist)
+        if not self._maneuvering and (self._route_mode == "on" or (
+                self._route_mode == "off" and self._route_pos is not None and
+                abs(self._route_pos.xtk_nm) <= _fw_route.OFF_ROUTE_KEEP_NM)):
+            # --route-zones: behind by the distance along the route, so a zone
+            # beyond a turn (behind by the heading now) stays, and a weather
+            # deviation (off the route, but near it) moves none
+            zone_pos = _fw_route.locate(self._route_points, lat, lon)
+            behind_nm = self._route_pos.along_nm - zone_pos.along_nm if zone_pos else 0.0
+            if behind_nm <= limit:
+                return None
+            return f"{behind_nm:.0f}nm behind along the route (limit {limit:.0f}nm)"
         az_to_zone, _, dist_nm = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
         dist_nm /= _NM_TO_M
         is_behind = abs((az_to_zone - self.ac_hdg + 180) % 360 - 180) > 90.0
         if not is_behind:
             return None
-        limit = (self.args.cruise_behind_dist if in_cruise and not self._maneuvering
-                 else self.args.low_alt_dist)
         if dist_nm <= limit:
             return None
         return f"{dist_nm:.0f}nm behind (limit {limit:.0f}nm)"
@@ -10691,6 +10822,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     # relocation below moves zones as they fall behind. It
                     # used to re-place them on leaving too, taking away a CB
                     # the aircraft was in (live, 2026-10-23).
+                    self._update_route_mode()
                     entered_maneuvering = (self._update_maneuvering_mode() and
                                            self._maneuvering)
                     # When PSX manages its own weather (WxAutoSet=1, "disabled"
@@ -11579,6 +11711,16 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "the cell takes its weather.")
         parser.add_argument(   # on by default since 2026-11-10; still accepted, does nothing
             '--advanced-zones', action='store_true', help=argparse.SUPPRESS)
+        parser.add_argument(
+            '--route-zones', action='store_true',
+            help="Plan the weather zones along the FMC route (testing). While the aircraft "
+                 "follows its route (within 10nm, track within 30 degrees, for 2 minutes), new "
+                 "zones go 150-250nm ahead along the route, through its turns, and a zone only "
+                 "counts as behind by its distance along the route; off the route (more than "
+                 "10nm for 3 minutes, e.g. a weather deviation) zones are planned from the "
+                 "heading as before. Vectors near the destination (within 60nm, more than 5nm "
+                 "or 45 degrees off the route) switch to maneuvering until landing or a new "
+                 "route. See docs/frankenweather.md.")
         parser.add_argument(
             '--realistic-holdover', action='store_true',
             help="Realistic anti-icing fluid holdover times (testing). When a de-icing tool "

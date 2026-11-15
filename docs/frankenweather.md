@@ -381,6 +381,33 @@ boundary. Entering maneuvering mode re-places all zones around the
 aircraft, except those whose CB turbulence can still reach it; leaving it
 doesn't move any zone, the ordinary relocation rules take over.
 
+**Route-based zones (`--route-zones`, testing):** with this option the
+zones follow the FMC route instead of the heading:
+
+- **On the route** means within 10 nm of a leg and tracking within 30° of
+  it, for 2 minutes. While on it, new and relocated zones go 150-250 nm
+  ahead *along the route*, through its turns, with the lateral spread
+  measured from the route. A zone counts as behind by its distance along
+  the route. A zone just beyond a turn is behind by the heading before the
+  turn, but it isn't moved.
+- **Off the route** means more than 10 nm away for 3 minutes, for example
+  a deviation around weather or a direct routing the FMC doesn't know.
+  Zones are then planned from the heading as described above, and the
+  route takes over again once the aircraft is back on it. Within 60 nm of
+  the route a zone still counts as behind by its distance along the route,
+  so a deviation doesn't move any zone: one ahead along the route stays.
+- **Vectors near the destination**: when the aircraft has been following
+  the route and then, within 60 nm of the destination, goes more than 5 nm
+  or 45° off it, frankenweather switches to maneuvering mode. It stays
+  there until landing or a new route (a diversion, a new arrival).
+- **A new route** counts once the aircraft follows it; until then zones
+  are planned from the heading.
+- The track is the aircraft's track over the ground over the last 30-60 s,
+  not its heading, which a crosswind can turn 10° or more.
+- The route is every waypoint of the flight, passed ones included, plus the
+  destination airport. The log shows each change ("Route zones: following
+  the FMC route", "off the FMC route", "vectors near ...").
+
 **Keeping the zones:** frankenweather watches every weather variable it
 sets (the zones' positions, weather and METARs, `WxBasic`, `WxAutoSet`).
 If something else changes one, it writes its own value back about 2

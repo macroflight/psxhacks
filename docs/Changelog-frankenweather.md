@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **New (testing): zones along the FMC route (`--route-zones`).** While
+  the aircraft follows its route, new weather zones go ahead along the
+  route, through its turns, rather than straight ahead of the heading. A
+  zone beyond a turn is no longer moved away just because the heading
+  points elsewhere before the turn. Off the route (a weather deviation)
+  zones are planned from the heading as before. Vectors near the
+  destination switch to maneuvering until landing or a new route.
 - **CB anvils point downwind of the wind at the CB.** The anvil turbulence
   zone above a CB's top (and the map's anvil) followed the wind at the
   CB's top level at the aircraft, which can be hundreds of miles away and
