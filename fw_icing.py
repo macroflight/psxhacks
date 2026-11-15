@@ -242,7 +242,7 @@ def model_factor(c: Conditions) -> tuple:
         why += ", precipitation"
     if warm < 1.0:
         le_c = leading_edge_c(c.sat_c, c.tat_c)
-        if factor * warm >= min(factor, aft):
+        if le_c <= 0.0 or factor * warm >= min(factor, aft):
             factor *= warm
             why += f", leading edge {le_c:+.1f} C"
         else:
