@@ -458,6 +458,10 @@ _RADAR_FRESH_S = 1800.0       # a radar frame older than this doesn't decide any
 _RADAR_MATCH_NM = 20.0        # a radar CB within this of a zone centre is that zone's CB
 _RADAR_GONE_NM = 12.0         # a drifting CB's radar cell must be within this, else it's gone
 _RADAR_COVERAGE_KEEP_S = 6 * 3600.0
+_RADAR_STEER_S = 600.0         # a drifting CB steers onto its radar cell over this long
+_RADAR_TRUST_AGE_S = 1200     # a cell's own motion counts once tracked over 2 frames (20 min)
+_RADAR_CORRECT_MAX_KT = 15.0   # ... with at most this much on top of the cell's own motion
+_RADAR_STEER_MAX_KT = 60.0     # ... and never faster than this in all (realistic storm speeds)
 _CBS_CHECK_S = 5.0            # CBS messages: look for changes this often
 _CBS_SAME_CB_NM = 20.0        # a zone's CB this far from where it was: a new CB (new id)
 _FUEL_SITU_LOAD_S = 30.0      # fuel changes this soon after a situ load: the load, not a refuel
@@ -6988,7 +6992,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 continue
             if not self._radar_covered(cell.lat, cell.lon):
                 continue
-            return cell.lat, cell.lon, f"X{random.randint(100, 999):03d}"
+            return (*self._radar_cell_now(cell), f"X{random.randint(100, 999):03d}")
         return None
 
     def _cb_turb_in_reach(self, zone_num: int) -> Optional[str]:
@@ -7616,11 +7620,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                                          {c.radar for c in self._drift.values() if c.radar})
                      if self._radar_fresh() else None)
             if radar is not None:   # --radar-cbs: the CB sits on the cell, moves with it
-                lat, lon = radar.lat, radar.lon
+                lat, lon = self._radar_cell_now(radar)
             profile = await loop.run_in_executor(
                 None, self._turb_engine.wind_fetcher.get, lat, lon, datetime.now(timezone.utc))
-            motion = (radar.motion if radar is not None and radar.motion else
-                      _fw_drift.mean_wind_motion(profile))
+            trusted = radar is not None and radar.motion and radar.age_s >= _RADAR_TRUST_AGE_S
+            motion = ((radar.motion[0], min(radar.motion[1], _RADAR_STEER_MAX_KT)) if trusted
+                      else _fw_drift.mean_wind_motion(profile))
             if motion is None:
                 self.logger.debug("CB drift: Zone %d stays put (no or calm 850-300hPa wind)",
                                   zone_num)
@@ -7640,7 +7645,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 "CB drift: Zone %d (%s) CB at %s starts drifting %03.0f°/%.0fkt"
                 " (%s), CB %d oktas, life %.0f min",
                 zone_num, name, _fw_drift.pos_text(lat, lon), cell.heading_deg, cell.speed_kt,
-                ("on its radar cell, the cell's motion" if radar is not None and radar.motion
+                ("on its radar cell, the cell's motion" if trusted
                  else "on its radar cell, 850-300hPa mean wind +5°" if radar is not None
                  else "850-300hPa mean wind +5°"),
                 cell.start_oktas, cell.lifetime_s / 60.0)
@@ -7665,10 +7670,28 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             cell.start_decay(now, "its radar cell is gone")
             self.logger.info("CB drift: Zone %d starts to decay (%s)", zone_num, cell.decay_why)
             return
-        cell.radar, cell.lat, cell.lon = match.key, match.lat, match.lon
-        if match.motion:
-            cell.heading_deg, cell.speed_kt = match.motion
+        cell.radar = match.key
         cell.lifetime_s = max(cell.lifetime_s, cell.age_s + 1200.0)   # alive while the radar has it
+        # Where the cell is now (the frame is 10-20 min old), and where it will be
+        # when the next frame is due: steer there instead of jumping
+        lat, lon = self._radar_cell_now(match)
+        motion = (match.motion if match.motion and match.age_s >= _RADAR_TRUST_AGE_S
+                  else (cell.heading_deg, cell.speed_kt))
+        # Gently, not to startle the pilot: the cell's motion plus a correction of
+        # at most _RADAR_CORRECT_MAX_KT towards it, at most _RADAR_STEER_MAX_KT in all
+        # (a big gap takes a few frames to close)
+        az, _, dist_m = self.geod.inv(cell.lon, cell.lat, lon, lat)
+        corr_kt = min(_RADAR_CORRECT_MAX_KT, dist_m / _NM_TO_M / (_RADAR_STEER_S / 3600.0))
+        u = (motion[1] * math.sin(math.radians(motion[0])) +
+             corr_kt * math.sin(math.radians(az)))
+        v = (motion[1] * math.cos(math.radians(motion[0])) +
+             corr_kt * math.cos(math.radians(az)))
+        cell.heading_deg = math.degrees(math.atan2(u, v)) % 360.0
+        cell.speed_kt = min(math.hypot(u, v), _RADAR_STEER_MAX_KT)
+        self.logger.info("CB drift: Zone %d follows its radar cell %.1fnm away: %03.0f/%.0fkt "
+                         "(cell %03.0f/%.0fkt)", zone_num,
+                         self._dist_nm(cell.lat, cell.lon, lat, lon), cell.heading_deg,
+                         cell.speed_kt, motion[0], motion[1])
 
     def _cb_still_growing(self, zone_num: int, wx: str) -> bool:
         """Return True if zone_num's CB (wx) hasn't yet grown to its fade target (_fade_cb_wx())."""
@@ -9946,6 +9969,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                              (f" {c.motion[0]:03.0f}/{c.motion[1]:.0f}kt" if c.motion else "")
                              for c in cbs[:3]) if cbs else "")
 
+    def _radar_cell_now(self, cell) -> tuple:
+        """Return (lat, lon) where a radar cell is now: its frame position run on by its motion."""
+        if not cell.motion or cell.age_s < _RADAR_TRUST_AGE_S:
+            return cell.lat, cell.lon
+        sim_ms = self.sim_time_ms()
+        now_s = sim_ms / 1000.0 if sim_ms is not None else time.time()
+        hours = max(0.0, min(3600.0, now_s - cell.frame)) / 3600.0
+        return _fw_radar.ahead(cell.lat, cell.lon, cell.motion[0], cell.motion[1] * hours)
+
     def _radar_fresh(self) -> bool:
         """Return True if --radar-cbs has a recent radar frame to decide with."""
         return (self.args.radar_cbs and self._radar_frame is not None and
@@ -10392,9 +10424,21 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             if (self._radar_fresh() and not cb_removed_for and
                     not self._is_cb_free_zone(zone_num) and self._radar_covered(lat, lon)):
                 # --radar-cbs: inside radar coverage the radar alone decides
-                final_wx, radar_why = self._radar_cb_wx(final_wx, lat, lon, month)
+                before = _fw_drift.cb_oktas(final_wx)
+                # where PSX draws the zone's CB (7 nm from its centre), if known
+                sim_ms = self.sim_time_ms()
+                cb_at = (_fw_drift.cb_position(self.geod, new_modes[-1], sim_ms)
+                         if sim_ms is not None else None) or (lat, lon)
+                final_wx, radar_why = self._radar_cb_wx(final_wx, *cb_at, month)
                 if radar_why:
                     sigmet_label = None
+                    self.logger.info("Zone %d radar: CB %d -> %d oktas (%s)", zone_num, before,
+                                     _fw_drift.cb_oktas(final_wx), radar_why)
+            elif self._radar_fresh():
+                self.logger.debug("Zone %d radar: not deciding (covered %s, removed %s, "
+                                  "CB-free %s)",
+                                  zone_num, self._radar_covered(lat, lon), cb_removed_for,
+                                  self._is_cb_free_zone(zone_num))
             self.zone_cb_sigmet[zone_num] = sigmet_label
             target_parts = final_wx.split(';')
             target_oktas_val = int(target_parts[9]) if len(target_parts) > 11 else 0

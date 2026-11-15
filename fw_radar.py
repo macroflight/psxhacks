@@ -256,7 +256,7 @@ def find_cells(tiles: dict, zoom: int, frame: int, area: Optional[tuple] = None)
     return cells
 
 
-def _ahead(lat: float, lon: float, hdg: float, nm: float) -> tuple:
+def ahead(lat: float, lon: float, hdg: float, nm: float) -> tuple:
     """Return (lat, lon) nm from a point along hdg (flat-earth, short distances)."""
     dlat = nm * math.cos(math.radians(hdg)) / 60.0
     dlon = nm * math.sin(math.radians(hdg)) / (60.0 * max(0.1, math.cos(math.radians(lat))))
@@ -280,7 +280,7 @@ def track(previous: list, cells: list, dt_s: float) -> None:  # pylint: disable=
         best, best_d = None, math.inf
         for old in free:
             if old.motion is not None and dt_s > 0:
-                plat, plon = _ahead(old.lat, old.lon, old.motion[0], old.motion[1] * hours)
+                plat, plon = ahead(old.lat, old.lon, old.motion[0], old.motion[1] * hours)
                 d, reach = _dist_nm(plat, plon, cell.lat, cell.lon), TRACK_PREDICTED_NM
             else:
                 d = _dist_nm(old.lat, old.lon, cell.lat, cell.lon)

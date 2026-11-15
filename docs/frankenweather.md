@@ -426,9 +426,15 @@ the same picture VATSIM Radar can show) decides where the CBs are.
   none there, the cell gives the zone one, with oktas and top from its
   strength and size. METARs and SIGMETs no longer create CBs there. New
   zones go onto the strongest unclaimed radar CBs ahead.
-- A drifting CB (advanced zones) sits exactly on its radar cell and moves
-  with the cell's tracked motion. It follows the cell on every new frame,
-  stays alive as long as the radar has it, and fades when the cell is gone.
+- A drifting CB (advanced zones) starts on its radar cell and moves with
+  the cell's tracked motion (once the cell has been tracked for 20
+  minutes; until then with the 850-300 hPa mean wind). A radar frame is 10-20 minutes old when it
+  arrives, so frankenweather runs the cell on to where it is now. On every
+  new frame the CB steers gently back towards its cell: the cell's motion
+  plus at most 15 kt, never faster than 60 kt in all. Not startling the
+  pilot matters more than following the radar exactly, so a big gap takes
+  a few frames to close. The CB stays alive as long as the radar has the
+  cell, and fades when the cell is gone (or more than 12 nm away).
 - **Outside radar coverage** (oceans, most of Africa, Russia, polar areas)
   nothing changes: lightning (MTG), SIGMETs and the forecast place the CBs.
 - The log shows each frame ("Radar cells: ..."), and a zone's reason shows
