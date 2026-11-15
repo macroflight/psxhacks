@@ -31,6 +31,7 @@ from typing import List, Optional, Tuple
 import aiohttp
 
 from fw_cb import om_cb_fields
+import fw_radar
 
 try:
     from PIL import Image
@@ -171,24 +172,12 @@ def _pixel_in_tile(lat: float, lon: float, zoom: int) -> Tuple[int, int]:
 
 
 # ---------------------------------------------------------------------------
-# Radar helpers (RainViewer colour scheme 2)
+# Radar helpers (RainViewer's Universal Blue colours, fw_radar)
 # ---------------------------------------------------------------------------
 
 def _pixel_echo_strength(r: int, g: int, b: int, a: int) -> int:
-    """Map an RGBA pixel from RainViewer scheme 2 to echo strength 0-3.
-
-    Scheme 2 colour progression:
-      15-30 dBZ → blue/cyan shades
-      35-50 dBZ → green shades
-      50+   dBZ → yellow → orange → red  (CB core range)
-    """
-    if a < 30:
-        return 0                        # transparent = no echo
-    if b > max(r, g):
-        return 1                        # blue-dominant = light rain
-    if g >= r:
-        return 2                        # green-dominant = moderate
-    return 3                            # warm (yellow/orange/red) = heavy/CB
+    """Map an RGBA tile pixel to echo strength 0-3 (fw_radar.pixel_echo())."""
+    return fw_radar.pixel_echo(r, g, b, a)
 
 
 def _tile_echo(img: 'Image.Image', px: int, py: int) -> int:

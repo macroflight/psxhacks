@@ -77,6 +77,7 @@ import fw_sigmet as _fw_sigmet  # pylint: disable=wrong-import-order
 import fw_drift as _fw_drift  # pylint: disable=wrong-import-order
 import fw_cbmsg as _fw_cbmsg  # pylint: disable=wrong-import-order
 import fw_route as _fw_route  # pylint: disable=wrong-import-order
+import fw_radar as _fw_radar  # pylint: disable=wrong-import-order
 import fw_holdover as _fw_holdover  # pylint: disable=wrong-import-order
 import fw_icing as _fw_icing  # pylint: disable=wrong-import-order
 from psxhacks_version import get_version
@@ -1221,18 +1222,12 @@ def _sigmet_first_polygon(text: str) -> list:
 
 
 # ---------------------------------------------------------------------------
-# Radar helpers (RainViewer colour scheme 2 — logic shared with fw_scanner.py)
+# Radar helpers (RainViewer's Universal Blue colours, fw_radar — shared with fw_scanner.py)
 # ---------------------------------------------------------------------------
 
 def _rv_pixel_echo_strength(r: int, g: int, b: int, a: int) -> int:
-    """Map an RGBA pixel from RainViewer scheme 2 to echo strength 0–3."""
-    if a < 30:
-        return 0
-    if b > max(r, g):
-        return 1   # blue-dominant: light rain (15-30 dBZ)
-    if g >= r:
-        return 2   # green-dominant: moderate (35-50 dBZ)
-    return 3       # warm (yellow/orange/red): heavy / CB core (50+ dBZ)
+    """Map an RGBA tile pixel to echo strength 0-3 (fw_radar.pixel_echo())."""
+    return _fw_radar.pixel_echo(r, g, b, a)
 
 
 def _rv_tile_xy(lat: float, lon: float, zoom: int) -> tuple:

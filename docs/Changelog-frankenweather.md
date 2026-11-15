@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Fix: the weather radar read drizzle as heavy rain.** RainViewer only
+  serves its "Universal Blue" colours since 2026, where light rain and
+  drizzle are beige. frankenweather still read the old colours and took
+  that beige for the heavy-rain colours, so any light echo counted as a
+  CB core: more CB oktas allowed, and zones pulled towards drizzle. It now
+  reads each pixel's exact reflectivity from RainViewer's published colour
+  table: moderate from 35 dBZ, heavy from 50 dBZ. The scanner too.
 - **New (testing): zones along the FMC route (`--route-zones`).** While
   the aircraft follows its route, new weather zones go ahead along the
   route, through its turns, rather than straight ahead of the heading. A
