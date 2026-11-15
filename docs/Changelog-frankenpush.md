@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Formation autopilot: FLCH and Flight Centre's V/S.** Altitude changes
+  are flown the way Flight Centre commands: FLCH for big changes (the
+  speed held by pitch), V/S at its rate (500-3,000 ft/min) for small ones
+  and for following a climbing or descending lead, switching to FLCH if
+  the speed runs away, and ALT HOLD near the altitude. The status reports
+  the actual V/S and mode. FLCH is now an accepted pitch mode; an older
+  Flight Centre still gets V/S at 1,000 ft/min.
 - **New: frankenweather's weather goes to Flight Centre.** The telemetry
   now has a `weather` part: the weather zones, every CB (position, tops,
   drift, anvil) and the turbulence right now, from frankenweather, when it

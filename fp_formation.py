@@ -11,12 +11,14 @@ messages. Pure logic, unit-tested here (python3 -m unittest fp_formation).
 Rules (from the user and Flight Centre's interface):
 - Opt-in (frankenpush --formation-autopilot); otherwise "refused".
 - Only steers while the centre autopilot CMD C (and no other) is engaged,
-  the A/T mode is SPD, the roll mode HDG SEL, the pitch mode ALT or V/S,
+  the A/T mode is SPD (THR/HOLD in FLCH), the roll mode HDG SEL, the pitch mode ALT, V/S or FLCH,
   the bank limit AUTO, flaps up, airborne and 1,000 ft AGL or more. It
   never selects any of these itself: the crew sets them up. Otherwise
   "standby" (before steering) or "disengaged" (while steering).
-- Turns only the MCP HDG, SPD, ALT and V/S knobs, and switches between
-  ALT HOLD and V/S (at 1,000 ft/min) for altitude changes.
+- Turns only the MCP HDG, SPD, ALT and V/S knobs, and presses FLCH, V/S or
+  ALT HOLD as Flight Centre's command.vertical_mode says (V/S at
+  command.vs_fpm; FLCH while the speed runs away in V/S); without it V/S at
+  1,000 ft/min as before.
 - Any MCP or mode change it didn't make itself is a pilot override: stop
   at once, touch nothing more.
 - A lead slower than we can fly (its ground speed needs an IAS below our
@@ -38,6 +40,8 @@ AFDS_SPD = 19
 AFDS_HDG_SEL = 3
 AFDS_ALT = 9
 AFDS_VS = 13
+AFDS_FLCH = 11
+AFDS_THR, AFDS_HOLD = 20, 21   # the A/T in FLCH
 
 # MCP knob clicks: HDG 1 deg, SPD 1 kt or 0.001 Mach, ALT 100 ft, V/S 100 ft/min.
 # PSX takes DELTA events of up to 16 clicks, at up to 20 Hz.
@@ -73,6 +77,12 @@ STATUS_EVERY = 5
 CLIMB_STOP_KT = 10.0
 CLIMB_OK_KT = 3.0
 CLIMB_BLOCK_S = 60.0
+# Vertical modes (Flight Centre 2026-11-15, command.vertical_mode): V/S gives way to FLCH when the
+# speed runs away (descending: IAS this far above the MCP speed; climbing: CLIMB_STOP_KT below it),
+# and goes back to V/S once the speed has been within SPEED_HELD_KT for SPEED_HELD_S
+VS_OVERSPEED_KT = 10.0
+SPEED_HELD_KT = 3.0
+SPEED_HELD_S = 30.0
 
 
 # ---------------------------------------------------------------- performance
@@ -283,6 +293,11 @@ class Formation:  # pylint: disable=too-many-instance-attributes
         self.timed_out = False      # disengaged by NO GUIDANCE: tell the crew
         self.drift = 0.0            # last drift (track - heading) measured wings level
         self.climb_blocked_until = -1e9   # climb protection (CLIMB_*)
+        self.flch_pressed_at = -1e9
+        self.vs_limited_since: Optional[float] = None   # V/S asked, FLCH flown (speed ran away)
+        self.speed_held_since: Optional[float] = None
+        # What we fly vertically, reported in every formation_status while engaged (2026-11-15)
+        self.vertical = {"vs_actual_fpm": None, "vertical_mode": None, "vs_limited": None}
         self.lead_slow_since: Optional[float] = None
         # Limits we fly to now, reported in formation_status (Flight Centre 2026-11-11)
         self.limits = {"min_ias_kt": None, "max_ias_kt": None, "speed_limited": None,
@@ -296,7 +311,7 @@ class Formation:  # pylint: disable=too-many-instance-attributes
         return {"type": "formation_status", "protocol_version": 1,
                 "formation_version": FORMATION_VERSION, "state": self.state,
                 "reason": self.reason, "seq": self.last_seq, "ap_engaged": self.ap_engaged,
-                **self.limits}
+                **self.limits, **(self.vertical if self.state == "engaged" else {})}
 
     def _set_state(self, state: str, reason: Optional[str], detail: Optional[str] = None) -> list:
         if (state, reason) == (self.state, self.reason):
@@ -324,12 +339,12 @@ class Formation:  # pylint: disable=too-many-instance-attributes
             return "AUTOPILOT NOT ENGAGED" if not any(
                 self._lit(sim, f"McpPshCmd{s}") for s in "LCR") else "CMD C ONLY"
         wrong = []
-        if sim.get("thr") != AFDS_SPD:
+        if not _thr_ok(sim):
             wrong.append("A/T NOT SPD")
         if sim.get("roll") != AFDS_HDG_SEL:
             wrong.append("NOT HDG SEL")
-        if sim.get("pitch") not in (AFDS_ALT, AFDS_VS):
-            wrong.append("NOT ALT OR V/S")
+        if sim.get("pitch") not in (AFDS_ALT, AFDS_VS, AFDS_FLCH):
+            wrong.append("NOT ALT, V/S OR FLCH")
         if sim.get("bank_limit") != 0:
             wrong.append("BANK LIMIT NOT AUTO")
         if sim.get("flap_lever") not in (0, None):
@@ -468,6 +483,7 @@ class Formation:  # pylint: disable=too-many-instance-attributes
         """Start watching the MCP windows from what they show now."""
         self.expect = {name: (sim.get(name), sim.get(name), now, sim.get(name))
                        for name in ("mcp_hdg", "mcp_spd", "mcp_alt", "mcp_vs")}
+        self.expect["pitch"] = sim.get("pitch")
         self.vs_pressed_at = self.alt_pressed_at = -1e9
         self.climb_blocked_until = -1e9
 
@@ -516,6 +532,8 @@ class Formation:  # pylint: disable=too-many-instance-attributes
         for key, want, text in (("thr", AFDS_SPD, "A/T mode"), ("roll", AFDS_HDG_SEL, "roll mode")):
             if sim.get(key) == -want:
                 return "AFDS FAULT", f"{text} {sim.get(key)}"
+            if key == "thr" and _thr_ok(sim):
+                continue
             if sim.get(key) != want:
                 return "PILOT OVERRIDE", f"{text} {sim.get(key)}"
         if sim.get("bank_limit") != 0:
@@ -523,14 +541,17 @@ class Formation:  # pylint: disable=too-many-instance-attributes
         if sim.get("flap_lever") not in (0, None):
             return "PILOT OVERRIDE", f"flap lever {sim.get('flap_lever')}"
         pitch = sim.get("pitch")
-        if pitch in (-AFDS_ALT, -AFDS_VS):
+        if pitch in (-AFDS_ALT, -AFDS_VS, -AFDS_FLCH):
             return "AFDS FAULT", f"pitch mode {pitch}"
-        if pitch not in (AFDS_ALT, AFDS_VS):
+        if pitch not in (AFDS_ALT, AFDS_VS, AFDS_FLCH):
             return "PILOT OVERRIDE", f"pitch mode {pitch}"
-        # ALT -> V/S only when we pressed it; V/S -> ALT is PSX capturing (or our ALT HOLD)
-        if pitch == AFDS_VS and self.expect.get("pitch") == AFDS_ALT and \
+        # V/S or FLCH only when we pressed it; to ALT is PSX capturing (or our ALT HOLD)
+        if pitch == AFDS_VS and self.expect.get("pitch") not in (None, AFDS_VS) and \
                 now - self.vs_pressed_at > VS_GRACE_S:
             return "PILOT OVERRIDE", "V/S selected"
+        if pitch == AFDS_FLCH and self.expect.get("pitch") not in (None, AFDS_FLCH) and \
+                now - self.flch_pressed_at > VS_GRACE_S:
+            return "PILOT OVERRIDE", "FLCH selected"
         self.expect["pitch"] = pitch
         names = ["mcp_hdg", "mcp_spd", "mcp_alt"]
         if pitch == AFDS_VS and now - self.vs_pressed_at > VS_GRACE_S:
@@ -607,7 +628,12 @@ class Formation:  # pylint: disable=too-many-instance-attributes
         if base is not None and target != base:
             actions += turns("McpTurnAlt", target - base)
             self._expect_turn("mcp_alt", sim["mcp_alt"], target, now)
-        actions += self._vertical(cmd_alt, sim, now, limits)
+        mode = cmd.get("vertical_mode")
+        if mode in ("flch", "vs", "alt"):
+            actions += self._vertical_mode(mode, cmd, cmd_alt, sim, now, limits)
+        else:
+            actions += self._vertical(cmd_alt, sim, now, limits)
+        self._report_vertical(sim, mode)
         return actions
 
     def _cap_altitude(self, cmd_alt: float, sim: dict) -> float:
@@ -681,10 +707,94 @@ class Formation:  # pylint: disable=too-many-instance-attributes
                 return turns("McpTurnVs", want - cur)
         return []
 
+    def _report_vertical(self, sim: dict, mode: Optional[str]):
+        """Note what we fly vertically, for formation_status (vs_actual_fpm, vertical_mode...)."""
+        pitch = sim.get("pitch")
+        flown = {AFDS_FLCH: "flch", AFDS_VS: "vs", AFDS_ALT: "alt"}.get(pitch)
+        vs = sim.get("vs_actual_fpm")
+        self.vertical = {"vs_actual_fpm": int(round(vs)) if vs is not None else None,
+                         "vertical_mode": flown,
+                         "vs_limited": bool(mode == "vs" and flown == "flch")}
+
+    def _press(self, button: str, now: float) -> list:
+        """Press V/S, FLCH or ALT HOLD (once per VS_GRACE_S) and note it for override checks."""
+        attr = {"McpPshVs": "vs_pressed_at", "McpPshFlc": "flch_pressed_at",
+                "McpPshAltHld": "alt_pressed_at"}[button]
+        if now - getattr(self, attr) <= VS_GRACE_S:
+            return []
+        setattr(self, attr, now)
+        if button == "McpPshVs":
+            self.expect["mcp_vs"] = (None, None, now + VS_GRACE_S, None)
+        return [("press", button)]
+
+    def _vertical_mode(self, mode: str, cmd: dict, cmd_alt: float, sim: dict,  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-return-statements,too-many-branches,too-many-locals
+                       now: float, limits: dict) -> list:
+        """Fly Flight Centre's command.vertical_mode: FLCH, V/S at command.vs_fpm, or ALT HOLD.
+
+        In V/S a runaway speed (descending: IAS VS_OVERSPEED_KT above the MCP
+        speed; climbing: CLIMB_STOP_KT below it) switches to FLCH, which holds
+        the speed by pitch; back to V/S once the speed has been held for
+        SPEED_HELD_S. The MCP altitude window is already set (_steer()).
+        """
+        alt = sim.get("baro_alt_ft")
+        if alt is None:
+            alt = sim.get("alt_ft")
+        if alt is None:
+            return []
+        err = cmd_alt - alt
+        pitch = sim.get("pitch")
+        if mode == "alt" or abs(err) <= ALT_BAND_FT:
+            self.vs_limited_since = None
+            if pitch == AFDS_ALT:
+                return []
+            if abs(err) <= ALT_BAND_FT:
+                return self._press("McpPshAltHld", now)
+            return []                                       # ALT asked further away: let it capture
+        if mode == "flch":
+            self.vs_limited_since = None
+            return [] if pitch == AFDS_FLCH else self._press("McpPshFlc", now)
+        # "vs"
+        top = max(1, min(60, int(round(float(limits.get("vs_fpm") or 3000) / 100.0))))
+        try:
+            want = int(round(float(cmd.get("vs_fpm")) / 100.0))
+        except (TypeError, ValueError):
+            want = 10 if err > 0 else -10
+        want = max(-top, min(top, want)) or (5 if err > 0 else -5)
+        if (want > 0) != (err > 0):
+            want = -want                                    # never away from the altitude
+        deficit = speed_deficit(sim)
+        held = deficit is not None and abs(deficit) <= SPEED_HELD_KT
+        self.speed_held_since = (self.speed_held_since or now) if held else None
+        runaway = deficit is not None and (
+            (want < 0 and -deficit > VS_OVERSPEED_KT) or (want > 0 and deficit > CLIMB_STOP_KT))
+        if runaway and pitch == AFDS_VS:
+            self.vs_limited_since = now
+            self.events.append(f"formation autopilot: speed {abs(deficit):.0f} kt "
+                               f"{'above' if want < 0 else 'below'} the MCP speed in V/S: FLCH")
+            return self._press("McpPshFlc", now)
+        if self.vs_limited_since is not None:
+            if pitch == AFDS_FLCH and not (self.speed_held_since is not None and
+                                           now - self.speed_held_since >= SPEED_HELD_S):
+                return []                                   # hold FLCH until the speed is held
+            self.vs_limited_since = None
+        if pitch != AFDS_VS:
+            return self._press("McpPshVs", now) + [("vs", want)]
+        cur = self._base("mcp_vs", sim, now)
+        if now - self.vs_pressed_at > VS_GRACE_S and cur is not None and cur != want:
+            self._expect_turn("mcp_vs", sim.get("mcp_vs"), want, now)
+            return turns("McpTurnVs", want - cur)
+        return []
+
     def set_vs_expected(self, current: int, want: int):
         """Note the V/S knob turn from current to want made after pressing V/S."""
         now = self.clock()
         self.expect["mcp_vs"] = (min(current, want), max(current, want), now + TURN_GRACE_S, want)
+
+
+def _thr_ok(sim: dict) -> bool:
+    """Return True for the A/T mode we steer with: SPD, or THR/HOLD while in FLCH."""
+    thr = sim.get("thr")
+    return thr == AFDS_SPD or (sim.get("pitch") == AFDS_FLCH and thr in (AFDS_THR, AFDS_HOLD))
 
 
 def speed_deficit(sim: dict) -> Optional[float]:
@@ -767,11 +877,11 @@ class TestFormation(unittest.TestCase):  # pylint: disable=too-many-public-metho
         self.assertIn(("turn", "McpTurnHdg", 10), actions)
 
     def test_modes_required(self):
-        """FLCH, LNAV, A/T not SPD, bank limit not AUTO: standby listing them."""
+        """VNAV, LNAV, A/T not SPD, bank limit not AUTO: standby listing them."""
         f, _ = self.make()
-        _, st = f.on_steer(_steer(1), _sim(pitch=11, roll=4, thr=20, bank_limit=2))
+        _, st = f.on_steer(_steer(1), _sim(pitch=15, roll=4, thr=20, bank_limit=2))
         self.assertEqual(st[0]["state"], "standby")
-        for word in ("A/T NOT SPD", "NOT HDG SEL", "NOT ALT OR V/S", "BANK LIMIT NOT AUTO"):
+        for word in ("A/T NOT SPD", "NOT HDG SEL", "NOT ALT, V/S OR FLCH", "BANK LIMIT NOT AUTO"):
             self.assertIn(word, st[0]["reason"])
 
     def test_no_psx_data_is_standby(self):
@@ -869,7 +979,7 @@ class TestFormation(unittest.TestCase):  # pylint: disable=too-many-public-metho
         self.assertEqual(mcp_heading(2, 358, 3, 0, True), 357)
 
     def test_pilot_override(self):
-        """The crew turning a knob we didn't, or FLCH, or AP off: disengaged."""
+        """The crew turning a knob we didn't, or selecting FLCH, or AP off: disengaged."""
         f, clock = self.make()
         f.on_steer(_steer(1), _sim())
         clock.t += 1
@@ -883,6 +993,48 @@ class TestFormation(unittest.TestCase):  # pylint: disable=too-many-public-metho
         f.on_steer(_steer(1), _sim())
         _, st = f.tick(_sim(pitch=11))
         self.assertEqual(st[0]["reason"], "PILOT OVERRIDE")
+
+    def test_vertical_modes(self):
+        """vertical_mode: FLCH pressed, V/S at vs_fpm, ALT HOLD near; ours aren't overrides."""
+        def steer(seq, mode, vs=None, alt=37000.0):
+            msg = _steer(seq, alt=alt)
+            msg["command"].update(vertical_mode=mode, **({"vs_fpm": vs} if vs is not None else {}))
+            msg["limits"]["vs_fpm"] = 3000
+            return msg
+        f, clock = self.make()
+        acts, _ = f.on_steer(steer(1, "flch"), _sim())
+        self.assertIn(("press", "McpPshFlc"), acts)
+        clock.t += 3      # within the press grace: not pressed again
+        acts, _ = f.on_steer(steer(2, "flch"), _sim(mcp_alt=370))
+        self.assertNotIn(("press", "McpPshFlc"), acts)
+        clock.t += 1     # FLCH active, A/T THR: neither is an override
+        self.assertEqual(f.tick(_sim(pitch=AFDS_FLCH, thr=AFDS_THR, mcp_alt=370))[1], [])
+        clock.t += 3
+        acts, _ = f.on_steer(steer(3, "vs", 1800),
+                             _sim(pitch=AFDS_FLCH, thr=AFDS_THR, mcp_alt=370, vs_actual_fpm=2100.0))
+        self.assertEqual(acts[:2], [("press", "McpPshVs"), ("vs", 18)])
+        self.assertEqual(f.vertical["vertical_mode"], "flch")
+        self.assertEqual(f.vertical["vs_actual_fpm"], 2100)
+        clock.t += 3
+        sim = _sim(pitch=AFDS_VS, mcp_alt=370, mcp_vs=18, baro_alt_ft=36950.0, alt_ft=36950.0)
+        acts, _ = f.on_steer(steer(4, "alt"), sim)
+        self.assertIn(("press", "McpPshAltHld"), acts)
+
+    def test_vs_speed_runaway_flch(self):
+        """V/S descending with the speed 10+ kt above the MCP speed: FLCH, vs_limited reported."""
+        f, clock = self.make()
+        msg = _steer(1, alt=31000.0)
+        msg["command"].update(vertical_mode="vs", vs_fpm=-2500)
+        f.on_steer(msg, _sim())
+        clock.t += 3
+        msg = dict(msg, seq=2)
+        acts, _ = f.on_steer(msg, _sim(pitch=AFDS_VS, mcp_vs=-25, mcp_alt=310, ias=295.0))
+        self.assertIn(("press", "McpPshFlc"), acts)
+        clock.t += 3
+        msg = dict(msg, seq=3)
+        f.on_steer(msg, _sim(pitch=AFDS_FLCH, thr=AFDS_HOLD, mcp_alt=310, ias=285.0))
+        self.assertTrue(f.vertical["vs_limited"])
+        self.assertTrue(f.status()["vs_limited"])
 
     def test_own_turns_are_not_overrides(self):
         """Our own heading turn passing through intermediate values is fine."""

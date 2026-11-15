@@ -91,12 +91,13 @@ frankenpush.py ... --formation-autopilot
 ```
 
 - **Only when the crew has set it up:** the centre autopilot **CMD C**
-  engaged (and not L or R), A/T mode **SPD**, roll mode **HDG SEL**, pitch
-  mode **ALT** or **V/S**, bank limit **AUTO**, flaps up, airborne and at
+  engaged (and not L or R), A/T mode **SPD** (THR or HOLD in FLCH), roll
+  mode **HDG SEL**, pitch mode **ALT**, **V/S** or **FLCH**, bank limit
+  **AUTO**, flaps up, airborne and at
   least 1,000 ft above the ground (true altitude minus PSX's terrain
   elevation under the aircraft). frankenpush never selects any of these
   itself. Until they hold it reports "standby" with what's missing (e.g.
-  "NOT HDG SEL, NOT ALT OR V/S") and starts as soon as they do.
+  "NOT HDG SEL, NOT ALT, V/S OR FLCH") and starts as soon as they do.
 - **What it turns:** only the MCP knobs, the way a pilot would.
   - **Heading:** the commanded track, minus the drift (measured from the
     track over the ground with the wings level) and the magnetic variation
@@ -111,10 +112,20 @@ frankenpush.py ... --formation-autopilot
     buffet-onset speed, plus 5 kt. From PSX's EICAS gross weight; a rough
     747-400 model that errs high (e.g. 350 t: 253 kt low down, about
     270 kt at FL350).
-  - **Altitude:** the MCP altitude; a new altitude is flown in **V/S at
-    1,000 ft/min** (frankenpush presses V/S and sets the V/S wheel) and PSX
-    captures it in ALT. frankenpush presses ALT HOLD only if V/S is still on
-    within 100 ft of it.
+  - **Altitude:** the MCP altitude, flown the way Flight Centre says
+    (`command.vertical_mode`, 2026-11-15):
+    - **FLCH** for a change of 1,000 ft or more and for breaking away
+      downwards: PSX's best rate with the speed held by pitch, so it can't
+      run away. frankenpush keeps setting the MCP speed as usual.
+    - **V/S at Flight Centre's rate** (`command.vs_fpm`, 500-3,000 ft/min)
+      for small changes and for following a lead that climbs or descends.
+      If the speed runs away anyway (descending: IAS 10 kt above the MCP
+      speed; climbing: 10 kt below it), it switches to FLCH until the speed
+      has been held for 30 s, then back to V/S ("vs_limited" meanwhile).
+    - **ALT HOLD** within 100 ft; PSX captures the MCP altitude.
+    - Without these fields (an older Flight Centre): V/S at 1,000 ft/min as
+      before. Every status while engaged reports the actual V/S, the pitch
+      mode flown and whether it's limited.
   - **Maximum altitude:** never above the altitude where the weight still
     allows a 1,000 ft/min climb (roughly the 747-400 maximum altitude chart
     minus 2,000 ft: about FL323 at 315 t, FL305 at 350 t). Above it already,
@@ -125,7 +136,7 @@ frankenpush.py ... --formation-autopilot
     the first live test a heavy aircraft left climbing in V/S at FL349
     stalled and crashed.)
 - **Pilot override:** any MCP heading, speed, altitude or V/S change, or
-  mode change, frankenpush didn't make (except PSX's own ALT capture and
+  mode change (FLCH or V/S included), frankenpush didn't make (except PSX's own ALT capture and
   IAS/Mach changeover), or the autopilot disconnecting: it stops at once
   ("disengaged, PILOT OVERRIDE" or "AUTOPILOT DISCONNECTED") and touches
   nothing more. Engage again from the station. The log says what changed

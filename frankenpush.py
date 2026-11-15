@@ -1726,6 +1726,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
             "mcp_vs": self._mcp_vs // 100 if (self._mcp_vs is not None and vs_lit) else None,
             "gs": self._ground_speed, "tas": self._tas_kt, "ias": misc.get("ias"),
             "oat_c": misc.get("oat_c"),
+            "vs_actual_fpm": self._vs_fpm,     # PSX's vertical speed (smoothed), formation_status
         })
         return snap
 
