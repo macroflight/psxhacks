@@ -424,8 +424,11 @@ the same picture VATSIM Radar can show) decides where the CBs are.
 - **Inside radar coverage** (RainViewer's own coverage map), a zone only
   keeps a CB when a radar CB lies within 20 nm of it. When the forecast has
   none there, the cell gives the zone one, with oktas and top from its
-  strength and size. METARs and SIGMETs no longer create CBs there. New
-  zones go onto the strongest unclaimed radar CBs ahead.
+  strength and size. METARs and SIGMETs no longer create CBs there. A zone
+  keeps its cell while the cell stays within 28 nm, so its CB doesn't come
+  and go as PSX's CB circles the zone centre. New zones go onto the
+  strongest unclaimed radar CBs ahead, from 40 nm ahead: a storm the
+  pilot already sees on the radar is no surprise, and its CB grows in.
 - A drifting CB (advanced zones) starts on its radar cell and moves with
   the cell's tracked motion (once the cell has been tracked for 20
   minutes; until then with the 850-300 hPa mean wind). A radar frame is 10-20 minutes old when it

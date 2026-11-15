@@ -455,10 +455,12 @@ _ROUTE_TRACK_MAX_S = 60.0     # ... at most this long
 _RADAR_CELL_NM = 250.0        # --radar-cbs: radar cells looked for this far around the aircraft
 _RADAR_MOVED_NM = 60.0        # ... again (before the next frame) after a move this far
 _RADAR_FRESH_S = 1800.0       # a radar frame older than this doesn't decide any more
-_RADAR_MATCH_NM = 20.0        # a radar CB within this of a zone centre is that zone's CB
+_RADAR_MATCH_NM = 20.0        # a radar CB within this of a zone's CB is that zone's CB
+_RADAR_KEEP_NM = 28.0         # ... and stays it within this (PSX's CB circles the zone centre)
 _RADAR_GONE_NM = 12.0         # a drifting CB's radar cell must be within this, else it's gone
 _RADAR_COVERAGE_KEEP_S = 6 * 3600.0
 _RADAR_STEER_S = 600.0         # a drifting CB steers onto its radar cell over this long
+_RADAR_PLACE_MIN_NM = 40.0     # new zones on radar cells from this far ahead (not just 150-250 nm)
 _RADAR_TRUST_AGE_S = 1200     # a cell's own motion counts once tracked over 2 frames (20 min)
 _RADAR_CORRECT_MAX_KT = 15.0   # ... with at most this much on top of the cell's own motion
 _RADAR_STEER_MAX_KT = 60.0     # ... and never faster than this in all (realistic storm speeds)
@@ -2813,6 +2815,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._radar_at: Optional[tuple] = None
         self._radar_cov: dict = {}
         self._radar_logged: dict = {}   # zone -> its last logged radar decision
+        self._radar_zone_cell: dict = {}   # zone -> the key of the radar cell its CB is on
         # MTG lightning: flash positions [(lat, lon)] of the last 15 minutes
         # (fw_lightning), when and where (lat, lon) they were fetched
         self._ltg_points: list = []
@@ -6977,16 +6980,21 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         """--radar-cbs: return (lat, lon, icao) on the strongest unclaimed radar CB ahead, or None.
 
         Ahead: within 60 degrees of the heading (or the route's course there,
-        --route-zones), fwd_min-fwd_max nm away; anywhere up to fwd_max at
-        startup or while maneuvering. Unclaimed: no zone within min_sep.
+        --route-zones), _RADAR_PLACE_MIN_NM-fwd_max nm away (closer than the
+        usual fwd_min: a storm the pilot already sees on the radar 60-80 nm
+        ahead is no surprise, and its CB still grows in; FTECH1 2026-11-15: a
+        line 67-83 nm ahead got no zone); anywhere up to fwd_max at startup or
+        while maneuvering. Unclaimed: no zone within min_sep. The strongest
+        first, the nearer of equals.
         """
         if not self._radar_fresh():
             return None
         all_round = initial or self._maneuvering
+        near_min = min(fwd_min, _RADAR_PLACE_MIN_NM)
         for cell in (c for c in self._radar_cells if c.is_cb):
             az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, cell.lon, cell.lat)
             dist_nm = dist_m / _NM_TO_M
-            if dist_nm > fwd_max or (not all_round and dist_nm < fwd_min):
+            if dist_nm > fwd_max or (not all_round and dist_nm < near_min):
                 continue
             ahead = self.ac_hdg
             if self._route_mode == "on" and self._route_pos is not None:
@@ -10008,13 +10016,29 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 best = cell
         return best
 
-    def _radar_cb_wx(self, wx: str, lat: float, lon: float, month: int) -> tuple:
-        """--radar-cbs: return (wx, why) for a zone centred at (lat, lon) inside radar coverage.
+    def _radar_cb_wx(self, wx: str, lat: float, lon: float, month: int,  # pylint: disable=too-many-arguments,too-many-positional-arguments
+                     zone_num: int = 0) -> tuple:
+        """--radar-cbs: return (wx, why) for a zone's CB at (lat, lon) inside radar coverage.
 
         No radar CB within _RADAR_MATCH_NM: no CB, whatever made it. A radar
         CB: at least its oktas (by strength and size) and top (by strength).
+        A cell the zone already had stays its own within _RADAR_KEEP_NM: PSX's
+        CB circles the zone centre, and a cell near the edge of the match
+        radius made the CB grow and fade by turns (FTECH1 2026-11-15).
         """
-        cell = self._radar_cb_near(lat, lon, _RADAR_MATCH_NM)
+        cell = None
+        kept = self._radar_zone_cell.get(zone_num)
+        if kept is not None:
+            cell = next((c for c in self._radar_cells if c.key == kept and c.is_cb and
+                         self._dist_nm(lat, lon, c.lat, c.lon) <= _RADAR_KEEP_NM), None)
+        # one storm, one zone: cells other zones (or drifting CBs) have are taken
+        taken = ({k for zn, k in self._radar_zone_cell.items() if zn != zone_num} |
+                 {c.radar for zn, c in self._drift.items() if zn != zone_num and c.radar})
+        cell = cell or self._radar_cb_near(lat, lon, _RADAR_MATCH_NM, taken)
+        if cell is not None:
+            self._radar_zone_cell[zone_num] = cell.key
+        else:
+            self._radar_zone_cell.pop(zone_num, None)
         if cell is None:
             return (_strip_cb(wx), "radar: no storm cell") if _fw_drift.cb_oktas(wx) else (wx, "")
         oktas = (3 if cell.max_dbz < 50 else 4 if cell.max_dbz < 55 else 6 if cell.max_dbz < 60
@@ -10437,7 +10461,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 sim_ms = self.sim_time_ms()
                 cb_at = (_fw_drift.cb_position(self.geod, new_modes[-1], sim_ms)
                          if sim_ms is not None else None) or (lat, lon)
-                final_wx, radar_why = self._radar_cb_wx(final_wx, *cb_at, month)
+                final_wx, radar_why = self._radar_cb_wx(final_wx, *cb_at, month, zone_num)
                 if radar_why:
                     sigmet_label = None
                     decided = (before, _fw_drift.cb_oktas(final_wx), radar_why.split(" cell")[0])
