@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fix: a step climb above the FMC's MAX altitude. PSX's VNAV CRZ page
+  showed STEP TO FL450, AT NOW, with MAX FL445, and frankenpilot climbed
+  (FTECH1, 2026-11-15). It now reads OPT, MAX and RECMD from that page
+  and doesn't step above MAX ("not climbing: STEP TO FL450 is above MAX
+  FL445" in the log).
 - Fix: the log named a runway by its first end whatever the direction
   (FTECH1 at RJTT, 2026-11-13: "last on runway 04" after landing on 22).
   It now names the end the aircraft is moving along, and both ends

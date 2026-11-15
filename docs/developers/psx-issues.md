@@ -597,6 +597,13 @@ the fuel at least 2 C above the freezing point of the selected fuel type.
 point - 6 C) instead, perhaps with a gradual thrust loss as the fuel gets
 waxy.
 
+## VNAV CRZ offers a STEP TO above its own MAX altitude
+
+Seen 2026-11-15 on FTECH1 (EGLL-LPPT, FL410, step size RVSM): VNAV CRZ 2/3
+showed STEP TO FL450, AT NOW, while the same page's MAX was FL445. A real
+FMC shouldn't propose a step above MAX. Workaround: frankenpilot doesn't
+step climb above the page's MAX.
+
 ## Documentation
 
 Things we had to learn from the forum, other addons' authors, or live

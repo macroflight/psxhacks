@@ -2103,12 +2103,18 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
 
         The rule (user, 2026-11-13): never online on VATSIM; offline, in level
         VNAV PTH with A/T SPD (check_step_climb()), climb to the STEP TO level
-        VNAV CRZ lists once it says AT NOW. The STEP size doesn't matter (FTECH1
+        VNAV CRZ lists once it says AT NOW, but never above its MAX.
+        The STEP size doesn't matter (FTECH1
         sat at FL300 for hours with STEP 0 and VNAV showing a step to FL340),
         nor does the MCP altitude: it is set to the STEP TO level first.
         """
         if not page['step_to_ft']:
             return "no STEP TO level"
+        # Never above the FMC's MAX (FTECH1 2026-11-15: PSX showed STEP TO FL450 AT NOW
+        # with MAX FL445, and we climbed)
+        if page.get('max_ft') and page['step_to_ft'] > page['max_ft']:
+            return (f"STEP TO FL{page['step_to_ft'] // 100:03d} is above MAX "
+                    f"FL{page['max_ft'] // 100:03d}")
         online = self.vatsim_online()
         if online[0] is not False:
             return f"{online[1]} (ATC gives step climbs online)"

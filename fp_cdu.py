@@ -69,7 +69,8 @@ def parse_vnav_cruise(lines):
 
     NG FMC layout: line 1 big right "STEP TO" level, line 2 big right "AT"
     ("NOW" or "1010Z/ 265NM"), line 4 small "STEP ... OPT MAX RECMD" and
-    big left the step size ("0", "1000", "RVSM"). None when it isn't that page.
+    big left the step size ("0", "1000", "RVSM") then OPT, MAX and RECMD
+    ("FL421 FL445 FL410"). None when it isn't that page.
     """
     l4s, l4b = text(lines.get("Line4s")), text(lines.get("Line4b"))
     if not l4s.startswith("STEP") or "SIZE" in l4s:     # original FMC: "STEP SIZE"
@@ -86,4 +87,7 @@ def parse_vnav_cruise(lines):
         "at_time": m_time.group(1) if m_time else None,
         "at_nm": int(m_nm.group(1)) if m_nm else None,
         "step_size": l4b.split()[0] if l4b.split() else "",
+        # OPT, MAX, RECMD follow the step size: "0      FL421 FL445 FL410" (FTECH1 2026-11-15)
+        **dict(zip(("opt_ft", "max_ft", "recmd_ft"),
+                   [int(x) * 100 for x in re.findall(r"FL(\d{3})", l4b)[:3]] + [None] * 3)),
     }
