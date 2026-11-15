@@ -226,8 +226,8 @@ _KNOWN_ADDON_PREFIXES = ('BACARS.REMOTE', 'GROUND.COMPANIES', 'GEOVR.PSX.', 'MSF
 # see handle_addon()'s FRANKENWEATHER case and frankenweather.py's
 # _note_conflict() for why that visibility matters.
 _FRANKENWEATHER_CLIENT_ID = 'WEATHER'
-# Clients that also get every FRANKENWEATHER message but CBFEED (frankenpush puts the
-# weather into its Flight Centre upload)
+# Clients that also get every FRANKENWEATHER message (frankenpush puts the weather into
+# its Flight Centre upload)
 _FRANKENWEATHER_ALSO_TO_IDS = ('PUSH',)
 
 # How long a pure-START-non-ECON value from upstream is treated as the
@@ -300,10 +300,9 @@ class RulesAction(enum.Enum):
 
     - 'forward_ids': tuple of client_provided_id values
 
-    With frankenweather_forward, frankenrouters_only or
-    ground_handling_forward: also send to these clients (frankenpush,
-    _FRANKENWEATHER_ALSO_TO_IDS, gets every FRANKENWEATHER message but
-    CBFEED).
+    With frankenweather_forward, frankenrouters_only, orchestration_cbfeed
+    or ground_handling_forward: also send to these clients (frankenpush,
+    _FRANKENWEATHER_ALSO_TO_IDS, gets every FRANKENWEATHER message).
 
     - 'own_sim_only': True
 
@@ -1272,11 +1271,13 @@ class Rules():  # pylint: disable=too-many-public-methods
                 if feed is None:
                     return self.myreturn(
                         RulesAction.FILTER, RulesCode.FRANKENWEATHER_FILTERED,
-                        extra_data={'frankenrouters_only': True},
+                        extra_data={'frankenrouters_only': True,
+                                    'forward_ids': _FRANKENWEATHER_ALSO_TO_IDS},
                         message="malformed FRANKENWEATHER:CBFEED, only forwarded")
                 return self.myreturn(
                     RulesAction.FILTER, RulesCode.FRANKENWEATHER_FILTERED,
-                    extra_data={'orchestration_cbfeed': feed})
+                    extra_data={'orchestration_cbfeed': feed,
+                                'forward_ids': _FRANKENWEATHER_ALSO_TO_IDS})
             # CBS: every CB frankenweather has in PSX (position, base/tops,
             # drift, anvil; ~2.5 KB on change and once a minute) for the
             # clients that draw PSX's CBs elsewhere ([filtering]
@@ -3324,7 +3325,8 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
                     'not json'):
             (_, _, _, extra_data) = rules.route(f'addon=FRANKENWEATHER:CBFEED:{bad}',
                                                 router.upstream)
-            self.assertEqual(extra_data, {'frankenrouters_only': True}, bad)
+            self.assertEqual(extra_data, {'frankenrouters_only': True, 'forward_ids': ('PUSH',)},
+                             bad)
 
     def test_frankenweather_cbs(self):
         """FRANKENWEATHER:CBS goes to the frankenrouters and the Orchestration clients only."""

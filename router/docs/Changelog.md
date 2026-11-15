@@ -4,7 +4,7 @@
 
 - **FrankenWeather's messages also go to FrankenPush**, which puts the
   weather (zones, CBs, turbulence) into its Flight Centre upload. All of
-  them but the routers' own CB feed for PSX.NET.Orchestration.
+  them, the routers' own CB feed for PSX.NET.Orchestration (CBFEED) too.
 - **New: FrankenWeather's CB messages reach PSX.NET.Orchestration.** The
   router passes `addon=FRANKENWEATHER:CBS` (every CB with position, tops,
   drift and anvil) to the other routers and to the `[filtering]

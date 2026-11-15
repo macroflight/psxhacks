@@ -5560,14 +5560,19 @@ class Frankenrouter():  # pylint: disable=too-many-instance-attributes,too-many-
                 # they are; our own Orchestration clients get WxModes from them
                 # (orchestration_feed_task())
                 self.orchestration_cbfeed(extra_data['orchestration_cbfeed'])
+                ids = set(extra_data.get('forward_ids', ()))   # ... and these clients
+                extra = [c.peername for c in self.clients.values()
+                         if ids and c.client_provided_id in ids and c.peername != sender.peername]
                 if sender.upstream:
-                    await self.client_broadcast(line, exclude_non_frankenrouter=True)
+                    tasks = [self.client_broadcast(line, exclude_non_frankenrouter=True)]
                 else:
                     tasks = [self.client_broadcast(
                         line, exclude=[sender.peername], exclude_non_frankenrouter=True)]
                     if self.is_upstream_connected() and self.upstream.is_frankenrouter:
                         tasks.append(self.send_to_upstream(line, sender.peername))
-                    await asyncio.gather(*tasks)
+                if extra:
+                    tasks.append(self.client_broadcast(line, include=extra))
+                await asyncio.gather(*tasks)
             elif 'orchestration_egress' in extra_data:
                 # A weather-zone write: everyone now, Orchestration clients late
                 # (a drifting zone's WxMode not at all: they get the feed)
