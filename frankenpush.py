@@ -35,6 +35,7 @@ import math
 import pathlib
 import sys
 import time
+from typing import Optional
 import traceback
 import unicodedata
 
@@ -59,6 +60,8 @@ _ROUTERINFO_MAX_AGE = 20.0
 # backward-compatible with the version of push_manager.py on the portal.
 # The portal will reject connections whose version does not match.
 PUSH_PROTOCOL_VERSION = 1
+# frankenweather's weather older than this isn't uploaded (frankenweather stopped)
+_FW_WEATHER_MAX_AGE_S = 300.0
 
 # Logon code cache — written next to this script so the user doesn't have to
 # re-enter the code on every run.
@@ -391,6 +394,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self._routerinfos: dict = {}        # {uuid: routerinfo_dict}
         self._sharedinfo: dict = {}         # latest SHAREDINFO from master router
         self._pending_simevents: list = []  # events received since last portal send
+        # frankenweather's latest STATE zones, TURBSTATE and CBS (the routers pass us
+        # every FRANKENWEATHER message): (time.monotonic(), data) each, for the
+        # "weather" part of the Flight Centre upload (_weather_section())
+        self._fw_zones: Optional[tuple] = None
+        self._fw_turb: Optional[tuple] = None
+        self._fw_cbs: Optional[tuple] = None
 
         # Messages to send to Flight Centre immediately rather than on the
         # next periodic tick - see _reverse_sync_loop().
@@ -951,6 +960,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
             update["autosave_situ"] = self._pending_autosave_situ
             self._pending_autosave_situ = None
 
+        # frankenweather's weather (zones, CBs, turbulence) — when it changes
+        weather = self._weather_section()
+        if weather is not None and (
+                full or self._sent_state.get("weather") != self._weather_signature(weather)):
+            update["weather"] = weather
+
         # Sim events — always include when pending (one-shot delivery).
         if self._pending_simevents:
             update["simevents"] = self._pending_simevents
@@ -995,6 +1010,8 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self._sent_state["is_freighter"] = update["is_freighter"]
         if "flight_deck_curtain_open" in update:
             self._sent_state["curtain_open"] = update["flight_deck_curtain_open"]
+        if "weather" in update:
+            self._sent_state["weather"] = self._weather_signature(update["weather"])
 
     def _queue_initial_status(self):
         """Queue the currently-known door lock, seatbelt, variant and curtain state.
@@ -1250,9 +1267,13 @@ class Script():  # pylint: disable=too-many-instance-attributes
         is needed here: FRDP PING is only ever sent to full router peers
         (is_frankenrouter), and SUBSCRIBE deliberately stops short of
         that - see router/docs/NOTES.md's "FRDP SUBSCRIBE" section.
-        Other addon= messages (e.g from frankenweather, frankenusb) are
+        frankenweather's STATE, TURBSTATE and CBS go to _handle_frankenweather()
+        (for the Flight Centre upload's weather). Other addon= messages are
         ignored.
         """
+        if value.startswith('FRANKENWEATHER:'):
+            self._handle_frankenweather(value[len('FRANKENWEATHER:'):])
+            return
         if not value.startswith('FRANKENROUTER:'):
             return
         parts = value[len('FRANKENROUTER:'):].split(':', 2)
@@ -1266,6 +1287,55 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self._handle_frdp_sharedinfo(payload)
         elif msg_type == 'SIMEVENTS' and self.args.simevents:
             self._handle_frdp_simevents(payload)
+
+    def _handle_frankenweather(self, rest):
+        """Keep the weather frankenweather sends (addon=FRANKENWEATHER:<TYPE>:<uuid>:<json>)."""
+        kind, _, rest = rest.partition(':')
+        if kind not in ("STATE", "TURBSTATE", "CBS"):
+            return   # WINDSTATE, SIGMET*, MSA, CBFEED...: not uploaded
+        _uuid, _, payload = rest.partition(':')
+        try:
+            data = json.loads(payload)
+        except ValueError:
+            return
+        if not isinstance(data, dict):
+            return
+        now = time.monotonic()
+        if kind == "STATE":
+            self._fw_zones = (now, [
+                {k: z.get(k) for k in ("zone", "icao", "lat", "lon", "source", "weather_detail")}
+                for z in data.get("zones") or [] if isinstance(z, dict)])
+        elif kind == "TURBSTATE":
+            self._fw_turb = (now, {"kind": data.get("active_kind"),
+                                   "intensity": data.get("effective_intensity"),
+                                   "reason": data.get("active_reason")})
+        else:
+            self._fw_cbs = (now, data)
+
+    def _weather_section(self) -> Optional[dict]:
+        """Return the upload's "weather" (frankenweather's, not over 5 min old), or None."""
+        now = time.monotonic()
+
+        def fresh(item):
+            return item[1] if item is not None and now - item[0] <= _FW_WEATHER_MAX_AGE_S else None
+        zones, turb, cbs = fresh(self._fw_zones), fresh(self._fw_turb), fresh(self._fw_cbs)
+        if zones is None and turb is None and cbs is None:
+            return None
+        return {"zones": zones, "turbulence": turb,
+                "cbs": cbs.get("cbs") if cbs else None,
+                "cbs_time": cbs.get("time") if cbs else None,
+                "tropopause_ft": cbs.get("tropopause_ft") if cbs else None}
+
+    @staticmethod
+    def _weather_signature(weather: Optional[dict]) -> Optional[tuple]:
+        """Return what makes the weather new for Flight Centre (not every turbulence wobble)."""
+        if weather is None:
+            return None
+        turb = weather.get("turbulence") or {}
+        return (weather.get("cbs_time"),
+                tuple((z.get("zone"), z.get("icao"), z.get("source"), z.get("weather_detail"))
+                      for z in weather.get("zones") or []),
+                turb.get("kind"), round(turb.get("intensity") or 0.0, 1))
 
     def _handle_frdp_routerinfo(self, payload):
         """Process a ROUTERINFO addon message received over FRDP."""

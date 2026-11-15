@@ -1,5 +1,12 @@
 # frankenpush changelog
 
+## Unreleased
+
+- **New: frankenweather's weather goes to Flight Centre.** The telemetry
+  now has a `weather` part: the weather zones, every CB (position, tops,
+  drift, anvil) and the turbulence right now, from frankenweather, when it
+  changes. Needs this version's frankenrouter.
+
 ## 1.6.0 (2026-11-13)
 
 - **Formation autopilot: LEAD TOO SLOW.** A lead slower than we can fly

@@ -226,6 +226,9 @@ _KNOWN_ADDON_PREFIXES = ('BACARS.REMOTE', 'GROUND.COMPANIES', 'GEOVR.PSX.', 'MSF
 # see handle_addon()'s FRANKENWEATHER case and frankenweather.py's
 # _note_conflict() for why that visibility matters.
 _FRANKENWEATHER_CLIENT_ID = 'WEATHER'
+# Clients that also get every FRANKENWEATHER message but CBFEED (frankenpush puts the
+# weather into its Flight Centre upload)
+_FRANKENWEATHER_ALSO_TO_IDS = ('PUSH',)
 
 # How long a pure-START-non-ECON value from upstream is treated as the
 # private response to a "start" command, rather than an unsolicited
@@ -293,7 +296,14 @@ class RulesAction(enum.Enum):
 
     Send only to frankenrouters (upstream and downstream). Upstream is
     only sent to if it is itself a frankenrouter. Used for
-    FRANKENWEATHER:SIGMETJSON, which no other client needs.
+    FRANKENWEATHER:SIGMETJSON and CBFEED.
+
+    - 'forward_ids': tuple of client_provided_id values
+
+    With frankenweather_forward, frankenrouters_only or
+    ground_handling_forward: also send to these clients (frankenpush,
+    _FRANKENWEATHER_ALSO_TO_IDS, gets every FRANKENWEATHER message but
+    CBFEED).
 
     - 'own_sim_only': True
 
@@ -1276,7 +1286,8 @@ class Rules():  # pylint: disable=too-many-public-methods
                 return self.myreturn(
                     RulesAction.FILTER, RulesCode.FRANKENWEATHER_FILTERED,
                     extra_data={'ground_handling_forward':
-                                list(self.router.config.filtering.orchestration_names)})
+                                list(self.router.config.filtering.orchestration_names),
+                                'forward_ids': _FRANKENWEATHER_ALSO_TO_IDS})
             # MSA (departure/destination minimum safe altitude, ~80 bytes once a
             # minute near those airports) is for frankenpilot, a normal client.
             if payload.startswith('MSA:'):
@@ -1287,11 +1298,13 @@ class Rules():  # pylint: disable=too-many-public-methods
                 return self.myreturn(
                     RulesAction.FILTER,
                     RulesCode.FRANKENWEATHER_FILTERED,
-                    extra_data={'frankenrouters_only': True})
+                    extra_data={'frankenrouters_only': True,
+                                'forward_ids': _FRANKENWEATHER_ALSO_TO_IDS})
             return self.myreturn(
                 RulesAction.FILTER,
                 RulesCode.FRANKENWEATHER_FILTERED,
-                extra_data={'frankenweather_forward': _FRANKENWEATHER_CLIENT_ID})
+                extra_data={'frankenweather_forward': _FRANKENWEATHER_CLIENT_ID,
+                            'forward_ids': _FRANKENWEATHER_ALSO_TO_IDS})
 
         # GROUND.HANDLING (PSX.NET.Orchestration) doesn't use the normal
         # NAME:payload colon convention -- its messages look like
@@ -3322,10 +3335,11 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
                 '{"v": 1, "time": "2026-11-15T07:00:00Z", "cbs": []}')
         (action, code, _, extra_data) = rules.route(line, router.upstream)
         self.assertEqual((action, code), (RulesAction.FILTER, RulesCode.FRANKENWEATHER_FILTERED))
-        self.assertEqual(extra_data, {'ground_handling_forward': ['PSX.NET.Orchestration']})
+        self.assertEqual(extra_data, {'ground_handling_forward': ['PSX.NET.Orchestration'],
+                                      'forward_ids': ('PUSH',)})
         router.config.filtering.orchestration_names = []
         (_, _, _, extra_data) = rules.route(line, router.upstream)
-        self.assertEqual(extra_data, {'ground_handling_forward': []})
+        self.assertEqual(extra_data, {'ground_handling_forward': [], 'forward_ids': ('PUSH',)})
 
     def test_orchestration_egress(self):
         """Weather-zone writes get the Orchestration egress filter only when it's needed."""
@@ -3362,7 +3376,8 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             "addon=FRANKENWEATHER:STATE:someuuid:{}", testpeer)
         self.assertEqual(action, RulesAction.FILTER)
         self.assertEqual(code, RulesCode.FRANKENWEATHER_FILTERED)
-        self.assertEqual(extra_data, {'frankenweather_forward': 'WEATHER'})
+        self.assertEqual(extra_data, {'frankenweather_forward': 'WEATHER',
+                                      'forward_ids': ('PUSH',)})
 
         # Same filtering applies regardless of sender direction or message
         # subtype (STATE/TURBSTATE/WINDSTATE all use the same addon name).
@@ -3370,15 +3385,16 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             "addon=FRANKENWEATHER:WINDSTATE:someuuid:payload", router.upstream)
         self.assertEqual(action, RulesAction.FILTER)
         self.assertEqual(code, RulesCode.FRANKENWEATHER_FILTERED)
-        self.assertEqual(extra_data, {'frankenweather_forward': 'WEATHER'})
+        self.assertEqual(extra_data, {'frankenweather_forward': 'WEATHER',
+                                      'forward_ids': ('PUSH',)})
 
-        # SIGMETJSON only goes to frankenrouters, from either direction.
+        # SIGMETJSON only goes to frankenrouters (and frankenpush), from either direction.
         for sender in (testpeer, router.upstream):
             (action, code, _, extra_data) = rules.route(
                 "addon=FRANKENWEATHER:SIGMETJSON:someuuid:payload", sender)
             self.assertEqual(action, RulesAction.FILTER)
             self.assertEqual(code, RulesCode.FRANKENWEATHER_FILTERED)
-            self.assertEqual(extra_data, {'frankenrouters_only': True})
+            self.assertEqual(extra_data, {'frankenrouters_only': True, 'forward_ids': ('PUSH',)})
 
         # A client without write access must still be dropped, same as any
         # other addon message.
