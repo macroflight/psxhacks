@@ -51,6 +51,15 @@ TRACE, LIGHT, LIGHT_MOD, MODERATE, MOD_SEV, SEVERE = 0.1, 0.3, 0.6, 1.0, 1.7, 2.
 KINETIC_SHARE = 0.4
 LE_COLD_C = -1.0
 LE_WARM_C = 1.0
+# Behind the leading edge the air speeds up over the wing and cools, so in
+# cloud some ice still builds there when the leading edge itself is kept
+# above freezing (FAA AC 91-51A: an airfoil can reach 0 C with the air "a
+# few degrees" warmer). Research 2026-11-15 (Hardy, NACA ARR 5G13: wet
+# surfaces get about half the dry kinetic rise, which KINETIC_SHARE already
+# is): light ice at most, up to SAT 0 C, AFT_ICE_MAX at SAT -AFT_ICE_RAMP_C
+# and below, and never more than the cloud itself would give.
+AFT_ICE_MAX = LIGHT
+AFT_ICE_RAMP_C = 3.0
 # Out of cloud PSX melts ice within seconds above some TAT between +1 C
 # (FL190: ice kept) and +6 C (FL140: gone after every write; test sim
 # 2026-11-14); +3 C assumed, PSX's limit for icing on the ground.
@@ -206,7 +215,8 @@ class Conditions:  # pylint: disable=too-many-instance-attributes
 def model_factor(c: Conditions) -> tuple:
     """Return (factor, why) from the weather alone (cloud, temperature, precipitation)."""
     warm = warm_factor(c.sat_c, c.tat_c)
-    if warm <= 0.0:
+    aft = AFT_ICE_MAX * max(0.0, min(1.0, -c.sat_c / AFT_ICE_RAMP_C))
+    if warm <= 0.0 and (c.cloud is None or aft <= 0.0):
         return 0.0, (f"SAT {c.sat_c:.0f} C, TAT {c.tat_c:+.0f} C: kinetic heating keeps the "
                      "leading edge above freezing")
     if c.sat_c <= SAT_MIN_C:
@@ -231,8 +241,14 @@ def model_factor(c: Conditions) -> tuple:
         factor *= 1.3
         why += ", precipitation"
     if warm < 1.0:
-        factor *= warm
-        why += f", leading edge {leading_edge_c(c.sat_c, c.tat_c):+.1f} C"
+        le_c = leading_edge_c(c.sat_c, c.tat_c)
+        if factor * warm >= min(factor, aft):
+            factor *= warm
+            why += f", leading edge {le_c:+.1f} C"
+        else:
+            factor = min(factor, aft)
+            why += (f", leading edge {le_c:+.1f} C (kinetic heating): ice only behind it, "
+                    "where the air cools over the wing")
     return factor, why
 
 

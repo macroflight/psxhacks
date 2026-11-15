@@ -1024,8 +1024,14 @@ the ground PSX's icing, the de-icing and the holdover stay as they are):
   - **Kinetic heating**: the leading edge is taken to be SAT plus 40 % of
     the rise from SAT to TAT (estimate, from NACA's finding of heavy glaze
     still at -7 C at M0.5 and -21 C at M0.9). Above +1 C: no ice; full ice
-    from -1 C. At 250 kt and 10,000 ft that means no ice above about
-    SAT -3 C, where PSX ices to about SAT -2 C.
+    from -1 C. 40 % matches the physics: a wet surface in cloud gets about
+    half the dry rise, because the water on it evaporates (Hardy, NACA ARR
+    5G13). Behind the leading edge, though, the air speeds up over the wing
+    and cools, so in cloud light ice still builds when the leading edge
+    is above freezing. That ice is at most light (0.3 of PSX's rate) at
+    SAT -3 C, falling to none at SAT 0 C (FAA AC 91-51A). At 250 kt that
+    gives light ice at SAT -3 to -2 C and a trace at -1 C, where PSX ices
+    to about SAT -2 C. Clear air gets none of it.
   - **Which cloud**: the layer in PSX's weather at the aircraft. Layer
     cloud starts at 0.6 of PSX's rate, convective cloud at 2 (inside the
     CB cell, where frankenweather's CB turbulence core is: PSX's CB layer
