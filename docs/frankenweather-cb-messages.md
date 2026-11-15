@@ -110,9 +110,12 @@ change. The CBS message is **not** delayed: its positions are for `time`.
 - **Top above PSX's limit**: when PSX's limit cut the top, `top_ft_msl_fw` is the
   tropopause (forecast at the CB, or the climate value for the latitude and
   month if higher) plus 2,000 ft.
-- **Drift**: frankenweather's advanced zones (opt-in, `--advanced-zones`)
-  move CBs with the 850-300 hPa mean wind, 5 degrees to the right.
-  Without advanced zones, `drift` is always `null`.
+- **Drift**: frankenweather's advanced zones (on by default, off with
+  `--no-advanced-zones`) move enroute CBs with the 850-300 hPa mean wind,
+  5 degrees to the right. With `--radar-cbs` a CB on a radar storm cell
+  moves with the cell's own motion, tracked from frame to frame. Without
+  advanced zones, `drift` is always `null`, as it is near the departure and
+  destination airports and below 10,000 ft.
 - **Radar size**: measured on PSX's radar for 2-8 oktas, tops FL250-450 and
   bases 1,500-6,000 ft. It was the same every time.
 

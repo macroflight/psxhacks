@@ -452,6 +452,12 @@ _FUEL_JUMP_C = 5.0            # PSX's own fuel temperature this far off: a situa
 _FUEL_JUMP_KG = 3000.0        # fuel this much lower in one step: a situation load, start over
 _ROUTE_TRACK_S = 30.0         # --route-zones: the track over the ground over this long
 _ROUTE_TRACK_MAX_S = 60.0     # ... at most this long
+_RADAR_CELL_NM = 250.0        # --radar-cbs: radar cells looked for this far around the aircraft
+_RADAR_MOVED_NM = 60.0        # ... again (before the next frame) after a move this far
+_RADAR_FRESH_S = 1800.0       # a radar frame older than this doesn't decide any more
+_RADAR_MATCH_NM = 20.0        # a radar CB within this of a zone centre is that zone's CB
+_RADAR_GONE_NM = 12.0         # a drifting CB's radar cell must be within this, else it's gone
+_RADAR_COVERAGE_KEEP_S = 6 * 3600.0
 _CBS_CHECK_S = 5.0            # CBS messages: look for changes this often
 _CBS_SAME_CB_NM = 20.0        # a zone's CB this far from where it was: a new CB (new id)
 _FUEL_SITU_LOAD_S = 30.0      # fuel changes this soon after a situ load: the load, not a refuel
@@ -2790,6 +2796,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._rv_frame_path: Optional[str] = None
         self._rv_tile_cache: dict = {}
 
+        # --radar-cbs (radar_cells_coro()): the radar's storm cells (fw_radar.Cell) of
+        # the latest frame, its time (unix s), where (lat, lon) they were looked for,
+        # and the coverage mask tiles {(tx, ty): (time.monotonic(), fw_radar.tile_covered())}
+        self._radar_cells: list = []
+        self._radar_frame: Optional[int] = None
+        self._radar_at: Optional[tuple] = None
+        self._radar_cov: dict = {}
         # MTG lightning: flash positions [(lat, lon)] of the last 15 minutes
         # (fw_lightning), when and where (lat, lon) they were fetched
         self._ltg_points: list = []
@@ -6895,6 +6908,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         search_nm = fwd_max + (0.0 if initial else lat_max) + _AIRPORT_SNAP_NM
         airports_nearby = self._airports_within_nm(self.ac_lat, self.ac_lon, search_nm)
 
+        on_cell = self._radar_cell_position(fwd_min, fwd_max, min_sep, others, initial)
+        if on_cell is not None:   # --radar-cbs: a zone on a radar storm cell
+            return on_cell
+
         # Generate a pool of candidates; score by radar echo to bias toward active cells.
         # When radar is unavailable all echoes are 0 → reduces to clearance-only selection.
         candidates: list = []
@@ -6943,6 +6960,35 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         candidates.sort(key=lambda c: (-c[1], -c[0]))
         _, _, lat_c, lon_c, icao = candidates[0]
         return lat_c, lon_c, icao
+
+    def _radar_cell_position(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+            self, fwd_min: float, fwd_max: float, min_sep: float, others: list,
+            initial: bool) -> Optional[tuple]:
+        """--radar-cbs: return (lat, lon, icao) on the strongest unclaimed radar CB ahead, or None.
+
+        Ahead: within 60 degrees of the heading (or the route's course there,
+        --route-zones), fwd_min-fwd_max nm away; anywhere up to fwd_max at
+        startup or while maneuvering. Unclaimed: no zone within min_sep.
+        """
+        if not self._radar_fresh():
+            return None
+        all_round = initial or self._maneuvering
+        for cell in (c for c in self._radar_cells if c.is_cb):
+            az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, cell.lon, cell.lat)
+            dist_nm = dist_m / _NM_TO_M
+            if dist_nm > fwd_max or (not all_round and dist_nm < fwd_min):
+                continue
+            ahead = self.ac_hdg
+            if self._route_mode == "on" and self._route_pos is not None:
+                ahead = self._route_pos.course
+            if not all_round and _fw_route.angle_diff(az % 360.0, ahead) > 60.0:
+                continue
+            if any(self._dist_nm(cell.lat, cell.lon, o[0], o[1]) < min_sep for o in others):
+                continue
+            if not self._radar_covered(cell.lat, cell.lon):
+                continue
+            return cell.lat, cell.lon, f"X{random.randint(100, 999):03d}"
+        return None
 
     def _cb_turb_in_reach(self, zone_num: int) -> Optional[str]:
         """Return why zone_num's CB turbulence can reach the aircraft, or None if it can't.
@@ -7565,9 +7611,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 continue
             if self._cb_removed_near_airport(lat, lon):
                 continue
+            radar = (self._radar_cb_near(lat, lon, _RADAR_MATCH_NM + _fw_drift.CB_OFFSET_NM,
+                                         {c.radar for c in self._drift.values() if c.radar})
+                     if self._radar_fresh() else None)
+            if radar is not None:   # --radar-cbs: the CB sits on the cell, moves with it
+                lat, lon = radar.lat, radar.lon
             profile = await loop.run_in_executor(
                 None, self._turb_engine.wind_fetcher.get, lat, lon, datetime.now(timezone.utc))
-            motion = _fw_drift.mean_wind_motion(profile)
+            motion = (radar.motion if radar is not None and radar.motion else
+                      _fw_drift.mean_wind_motion(profile))
             if motion is None:
                 self.logger.debug("CB drift: Zone %d stays put (no or calm 850-300hPa wind)",
                                   zone_num)
@@ -7578,16 +7630,44 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             cell = _fw_drift.DriftCell(zone=zone_num, lat=lat, lon=lon, heading_deg=motion[0],
                                        speed_kt=motion[1], wx=wx, mode=new_modes[i], icao=name,
                                        started=time.monotonic(), clat=centre[0], clon=centre[1],
-                                       stepped_at=time.monotonic())
+                                       stepped_at=time.monotonic(),
+                                       radar=radar.key if radar is not None else "")
             self._drift[zone_num] = cell
             self.zone_positions[zone_num] = (centre[0], centre[1],
                                              self.zone_positions[zone_num][2])
             self.logger.info(
                 "CB drift: Zone %d (%s) CB at %s starts drifting %03.0f°/%.0fkt"
-                " (850-300hPa mean wind +5°), CB %d oktas, life %.0f min",
+                " (%s), CB %d oktas, life %.0f min",
                 zone_num, name, _fw_drift.pos_text(lat, lon), cell.heading_deg, cell.speed_kt,
+                ("on its radar cell, the cell's motion" if radar is not None and radar.motion
+                 else "on its radar cell, 850-300hPa mean wind +5°" if radar is not None
+                 else "850-300hPa mean wind +5°"),
                 cell.start_oktas, cell.lifetime_s / 60.0)
             self._state_changed_event.set()
+
+    def _radar_follow(self, zone_num: int, cell, now: float) -> None:
+        """--radar-cbs: keep a drifting CB on its radar cell; decay it when the cell is gone.
+
+        On each new frame the cell (same key, else the nearest CB within
+        _RADAR_GONE_NM) gives the CB its position and motion and keeps it
+        alive past its lifetime; no cell: the CB decays.
+        """
+        if not cell.radar or not self._radar_fresh() or cell.decay_from is not None:
+            return
+        if cell.radar_frame == self._radar_frame:
+            return
+        cell.radar_frame = self._radar_frame
+        match = next((c for c in self._radar_cells if c.key == cell.radar and c.is_cb), None) or \
+            self._radar_cb_near(cell.lat, cell.lon, _RADAR_GONE_NM,
+                                {c.radar for zn, c in self._drift.items() if zn != zone_num})
+        if match is None:
+            cell.start_decay(now, "its radar cell is gone")
+            self.logger.info("CB drift: Zone %d starts to decay (%s)", zone_num, cell.decay_why)
+            return
+        cell.radar, cell.lat, cell.lon = match.key, match.lat, match.lon
+        if match.motion:
+            cell.heading_deg, cell.speed_kt = match.motion
+        cell.lifetime_s = max(cell.lifetime_s, cell.age_s + 1200.0)   # alive while the radar has it
 
     def _cb_still_growing(self, zone_num: int, wx: str) -> bool:
         """Return True if zone_num's CB (wx) hasn't yet grown to its fade target (_fade_cb_wx())."""
@@ -7713,6 +7793,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 self._end_drift(zone_num, "the zone was moved elsewhere", retire=False)
                 continue
             cell.advance(dt_s * accel)
+            self._radar_follow(zone_num, cell, now)
             if cell.decay_from is None and cell.life_over():
                 cell.start_decay(now, f"end of its {cell.lifetime_s / 60.0:.0f} min life")
                 self.logger.info("CB drift: Zone %d starts to decay (%s)", zone_num, cell.decay_why)
@@ -7805,7 +7886,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         return {"why_not": self._cb_test_unavailable(), "cells": cells,
                 "distances_nm": list(self._CB_TEST_DISTANCES_NM),
                 "advanced_zones": self._advanced_zones, "orch_delay_s": self._orch_delay_s,
-                "orch_rate_hz": self._orch_rate_hz}
+                "orch_rate_hz": self._orch_rate_hz,
+                # opt-in (testing) CB features, switchable here too
+                "radar_cbs": bool(self.args.radar_cbs), "radar_cbs_why_not": (
+                    None if _HAS_PIL else "needs Pillow"),
+                "route_zones": bool(self.args.route_zones), "route_mode": self._route_mode}
 
     def _handle_cb_test_addon(self, json_str: str) -> None:
         """Do a CB test page command from a router's web UI (FRANKENWEATHER:CBTESTCOMMAND)."""
@@ -7841,6 +7926,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return await self._cb_test_set_speed(cmd.get("speed") if action == "speed" else None)
         if action == "advanced":
             return self._set_advanced_zones(cmd.get("on") == "1")
+        if action == "radar_cbs":
+            return self._set_opt_in("radar_cbs", "Radar decides CBs", cmd.get("on") == "1")
+        if action == "route_zones":
+            return self._set_opt_in("route_zones", "Zones along the FMC route",
+                                    cmd.get("on") == "1")
         if action == "rate":
             try:
                 rate = float(cmd.get("rate", ""))
@@ -7941,6 +8031,19 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                          len(cells))
         rest = "" if moved == len(cells) else " (no wind data, or calm, for the rest)"
         return f"{moved} of {len(cells)} test CB(s) now move with the 850-300 hPa mean wind{rest}"
+
+    def _set_opt_in(self, name: str, label: str, on: bool) -> str:
+        """Switch an opt-in CB feature (--radar-cbs, --route-zones) on or off at runtime."""
+        if bool(getattr(self.args, name)) == on:
+            return f"{label} is already {'on' if on else 'off'}"
+        if name == "radar_cbs" and on and not _HAS_PIL:
+            return f"{label} needs Pillow (pip install Pillow)"
+        setattr(self.args, name, on)
+        if name == "radar_cbs" and not on:
+            self._radar_cells, self._radar_frame, self._radar_at = [], None, None
+        self.logger.info("%s switched %s (web UI)", label, "on" if on else "off")
+        self._state_changed_event.set()
+        return f"{label} {'on' if on else 'off'}"
 
     def _set_advanced_zones(self, on: bool) -> str:
         """Switch --advanced-zones on or off at runtime (the CB test page)."""
@@ -9740,6 +9843,156 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         return _rv_tile_echo(img, px, py)
 
     # ------------------------------------------------------------------
+    # Radar storm cells (--radar-cbs, fw_radar)
+    # ------------------------------------------------------------------
+
+    async def radar_cells_coro(self) -> None:
+        """--radar-cbs: find the radar's storm cells around the aircraft on every new frame.
+
+        RainViewer's latest frame (every 10 min) at zoom 7 within _RADAR_CELL_NM,
+        cells tracked against the frame before (their motion); the coverage
+        mask too. Without a previous frame 10-20 min old, that one first.
+        """
+        myname = inspect.currentframe().f_code.co_name
+        try:
+            self.logger.debug("Starting %s", myname)
+            if not _HAS_PIL:
+                if self.args.radar_cbs:
+                    self.logger.warning("--radar-cbs needs Pillow (pip install Pillow): radar off")
+                return
+            async with aiohttp.ClientSession() as session:
+                while True:
+                    if not self.args.radar_cbs:   # off (switchable on the CB test page)
+                        await asyncio.sleep(5.0)
+                        continue
+                    try:
+                        await self._radar_cells_refresh(session)
+                    except Exception as exc:  # pylint: disable=broad-exception-caught
+                        self.logger.info("Radar cells: not available (%s)", exc)
+                    await asyncio.sleep(60.0)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
+            self.logger.critical(traceback.format_exc())
+
+    async def _radar_get_tiles(self, session, urls: dict) -> dict:
+        """Return {key: PIL image or None} for {key: url}, a few at a time."""
+        sem = asyncio.Semaphore(6)
+
+        async def one(key, url):
+            async with sem:
+                try:
+                    async with session.get(url, timeout=_RV_TIMEOUT) as r:
+                        if r.status != 200:
+                            return key, None
+                        data = await r.read()
+                    return key, _PIL_Image.open(BytesIO(data)).convert('RGBA')
+                except Exception:  # pylint: disable=broad-exception-caught
+                    return key, None
+        return dict(await asyncio.gather(*[one(k, u) for k, u in urls.items()]))
+
+    async def _radar_cells_refresh(self, session) -> None:  # pylint: disable=too-many-locals
+        """Look for a new radar frame (or a long move) and find its cells (radar_cells_coro())."""
+        if self.ac_lat is None or not self.psx_connected:
+            return
+        here = (self.ac_lat, self.ac_lon)
+        moved = (self._radar_at is None or
+                 self._dist_nm(*here, *self._radar_at) > _RADAR_MOVED_NM)
+        async with session.get(_RV_API, timeout=_RV_TIMEOUT) as resp:
+            past = ((await resp.json(content_type=None)).get('radar') or {}).get('past') or []
+        if not past or (past[-1]['time'] == self._radar_frame and not moved):
+            return
+        loop = asyncio.get_running_loop()
+        zoom = _fw_radar.CELL_ZOOM
+        tiles = _fw_radar.tiles_around(*here, _RADAR_CELL_NM, zoom)
+        frames = [past[-1]]
+        if self._radar_frame is None or past[-1]['time'] - self._radar_frame > 1200:
+            frames = past[-2:]   # the one before too, for the cells' motion
+        # Cells stay where they are when the aircraft moves: only a jump (a
+        # reposition) loses them
+        jumped = (self._radar_at is not None and
+                  self._dist_nm(*here, *self._radar_at) > 2 * _RADAR_CELL_NM)
+        previous = [] if jumped else self._radar_cells
+        prev_time = None if jumped else self._radar_frame
+        for frame in frames:
+            imgs = await self._radar_get_tiles(session, {
+                t: _fw_radar.tile_url(frame['path'], zoom, *t) for t in tiles})
+            decoded = await loop.run_in_executor(None, lambda imgs=imgs: {
+                t: _fw_radar.tile_dbz(img) for t, img in imgs.items() if img is not None})
+            cells = await loop.run_in_executor(
+                None, _fw_radar.find_cells, decoded, zoom, frame['time'])
+            cells = [c for c in cells if self._dist_nm(*here, c.lat, c.lon) <= _RADAR_CELL_NM]
+            if previous and prev_time is not None and 0 <= frame['time'] - prev_time <= 1500:
+                _fw_radar.track(previous, cells, frame['time'] - prev_time)   # 0: same frame
+            previous, prev_time = cells, frame['time']
+        # coverage mask (changes rarely)
+        now = time.monotonic()
+        cov_tiles = [t for t in _fw_radar.tiles_around(*here, _RADAR_CELL_NM + 60.0,
+                                                       _fw_radar.COVERAGE_ZOOM)
+                     if now - self._radar_cov.get(t, (-1e9, None))[0] > _RADAR_COVERAGE_KEEP_S]
+        if cov_tiles:
+            imgs = await self._radar_get_tiles(session, {
+                t: _fw_radar.coverage_url(_fw_radar.COVERAGE_ZOOM, *t) for t in cov_tiles})
+            for t, img in imgs.items():
+                if img is not None:
+                    self._radar_cov[t] = (now, _fw_radar.tile_covered(img))
+        self._radar_cells, self._radar_frame, self._radar_at = previous, past[-1]['time'], here
+        cbs = [c for c in previous if c.is_cb]
+        self.logger.info("Radar cells: %d (%d CB) within %.0fnm, frame %s%s", len(previous),
+                         len(cbs), _RADAR_CELL_NM,
+                         time.strftime("%H:%MZ", time.gmtime(past[-1]['time'])),
+                         "; strongest " + ", ".join(
+                             f"{_fw_drift.pos_text(c.lat, c.lon)} {c.max_dbz} dBZ" +
+                             (f" {c.motion[0]:03.0f}/{c.motion[1]:.0f}kt" if c.motion else "")
+                             for c in cbs[:3]) if cbs else "")
+
+    def _radar_fresh(self) -> bool:
+        """Return True if --radar-cbs has a recent radar frame to decide with."""
+        return (self.args.radar_cbs and self._radar_frame is not None and
+                time.time() - self._radar_frame <= _RADAR_FRESH_S)
+
+    def _radar_covered(self, lat: float, lon: float) -> bool:
+        """Return True if (lat, lon) is inside weather radar coverage (unknown: False)."""
+        zoom = _fw_radar.COVERAGE_ZOOM
+        x, y = _fw_radar.global_px(lat, lon, zoom)
+        tile = self._radar_cov.get((int(x // _fw_radar.TILE_PX), int(y // _fw_radar.TILE_PX)))
+        if tile is None:
+            return False
+        return bool(tile[1][int(y % _fw_radar.TILE_PX) * _fw_radar.TILE_PX +
+                            int(x % _fw_radar.TILE_PX)])
+
+    def _radar_cb_near(self, lat: float, lon: float, nm: float, taken=()) -> Optional[object]:
+        """Return the strongest radar CB within nm of (lat, lon) not in taken (keys), or None."""
+        best = None
+        for cell in self._radar_cells:
+            if (cell.is_cb and cell.key not in taken and
+                    self._dist_nm(lat, lon, cell.lat, cell.lon) <= nm and
+                    (best is None or cell.max_dbz > best.max_dbz)):
+                best = cell
+        return best
+
+    def _radar_cb_wx(self, wx: str, lat: float, lon: float, month: int) -> tuple:
+        """--radar-cbs: return (wx, why) for a zone centred at (lat, lon) inside radar coverage.
+
+        No radar CB within _RADAR_MATCH_NM: no CB, whatever made it. A radar
+        CB: at least its oktas (by strength and size) and top (by strength).
+        """
+        cell = self._radar_cb_near(lat, lon, _RADAR_MATCH_NM)
+        if cell is None:
+            return (_strip_cb(wx), "radar: no storm cell") if _fw_drift.cb_oktas(wx) else (wx, "")
+        oktas = (3 if cell.max_dbz < 50 else 4 if cell.max_dbz < 55 else 6 if cell.max_dbz < 60
+                 else 7) + (1 if cell.area_km2 >= 200.0 else 0)
+        top = min(_cb_top_ceiling_ft(lat, month), 25000 + (cell.max_dbz - 45) * 1500)
+        parts = wx.split(';')
+        if len(parts) < 12:
+            return wx, ""
+        had = parts[9] not in ('', '0')
+        parts[9] = str(min(8, max(oktas, int(parts[9]) if had else 0)))
+        parts[10] = str(max(top, int(parts[10]) if had else 0))
+        if not had:
+            parts[11] = "3000"
+        return ";".join(parts), f"radar: {cell.max_dbz} dBZ cell {cell.area_km2:.0f} km2"
+
+    # ------------------------------------------------------------------
     # Lightning (MTG Lightning Imager, fw_lightning) helpers
     # ------------------------------------------------------------------
 
@@ -10134,6 +10387,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 final_wx = _strip_cb(final_wx)
                 sigmet_label = None
             final_wx = self._limit_close_cb(zone_num, final_wx, positions[i])
+            radar_why = ""
+            if (self._radar_fresh() and not cb_removed_for and
+                    not self._is_cb_free_zone(zone_num) and self._radar_covered(lat, lon)):
+                # --radar-cbs: inside radar coverage the radar alone decides
+                final_wx, radar_why = self._radar_cb_wx(final_wx, lat, lon, month)
+                if radar_why:
+                    sigmet_label = None
             self.zone_cb_sigmet[zone_num] = sigmet_label
             target_parts = final_wx.split(';')
             target_oktas_val = int(target_parts[9]) if len(target_parts) > 11 else 0
@@ -10159,6 +10419,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 'showers_metar': has_showers_metar,
                 'sigmet_label': sigmet_label,
                 'cb_removed_for': cb_removed_for,
+                'radar_why': radar_why,
             })
 
         if self.args.fake_cb:
@@ -10228,6 +10489,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
             pz = _per_zone[i]
             self.zone_cb_source[i + 1] = (
+                "radar" if pz['radar_why'].startswith("radar: ") and
+                "no storm" not in pz['radar_why'] else
                 "sigmet" if pz['sigmet_label'] else "radar" if pz['radar_echo'] >= 2 else
                 "lightning" if pz['lightning'] else "metar" if pz['ts_oktas'] > 0 else "model")
             snap_icao = snap_icaos[i]
@@ -10289,6 +10552,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     detail += "; no CBs"
             if pz['cb_removed_for']:
                 detail += f"; CBs removed (Remove CB near dep/arr: {pz['cb_removed_for']})"
+            if pz['radar_why']:
+                detail += f"; {pz['radar_why']}"
             self.zone_weather_detail[i + 1] = detail
 
         self._drift_override(new_modes, new_wxs, new_metars, snap_positions, snap_icaos, month)
@@ -11619,6 +11884,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 coros.append(("CbFade", self.cb_fade_coro))     # idle with --cb-growth
                 coros.append(("OrchestrationFeed", self.orchestration_feed_coro))
                 coros.append(("CbMessages", self.cb_messages_coro))
+                coros.append(("RadarCells", self.radar_cells_coro))   # idle without --radar-cbs
                 coros.append(("CbMotion", self.cb_motion_coro))
                 coros.append(("AdvancedIcing", self.advanced_icing_coro))  # idle unless on
                 for name, coro_fn in coros:
@@ -11716,6 +11982,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "the cell takes its weather.")
         parser.add_argument(   # on by default since 2026-11-10; still accepted, does nothing
             '--advanced-zones', action='store_true', help=argparse.SUPPRESS)
+        parser.add_argument(
+            '--radar-cbs', action='store_true',
+            help="The weather radar decides where CBs are (testing). Inside radar coverage "
+                 "(RainViewer), a zone only keeps a CB where the radar has a storm cell (45 dBZ "
+                 "or more) within 20nm, and gets one where the forecast has none; METARs and "
+                 "SIGMETs no longer make CBs there. A drifting CB sits exactly on its radar cell "
+                 "and moves with the cell's tracked motion, and fades when the cell is gone. "
+                 "Outside radar coverage nothing changes. Needs Pillow. See "
+                 "docs/frankenweather.md.")
         parser.add_argument(
             '--route-zones', action='store_true',
             help="Plan the weather zones along the FMC route (testing). While the aircraft "

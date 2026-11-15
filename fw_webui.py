@@ -3242,6 +3242,18 @@ def _build_cb_test_page(ctx, message: str = '') -> str:  # pylint: disable=too-m
              number('rate', 'rate', state.get('orch_rate_hz', 5.0), 'Hz', 1, 20, 1) + sep +
              number('speed', 'Test CB drift', 20.0, 'kt', 0, 200, 1) +
              button('reset_speed', 'Reset drift') + button('wind', 'Move with the wind'))
+    radar_on, route_on = state.get('radar_cbs'), state.get('route_zones')
+    if radar_on is not None:   # frankenweather versions with the opt-in CB features
+        body += ('</div>\n<div class="row">' +
+                 f'<b>Radar decides CBs {"on" if radar_on else "off"}</b>' +
+                 button('radar_cbs', f'Turn {"off" if radar_on else "on"}',
+                        f'<input type="hidden" name="on" value="{"0" if radar_on else "1"}">') +
+                 (f' ({_esc(state["radar_cbs_why_not"])})' if state.get('radar_cbs_why_not')
+                  else '') + sep +
+                 f'<b>Zones along the FMC route {"on" if route_on else "off"}</b>' +
+                 button('route_zones', f'Turn {"off" if route_on else "on"}',
+                        f'<input type="hidden" name="on" value="{"0" if route_on else "1"}">') +
+                 (f' (now: {_esc(state.get("route_mode") or "none")})' if route_on else ''))
     body += '</div>\n<div class="row">' + button('remove', 'Remove test CBs') + sep + 'Dead ahead'
     for dist in state.get('distances_nm', []):
         body += button('ahead', f'{dist} nm', f'<input type="hidden" name="dist" value="{dist}">')
@@ -3250,7 +3262,11 @@ def _build_cb_test_page(ctx, message: str = '') -> str:  # pylint: disable=too-m
     body += ('<details><summary>About this page</summary><p>Testing only. Advanced zones: CBs '
              'drift with the wind (on by default; off with --no-advanced-zones). The routers give '
              'PSX.NET.Orchestration every weather-zone change the delay late, to match PSX\'s '
-             'weather radar, and drifting CBs rate times a second.</p><p>Each test CB takes a '
+             'weather radar, and drifting CBs rate times a second.</p><p>Radar decides CBs '
+             '(--radar-cbs, testing): inside weather radar coverage a zone only has a CB where '
+             'the radar has a storm cell. Zones along the FMC route (--route-zones, testing): '
+             'new zones go ahead along the route rather than the heading. Both start off unless '
+             'given on the command line; see the docs.</p><p>Each test CB takes a '
              'weather zone, gets a fake 8/8 CB (3,000-40,000 ft) and stays until removed; the '
              'other zones keep 30 nm from its zone, so its echo shows at full size. Positions '
              'and bearings are from the aircraft now (bearings relative to the nose); a placed '

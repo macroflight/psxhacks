@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **New (testing): the weather radar decides where CBs are
+  (`--radar-cbs`).** Inside weather radar coverage, frankenweather only
+  puts a CB where the radar has a storm cell, puts one wherever it does,
+  and a drifting CB sits on its radar cell and moves with it. Outside
+  radar coverage nothing changes. Like the zones along the FMC route
+  (`--route-zones`), it can also be switched on on the web UI's CB test
+  page.
 - **Lightning from EUMETSAT's MTG Lightning Imager instead of
   Blitzortung.** Blitzortung's terms don't allow this use. The new
   source is the Meteosat-12 satellite's lightning images (free, no

@@ -384,8 +384,9 @@ boundary. Entering maneuvering mode re-places all zones around the
 aircraft, except those whose CB turbulence can still reach it; leaving it
 doesn't move any zone, the ordinary relocation rules take over.
 
-**Route-based zones (`--route-zones`, testing):** with this option the
-zones follow the FMC route instead of the heading:
+**Route-based zones (`--route-zones`, testing):** with this option, or
+switched on on the web UI's CB test page, the zones follow the FMC route
+instead of the heading:
 
 - **On the route** means within 10 nm of a leg and tracking within 30° of
   it, for 2 minutes. While on it, new and relocated zones go 150-250 nm
@@ -410,6 +411,29 @@ zones follow the FMC route instead of the heading:
 - The route is every waypoint of the flight, passed ones included, plus the
   destination airport. The log shows each change ("Route zones: following
   the FMC route", "off the FMC route", "vectors near ...").
+
+**Radar decides where CBs are (`--radar-cbs`, testing):** with this option,
+or switched on on the web UI's CB test page, the weather radar (RainViewer,
+the same picture VATSIM Radar can show) decides where the CBs are.
+
+- Every new radar frame (every 10 minutes), frankenweather finds the storm
+  cells within 250 nm of the aircraft: areas of 40 dBZ or more, with large
+  areas split into their stronger cores. Each cell's motion comes from the
+  frame before. A cell peaking at 45 dBZ or more counts as a CB; weaker
+  ones count as towering cumulus or heavy showers.
+- **Inside radar coverage** (RainViewer's own coverage map), a zone only
+  keeps a CB when a radar CB lies within 20 nm of it. When the forecast has
+  none there, the cell gives the zone one, with oktas and top from its
+  strength and size. METARs and SIGMETs no longer create CBs there. New
+  zones go onto the strongest unclaimed radar CBs ahead.
+- A drifting CB (advanced zones) sits exactly on its radar cell and moves
+  with the cell's tracked motion. It follows the cell on every new frame,
+  stays alive as long as the radar has it, and fades when the cell is gone.
+- **Outside radar coverage** (oceans, most of Africa, Russia, polar areas)
+  nothing changes: lightning (MTG), SIGMETs and the forecast place the CBs.
+- The log shows each frame ("Radar cells: ..."), and a zone's reason shows
+  what the radar did ("radar: 52 dBZ cell 140 km2", "radar: no storm
+  cell"). Needs Pillow.
 
 **Keeping the zones:** frankenweather watches every weather variable it
 sets (the zones' positions, weather and METARs, `WxBasic`, `WxAutoSet`).
