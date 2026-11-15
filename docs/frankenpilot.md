@@ -115,7 +115,10 @@ config file (`[actions]`, names in brackets).
     precipitation, or BKN/OVC (5 oktas or more) below 3,000 ft (FEW/SCT
     alone don't count). The departure weather is its METAR in PSX, or, when
     that has no weather groups (frankenweather's "RMK FRANKENWX MODEL WX"),
-    the PSX weather zone the METAR belongs to. Wing anti-ice is only switched in flight.
+    the PSX weather zone the METAR belongs to. It looks at the departure
+    weather then, and again every minute until the takeoff roll, so fog
+    rolling in during a long taxi queue still gets engine anti-ice on.
+    Wing anti-ice is only switched in flight.
 
   Back to AUTO (or off) when TAT has been above 10 C for a minute, and in
   flight at >ANTI-ICE NAC/WING or a while after leaving cloud (longer after

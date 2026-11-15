@@ -57,6 +57,7 @@ EICAS_A = {
 }
 EICAS_C = {'ICING NAC': 47}
 ENGINES_SETTLED_S = 60.0   # ground anti-ice: wait after the last engine start (user, 11-13)
+ATIS_RECHECK_S = 60.0      # ... then look at the departure weather this often until takeoff
 # Readable fuel panel switch names for the log
 FUEL_LABELS = {
     'FuelCtrL': "center pump L", 'FuelCtrR': "center pump R",
@@ -507,7 +508,8 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.step_last_look = 0.0
         self.flap_seen = (None, 0.0)    # (lever position, since when) - flap_speeds
         self.flap_done = None           # lever position whose speed was set
-        self.atis_checked = False      # departure ATIS looked at after engine start
+        self.atis_next = 0.0           # when to look at the departure weather next (monotonic)
+        self.atis_logged = None        # what that look said last (logged on change)
         self.stby_std_above = None     # standby to STD once above this (departure MSA), ft
         self.arrival_qnh_done = None   # destination whose QNH the standby got below its MSA
         self.prev_alt = None
@@ -1516,9 +1518,11 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             auto = self.get_int("CfgNaiAuto", 0) == 1
             reason = self.icing_significant(now, on_ground, auto)
             reason = reason and f"Icing conditions (TAT {tat:.0f}, {reason})"
-        if not reason and on_ground and not self.atis_checked and self.phase == 'GROUND':
-            # Once after engine start: icing conditions right after takeoff per the ATIS
-            self.atis_checked = True
+        if not reason and on_ground and self.phase == 'GROUND' and now >= self.atis_next:
+            # After engine start and then every minute until takeoff (a long taxi
+            # queue: fog can roll in, user 2026-11-15): icing conditions right
+            # after takeoff per the departure weather
+            self.atis_next = now + ATIS_RECHECK_S
             metar, zone_wx = self.departure_atis(self.cur_dep)
             limit = self.params['icing_atis_base_ft']
             if zone_wx:
@@ -1527,8 +1531,14 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             else:
                 atis = metar and atis_icing_reason(metar, limit)
                 source = f"departure ATIS ({metar})"
+            if atis and tat > 10.0:
+                # The weather says 10 C or colder, PSX's air isn't (yet): not icing
+                # conditions here, and anti_ice_off() would switch it off again
+                # (it flapped once a minute, 2026-11-15)
+                atis = None
             reason = atis and f"Departure weather: {atis}"
-            if metar:
+            if metar and (atis or self.atis_logged != (metar, atis)):
+                self.atis_logged = (metar, atis)
                 self.decide(f"all engines running, {source}: " +
                             (f"icing conditions after takeoff ({atis}), engine anti-ice ON"
                              if atis else "no icing conditions expected after takeoff"))

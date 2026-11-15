@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The departure weather is checked for icing conditions every minute until
+  the takeoff roll, not only once after engine start: fog rolling in, or
+  the temperature dropping to 10 C, during a long taxi queue now gets
+  engine anti-ice on.
 - Fix: a step climb above the FMC's MAX altitude. PSX's VNAV CRZ page
   showed STEP TO FL450, AT NOW, with MAX FL445, and frankenpilot climbed
   (FTECH1, 2026-11-15). It now reads OPT, MAX and RECMD from that page
