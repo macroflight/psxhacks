@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import tempfile
+import threading
 import time
 from typing import Any, Optional
 
@@ -60,6 +61,10 @@ class DiskCache:
     Values must already be JSON-serializable (plain dicts/lists/numbers/
     strings) — callers with richer types (dataclasses, numpy arrays, …)
     are expected to encode/decode at their own call sites.
+
+    Thread-safe: fetchers run in executor threads, several at once (the
+    turbulence engine, CB drift, CB messages), and a flush must not see the
+    entries change under it.
     """
 
     def __init__(self, path: str, max_age_s: float) -> None:
@@ -67,6 +72,7 @@ class DiskCache:
         self._path = path
         self._max_age_s = max_age_s
         self._entries: dict[str, tuple[float, Any]] = {}
+        self._lock = threading.RLock()
         remove_stale_tmp(os.path.dirname(path) or ".")
         self._load()
 
@@ -90,15 +96,16 @@ class DiskCache:
 
     def get_entry(self, key: str) -> Optional[tuple]:
         """Return (value, age_s) for key, or None if absent or expired."""
-        entry = self._entries.get(key)
-        if entry is None:
-            return None
-        stored_at, value = entry
-        age_s = time.time() - stored_at
-        if age_s > self._max_age_s:
-            del self._entries[key]
-            return None
-        return value, age_s
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None:
+                return None
+            stored_at, value = entry
+            age_s = time.time() - stored_at
+            if age_s > self._max_age_s:
+                del self._entries[key]
+                return None
+            return value, age_s
 
     def set(self, key: str, value: Any) -> None:
         """Store value under key and flush the whole cache to disk."""
@@ -107,10 +114,11 @@ class DiskCache:
     def set_many(self, items: dict) -> None:
         """Store several key/value pairs and flush the whole cache to disk once."""
         now = time.time()
-        for key, value in items.items():
-            self._entries[key] = (now, value)
-        self._prune(now)
-        self._flush()
+        with self._lock:
+            for key, value in items.items():
+                self._entries[key] = (now, value)
+            self._prune(now)
+            self._flush()
 
     def _prune(self, now: float) -> None:
         """Drop expired entries, so the file doesn't keep growing."""
