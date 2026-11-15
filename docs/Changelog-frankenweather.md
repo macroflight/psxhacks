@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **CB messages: PSX's real radar echo size per CB.** `radar_core_nm`
+  and `radar_amber_nm` were always 6 and 18 nm; PSX paints small or
+  shallow CBs smaller (measured: 1 okta 32,000 ft deep 3.2 / 9.9 nm, 2
+  oktas 12,000 ft deep 1.9 / 5.7 nm). They now come from a table of
+  measurements by oktas and depth, so PSX.NET.Orchestration and Flight
+  Centre get the size PSX's radar shows.
 - **New (testing): the weather radar decides where CBs are
   (`--radar-cbs`).** Inside weather radar coverage, frankenweather only
   puts a CB where the radar has a storm cell, puts one wherever it does,

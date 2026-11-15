@@ -587,13 +587,12 @@ is usually the better side.
   placement moves it (usually once it's behind the aircraft). A drift also
   ends when something else moves the zone, and the CB fades early instead
   of entering a "Remove CB near dep/arr" circle.
-- **Other zones in the way:** a CB shrinks on the radar the closer its
-  zone centre is to another zone (PSX sizes the echo by that distance:
-  small within about 5 nm, still growing beyond 12 nm). If a drifting
-  zone's centre comes within 10 nm of the anchor or a dep/dst airport
-  zone, that zone steps aside to 12 nm from it, and the cell takes its
-  weather (keeping its CB), so the local QNH and wind are the same
-  whichever of the two PSX treats as nearest. An airport zone goes at
+- **Other zones in the way:** if a drifting zone's centre comes within
+  10 nm of the anchor or a dep/dst airport zone, that zone steps aside to
+  12 nm from it, and the cell takes its weather (keeping its CB), so the
+  local QNH and wind are the same whichever of the two PSX treats as
+  nearest. (The size of PSX's radar echo doesn't depend on nearby zones,
+  measured 2026-11-15: only on the CB's oktas and depth.) An airport zone goes at
   most 15 nm from its field (otherwise the cell fades instead) and goes
   back as soon as no drifting zone is within 12 nm of the field.
 - **Where to see it:** the log has a `CB drift:` line for every start,

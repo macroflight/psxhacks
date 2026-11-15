@@ -67,7 +67,7 @@ CB frankenweather has in PSX at that moment. A CB missing from a message is gone
 | `base_ft_msl` | Cloud base, ft above sea level. |
 | `top_ft_msl_fw` | The top frankenweather's data says. It can be higher than PSX's limit, for example a tropical CB at 52,000 ft. |
 | `top_ft_msl_psx` | The top PSX got. PSX allows at most 44,999 ft above the zone's elevation. |
-| `radar_core_nm` | How wide PSX paints the CB's red core on the radar (diameter, nm). PSX paints the same size for every CB. |
+| `radar_core_nm` | How wide PSX paints this CB's red core (magenta included) on its weather radar: diameter, nm. |
 | `radar_amber_nm` | Diameter of amber plus red on PSX's radar (nm). |
 | `drift` | How the CB moves: `hdg_true` (towards, degrees true), `kt`, and `since`/`until` (PSX clock) for when the drift started and when the CB starts to decay (`until` is `null` if it has no end). `null` if the CB doesn't move. |
 | `anvil` | `visible` (always true when present), `hdg_true` (the way it points, downwind) and `length_nm`. `null` without an anvil. |
@@ -116,8 +116,13 @@ change. The CBS message is **not** delayed: its positions are for `time`.
   moves with the cell's own motion, tracked from frame to frame. Without
   advanced zones, `drift` is always `null`, as it is near the departure and
   destination airports and below 10,000 ft.
-- **Radar size**: measured on PSX's radar for 2-8 oktas, tops FL250-450 and
-  bases 1,500-6,000 ft. It was the same every time.
+- **Radar size**: what PSX actually paints, measured on PSX's radar
+  (2026-11-15) and interpolated per CB from its oktas and depth (top
+  minus base). A big or deep CB (3 oktas or more and 22,000 ft or more
+  deep, for instance) is about 6 nm red and 18.6 nm amber+red; a small or
+  shallow one less: 1 okta 32,000 ft deep 3.2 / 9.9 nm, 2 oktas 12,000 ft
+  deep 1.9 / 5.7 nm, 1 okta 8,000 ft deep barely a dot. The zone's size
+  and nearby zones make no difference.
 
 ## Changes
 

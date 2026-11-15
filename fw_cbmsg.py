@@ -16,11 +16,24 @@ CBS_VERSION = 1
 CBS_RESEND_S = 60.0          # sent at least this often, and soon after any change
 CBS_MIN_GAP_S = 15.0         # but at most this often (a growing CB changes all the time)
 CBS_TOP_STEP_FT = 2000       # tops (and bases) count as changed in steps of this
-# PSX's CB radar echo is the same size whatever the CB (2-8 oktas, tops
-# FL250-450, bases 1,500-6,000 ft; headless tests 2026-11-14): about 6 nm
-# across in red and 18 nm in amber, red included (magenta 2 nm)
-RADAR_RED_NM = 6.0
-RADAR_AMBER_NM = 18.0
+# What PSX paints on its weather radar for a CB, measured (headless tests G2/G3,
+# 2026-11-15, ND 40 nm WXR, colours measured): diameters (nm) of red (magenta
+# included) and amber+red, by oktas and depth (top - base, thousands of ft).
+# The zone's size and nearby zones make no difference; a big or deep CB is
+# about 6 / 18.6 nm, a small or shallow one less (1/8 8,000 ft deep: barely a
+# dot). Between table points linear; deeper than the last point: its value;
+# shallower than the first: down to nothing at 4,000 ft.
+ECHO_TABLE = {   # oktas: [(depth kft, red nm, amber+red nm), ...]
+    1: [(8, 0.0, 1.1), (12, 1.2, 3.1), (17, 1.9, 4.7), (22, 2.3, 7.1), (27, 2.3, 7.8),
+        (32, 3.2, 9.9)],
+    2: [(8, 0.9, 2.3), (12, 1.9, 5.7), (17, 2.5, 9.9), (22, 4.6, 14.7), (27, 5.0, 17.6),
+        (32, 5.8, 18.6)],
+    3: [(8, 1.1, 3.6), (12, 2.8, 8.8), (17, 4.9, 15.6), (22, 6.0, 18.6)],
+    4: [(8, 2.6, 7.8), (12, 5.2, 15.3), (17, 6.0, 18.6)],
+    6: [(8, 4.8, 15.8), (12, 6.0, 18.6)],
+    8: [(8, 6.0, 18.6)],
+}
+ECHO_MIN_DEPTH_KFT = 4.0
 # Anvil: visible when the top reaches within this of the tropopause, or
 # above it, and the CB has at least ANVIL_MIN_OKTAS (or came from radar or
 # lightning); length ANVIL_BASE_NM + ANVIL_NM_PER_KT x the wind at the top,
@@ -82,6 +95,38 @@ def anvil(top_ft: float, tropopause_ft: Optional[float], oktas: int, source: str
             "length_nm": round(min(ANVIL_MAX_NM, ANVIL_BASE_NM + ANVIL_NM_PER_KT * kt))}
 
 
+def _echo_row(oktas: int, depth_kft: float) -> tuple:
+    """Return (red, amber) for a measured oktas row (ECHO_TABLE) at depth_kft."""
+    row = ECHO_TABLE[oktas]
+    if depth_kft <= row[0][0]:
+        f = max(0.0, (depth_kft - ECHO_MIN_DEPTH_KFT) / (row[0][0] - ECHO_MIN_DEPTH_KFT))
+        return row[0][1] * f, row[0][2] * f
+    for (d0, r0, a0), (d1, r1, a1) in zip(row, row[1:]):
+        if depth_kft <= d1:
+            f = (depth_kft - d0) / (d1 - d0)
+            return r0 + (r1 - r0) * f, a0 + (a1 - a0) * f
+    return row[-1][1], row[-1][2]
+
+
+def echo_diameters(oktas: int, base_ft: float, top_ft: float) -> tuple:
+    """Return (red, amber+red) diameters (nm) PSX paints on its radar for a CB.
+
+    From ECHO_TABLE: by oktas (5 and 7 between their neighbours) and depth.
+    """
+    oktas = max(1, min(8, oktas))
+    depth = max(0.0, (top_ft - base_ft) / 1000.0)
+    rows = sorted(ECHO_TABLE)
+    if oktas in ECHO_TABLE:
+        red, amber = _echo_row(oktas, depth)
+    else:
+        lo = max(r for r in rows if r < oktas)
+        hi = min(r for r in rows if r > oktas)
+        (r0, a0), (r1, a1) = _echo_row(lo, depth), _echo_row(hi, depth)
+        f = (oktas - lo) / (hi - lo)
+        red, amber = r0 + (r1 - r0) * f, a0 + (a1 - a0) * f
+    return round(red, 1), round(amber, 1)
+
+
 def cb_entry(cb_id: str, pos: tuple, cb: dict, elev_ft: float, extra: dict) -> dict:
     """Return one CB of the message.
 
@@ -99,7 +144,8 @@ def cb_entry(cb_id: str, pos: tuple, cb: dict, elev_ft: float, extra: dict) -> d
         "base_ft_msl": int(round(cb["base_ft"] + elev_ft)),
         "top_ft_msl_fw": int(round(max(top_fw, top_psx))) if top_fw is not None else top_psx,
         "top_ft_msl_psx": top_psx,
-        "radar_core_nm": RADAR_RED_NM, "radar_amber_nm": RADAR_AMBER_NM,
+        **dict(zip(("radar_core_nm", "radar_amber_nm"),
+                   echo_diameters(cb["oktas"], cb["base_ft"], cb["top_ft"]))),
         "drift": extra.get("drift"),
         "anvil": extra.get("anvil"),
         "surface_wind": extra.get("surface_wind"),
