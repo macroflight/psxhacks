@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Lightning from EUMETSAT's MTG Lightning Imager instead of
+  Blitzortung.** Blitzortung's terms don't allow this use. The new
+  source is the Meteosat-12 satellite's lightning images (free, no
+  account), covering Europe, Africa, the Atlantic and the western Indian
+  Ocean, about 10-15 minutes behind. Outside that area there's no
+  lightning any more (the Americas, Asia-Pacific); radar, SIGMETs and the
+  forecast still place the CBs there.
 - **Fix: the weather radar read drizzle as heavy rain.** RainViewer only
   serves its "Universal Blue" colours since 2026, where light rain and
   drizzle are beige. frankenweather still read the old colours and took

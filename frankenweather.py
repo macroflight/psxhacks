@@ -78,6 +78,7 @@ import fw_drift as _fw_drift  # pylint: disable=wrong-import-order
 import fw_cbmsg as _fw_cbmsg  # pylint: disable=wrong-import-order
 import fw_route as _fw_route  # pylint: disable=wrong-import-order
 import fw_radar as _fw_radar  # pylint: disable=wrong-import-order
+import fw_lightning as _fw_lightning  # pylint: disable=wrong-import-order
 import fw_holdover as _fw_holdover  # pylint: disable=wrong-import-order
 import fw_icing as _fw_icing  # pylint: disable=wrong-import-order
 from psxhacks_version import get_version
@@ -732,7 +733,7 @@ _HOLD_KEEP_CB_NM = 100.0
 _ZONE_MOVE_CLEAR_CB_NM = 3.0
 
 # ---------------------------------------------------------------------------
-# Radar (RainViewer) and lightning (Blitzortung) constants
+# Radar (RainViewer) and lightning (MTG Lightning Imager) constants
 # ---------------------------------------------------------------------------
 
 _RV_API = "https://api.rainviewer.com/public/weather-maps.json"
@@ -783,10 +784,10 @@ _CB_AREA_MIN_DIST_NM = 60.0
 _CB_CLOSE_AREA_NM = 40.0
 _CB_AREA_ZONE_SEP_NM = 70.0
 
-_BZ_URL = "https://data.blitzortung.org/Data_1/strikes"
-_BZ_LOOKBACK_MIN = 20  # fetch this many recent minute-files of strike data
-_BZ_RADIUS_NM = 80.0   # strike within this radius → lightning signal for CB gate
-_BZ_CACHE_S = 240.0    # re-fetch Blitzortung no more often than this
+# Lightning: MTG Lightning Imager images (fw_lightning; Blitzortung until 2026-11-15)
+_LTG_RADIUS_NM = 80.0     # flashes within this radius → lightning signal for the CB gate
+_LTG_CACHE_S = 300.0      # fetch new images no more often than this
+_LTG_MOVED_DEG = 2.0      # ... unless the aircraft is this far from where they were fetched
 
 # ---------------------------------------------------------------------------
 # Coordinate parsing (UCAR stations.txt format)
@@ -2789,9 +2790,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._rv_frame_path: Optional[str] = None
         self._rv_tile_cache: dict = {}
 
-        # Blitzortung lightning strikes — list of (lat, lon) from last _BZ_LOOKBACK_MIN minutes
-        self._bz_strikes: list = []
-        self._bz_fetch_time: float = 0.0
+        # MTG lightning: flash positions [(lat, lon)] of the last 15 minutes
+        # (fw_lightning), when and where (lat, lon) they were fetched
+        self._ltg_points: list = []
+        self._ltg_fetch_time: float = 0.0
+        self._ltg_fetch_at: Optional[tuple] = None
+        self._ltg_image_time: Optional[str] = None
 
         # API state broadcast
         self._instance_uuid: str = str(uuid.uuid4())
@@ -9736,53 +9740,59 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         return _rv_tile_echo(img, px, py)
 
     # ------------------------------------------------------------------
-    # Lightning (Blitzortung) helpers
+    # Lightning (MTG Lightning Imager, fw_lightning) helpers
     # ------------------------------------------------------------------
 
-    async def _fetch_bz_strikes(self, session: aiohttp.ClientSession) -> None:
-        """Refresh Blitzortung strike list from the last _BZ_LOOKBACK_MIN minutes."""
-        if time.monotonic() - self._bz_fetch_time < _BZ_CACHE_S:
+    async def _fetch_lightning(self, session: aiohttp.ClientSession) -> None:
+        """Refresh the flash positions from MTG's Lightning Imager (the last 15 minutes).
+
+        Every _LTG_CACHE_S (sooner after a long move), one EUMETView WMS image per
+        5 minutes around the aircraft. Outside MTG's view, or without Pillow:
+        no lightning. Failures keep the last positions until they're old.
+        """
+        if self.ac_lat is None:
             return
-        now_utc = datetime.now(timezone.utc)
-        strikes = []
+        here = (self.ac_lat, self.ac_lon)
+        moved = (self._ltg_fetch_at is None or
+                 abs(here[0] - self._ltg_fetch_at[0]) > _LTG_MOVED_DEG or
+                 abs(((here[1] - self._ltg_fetch_at[1] + 180.0) % 360.0) - 180.0) >
+                 _LTG_MOVED_DEG)
+        if not moved and time.monotonic() - self._ltg_fetch_time < _LTG_CACHE_S:
+            return
+        self._ltg_fetch_time = time.monotonic()
+        if _PIL_Image is None or not _fw_lightning.covers(*here):
+            self._ltg_points, self._ltg_fetch_at = [], here
+            return
+        try:
+            async with session.get(_fw_lightning.WMS_URL, timeout=_RV_TIMEOUT, params={
+                    "service": "WMS", "version": "1.3.0", "request": "GetCapabilities"}) as r:
+                latest = _fw_lightning.latest_time(await r.text()) if r.status == 200 else None
+            if latest is None:
+                raise ValueError("no image time in the WMS capabilities")
+            bbox, size = _fw_lightning.box(*here)
+            points = []
+            for when in _fw_lightning.step_times(latest):
+                async with session.get(_fw_lightning.WMS_URL, timeout=_RV_TIMEOUT,
+                                       params=_fw_lightning.getmap_params(bbox, size, when)) as r:
+                    if r.status != 200 or not r.content_type.startswith("image/"):
+                        raise ValueError(f"WMS GetMap HTTP {r.status} {r.content_type}")
+                    img = _PIL_Image.open(BytesIO(await r.read())).convert('RGBA')
+                points += _fw_lightning.flash_points(img, bbox)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.info("MTG lightning: not available (%s)", exc)
+            return
+        if bool(points) != bool(self._ltg_points) or latest != self._ltg_image_time:
+            self.logger.debug("MTG lightning: %d flash pixels around the aircraft (up to %s)",
+                              len(points), latest)
+        self._ltg_points, self._ltg_fetch_at, self._ltg_image_time = points, here, latest
 
-        async def _get_minute(dt: datetime) -> list:
-            url = (f"{_BZ_URL}/{dt.year}/{dt.month:02d}/{dt.day:02d}"
-                   f"/{dt.hour:02d}/{dt.minute:02d}.json")
-            try:
-                async with session.get(url, timeout=_RV_TIMEOUT) as r:
-                    if r.status != 200:
-                        return []
-                    data = await r.json(content_type=None)
-                    if not isinstance(data, list):
-                        return []
-                    return [(float(s['lat']), float(s['lon']))
-                            for s in data if 'lat' in s and 'lon' in s]
-            except Exception:  # pylint: disable=broad-exception-caught
-                return []
-
-        minutes = [
-            (now_utc - timedelta(minutes=offset)).replace(second=0, microsecond=0)
-            for offset in range(1, _BZ_LOOKBACK_MIN + 1)
-        ]
-        results = await asyncio.gather(*[_get_minute(dt) for dt in minutes])
-        for batch in results:
-            strikes.extend(batch)
-
-        old_count = len(self._bz_strikes)
-        self._bz_strikes = strikes
-        self._bz_fetch_time = time.monotonic()
-        if strikes or old_count:
-            self.logger.debug("Blitzortung: %d strikes (last %d min)",
-                              len(strikes), _BZ_LOOKBACK_MIN)
-
-    def _bz_near(self, lat: float, lon: float) -> bool:
-        """Return True if a recent Blitzortung strike lies within _BZ_RADIUS_NM."""
+    def _lightning_near(self, lat: float, lon: float) -> bool:
+        """Return True if a recent flash lies within _LTG_RADIUS_NM."""
         lat_tol = 2.0   # fast coarse filter before expensive _dist_nm call
-        for slat, slon in self._bz_strikes:
+        for slat, slon in self._ltg_points:
             if abs(slat - lat) > lat_tol:
                 continue
-            if self._dist_nm(lat, lon, slat, slon) <= _BZ_RADIUS_NM:
+            if self._dist_nm(lat, lon, slat, slon) <= _LTG_RADIUS_NM:
                 return True
         return False
 
@@ -10039,7 +10049,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # Refresh radar and lightning sources; failures degrade to echo=0 / no lightning
         await self._fetch_rv_frame(session)
         await self._fetch_rv_tiles(session, snap_positions + self._rv_local_sample_points())
-        await self._fetch_bz_strikes(session)
+        await self._fetch_lightning(session)
 
         now = datetime.now(timezone.utc)
         month = now.month
@@ -10053,7 +10063,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             icao = snap_icaos[i]
             om = om_by_zone.get(i, {})
             radar_echo = self._rv_echo_at(lat, lon)
-            has_lightning = self._bz_near(lat, lon)
+            has_lightning = self._lightning_near(lat, lon)
             cb_removed_for = self._cb_removed_near_airport(lat, lon)
             ts_oktas = 0
             has_showers_metar = False
@@ -10254,7 +10264,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             if pz['radar_echo'] >= 2:
                 cb_sources.append(f"radar echo {pz['radar_echo']}")
             if pz['lightning']:
-                cb_sources.append("Blitzortung lightning")
+                cb_sources.append("MTG lightning")
             if pz['sigmet_label']:
                 cb_sources.append(pz['sigmet_label'])
             if cb_oktas > 0:

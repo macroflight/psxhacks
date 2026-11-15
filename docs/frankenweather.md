@@ -19,7 +19,10 @@ set once (by hand, or baked into a saved situ) and never updated again
 - Live weather zones, sourced from real airport METARs and Open-Meteo
   forecasts, placed and continuously updated around the aircraft as you fly.
 - Realistic CB (cumulonimbus) placement driven by actual atmospheric
-  CAPE/CIN data and TS SIGMETs, not hand-set oktas.
+  CAPE/CIN data and TS SIGMETs, not hand-set oktas, checked against live
+  weather radar (RainViewer) and satellite lightning. The lightning comes
+  from EUMETSAT's MTG Lightning Imager (© EUMETSAT) over Europe, Africa,
+  the Atlantic and the western Indian Ocean; there's none elsewhere.
 - A dedicated terrain-based turbulence engine — mountain wave, rotor,
   mechanical, wind-shear CAT, plus CB/CAPE/PIREP/G-AIRMET-driven bumps —
   using real wind and satellite terrain data.

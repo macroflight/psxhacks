@@ -155,7 +155,7 @@ def om_cb_fields(  # pylint: disable=too-many-locals,too-many-branches
     metar_showers: METAR observed SH-type precip (SHRA, TCU) — confirms showers.
     metar_ts: METAR observed thunderstorm (TS, GR, LTG, FC) — bypasses precip gate.
     radar_echo: RainViewer echo strength 0-3 (0=none, 1=light, 2=moderate, 3=heavy).
-    lightning: Blitzortung strike detected within zone radius in last 20 min.
+    lightning: MTG lightning (fw_lightning) within 80 nm in the last 15 min.
     """
     hourly = om.get("hourly") or {}
     hour_idx = datetime.now(timezone.utc).hour
