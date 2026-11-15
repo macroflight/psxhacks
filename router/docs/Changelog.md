@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **New: FrankenWeather's CB messages reach PSX.NET.Orchestration.** The
+  router passes `addon=FRANKENWEATHER:CBS` (every CB with position, tops,
+  drift and anvil) to the other routers and to the `[filtering]
+  orchestration_names` clients only.
 - **New: Advanced Icing toggle on `/efb`** (On/Off under SIGMETs, with a
   line saying what it's doing), for FrankenWeather's Advanced Icing
   (testing). Only shown with a FrankenWeather that has it.

@@ -1267,6 +1267,16 @@ class Rules():  # pylint: disable=too-many-public-methods
                 return self.myreturn(
                     RulesAction.FILTER, RulesCode.FRANKENWEATHER_FILTERED,
                     extra_data={'orchestration_cbfeed': feed})
+            # CBS: every CB frankenweather has in PSX (position, base/tops,
+            # drift, anvil; ~2.5 KB on change and once a minute) for the
+            # clients that draw PSX's CBs elsewhere ([filtering]
+            # orchestration_names) and the other frankenrouters (they pass it
+            # on to theirs). See docs/frankenweather-cb-messages.md.
+            if payload.startswith('CBS:'):
+                return self.myreturn(
+                    RulesAction.FILTER, RulesCode.FRANKENWEATHER_FILTERED,
+                    extra_data={'ground_handling_forward':
+                                list(self.router.config.filtering.orchestration_names)})
             # MSA (departure/destination minimum safe altitude, ~80 bytes once a
             # minute near those airports) is for frankenpilot, a normal client.
             if payload.startswith('MSA:'):
@@ -2316,6 +2326,7 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             """Initialize the filtering config."""
             self.ground_handling_forward_names = [
                 'PSX.NET EFB For Windows', 'PSX.NET.Orchestration', 'BA ACARS Simulation']
+            self.orchestration_names = ['PSX.NET.Orchestration']
             self.ptt_ground_handling_translation = True
             self.master_drop_check_switches = True
             self.slave_drop_printer_push = True
@@ -3301,6 +3312,20 @@ class TestRules(unittest.TestCase):  # pylint: disable=too-many-public-methods
             (_, _, _, extra_data) = rules.route(f'addon=FRANKENWEATHER:CBFEED:{bad}',
                                                 router.upstream)
             self.assertEqual(extra_data, {'frankenrouters_only': True}, bad)
+
+    def test_frankenweather_cbs(self):
+        """FRANKENWEATHER:CBS goes to the frankenrouters and the Orchestration clients only."""
+        router = self.DummyFrankenrouter()
+        rules = Rules(router)
+        router.upstream = self.DummyUpstreamConnection()
+        line = ('addon=FRANKENWEATHER:CBS:1234-uuid:'
+                '{"v": 1, "time": "2026-11-15T07:00:00Z", "cbs": []}')
+        (action, code, _, extra_data) = rules.route(line, router.upstream)
+        self.assertEqual((action, code), (RulesAction.FILTER, RulesCode.FRANKENWEATHER_FILTERED))
+        self.assertEqual(extra_data, {'ground_handling_forward': ['PSX.NET.Orchestration']})
+        router.config.filtering.orchestration_names = []
+        (_, _, _, extra_data) = rules.route(line, router.upstream)
+        self.assertEqual(extra_data, {'ground_handling_forward': []})
 
     def test_orchestration_egress(self):
         """Weather-zone writes get the Orchestration egress filter only when it's needed."""

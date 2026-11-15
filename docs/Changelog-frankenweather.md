@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **New: CB messages for other simulators.** frankenweather now sends an
+  `addon=FRANKENWEATHER:CBS` message listing every CB it has in PSX:
+  position now, base, tops (including the real top when PSX's 44,999 ft
+  limit cut it), drift, anvil direction and length, and surface wind. It
+  goes out once a minute and soon after any change, so add-ons that draw
+  PSX's CBs elsewhere (PSX.NET.Orchestration in MSFS) can show them with
+  their anvils and motion. Needs a router that passes it on (this
+  version's). Format: docs/frankenweather-cb-messages.md.
 - **Fix: turbulence PIREPs were never used.** aviationweather.gov's PIREP
   data names its fields differently since its new API (`tbInt1`, `lat`,
   `lon`, `fltLvl`, `obsTime` in seconds; intensities spelled `LGT`), and

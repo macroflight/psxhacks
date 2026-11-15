@@ -779,6 +779,10 @@ frdp_rtt_warning = 0.5
   frankenweather's 15 s writes, so the CB moves smoothly in MSFS. The
   messages themselves only go to frankenrouters. Without them for 90 s,
   no delay.
+  These clients (and the other frankenrouters, nobody else) also get
+  frankenweather's `FRANKENWEATHER:CBS` messages: every CB with its
+  position, tops, drift and anvil (see
+  `docs/frankenweather-cb-messages.md` in the repo).
 
 - `stale_traffic_dead_reckon_seconds`: a temporary workaround for frozen
   vPilot traffic. It's opt-in: default `0` (off); `60` is a good value.

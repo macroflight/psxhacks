@@ -64,6 +64,8 @@ from fw_cb import (
     cape_to_cb_oktas as _cape_to_cb_oktas,
     cb_base_ft as _cb_base_ft,
     cb_top_ceiling_ft as _cb_top_ceiling_ft,
+    climate_tropopause_ft as _climate_tropopause_ft,
+    CB_OVERSHOOT_FT as _CB_OVERSHOOT_FT,
     cb_tops_ft as _cb_tops_ft,
     om_cb_fields as _om_cb_fields,
     apply_om_cb as _apply_om_cb,
@@ -73,6 +75,7 @@ import fw_efb as _fw_efb  # pylint: disable=wrong-import-order
 import fw_webui as _fw_webui  # pylint: disable=wrong-import-order
 import fw_sigmet as _fw_sigmet  # pylint: disable=wrong-import-order
 import fw_drift as _fw_drift  # pylint: disable=wrong-import-order
+import fw_cbmsg as _fw_cbmsg  # pylint: disable=wrong-import-order
 import fw_holdover as _fw_holdover  # pylint: disable=wrong-import-order
 import fw_icing as _fw_icing  # pylint: disable=wrong-import-order
 from psxhacks_version import get_version
@@ -444,6 +447,8 @@ _ICING_FZ_METAR_NM = 30.0
 _FUEL_WRITE_MIN_S = 60.0      # Advanced Icing fuel temperature: write PSX's at most this often
 _FUEL_JUMP_C = 5.0            # PSX's own fuel temperature this far off: a situation load, adopt it
 _FUEL_JUMP_KG = 3000.0        # fuel this much lower in one step: a situation load, start over
+_CBS_CHECK_S = 5.0            # CBS messages: look for changes this often
+_CBS_SAME_CB_NM = 20.0        # a zone's CB this far from where it was: a new CB (new id)
 _FUEL_SITU_LOAD_S = 30.0      # fuel changes this soon after a situ load: the load, not a refuel
 _FUEL_LOG_S = 600.0           # log the fuel temperature model this often
 # Fuel cooling (Cold weather page, --fuel-cooling): PSX's own, or frankenweather's
@@ -2679,6 +2684,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # zone -> label of the SIGMET that gave its current CB (e.g. "TS
         # SIGMET MPZL 03 EMBD"), or None; shown in the log and the web UI.
         self.zone_cb_sigmet: dict = {}
+        # zone -> where its CB came from (fw_cbmsg.SOURCES), for the CBS messages
+        self.zone_cb_source: dict = {}
+        # CBS messages (cb_messages_coro()): zone -> (CB id, lat, lon) while it has a CB,
+        # and (signature, time.monotonic()) of the last one sent
+        self._cbs_ids: dict = {}
+        self._cbs_sent = (None, 0.0)
         # Set when we take over the SIGMETs: _place_sigmet_zones() then
         # places every zone it wants at once instead of one per interval.
         self._sigmet_place_burst: bool = False
@@ -7906,6 +7917,123 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
             self.logger.critical(traceback.format_exc())
 
+    def _cbs_id(self, zone_num: int, pos: tuple, now_s: float) -> str:
+        """Return the CBS id of the zone's CB at pos: the same while it lives, new if it jumped."""
+        old = self._cbs_ids.get(zone_num)
+        if old is not None:
+            _, _, dist_m = self.geod.inv(old[2], old[1], pos[1], pos[0])
+            if dist_m <= _CBS_SAME_CB_NM * 1852.0:
+                self._cbs_ids[zone_num] = (old[0], pos[0], pos[1])
+                return old[0]
+        cb_id = f"Z{zone_num}-{int(now_s)}"
+        self._cbs_ids[zone_num] = (cb_id, pos[0], pos[1])
+        return cb_id
+
+    def _cbs_drift(self, zone_num: int, now_s: float) -> Optional[dict]:
+        """Return the zone's CB drift for a CBS message, or None if it doesn't drift now."""
+        cell = self._drift.get(zone_num)
+        moving = (self.ac_alt_ft is not None and self.ac_alt_ft >= _DRIFT_MIN_ALT_FT and
+                  not self._maneuvering)
+        if cell is None or cell.speed_kt <= 0.0 or not (moving or cell.test):
+            return None
+        accel = self.time_accel()
+        left = cell.minutes_left()
+        return {"hdg_true": round(cell.heading_deg) % 360, "kt": round(cell.speed_kt),
+                "since": _fw_cbmsg.iso_utc(now_s - cell.age_s / accel),
+                "until": (None if left == math.inf else
+                          _fw_cbmsg.iso_utc(now_s + left * 60.0 / accel))}
+
+    def _cbs_message(self) -> Optional[dict]:  # pylint: disable=too-many-locals
+        """Return the CBS message (fw_cbmsg) for every CB in PSX now, or None (no clock yet).
+
+        Runs in an executor: the wind profiles at the CBs may need a download.
+        """
+        sim_ms = self.sim_time_ms()
+        if sim_ms is None or self.psx is None:
+            return None
+        now_s = sim_ms / 1000.0
+        month = datetime.fromtimestamp(now_s, timezone.utc).month
+        fetcher = self._turb_engine.wind_fetcher if self._turb_engine is not None else None
+        here = self._turb_engine.wind_profile() if self._turb_engine is not None else None
+        tropo_here = here.tropopause() if here is not None else None
+        cbs = []
+        for zone_num in range(1, 8):
+            mode = self.psx.get(f"WxMode{zone_num}")
+            cb = _fw_cbmsg.wx_cb(self.psx.get(f"Wx{zone_num}") or "")
+            cell = self._drift.get(zone_num)
+            if cell is not None and cell.bearing is not None:
+                pos = cell.position_at(self.geod, time.monotonic(),
+                                       self._cbs_drift(zone_num, now_s) is not None,
+                                       self.time_accel())
+            else:
+                pos = _fw_drift.cb_position(self.geod, mode, sim_ms) if mode else None
+            if cb is None or pos is None:
+                self._cbs_ids.pop(zone_num, None)
+                continue
+            try:   # a drifting zone's own elevation, not the one raised to turn its CB
+                elev_ft = cell.elev0_ft if cell is not None else float(mode.split(';')[3])
+            except (IndexError, ValueError):
+                elev_ft = 0.0
+            source = "test" if cell is not None and cell.test else self.zone_cb_source.get(
+                zone_num, "model")
+            profile = fetcher.get(pos[0], pos[1], datetime.now(timezone.utc)) if fetcher else None
+            tropo = profile.tropopause() if profile is not None else None
+            tropo_ft = tropo[0] / 0.3048 if tropo else None
+            top_psx = cb["top_ft"] + elev_ft
+            top_fw = None
+            if cb["top_ft"] >= _CB_TOP_MAX_FT:   # PSX's limit cut it: the tropopause and more
+                top_fw = max(_climate_tropopause_ft(pos[0], month),
+                             tropo_ft or 0.0) + _CB_OVERSHOOT_FT
+            top = max(top_psx, top_fw or 0.0)
+            top_wind = None
+            if profile is not None:
+                speed_kt, dir_deg = profile.wind_at(top * 0.3048)
+                top_wind = (dir_deg, speed_kt)
+            cbs.append(_fw_cbmsg.cb_entry(
+                self._cbs_id(zone_num, pos, now_s), pos, cb, elev_ft, {
+                    "zone": zone_num, "top_fw_ft": top_fw,
+                    "drift": self._cbs_drift(zone_num, now_s),
+                    "anvil": _fw_cbmsg.anvil(top, tropo_ft, cb["oktas"], source, top_wind),
+                    "surface_wind": _fw_cbmsg.wx_surface_wind(self.psx.get(f"Wx{zone_num}")),
+                    "source": source}))
+        return _fw_cbmsg.message(now_s, tropo_here[0] / 0.3048 if tropo_here else None, cbs)
+
+    async def cb_messages_coro(self) -> None:
+        """Send the CBS message (addon=FRANKENWEATHER:CBS:<uuid>:<json>) on change and every 60 s.
+
+        Every CB frankenweather has in PSX, for add-ons that draw them
+        elsewhere (PSX.NET.Orchestration in MSFS); see fw_cbmsg and
+        docs/frankenweather-cb-messages.md. Not while PSX governs the weather.
+        """
+        myname = inspect.currentframe().f_code.co_name
+        try:
+            self.logger.debug("Starting %s", myname)
+            loop = asyncio.get_running_loop()
+            while True:
+                await asyncio.sleep(_CBS_CHECK_S)
+                if not self.psx_connected or self.psx is None or self._fw_mode == "disabled":
+                    continue
+                msg = await loop.run_in_executor(None, self._cbs_message)
+                if msg is None:
+                    continue
+                sig = _fw_cbmsg.signature(msg)
+                last_sig, last_at = self._cbs_sent
+                now = time.monotonic()
+                if now - last_at < (_fw_cbmsg.CBS_RESEND_S if sig == last_sig else
+                                    _fw_cbmsg.CBS_MIN_GAP_S):
+                    continue
+                if sig != last_sig:
+                    self.logger.info("CB messages: %d CB(s): %s", len(msg["cbs"]), ", ".join(
+                        f"{c['id']} {c['oktas']}/8 {c['base_ft_msl']}-{c['top_ft_msl_fw']} ft"
+                        f"{' anvil' if c['anvil'] else ''}{' drifting' if c['drift'] else ''}"
+                        for c in msg["cbs"]) or "none")
+                self._cbs_sent = (sig, now)
+                self._psx_send("addon", f"FRANKENWEATHER:CBS:{self._instance_uuid}:" +
+                               json.dumps(msg, separators=(",", ":")))
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
+            self.logger.critical(traceback.format_exc())
+
     async def _cb_test_set_speed(self, speed) -> str:
         """Give every test CB this drift speed (kt), or (None) the motion it was placed with."""
         cells = {zn: c for zn, c in self._drift.items() if c.test}
@@ -9961,6 +10089,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.zone_reason[i + 1] = reason[:100]
 
             pz = _per_zone[i]
+            self.zone_cb_source[i + 1] = (
+                "sigmet" if pz['sigmet_label'] else "radar" if pz['radar_echo'] >= 2 else
+                "lightning" if pz['lightning'] else "metar" if pz['ts_oktas'] > 0 else "model")
             snap_icao = snap_icaos[i]
             is_metar = raw_metars[i] is not None
             _snap_fake = (len(snap_icao) == 4 and snap_icao[0] == 'X' and
@@ -11346,6 +11477,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 coros.append(("CbDrift", self.cb_drift_coro))   # idle unless advanced zones are on
                 coros.append(("CbFade", self.cb_fade_coro))     # idle with --cb-growth
                 coros.append(("OrchestrationFeed", self.orchestration_feed_coro))
+                coros.append(("CbMessages", self.cb_messages_coro))
                 coros.append(("CbMotion", self.cb_motion_coro))
                 coros.append(("AdvancedIcing", self.advanced_icing_coro))  # idle unless on
                 for name, coro_fn in coros:

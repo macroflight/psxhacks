@@ -551,6 +551,14 @@ is usually the better side.
   frankenweather's CB turbulence sees the zones with the same delay, so a
   CB that appears close by (a test CB, say) starts shaking the aircraft
   when MSFS shows it, not 10 s before.
+- **CB messages for other simulators (`FRANKENWEATHER:CBS`):** once a
+  minute, and soon after any change, frankenweather sends a message
+  listing every CB it has in PSX. Each CB comes with its position now, base
+  and tops (including a top above PSX's 44,999 ft limit), drift, anvil
+  (direction and length) and surface wind, so an add-on such as
+  PSX.NET.Orchestration can draw it in MSFS. The routers pass it only to
+  the other routers and to the `[filtering] orchestration_names` clients.
+  The format is in [frankenweather-cb-messages.md](frankenweather-cb-messages.md).
 - **CB test page** (`/weather/cbtest`, in frankenweather's own web UI and
   every router's):
   switches advanced zones on and off (they start on, or off with
