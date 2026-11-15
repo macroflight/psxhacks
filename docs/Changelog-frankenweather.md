@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **The departure airport's weather zone is released 50 nm after
+  takeoff** (it was kept for 200 nm), so it can be used for the weather
+  ahead. The destination still gets its zone within 200 nm.
+- **CBs are created at full size and removed at full size (new
+  default).** Until now a new CB grew from 1 okta and a few thousand feet
+  to its full size over several minutes, and faded out when removed (also
+  after every frankenweather restart). Two new switches decide it: the CB
+  height life cycle and the CB oktas life cycle, on the web UI's CB test
+  page, on the command line (`--cb-height-cycle`, `--cb-oktas-cycle`) and
+  in the config file. Both are off by default; turn them on for the old
+  growing and shrinking.
 - **CB messages: PSX's real radar echo size per CB.** `radar_core_nm`
   and `radar_amber_nm` were always 6 and 18 nm; PSX paints small or
   shallow CBs smaller (measured: 1 okta 32,000 ft deep 3.2 / 9.9 nm, 2

@@ -3233,6 +3233,30 @@ def _build_cb_test_page(ctx, message: str = '') -> str:  # pylint: disable=too-m
     body = '<div class="cbt">\n'
     if message:
         body += f'<div class="card"><p style="margin:0">{_esc(message)}</p></div>\n'
+    radar_on, route_on = state.get('radar_cbs'), state.get('route_zones')
+    if radar_on is not None:   # frankenweather versions with the opt-in CB features
+        def switch(action, label, on, extra=''):
+            return (f'<div class="row"><b>{_esc(label)}: {"on" if on else "off"}</b>' +
+                    button(action, f'Turn {"off" if on else "on"}',
+                           f'<input type="hidden" name="on" value="{"0" if on else "1"}">') +
+                    extra + '</div>\n')
+        body += ('<div class="card"><h2 style="margin-top:0">CB features (testing)</h2>\n' +
+                 switch('radar_cbs', 'Radar decides CBs', radar_on,
+                        (f' <span>({_esc(state["radar_cbs_why_not"])})</span>'
+                         if state.get('radar_cbs_why_not') else
+                         ' <span>inside weather radar coverage, CBs only on radar storms</span>')) +
+                 switch('route_zones', 'Zones along the FMC route', route_on,
+                        ' <span>new zones ahead along the route, not the heading' +
+                        (f' (now: {_esc(state.get("route_mode") or "none")})' if route_on else '') +
+                        '</span>') +
+                 (switch('cb_cycle_height', 'CB height life cycle', state.get('cb_cycle_height'),
+                         ' <span>on: CBs grow from a few thousand feet and shrink again; off: full '
+                         'height from creation to removal</span>') +
+                  switch('cb_cycle_oktas', 'CB oktas life cycle', state.get('cb_cycle_oktas'),
+                         ' <span>on: CBs step up from 1 okta and back down; off: full oktas from '
+                         'creation to removal</span>')
+                  if 'cb_cycle_height' in state else '') +
+                 '</div>\n')
     body += '<div class="card">\n<div class="row">'
     body += (f'<b>Advanced zones {"on" if on else "off"}</b>' +
              button('advanced', f'Turn {"off" if on else "on"}',
@@ -3242,18 +3266,6 @@ def _build_cb_test_page(ctx, message: str = '') -> str:  # pylint: disable=too-m
              number('rate', 'rate', state.get('orch_rate_hz', 5.0), 'Hz', 1, 20, 1) + sep +
              number('speed', 'Test CB drift', 20.0, 'kt', 0, 200, 1) +
              button('reset_speed', 'Reset drift') + button('wind', 'Move with the wind'))
-    radar_on, route_on = state.get('radar_cbs'), state.get('route_zones')
-    if radar_on is not None:   # frankenweather versions with the opt-in CB features
-        body += ('</div>\n<div class="row">' +
-                 f'<b>Radar decides CBs {"on" if radar_on else "off"}</b>' +
-                 button('radar_cbs', f'Turn {"off" if radar_on else "on"}',
-                        f'<input type="hidden" name="on" value="{"0" if radar_on else "1"}">') +
-                 (f' ({_esc(state["radar_cbs_why_not"])})' if state.get('radar_cbs_why_not')
-                  else '') + sep +
-                 f'<b>Zones along the FMC route {"on" if route_on else "off"}</b>' +
-                 button('route_zones', f'Turn {"off" if route_on else "on"}',
-                        f'<input type="hidden" name="on" value="{"0" if route_on else "1"}">') +
-                 (f' (now: {_esc(state.get("route_mode") or "none")})' if route_on else ''))
     body += '</div>\n<div class="row">' + button('remove', 'Remove test CBs') + sep + 'Dead ahead'
     for dist in state.get('distances_nm', []):
         body += button('ahead', f'{dist} nm', f'<input type="hidden" name="dist" value="{dist}">')

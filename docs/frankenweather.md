@@ -320,7 +320,10 @@ Key options:
 
 Up to 7 PSX weather zones are placed around the aircraft and relocated as
 needed. Two things don't depend on flight phase: a zone serving the FMC
-departure or destination airport is never relocated, and the single zone
+departure or destination airport is never relocated (the destination's
+within 200 nm, the departure's until 50 nm after takeoff: then it's an
+ordinary zone again, free for the weather ahead; a return to the departure
+airport would be entered as the new destination), and the single zone
 nearest the aircraft — which is almost always also the one PSX itself
 reports as its active weather zone (`FocussedWxZone`) — is never relocated
 either, even when it would otherwise qualify below. Relocating either would
@@ -455,6 +458,24 @@ times within 2 minutes, someone keeps changing it: frankenweather logs
 an error and leaves that variable alone until the changes stop.
 
 ### CB growth and decay
+
+**CB life cycle switches (default off).** Two switches decide whether CBs
+grow and shrink at all. They're on the web UI's CB test page (box "CB
+features"), on the command line (`--cb-height-cycle`, `--cb-oktas-cycle`)
+and in the config file (section `cb_life_cycle`, keys `height` and
+`oktas`):
+
+- **CB height life cycle:** on, a CB starts a few thousand feet tall,
+  grows to its full height and shrinks back before it's removed; off (the
+  default), it's created at its full height and keeps it until it's
+  removed.
+- **CB oktas life cycle:** on, a CB starts at 1 okta, steps up to its full
+  oktas and back down to 1 before it's removed; off (the default), it's
+  created at its full oktas and keeps them until it's removed.
+
+With both off, a CB appears and goes at its full size. That's what drawing
+the CBs in MSFS needs for now; the growing and shrinking described below
+only happens with a switch on.
 
 `--cb-growth` (experimental, off by default) is an option that
 ramps a CB's coverage (oktas) and top height gradually toward its forecast

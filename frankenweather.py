@@ -460,6 +460,7 @@ _RADAR_KEEP_NM = 28.0         # ... and stays it within this (PSX's CB circles t
 _RADAR_GONE_NM = 12.0         # a drifting CB's radar cell must be within this, else it's gone
 _RADAR_COVERAGE_KEEP_S = 6 * 3600.0
 _RADAR_STEER_S = 600.0         # a drifting CB steers onto its radar cell over this long
+_DEP_ZONE_AIRBORNE_NM = 50.0   # the departure airport's zone is kept this far once airborne
 _RADAR_PLACE_MIN_NM = 40.0     # new zones on radar cells from this far ahead (not just 150-250 nm)
 _RADAR_MOTION_MAX_OFF_DEG = 60.0   # a cell's motion within this of the mean wind, and
 _RADAR_MOTION_MAX_DIFF_KT = 25.0   # ... this of its speed, else the mean wind
@@ -2103,6 +2104,10 @@ _CONFIG_COLD_WEATHER_FIELDS = (
     ("advanced_icing", "_adv_icing", bool),
     ("prevent_fuel_freezing", "_prevent_fuel_freezing", bool),
 )
+_CONFIG_CB_LIFE_CYCLE_FIELDS = (
+    ("height", "_cb_cycle_height", bool),
+    ("oktas", "_cb_cycle_oktas", bool),
+)
 _CONFIG_MANUAL_WX_FIELDS = (
     "hi_oktas", "hi_top", "hi_base", "lo_oktas", "lo_top", "lo_base",
     "cb_oktas", "cb_top", "cb_base", "turb_severity", "turb_top", "turb_base",
@@ -2808,6 +2813,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # Maneuvering mode detection
         self._hdg_history: list = []   # [(monotonic_time, heading_deg)]
         self._maneuvering: bool = False
+        # CB life cycle (CB test page, --cb-height-cycle / --cb-oktas-cycle, [cb_life_cycle]):
+        # off (default) = a CB is created at its full height / oktas and removed at them;
+        # on = it grows from small and shrinks again at the end (user decision 2026-11-15)
+        self._cb_cycle_height: bool = False
+        self._cb_cycle_oktas: bool = False
         # --route-zones (_update_route_mode()): following the FMC route ("on"), off it
         # ("off"), or no route/option ("none"); since when the aircraft has been on
         # or off it (time.monotonic(), None: not now); where it is on the route
@@ -4374,6 +4384,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 key: getattr(self, attr) for key, attr, _cast in _CONFIG_CB_AVOIDANCE_FIELDS},
             "cold_weather": {
                 key: getattr(self, attr) for key, attr, _cast in _CONFIG_COLD_WEATHER_FIELDS},
+            "cb_life_cycle": {
+                key: getattr(self, attr) for key, attr, _cast in _CONFIG_CB_LIFE_CYCLE_FIELDS},
             "manual_weather": {
                 key: self._manual_wx_params[key] for key in _CONFIG_MANUAL_WX_FIELDS},
             "turbulence": {key: getattr(self, attr) for key, attr, _cast in _CONFIG_TURB_FIELDS},
@@ -4458,6 +4470,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self._cb_airport_mode = "off"
 
         self._apply_cold_weather_config(config.get("cold_weather", {}))
+
+        life = config.get("cb_life_cycle", {})
+        for key, attr, cast in _CONFIG_CB_LIFE_CYCLE_FIELDS:
+            if key in life:
+                setattr(self, attr, cast(life[key]))
 
         manual_wx = config.get("manual_weather", {})
         for key in _CONFIG_MANUAL_WX_FIELDS:
@@ -6265,6 +6282,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             new_oktas = min(float(target_oktas), old + _CB_FADE_IN_OKTAS_PER_MIN * elapsed_min)
         else:
             new_oktas = max(float(target_oktas), old - _CB_FADE_OUT_OKTAS_PER_MIN * elapsed_min)
+        if not self._cb_cycle_oktas:
+            # No oktas life cycle: the full oktas at once; going, it keeps them until the
+            # height life cycle (if on) has shrunk it, then goes at once
+            shrinking = (target_oktas <= 0 and self._cb_cycle_height and
+                         ramp['current_top_ft'] > ramp.get('base_ft', target_base) +
+                         _CB_MIN_DEPTH_FT + 1.0)
+            new_oktas = float(target_oktas) if target_oktas > 0 else (old if shrinking else 0.0)
         if new_oktas < 0.5 and target_oktas <= 0:
             self.zone_cb_ramp.pop(zone_num, None)
             return target_wx
@@ -6276,6 +6300,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         else:
             new_top = max(goal_top, old_top - _CB_FADE_OUT_TOP_FT_PER_MIN * elapsed_min)
         new_top = max(new_top, base + _CB_MIN_DEPTH_FT)
+        if not self._cb_cycle_height:
+            # No height life cycle: full height at once, and kept until the CB is gone
+            new_top = target_top if target_oktas > 0 else old_top
         rates = ((new_oktas - old) / elapsed_min, (new_top - old_top) / elapsed_min) \
             if elapsed_min else (0.0, 0.0)
         ramp.update(current_oktas=new_oktas, current_top_ft=new_top, base_ft=base,
@@ -6287,6 +6314,25 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         parts[10] = str(round(new_top))
         parts[11] = str(round(base))
         return ';'.join(parts)
+
+    def _cb_cycle_clamp(self, stepped_wx: str, target_wx: str) -> str:
+        """--cb-growth's ramp with the CB life cycle switches off: full oktas / height at once.
+
+        Without the oktas life cycle the CB has its target oktas (gone: gone at
+        once unless the height life cycle still shrinks it); without the height
+        life cycle its target top.
+        """
+        step, goal = stepped_wx.split(';'), target_wx.split(';')
+        if len(step) < 12 or len(goal) < 12:
+            return stepped_wx
+        if goal[9] in ('', '0'):
+            off = not self._cb_cycle_oktas and not self._cb_cycle_height
+            return target_wx if off else stepped_wx
+        if not self._cb_cycle_oktas:
+            step[9] = goal[9]
+        if not self._cb_cycle_height:
+            step[10], step[11] = goal[10], goal[11]
+        return ';'.join(step)
 
     def _psx_cb_in_place(self, zone_num: int) -> Optional[tuple]:
         """Return (oktas, top, base) of PSX's CB in zone_num if the zone stays where PSX has it.
@@ -7340,7 +7386,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         return any_moved
 
     def _arpt_coverage_needed(self) -> list:
-        """Return (icao, lat, lon) for dep/dst airports within arpt_zone_dist of aircraft."""
+        """Return (icao, lat, lon) for dep/dst airports near the aircraft.
+
+        Within 200 nm; the departure airport only within 50 nm once airborne.
+        """
         _ARPT_ZONE_DIST_NM = 200.0
         if self.ac_lat is None:
             return []
@@ -7358,7 +7407,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 continue
             lat, lon = self.airports[icao]
             dist = self._dist_nm(self.ac_lat, self.ac_lon, lat, lon)
-            if dist <= _ARPT_ZONE_DIST_NM:
+            # The departure is released 50 nm after takeoff (user 2026-11-15: a return
+            # would be entered as the destination; the anchor zone keeps the weather
+            # where the aircraft is); the destination keeps 200 nm
+            limit = (_DEP_ZONE_AIRBORNE_NM if icao == self.fmc_dep_icao and
+                     icao != self.fmc_dst_icao and not self._on_ground()
+                     else _ARPT_ZONE_DIST_NM)
+            if dist <= limit:
                 if self._cb_airport_mode == "move":
                     offset_nm = _CB_AIRPORT_CLEARANCE_NM + _CB_TO_ZONE_OFFSET_NM + 1.0
                     offset_lon, offset_lat, _ = self.geod.fwd(
@@ -7839,7 +7894,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 zone_num, _fw_drift.pos_text(new_lat, new_lon), aside_nm, cell.zone,
                 ", which takes its weather" if local else "")
 
-    def _drift_tick(self, dt_s: float) -> None:  # pylint: disable=too-many-locals,too-many-statements
+    def _drift_tick(self, dt_s: float) -> None:  # pylint: disable=too-many-locals,too-many-statements,too-many-branches
         """Move every drifting cell one step; decay and end them; put airport zones back."""
         now = time.monotonic()
         moving = (self.ac_alt_ft is not None and self.ac_alt_ft >= _DRIFT_MIN_ALT_FT and
@@ -7858,6 +7913,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             if cell.decay_from is None and cell.life_over():
                 cell.start_decay(now, f"end of its {cell.lifetime_s / 60.0:.0f} min life")
                 self.logger.info("CB drift: Zone %d starts to decay (%s)", zone_num, cell.decay_why)
+            if cell.decay_from is not None and not self._cb_cycle_oktas:
+                cell.decay_from = min(cell.decay_from, cell.age_s - _fw_drift.DECAY_S)   # gone now
             if moving or cell.test:
                 old = (cell.lat, cell.lon, cell.moved_nm)
                 cell.step(self.geod, dt_s * accel)   # the drift is in sim time
@@ -7951,7 +8008,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 # opt-in (testing) CB features, switchable here too
                 "radar_cbs": bool(self.args.radar_cbs), "radar_cbs_why_not": (
                     None if _HAS_PIL else "needs Pillow"),
-                "route_zones": bool(self.args.route_zones), "route_mode": self._route_mode}
+                "route_zones": bool(self.args.route_zones), "route_mode": self._route_mode,
+                "cb_cycle_height": self._cb_cycle_height, "cb_cycle_oktas": self._cb_cycle_oktas}
 
     def _handle_cb_test_addon(self, json_str: str) -> None:
         """Do a CB test page command from a router's web UI (FRANKENWEATHER:CBTESTCOMMAND)."""
@@ -7989,6 +8047,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return self._set_advanced_zones(cmd.get("on") == "1")
         if action == "radar_cbs":
             return self._set_opt_in("radar_cbs", "Radar decides CBs", cmd.get("on") == "1")
+        if action in ("cb_cycle_height", "cb_cycle_oktas"):
+            attr = "_" + action
+            on = cmd.get("on") == "1"
+            label = ("CB height life cycle" if action == "cb_cycle_height"
+                     else "CB oktas life cycle")
+            if getattr(self, attr) == on:
+                return f"{label} is already {'on' if on else 'off'}"
+            setattr(self, attr, on)
+            self.logger.info("%s switched %s (web UI)", label, "on" if on else "off")
+            self._state_changed_event.set()
+            return f"{label} {'on' if on else 'off'}"
         if action == "route_zones":
             return self._set_opt_in("route_zones", "Zones along the FMC route",
                                     cmd.get("on") == "1")
@@ -9084,6 +9153,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if self.args.prevent_fuel_freezing is not None:
             self._set_prevent_fuel_freezing(self.args.prevent_fuel_freezing,
                                             "--[no-]prevent-fuel-freezing")
+        if self.args.cb_height_cycle is not None:
+            self._cb_cycle_height = self.args.cb_height_cycle
+        if self.args.cb_oktas_cycle is not None:
+            self._cb_cycle_oktas = self.args.cb_oktas_cycle
+        self.logger.info("CB life cycle: height %s, oktas %s", "grows and shrinks" if
+                         self._cb_cycle_height else "full from creation to removal",
+                         "grow and shrink" if self._cb_cycle_oktas else
+                         "full from creation to removal")
 
     def _set_prevent_fuel_freezing(self, on: bool, why: str) -> None:
         """Switch "prevent fuel freezing" on or off."""
@@ -10512,7 +10589,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 self.zone_cb_ramp.pop(zone_num, None)
             elif self.args.cb_growth:
                 cape_here = _om_hval(om.get("hourly", {}), "cape", now.hour, 0) if om else 0.0
-                final_wx = self._ramp_cb_wx(zone_num, final_wx, cape_here)
+                final_wx = self._cb_cycle_clamp(self._ramp_cb_wx(zone_num, final_wx, cape_here),
+                                                final_wx)
             else:
                 final_wx = self._fade_cb_wx(zone_num, final_wx)
             new_wxs.append(final_wx)
@@ -12086,6 +12164,18 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "the cell takes its weather.")
         parser.add_argument(   # on by default since 2026-11-10; still accepted, does nothing
             '--advanced-zones', action='store_true', help=argparse.SUPPRESS)
+        parser.add_argument(
+            '--cb-height-cycle', action=argparse.BooleanOptionalAction, default=None,
+            help="CB height life cycle (also on the web UI's CB test page; default off): on, a "
+                 "CB starts a few thousand feet tall, grows to its full height and shrinks "
+                 "again before it's removed; off, it's created and removed at full height. "
+                 "Overrides the config file.")
+        parser.add_argument(
+            '--cb-oktas-cycle', action=argparse.BooleanOptionalAction, default=None,
+            help="CB coverage life cycle (also on the CB test page; default off): on, a CB "
+                 "starts at 1 okta, steps up to its full oktas and back down to 1 before it's "
+                 "removed; off, it's created and removed at its full oktas. Overrides the "
+                 "config file.")
         parser.add_argument(
             '--radar-cbs', action='store_true',
             help="The weather radar decides where CBs are (testing). Inside radar coverage "

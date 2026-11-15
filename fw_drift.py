@@ -42,6 +42,7 @@ _VEER_DEG = 5.0              # cells move slightly right of the mean wind
 _LIFE_MIN_S = 30 * 60.0
 _LIFE_MAX_S = 60 * 60.0
 _DECAY_S = 5 * 60.0          # the CB fades to nothing over this long at the end
+DECAY_S = _DECAY_S           # public: ends a decay at once (no oktas life cycle)
 _MIN_SPEED_KT = 3.0          # below this a cell just stays put
 
 
