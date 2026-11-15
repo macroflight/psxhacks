@@ -461,6 +461,8 @@ _RADAR_GONE_NM = 12.0         # a drifting CB's radar cell must be within this, 
 _RADAR_COVERAGE_KEEP_S = 6 * 3600.0
 _RADAR_STEER_S = 600.0         # a drifting CB steers onto its radar cell over this long
 _RADAR_PLACE_MIN_NM = 40.0     # new zones on radar cells from this far ahead (not just 150-250 nm)
+_RADAR_MOTION_MAX_OFF_DEG = 60.0   # a cell's motion within this of the mean wind, and
+_RADAR_MOTION_MAX_DIFF_KT = 25.0   # ... this of its speed, else the mean wind
 _RADAR_TRUST_AGE_S = 1200     # a cell's own motion counts once tracked over 2 frames (20 min)
 _RADAR_CORRECT_MAX_KT = 15.0   # ... with at most this much on top of the cell's own motion
 _RADAR_STEER_MAX_KT = 60.0     # ... and never faster than this in all (realistic storm speeds)
@@ -1808,6 +1810,24 @@ def _wx_equivalent(a: Optional[str], b: Optional[str]) -> bool:
                 wa[:6] == wb[:6] and int(wa[6:]) == int(wb[6:])):
             return False
     return pa[:18] == pb[:18] and pa[19:] == pb[19:]
+
+
+def _radar_motion_plausible(motion: Optional[tuple], wind: Optional[tuple]) -> bool:
+    """Return True if a radar cell's tracked motion is believable next to the mean wind.
+
+    Storms move roughly with the 850-300 hPa mean wind: within _RADAR_MOTION_MAX_OFF_DEG
+    of its direction and _RADAR_MOTION_MAX_DIFF_KT of its speed (slow cells: any
+    direction). Live over France (FTECH1 2026-11-15) a cell got 333/55 kt in a
+    050/45 kt flow: cores splitting, not the storm. No wind known: True.
+    """
+    if not motion:
+        return False
+    if not wind:
+        return True
+    if abs(motion[1] - wind[1]) > _RADAR_MOTION_MAX_DIFF_KT:
+        return False
+    off = abs((motion[0] - wind[0] + 180.0) % 360.0 - 180.0)
+    return off <= _RADAR_MOTION_MAX_OFF_DEG or max(motion[1], wind[1]) < 10.0
 
 
 def _strip_cb(wx: str) -> str:
@@ -7636,9 +7656,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 lat, lon = self._radar_cell_now(radar)
             profile = await loop.run_in_executor(
                 None, self._turb_engine.wind_fetcher.get, lat, lon, datetime.now(timezone.utc))
-            trusted = radar is not None and radar.motion and radar.age_s >= _RADAR_TRUST_AGE_S
+            wind = _fw_drift.mean_wind_motion(profile)
+            trusted = (radar is not None and radar.age_s >= _RADAR_TRUST_AGE_S and
+                       _radar_motion_plausible(radar.motion, wind))
             motion = ((radar.motion[0], min(radar.motion[1], _RADAR_STEER_MAX_KT)) if trusted
-                      else _fw_drift.mean_wind_motion(profile))
+                      else wind)
             if motion is None:
                 self.logger.debug("CB drift: Zone %d stays put (no or calm 850-300hPa wind)",
                                   zone_num)
@@ -7650,7 +7672,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                                        speed_kt=motion[1], wx=wx, mode=new_modes[i], icao=name,
                                        started=time.monotonic(), clat=centre[0], clon=centre[1],
                                        stepped_at=time.monotonic(),
-                                       radar=radar.key if radar is not None else "")
+                                       radar=radar.key if radar is not None else "",
+                                       wind_motion=wind if radar is not None else None)
             self._drift[zone_num] = cell
             self.zone_positions[zone_num] = (centre[0], centre[1],
                                              self.zone_positions[zone_num][2])
@@ -7688,8 +7711,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # Where the cell is now (the frame is 10-20 min old), and where it will be
         # when the next frame is due: steer there instead of jumping
         lat, lon = self._radar_cell_now(match)
-        motion = (match.motion if match.motion and match.age_s >= _RADAR_TRUST_AGE_S
-                  else (cell.heading_deg, cell.speed_kt))
+        motion = (match.motion if match.age_s >= _RADAR_TRUST_AGE_S and
+                  _radar_motion_plausible(match.motion, cell.wind_motion)
+                  else cell.wind_motion or (cell.heading_deg, cell.speed_kt))
         # Gently, not to startle the pilot: the cell's motion plus a correction of
         # at most _RADAR_CORRECT_MAX_KT towards it, at most _RADAR_STEER_MAX_KT in all
         # (a big gap takes a few frames to close)

@@ -431,7 +431,8 @@ the same picture VATSIM Radar can show) decides where the CBs are.
   pilot already sees on the radar is no surprise, and its CB grows in.
 - A drifting CB (advanced zones) starts on its radar cell and moves with
   the cell's tracked motion (once the cell has been tracked for 20
-  minutes; until then with the 850-300 hPa mean wind). A radar frame is 10-20 minutes old when it
+  minutes and its motion roughly agrees with the 850-300 hPa mean wind:
+  within 60 degrees and 25 kt; otherwise with the mean wind). A radar frame is 10-20 minutes old when it
   arrives, so frankenweather runs the cell on to where it is now. On every
   new frame the CB steers gently back towards its cell: the cell's motion
   plus at most 15 kt, never faster than 60 kt in all. Not startling the
