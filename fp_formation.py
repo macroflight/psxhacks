@@ -51,6 +51,13 @@ MCP_MACH_FROM = 400          # McpWdoSpd 400-950 is Mach x 1000, below that IAS 
 MIN_AGL_FT = 1000.0
 VS_HUNDREDS = 10             # climb/descent rate, 1,000 ft/min (overridden by limits.vs_fpm)
 ALT_BAND_FT = 100.0          # within this of the command: ALT HOLD
+# PSX's AFDS shows ALT while capturing the MCP altitude (from ~300 ft out at
+# 500 ft/min, more when faster): within this of the command and still capturing,
+# V/S and FLCH aren't re-pressed, which would break the capture (2026-11-15)
+ALT_CAPTURE_FT = 1500.0
+# ...but only while still capturing (moving towards it): ALT HOLD reached and the
+# command moved on (Flight Centre walks it in 100 ft steps) -> V/S again
+ALT_CAPTURING_FPM = 200.0
 MIN_IAS_KT = 240.0           # clean minimum we steer to (flaps must be up anyway)
 VMO_KT, MMO = 365.0, 0.92    # 747-400
 VMO_MARGIN_KT, MMO_MARGIN = 15.0, 0.02
@@ -750,6 +757,9 @@ class Formation:  # pylint: disable=too-many-instance-attributes
             if abs(err) <= ALT_BAND_FT:
                 return self._press("McpPshAltHld", now)
             return []                                       # ALT asked further away: let it capture
+        if pitch == AFDS_ALT and _capturing(sim, err, cmd_alt):
+            self.vs_limited_since = None
+            return []                                       # capturing the commanded altitude
         if mode == "flch":
             self.vs_limited_since = None
             return [] if pitch == AFDS_FLCH else self._press("McpPshFlc", now)
@@ -789,6 +799,15 @@ class Formation:  # pylint: disable=too-many-instance-attributes
         """Note the V/S knob turn from current to want made after pressing V/S."""
         now = self.clock()
         self.expect["mcp_vs"] = (min(current, want), max(current, want), now + TURN_GRACE_S, want)
+
+
+def _capturing(sim: dict, err: float, cmd_alt: float) -> bool:
+    """Return True if PSX's AFDS (in ALT) is still capturing the commanded altitude, err ft away."""
+    vs_now, mcp_alt = sim.get("vs_actual_fpm"), sim.get("mcp_alt")
+    if vs_now is None or mcp_alt is None or abs(mcp_alt * 100 - cmd_alt) >= 100:
+        return False
+    return abs(err) <= ALT_CAPTURE_FT and abs(vs_now) >= ALT_CAPTURING_FPM and \
+        (vs_now > 0) == (err > 0)
 
 
 def _thr_ok(sim: dict) -> bool:
@@ -1019,6 +1038,23 @@ class TestFormation(unittest.TestCase):  # pylint: disable=too-many-public-metho
         sim = _sim(pitch=AFDS_VS, mcp_alt=370, mcp_vs=18, baro_alt_ft=36950.0, alt_ft=36950.0)
         acts, _ = f.on_steer(steer(4, "alt"), sim)
         self.assertIn(("press", "McpPshAltHld"), acts)
+
+    def test_alt_capture_in_vs_not_broken(self):
+        """V/S commanded, PSX capturing the MCP altitude (pitch ALT 270 ft out): no V/S press."""
+        f, clock = self.make()
+        msg = _steer(1, alt=38600.0)
+        msg["command"].update(vertical_mode="vs", vs_fpm=500)
+        f.on_steer(msg, _sim(mcp_alt=386))
+        clock.t += 6
+        acts, _ = f.on_steer(dict(msg, seq=2), _sim(pitch=AFDS_ALT, mcp_alt=386, mcp_vs=5,
+                                                    baro_alt_ft=38330.0, alt_ft=38330.0,
+                                                    vs_actual_fpm=450.0))
+        self.assertNotIn(("press", "McpPshVs"), acts)
+        clock.t += 6     # ALT HOLD reached (level), command moved on: V/S again
+        acts, _ = f.on_steer(dict(msg, seq=3), _sim(pitch=AFDS_ALT, mcp_alt=386,
+                                                    baro_alt_ft=38300.0, alt_ft=38300.0,
+                                                    vs_actual_fpm=10.0))
+        self.assertIn(("press", "McpPshVs"), acts)
 
     def test_vs_speed_runaway_flch(self):
         """V/S descending with the speed 10+ kt above the MCP speed: FLCH, vs_limited reported."""
