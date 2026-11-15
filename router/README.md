@@ -87,7 +87,7 @@ of release to choose from:
   feature before it's been officially released, at the cost of being
   potentially less stable/tested.
 
-See [docs/BuildSystem.md](../docs/BuildSystem.md) in the main repo for
+See [docs/developers/BuildSystem.md](../docs/developers/BuildSystem.md) in the main repo for
 the full details of how and when these are built.
 
 To run the Python version of the router:

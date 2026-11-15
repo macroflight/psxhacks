@@ -1,6 +1,6 @@
 name: Build addon EXEs
 
-# See docs/BuildSystem.md for the full design and rationale.
+# See docs/developers/BuildSystem.md for the full design and rationale.
 #
 # Only ever runs in the public macroflight/psxhacks repo (see the explicit
 # `github.repository` guard on every job below) -- psxhacks-devel (private)
@@ -26,14 +26,14 @@ permissions:
 
 env:
   # How many releases to keep per addon on each branch. Configurable here,
-  # independently per branch -- see docs/BuildSystem.md.
+  # independently per branch -- see docs/developers/BuildSystem.md.
   RETAIN_MAIN: 5
   RETAIN_TESTING: 5
 
 jobs:
   detect:
     # Hard repo guard: makes this workflow a no-op anywhere except the
-    # public repo, regardless of branch name -- see docs/BuildSystem.md
+    # public repo, regardless of branch name -- see docs/developers/BuildSystem.md
     # for why this can't just rely on the on:push branch filter alone.
     if: github.repository == 'macroflight/psxhacks'
     runs-on: ubuntu-latest
@@ -105,7 +105,7 @@ jobs:
           # Addons that are actually a group of small utility scripts sharing
           # one version file and published as a single release with a zip of
           # every member's EXE, instead of one release per script -- see
-          # docs/BuildSystem.md. Not in makepackages.ps1's $AddonSpecs table
+          # docs/developers/BuildSystem.md. Not in makepackages.ps1's $AddonSpecs table
           # itself (each member still builds individually via -Addon), this
           # is purely about how the *release* is packaged.
           $GroupMembers = @{

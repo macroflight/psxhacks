@@ -4,7 +4,7 @@ PSX sends each CDU's screen as network variables ({L,C,R}cduTitle,
 {L,C,R}cduLine1s/1b ... 6s/6b, 24 characters, '_' for a space, then the
 characters' font sizes). frankenpilot reads its own side's CDU, e.g. VNAV
 CRZ page 2/3 for the next step climb (not on the network otherwise, see
-docs/psx-issues.md), and puts the page that was showing back.
+docs/developers/psx-issues.md), and puts the page that was showing back.
 """
 import re
 

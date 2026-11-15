@@ -67,8 +67,8 @@ DEFAULT_BANDS = (
 # Testing profile: smooth and light only. Moderate and stronger come as
 # rare events instead (frankenturb/turbulence_events.py): real turbulence
 # areas are mostly smooth or light, with moderate in patches and severe a
-# few seconds now and then (docs/turbulence-research/realism-targets.md).
-# 0.30 is light chop (p95 about 0.07 g, docs/turbulence-calibration.md).
+# few seconds now and then (docs/developers/turbulence-research/realism-targets.md).
+# 0.30 is light chop (p95 about 0.07 g, docs/developers/turbulence-calibration.md).
 REALISTIC_BANDS = (
     IntensityBand(0.00, 0.05, 0.50, 0.25, 90.0, 420.0),   # smooth air
     IntensityBand(0.12, 0.22, 0.35, 0.40, 120.0, 420.0),
@@ -77,7 +77,7 @@ REALISTIC_BANDS = (
 # ... and a SEV TURB SIGMET's: mostly light chop, so the crew notices it
 # without its being severe. At FL350 (sweep 2026-10-26) 15-20 % gave p95
 # 0.02-0.03 g, barely anything, 22-32 % 0.06-0.09 g, 35 % and up 0.11 g
-# and more (docs/turbulence-research/event-shape-calibration.md).
+# and more (docs/developers/turbulence-research/event-shape-calibration.md).
 REALISTIC_SEV_BANDS = (
     IntensityBand(0.00, 0.05, 0.30, 0.10, 90.0, 300.0),   # smooth air
     IntensityBand(0.22, 0.28, 0.50, 0.45, 120.0, 420.0),

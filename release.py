@@ -24,14 +24,14 @@ psxutils is a shared version number for a group of small diagnostic
 utilities (show_hid, show_psx, show_usb, temporary_weather_logger,
 compare_metars) that are published together as one release containing a zip
 of all their EXEs, rather than each having its own version/release -- see
-docs/BuildSystem.md.
+docs/developers/BuildSystem.md.
 
 start_scripts is plain PowerShell the user runs directly (see
 start_scripts/functions.ps1's Get-StartScriptsVersion) -- it is never built
 into an EXE, so bumping it never triggers a CI build (it isn't in this
 file's _ADDONS, only in the separate _NONBUILD_ADDONS).
 
-CI usage (see .github/workflows/build.yml and docs/BuildSystem.md):
+CI usage (see .github/workflows/build.yml and docs/developers/BuildSystem.md):
     git diff --name-only <before> <after> | ./release.py --detect-changed
 Reads newline-separated file paths from stdin and prints a JSON array of
 addon names whose .version file is among them -- the single source of

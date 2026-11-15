@@ -78,7 +78,7 @@ addon name to force-build just that one regardless of whether its
 For each addon that needs building, the `build` job:
 
 1. Runs `makepackages.ps1 -Addon <name>` (the same script you'd run
-   locally — see its own header comment and `docs/BuildSystem.md`'s
+   locally — see its own header comment and `docs/developers/BuildSystem.md`'s
    sibling, the repo's main README, for manual usage).
 1. Reads the resulting version string from the addon's `.version` file
    (or `router/frankenrouter.version` for `frankenrouter`).

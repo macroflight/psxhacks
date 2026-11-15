@@ -1990,7 +1990,8 @@ _BURST_GUST = 400
 # Since 191.09 PSX's A/T in SPD mode stops moving the thrust levers for 8-12 s after weak GUST
 # bursts (GUST 401-408: 8 s) and weak SPD-minus bursts (-301 to -329: 9-12 s), however far IAS
 # then falls below the MCP speed; from -332 / 409 on, and SINK, BANK, YAW and SPD-plus, it
-# responds within 1-2 s (headless test sim, 10.178-10.195, 2026-11-08, docs/psx-issues.md).
+# responds within 1-2 s
+# (headless test sim, 10.178-10.195, 2026-11-08, docs/developers/psx-issues.md).
 # In flight our GUST bursts become SPD bursts, and an SPD-minus burst weaker than this is sent at
 # this strength instead, with probability magnitude/this, so the speed kicks add up to the same per
 # minute, in fewer and bigger ones (_at_workaround()).
@@ -2158,7 +2159,7 @@ _TURB_BG_MAX = 0.34
 # autopilot still had no trouble at all (pilot: "could be even stronger",
 # then "more than" 45-60 %). The stable profile gives a CB interior 38-66 %;
 # 60 %+ upset the aircraft at cruise on the autopilot in the calibration
-# (docs/turbulence-calibration.md): in a CB core a pilot should hand-fly.
+# (docs/developers/turbulence-calibration.md): in a CB core a pilot should hand-fly.
 _TURB_CB_CORE = (0.55, 0.70)
 _TURB_EVENT_MULT_MAX = {"moderate": 10.0, "severe": 100.0, "extreme": 1000.0}
 # Every this many seconds a line about the flight, the weather and the
@@ -2565,7 +2566,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # in its own file (_sigmet_types_file()), so it survives a restart.
         # VA off by default: an area-less VA SIGMET (Sakurajima, 2026-11-05)
         # gave two frankenweather sims ash damage far from the volcano
-        # (docs/psx-issues.md); a saved choice overrides this
+        # (docs/developers/psx-issues.md); a saved choice overrides this
         self._sigmet_type_on: dict = {h: h != "VA" for h in _fw_sigmet.HAZARDS}
         # The varying intensity of TURB/MTW SIGMET turbulence, one per type,
         # each with its own timeline per altitude layer (see
@@ -3171,7 +3172,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
         A restart in flight used to rewrite the clock every time (2026-11-09); every clock
         write moves PSX's CB orbit positions and was the suspected trigger of the VA SIGMET
-        damage (docs/psx-issues.md), so only when it's needed.
+        damage (docs/developers/psx-issues.md), so only when it's needed.
         """
         psx_ms = self.sim_time_ms()
         if psx_ms is not None and abs(psx_ms - time.time() * 1000.0) <= _TIMESYNC_DRIFT_S * 1000.0:
@@ -8238,7 +8239,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
         Every CB frankenweather has in PSX, for add-ons that draw them
         elsewhere (PSX.NET.Orchestration in MSFS); see fw_cbmsg and
-        docs/frankenweather-cb-messages.md. Not while PSX governs the weather.
+        docs/developers/frankenweather-cb-messages.md. Not while PSX governs the weather.
         """
         myname = inspect.currentframe().f_code.co_name
         try:

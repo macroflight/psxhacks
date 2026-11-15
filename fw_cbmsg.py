@@ -5,7 +5,7 @@ add-ons that draw the CBs elsewhere (PSX.NET.Orchestration in MSFS): where
 each CB is, its base and tops, how it drifts, its anvil and the surface
 wind. Plain JSON, sent on any change and every 60 s; the receiver runs the
 positions on from the drift in between. The message format is documented
-in docs/frankenweather-cb-messages.md (the contract: change it there too).
+in docs/developers/frankenweather-cb-messages.md (the contract: change it there too).
 
 Pure functions only: frankenweather.py collects the data and sends.
 """

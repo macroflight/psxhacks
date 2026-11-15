@@ -5,7 +5,7 @@ minute or two long, and severe is a 5-30 s cluster of jolts inside ordinary
 chop, something an aircraft hits rather than flies in. At cruise about
 0.4 % of the time is moderate or worse and ~0.1 % severe; in the US there
 is about one severe pilot report per 3,500 airline hours and one
-serious-injury encounter per ~2 million (docs/turbulence-research/
+serious-injury encounter per ~2 million (docs/developers/turbulence-research/
 realism-targets.md). frankenweather's testing profile keeps its continuous
 turbulence light and makes everything stronger one of these events,
 started at random (a Poisson process) at a rate per hour that depends on
@@ -14,7 +14,7 @@ multiplier per kind.
 
 An event is a level the continuous turbulence is raised to for a while,
 plus scripted WxBurst up/down bursts. Sizes and timings come from PSX
-test flights (FL350, 2026-10-26, docs/turbulence-research/): a single
+test flights (FL350, 2026-10-26, docs/developers/turbulence-research/): a single
 up/down burst of size s gives about 1.25 x (s/99)^2 g (size_for_g()), and
 PSX's pitch rings on for ~8 s at a 3.5-4 s period at about 60 % of the
 first swing, so one big burst already gives the 2-4 big swings of a real
@@ -56,7 +56,7 @@ MODERATE_S = (20.0, 600.0)          # ... clamped to this
 # A moderate patch builds up and dies away over this long (each), from
 # MODERATE_EDGE x its level, like real CAT: an intensity envelope varying
 # over tens of seconds with lighter chop at the edges, not a step
-# (docs/turbulence-research/notes/temporal-structure.md). Too short to
+# (docs/developers/turbulence-research/notes/temporal-structure.md). Too short to
 # slow down before it; at most a third of the patch each.
 MODERATE_RAMP_S = (10.0, 20.0)
 MODERATE_EDGE = 0.4
@@ -75,7 +75,7 @@ def size_for_g(g: float) -> int:
     """Return the WxBurst up/down size (1-99) whose first swing is about g (PSX, FL350).
 
     Never 90: PSX answers +90 and -90 alike with -1.3 g then +2.3 g,
-    unlike 88-92 (2026-10-26, docs/turbulence-research/
+    unlike 88-92 (2026-10-26, docs/developers/turbulence-research/
     event-shape-calibration.md).
     """
     size = max(1, min(99, round(99.0 * math.sqrt(max(0.0, g) / 1.25))))

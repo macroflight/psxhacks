@@ -1271,7 +1271,7 @@ class Rules():  # pylint: disable=too-many-public-methods
             # drift, anvil; ~2.5 KB on change and once a minute) for the
             # clients that draw PSX's CBs elsewhere ([filtering]
             # orchestration_names) and the other frankenrouters (they pass it
-            # on to theirs). See docs/frankenweather-cb-messages.md.
+            # on to theirs). See docs/developers/frankenweather-cb-messages.md.
             if payload.startswith('CBS:'):
                 return self.myreturn(
                     RulesAction.FILTER, RulesCode.FRANKENWEATHER_FILTERED,

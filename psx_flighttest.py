@@ -1,4 +1,6 @@
-"""Automated flight testing on a PSX test sim: reposition, fly stably, record (docs/flighttest.md).
+"""Automated flight testing on a PSX test sim: reposition, fly stably, record.
+
+See docs/developers/flighttest.md.
 
 Writes to the sim (repositions it, presses MCP buttons): use it only on
 a test sim, never on someone's flight.

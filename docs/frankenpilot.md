@@ -169,7 +169,7 @@ it.
   SPD and VNAV CRZ lists a STEP TO level with AT NOW. The STEP size
   doesn't matter (VNAV lists a STEP TO level even with STEP 0), and
   neither does the step's origin (LEGS page or VNAV's automatic steps).
-  PSX doesn't put VNAV's next step on the network (docs/psx-issues.md), so
+  PSX doesn't put VNAV's next step on the network (docs/developers/psx-issues.md), so
   frankenpilot reads the page on its own side's CDU: when that CDU already
   shows VNAV CRZ 2/3 every 30 s; otherwise 5 minutes after levelling off,
   shortly before the step point VNAV shows, and every 10 minutes, each time

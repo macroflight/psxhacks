@@ -1,4 +1,4 @@
-"""Automated flight testing on a PSX test sim (see docs/flighttest.md).
+"""Automated flight testing on a PSX test sim (see docs/developers/flighttest.md).
 
 - sim: talk to PSX like any other client: load a situation with the
   aircraft repositioned, wait until it flies stably, correct the heading

@@ -1,6 +1,6 @@
 """Fly a plan of test legs (a TOML file) one after another: reposition, settle, record.
 
-See docs/flighttest.md for the plan format. Each leg is flown from
+See docs/developers/flighttest.md for the plan format. Each leg is flown from
 before_nm before its reference point (e.g. an airport) along its true
 track; if the terrain doesn't clear the leg's altitude by
 min_clearance_ft within check_nm, the reverse track is tried (with

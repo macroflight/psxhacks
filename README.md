@@ -274,7 +274,7 @@ tag matching the addon you want:
   `temporary_weather_logger.exe`, `compare_metars.exe`) rather than one
   EXE per release.
 
-See [docs/BuildSystem.md](docs/BuildSystem.md) for the full details of
+See [docs/developers/BuildSystem.md](docs/developers/BuildSystem.md) for the full details of
 how and when these are built.
 
 All the binaries can be run by double-clicking on them or starting

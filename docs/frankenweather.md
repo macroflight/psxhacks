@@ -50,7 +50,7 @@ officially released version. A tag named
 `frankenweather-testing-v<version>` instead (marked "Pre-release" on
 GitHub) is built from the `testing` branch, for trying out changes
 before they're officially released; see
-[docs/BuildSystem.md](BuildSystem.md) for the full details.
+[docs/developers/BuildSystem.md](developers/BuildSystem.md) for the full details.
 For most users — a single PC running PSX on its default port — just start
 the EXE and then control everything from
 [http://localhost:9747/](http://localhost:9747/); no setup or arguments
@@ -553,7 +553,7 @@ is usually the better side.
   or while maneuvering, the cells stand still.
 - **Where the CB is:** PSX always draws a zone's CB 7 nm from the zone
   centre, on a bearing that goes round clockwise once an hour (see
-  [PSX issues](psx-issues.md#a-zones-cb-circles-its-centre-once-an-hour)).
+  [PSX issues](developers/psx-issues.md#a-zones-cb-circles-its-centre-once-an-hour)).
   The zone elevation adds to that bearing (1 ft = 1 degree), so every 15
   seconds frankenweather sets a drifting zone's elevation (`WxMode<n>`)
   0-359 ft above its own, to keep the bearing the CB had when the drift
@@ -612,7 +612,7 @@ is usually the better side.
   (direction and length) and surface wind, so an add-on such as
   PSX.NET.Orchestration can draw it in MSFS. The routers pass it only to
   the other routers and to the `[filtering] orchestration_names` clients.
-  The format is in [frankenweather-cb-messages.md](frankenweather-cb-messages.md).
+  The format is in [frankenweather-cb-messages.md](developers/frankenweather-cb-messages.md).
 - **CB test page** (`/weather/cbtest`, in frankenweather's own web UI and
   every router's):
   switches advanced zones on and off (they start on, or off with
@@ -825,7 +825,7 @@ minute or two long, and severe is something an aircraft hits, not
 something it flies in: a 5-30 second cluster of jolts. At cruise about
 0.4% of the time is moderate or worse and 0.1% or less severe, and in
 the US there is about one severe pilot report per 3,500 airline hours
-(see [turbulence-research](turbulence-research/README.md)). The stable
+(see [turbulence-research](developers/turbulence-research/README.md)). The stable
 profile instead holds one level per source for minutes, which in a SEV
 TURB SIGMET gave severe-class shaking (peaks over 2 g) for minutes at a
 time.
@@ -945,7 +945,7 @@ really cost energy, and there the answer is to descend or turn away.
 PSX 10.191 and later have an autothrottle bug: after a weak gust or a weak
 "speed down" turbulence burst, the A/T in SPD mode leaves the thrust levers
 where they are for 8 to 12 seconds, however far the speed then falls below
-the MCP speed (docs/psx-issues.md). Stronger bursts and the up/down, bank
+the MCP speed (docs/developers/psx-issues.md). Stronger bursts and the up/down, bank
 and yaw bursts don't do it. So in flight frankenweather sends its gust
 bursts as speed bursts, and replaces weak "speed down" bursts by fewer
 stronger ones (the same speed kicks per minute, so the turbulence feels the
