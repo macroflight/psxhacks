@@ -795,7 +795,11 @@ _CB_CLOSE_AREA_NM = 40.0
 _CB_AREA_ZONE_SEP_NM = 70.0
 
 # Lightning: MTG Lightning Imager images (fw_lightning; Blitzortung until 2026-11-15)
-_LTG_RADIUS_NM = 80.0     # flashes within this radius → lightning signal for the CB gate
+# Flashes (at least _LTG_MIN_PIXELS of them) within this radius → lightning signal for
+# the CB gate. 80 nm suited Blitzortung's single strikes; MTG paints flash areas, so
+# over an active region everything was within 80 nm (Congo, night test 2026-11-15)
+_LTG_RADIUS_NM = 40.0
+_LTG_MIN_PIXELS = 3
 _LTG_CACHE_S = 300.0      # fetch new images no more often than this
 _LTG_MOVED_DEG = 2.0      # ... unless the aircraft is this far from where they were fetched
 
@@ -2808,6 +2812,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._radar_frame: Optional[int] = None
         self._radar_at: Optional[tuple] = None
         self._radar_cov: dict = {}
+        self._radar_logged: dict = {}   # zone -> its last logged radar decision
         # MTG lightning: flash positions [(lat, lon)] of the last 15 minutes
         # (fw_lightning), when and where (lat, lon) they were fetched
         self._ltg_points: list = []
@@ -10073,13 +10078,16 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._ltg_points, self._ltg_fetch_at, self._ltg_image_time = points, here, latest
 
     def _lightning_near(self, lat: float, lon: float) -> bool:
-        """Return True if a recent flash lies within _LTG_RADIUS_NM."""
-        lat_tol = 2.0   # fast coarse filter before expensive _dist_nm call
+        """Return True if at least _LTG_MIN_PIXELS recent flash pixels lie within _LTG_RADIUS_NM."""
+        lat_tol = _LTG_RADIUS_NM / 60.0 + 0.1   # fast coarse filter before _dist_nm
+        found = 0
         for slat, slon in self._ltg_points:
             if abs(slat - lat) > lat_tol:
                 continue
             if self._dist_nm(lat, lon, slat, slon) <= _LTG_RADIUS_NM:
-                return True
+                found += 1
+                if found >= _LTG_MIN_PIXELS:
+                    return True
         return False
 
     # ------------------------------------------------------------------
@@ -10432,8 +10440,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 final_wx, radar_why = self._radar_cb_wx(final_wx, *cb_at, month)
                 if radar_why:
                     sigmet_label = None
-                    self.logger.info("Zone %d radar: CB %d -> %d oktas (%s)", zone_num, before,
-                                     _fw_drift.cb_oktas(final_wx), radar_why)
+                    decided = (before, _fw_drift.cb_oktas(final_wx), radar_why.split(" cell")[0])
+                    if self._radar_logged.get(zone_num) != decided:   # changes only
+                        self._radar_logged[zone_num] = decided
+                        self.logger.info("Zone %d radar: CB %d -> %d oktas (%s)", zone_num,
+                                         before, decided[1], radar_why)
             elif self._radar_fresh():
                 self.logger.debug("Zone %d radar: not deciding (covered %s, removed %s, "
                                   "CB-free %s)",
