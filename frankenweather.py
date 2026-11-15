@@ -444,6 +444,7 @@ _ICING_FZ_METAR_NM = 30.0
 _FUEL_WRITE_MIN_S = 60.0      # Advanced Icing fuel temperature: write PSX's at most this often
 _FUEL_JUMP_C = 5.0            # PSX's own fuel temperature this far off: a situation load, adopt it
 _FUEL_JUMP_KG = 3000.0        # fuel this much lower in one step: a situation load, start over
+_FUEL_SITU_LOAD_S = 30.0      # fuel changes this soon after a situ load: the load, not a refuel
 _FUEL_LOG_S = 600.0           # log the fuel temperature model this often
 # Fuel cooling (Cold weather page, --fuel-cooling): PSX's own, or frankenweather's
 # realistic wing tank model (fw_icing's fuel section)
@@ -8807,7 +8808,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                                  fq.temp_c)
             self._fuel_model_c, self._fuel_prev_kg, self._fuel_prev_t = fq.temp_c, fq.total_kg, now
             return None
-        if on_ground and fq.total_kg > self._fuel_prev_kg + 50.0:
+        reload = now - self._last_situ_load_mono < _FUEL_SITU_LOAD_S
+        if on_ground and fq.total_kg > self._fuel_prev_kg + 50.0 and not reload:
             old = model
             model = _fw_icing.fuel_uplift_c(model, self._fuel_prev_kg, fq.total_kg, sat)
             self.logger.info("Fuel temperature: refuelling %.0f -> %.0f kg mixes the fuel "
