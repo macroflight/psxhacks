@@ -93,6 +93,7 @@ SPLIT_KM2 = 400.0             # a larger one is split into its stronger cores
 TRACK_MAX_KT = 70.0           # a cell can't have moved faster than this between frames
 TRACK_GAP_NM = 4.0            # ... plus this (centres wobble as cells change shape)
 TRACK_PREDICTED_NM = 8.0      # a tracked cell: this far from where its motion puts it
+TRACK_SANE_KT = 60.0          # a tracked motion faster than this is a mismatch, not a storm
 EARTH_KM = 6371.0
 
 
@@ -298,7 +299,7 @@ def track(previous: list, cells: list, dt_s: float) -> None:  # pylint: disable=
         hdg = _course(best.lat, best.lon, cell.lat, cell.lon)
         kt = _dist_nm(best.lat, best.lon, cell.lat, cell.lon) / hours
         if best.motion is None:
-            cell.motion = (hdg, kt)
+            cell.motion = (hdg, kt) if kt <= TRACK_SANE_KT else None
             continue
         off = abs((hdg - best.motion[0] + 180.0) % 360.0 - 180.0)
         weight = 0.5 if off <= 60.0 else 0.15   # vectors: the new move's share
@@ -306,4 +307,6 @@ def track(previous: list, cells: list, dt_s: float) -> None:  # pylint: disable=
              (1 - weight) * math.sin(math.radians(best.motion[0])) * best.motion[1])
         v = (weight * math.cos(math.radians(hdg)) * kt +
              (1 - weight) * math.cos(math.radians(best.motion[0])) * best.motion[1])
-        cell.motion = (math.degrees(math.atan2(u, v)) % 360.0, math.hypot(u, v))
+        motion = (math.degrees(math.atan2(u, v)) % 360.0, math.hypot(u, v))
+        # Faster than storms move: a mismatch (cores splitting and merging), keep the old
+        cell.motion = motion if motion[1] <= TRACK_SANE_KT else best.motion
