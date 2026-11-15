@@ -8347,7 +8347,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             tropo_ft = tropo[0] / 0.3048 if tropo else None
             top_psx = cb["top_ft"] + elev_ft
             top_fw = None
-            if cb["top_ft"] >= _CB_TOP_MAX_FT:   # PSX's limit cut it: the tropopause and more
+            # PSX's limit cut it: the tropopause and more. The cap is applied above sea level
+            # before the top becomes a height above the zone (44,999 - elevation), so compare
+            # the sea-level top too (2026-11-15: no anvil ever for a capped CB above 0 ft)
+            if max(cb["top_ft"], top_psx) >= _CB_TOP_MAX_FT:
                 top_fw = max(_climate_tropopause_ft(pos[0], month),
                              tropo_ft or 0.0) + _CB_OVERSHOOT_FT
             top = max(top_psx, top_fw or 0.0)
