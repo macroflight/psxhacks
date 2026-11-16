@@ -7235,6 +7235,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 "Zone %d: initial placement at %s @ %.3f/%.3f  %.0f°/%.0fnm",
                 zone_num, icao, lat, lon, az % 360, dist_m / _NM_TO_M)
 
+    def _behind_by_route(self) -> bool:
+        """Return True if "behind" is measured along the FMC route (--route-zones), not heading."""
+        return not self._maneuvering and (self._route_mode == "on" or (
+            self._route_mode == "off" and self._route_pos is not None and
+            abs(self._route_pos.xtk_nm) <= _fw_route.OFF_ROUTE_KEEP_NM))
+
+    def _route_behind_nm(self, lat: float, lon: float) -> float:
+        """Return how far (lat, lon) is behind the aircraft along the route (negative: ahead)."""
+        pos = _fw_route.locate(self._route_points, lat, lon)
+        return self._route_pos.along_nm - pos.along_nm if pos else 0.0
+
     def _zone_relocate_reason(
             self, zone_num: int, in_cruise: bool, arpt_icaos: set) -> Optional[str]:
         """Return why zone_num is due for relocation, or None if it's still useful.
@@ -7256,14 +7267,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return None  # dep/dst airport — never relocate, always relevant
         limit = (self.args.cruise_behind_dist if in_cruise and not self._maneuvering
                  else self.args.low_alt_dist)
-        if not self._maneuvering and (self._route_mode == "on" or (
-                self._route_mode == "off" and self._route_pos is not None and
-                abs(self._route_pos.xtk_nm) <= _fw_route.OFF_ROUTE_KEEP_NM)):
+        if self._behind_by_route():
             # --route-zones: behind by the distance along the route, so a zone
             # beyond a turn (behind by the heading now) stays, and a weather
             # deviation (off the route, but near it) moves none
-            zone_pos = _fw_route.locate(self._route_points, lat, lon)
-            behind_nm = self._route_pos.along_nm - zone_pos.along_nm if zone_pos else 0.0
+            behind_nm = self._route_behind_nm(lat, lon)
             if behind_nm <= limit:
                 return None
             return f"{behind_nm:.0f}nm behind along the route (limit {limit:.0f}nm)"
@@ -8713,6 +8721,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         points = [p for p in points if p[2] >= _CB_SQUEEZE_MIN_FWD_NM and
                   (self._maneuvering or
                    abs((p[3] - self.ac_hdg + 180) % 360 - 180) <= _SIGMET_PLACE_MAX_REL_DEG)]
+        if self._behind_by_route():
+            # --route-zones: behind is along the route there (_zone_relocate_reason()); a
+            # point ahead by the heading but behind along the route was moved away 10 s
+            # later, then placed again (headless US2 2026-11-15)
+            points = [p for p in points if self._route_behind_nm(p[0], p[1]) < 0.0]
         if not points:
             return None
         others = [(lat, lon) for zn, (lat, lon, _) in self.zone_positions.items()
