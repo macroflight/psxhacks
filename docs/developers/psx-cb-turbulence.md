@@ -117,6 +117,33 @@ chance; the same wind gave the same shape every time.
   stretched across the line of sight (~165 degrees true) in every case,
   which is that smearing, not the wind.
 
+### The green around the echo (no rain, no cloud layers)
+
+Same frozen setup, the zone with only a CB (no cloud layers, no rain),
+ND at 40 nm (CB 22 nm away) and 80 nm (CB 40 nm away), share of the ND
+area in each colour per 2 nm ring from the red core's centre:
+
+| from centre | big 8/8: amber / green | small 1/8: amber / green |
+| --- | --- | --- |
+| 0-4 nm | red core (~3 nm radius) | red core (~2 nm) |
+| 4-6 nm | 0.89 / 0.01 | 0.04 / 0.81 |
+| 6-10 nm | 0.3-0.7 / 0.2-0.6 | 0.1-0.2 / 0.8 |
+| 10-18 nm | 0.0-0.2 / 0.6-0.9 | 0-0.1 / 0.8-1.0 |
+| 18-22 nm | - / 0.6-0.8 | - / 0.6-0.8 |
+| 22-34 nm (80 nm map) | - / 0.5 falling to 0.25 | - / 0.5 falling to 0.27 |
+
+- With no CB (same zone, oktas 0) the radar is black. All this green
+  belongs to the CB.
+- **Solid green reaches ~18-20 nm from the CB centre for every CB, big or
+  small.** Speckled green reaches 30+ nm. Only the red and amber scale
+  with the CB (amber to ~9 nm big, a few patches small).
+- A crew avoiding solid green (a real 747 pilot's practice: uncomfortable
+  for passengers but not dangerous; amber is where danger starts, red and
+  magenta definitely avoided) keeps ~20 nm from any PSX CB. That matches
+  the FAA's 20 nm guidance and is beyond PSX's 14 nm turbulence reach.
+- Scripts and shots: `~/psx-headless/tests/cbshape-20261116/Bgreen*`
+  (`CASESET=green`).
+
 ### Upwind vs downwind (wind about 270/60 at FL300)
 
 Zone surface wind 270/30, tropopause 270/80, big CB alone. Bursts on the
