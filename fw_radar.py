@@ -179,6 +179,16 @@ class Cell:  # pylint: disable=too-many-instance-attributes
     age_s: int = 0              # since it was first seen (0: this frame)
     key: str = ""               # stays the same while the cell is tracked
 
+    def __post_init__(self):
+        """Give a new cell its own key (track() hands a tracked cell its earlier one).
+
+        Not only in track(): the first frame's cells (nothing to track against)
+        had none, and the cells tracked from them inherited "" for good, so a CB
+        on one never followed it (headless AU1 2026-11-16).
+        """
+        if not self.key:
+            self.key = f"{self.frame}-{self.lat:.3f}-{self.lon:.3f}"
+
     @property
     def is_cb(self) -> bool:
         """Return True if the cell is strong enough for a CB (else TCU / heavy showers)."""
