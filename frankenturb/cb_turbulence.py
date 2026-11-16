@@ -25,6 +25,13 @@ data (coverage in oktas and cloud base/top altitude):
                Moderate CAT in the anvil outflow; lateral zone up to ~60 nm
                for an extreme cell.
 
+Around a weather-zone CB at cloud-layer altitudes the flank (4) follows the
+colours PSX's weather radar draws there (_radar_flank()): amber out to the
+echo radius (CbInfo.echo_radius_nm), solid green to ~20 nm from the CB
+centre and speckled green beyond, the same for every CB. A real 747 pilot:
+solid green is uncomfortable for passengers but not dangerous, amber is
+where it starts to get dangerous, red and magenta are avoided (2026-11-16).
+
 Severity is estimated as the geometric mean of coverage (0–8 oktas,
 normalised to 0–1) and cloud depth (0–30 000 ft, normalised to 0–1).
 
@@ -62,6 +69,20 @@ _ANVIL_MAX_NM = 60.0
 
 # Scale height for inflow intensity decay below cloud base (ft).
 _INFLOW_DECAY_FT = 8_000.0
+
+# Radar-colour flank of a weather-zone CB (_radar_flank()), nm from the CB
+# centre: amber to the echo radius, solid green to _GREEN_SOLID_NM, speckled
+# green fading out at _GREEN_END_NM (PSX's echo, test sim 2026-11-16: solid
+# green to ~18-20 nm and speckled to 30+ nm around any CB, big or small).
+# Levels: amber _AMBER_LEVEL (inner edge to outer edge; frankenweather holds the
+# continuous turbulence there in a band, "cb_amber" area), solid green
+# _GREEN_LEVEL (amber edge to _GREEN_SOLID_NM), then down to 0. First guesses,
+# to be tuned with a real 747 pilot.
+AMBER_REASON = "CB amber"
+_AMBER_LEVEL = (0.50, 0.42)
+_GREEN_LEVEL = (0.32, 0.24)
+_GREEN_SOLID_NM = 20.0
+_GREEN_END_NM = 30.0
 
 
 def compute_cb_turbulence(alt_ft: float, cb: CbInfo,  # pylint: disable=too-many-return-statements
@@ -109,6 +130,9 @@ def compute_cb_turbulence(alt_ft: float, cb: CbInfo,  # pylint: disable=too-many
     if above_top and (inside or 0.0 <= cb.range_edge_nm <= anvil_nm):
         return _anvil(alt_ft, cb, severity, inside, anvil_nm)
 
+    if in_cloud and not inside and cb.echo_radius_nm > 0.0:
+        return _radar_flank(cb)
+
     if in_cloud and not inside and 0.0 <= cb.range_edge_nm <= outflow_nm:
         return _outflow(cb, severity, outflow_nm)
 
@@ -125,11 +149,14 @@ def cb_flank_width_nm(coverage: int, top_ft: float, base_ft: float,
 
     The flank (outflow) zone at and below cloud levels, or with anvil=True
     the anvil CAT zone above the cloud top, which reaches three times as far.
+    The flank is at most _GREEN_END_NM (a weather-zone CB's, from its centre:
+    generous, it doesn't depend on the radius).
     """
     if coverage < _MIN_COVERAGE:
         return 0.0
-    return ((_ANVIL_MAX_NM if anvil else _OUTFLOW_MAX_NM) *
-            _severity_of(coverage, top_ft - base_ft))
+    if not anvil:   # a weather-zone CB's radar-colour flank reaches _GREEN_END_NM from its centre
+        return max(_GREEN_END_NM, _OUTFLOW_MAX_NM * _severity_of(coverage, top_ft - base_ft))
+    return _ANVIL_MAX_NM * _severity_of(coverage, top_ft - base_ft)
 
 
 def _severity(cb: CbInfo) -> float:
@@ -233,6 +260,38 @@ def _anvil(  # pylint: disable=too-many-arguments,too-many-positional-arguments
             f"CB anvil CAT: {cb.source} top={cb.cloud_top_ft_msl:.0f}ft "
             f"+{max(0.0, excess_ft):.0f}ft rng={cb.range_center_nm:.0f}nm"
         ),
+    )
+
+
+def _radar_flank(cb: CbInfo) -> TurbulenceState:
+    """Flank turbulence around a weather-zone CB by the colour PSX's radar shows there.
+
+    Amber (inside echo_radius_nm) _AMBER_LEVEL, solid green out to
+    _GREEN_SOLID_NM _GREEN_LEVEL, speckled green fading to nothing at
+    _GREEN_END_NM; each falls off linearly across its band. The same for
+    every CB, as PSX's green is (only the amber grows with the CB).
+    """
+    d = cb.range_center_nm
+    inner = cb.lateral_radius_nm
+    echo = cb.echo_radius_nm
+    if d <= echo:
+        frac = (d - inner) / (echo - inner) if echo > inner else 1.0
+        level = _AMBER_LEVEL[0] + (_AMBER_LEVEL[1] - _AMBER_LEVEL[0]) * min(1.0, max(0.0, frac))
+        zone = AMBER_REASON
+    elif d <= _GREEN_SOLID_NM:
+        start = max(echo, inner)
+        frac = (d - start) / (_GREEN_SOLID_NM - start) if _GREEN_SOLID_NM > start else 1.0
+        level = _GREEN_LEVEL[0] + (_GREEN_LEVEL[1] - _GREEN_LEVEL[0]) * min(1.0, max(0.0, frac))
+        zone = "CB solid green"
+    elif d < _GREEN_END_NM:
+        level = _GREEN_LEVEL[1] * (_GREEN_END_NM - d) / (_GREEN_END_NM - _GREEN_SOLID_NM)
+        zone = "CB speckled green"
+    else:
+        return TurbulenceState()
+    return TurbulenceState(
+        intensity=level,
+        kind="cb",
+        reason=f"{zone}: {cb.source} rng={d:.0f}nm echo={echo:.0f}nm",
     )
 
 

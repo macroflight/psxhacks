@@ -62,6 +62,7 @@ class CbInfo:  # pylint: disable=too-many-instance-attributes
     cloud_base_ft_msl: float
     cloud_top_ft_msl: float
     coverage: int                # 0–8 oktas
+    echo_radius_nm: float = 0.0  # amber radar echo radius (frankenweather sets it; 0 = unknown)
 
 
 def parse_wx_zone_basic(raw: str) -> Optional[tuple[int, int, int]]:

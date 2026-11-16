@@ -51,7 +51,7 @@ from frankenturb.cb import (
     find_nearest_cb, parse_wx_zone_basic, parse_wx_zone_position, parse_wx_clust,
     zone_cb_radius_nm,
 )
-from frankenturb.cb_turbulence import cb_flank_width_nm
+from frankenturb.cb_turbulence import AMBER_REASON as CB_AMBER_REASON, cb_flank_width_nm
 from frankenturb.disk_cache import DiskCache
 from frankenturb.openmeteo import CLIENT as _OM_CLIENT
 from frankenturb import turbulence_events as _turb_events
@@ -2213,6 +2213,10 @@ _TURB_BG_MAX = 0.34
 # 60 %+ upset the aircraft at cruise on the autopilot in the calibration
 # (docs/developers/turbulence-calibration.md): in a CB core a pilot should hand-fly.
 _TURB_CB_CORE = (0.55, 0.70)
+# ... and in a weather-zone CB's amber radar echo (area "cb_amber", see
+# frankenturb/cb_turbulence.py _radar_flank()): moderate, where a real 747
+# pilot says it starts to get dangerous (first guess, 2026-11-16).
+_TURB_CB_AMBER = (0.42, 0.50)
 _TURB_EVENT_MULT_MAX = {"moderate": 10.0, "severe": 100.0, "extreme": 1000.0}
 # Every this many seconds a line about the flight, the weather and the
 # turbulence goes to the log, so a pilot's report (too rough, too
@@ -4790,9 +4794,24 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         clust_raw = self.psx.get("WxClust")
         clust_positions = parse_wx_clust(clust_raw) if clust_raw else []
 
-        return find_nearest_cb(lat, lon, zone_positions, zone_cb_data,
-                               clust_positions, time_earth_ms,
-                               lat_scale=self._turb_lateral_size_bias / 100.0)
+        return self._with_echo_radius(
+            find_nearest_cb(lat, lon, zone_positions, zone_cb_data, clust_positions, time_earth_ms,
+                            lat_scale=self._turb_lateral_size_bias / 100.0), zone_cb_data)
+
+    def _with_echo_radius(self, cb, zone_cb_data: dict):
+        """Return cb with PSX's amber echo radius if it is a zone's CB.
+
+        The CB turbulence around it follows the radar's colours
+        (frankenturb/cb_turbulence.py _radar_flank()).
+        """
+        if cb is None or not cb.source[2:].isdigit():
+            return cb
+        zone_i = int(cb.source[2:])
+        oktas, top_agl, base_agl = zone_cb_data[zone_i]
+        modes = {z: self._wx_as_drawn(f"WxMode{z}") or "" for z in range(1, 8)}
+        amber = _fw_cbmsg.echo_diameters(oktas, base_agl, top_agl,
+                                         _fw_cbmsg.nearest_zone_nm(modes, zone_i))[1]
+        return dataclasses.replace(cb, echo_radius_nm=amber / 2.0)
 
     async def psx_wind_coro(self) -> None:
         """Refresh PSX weather-zone wind every 30 s when PSX wind mode is active."""
@@ -5836,6 +5855,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         cb = sources.get("cb")
         if cb is not None:
             consider("cb_core" if (cb.reason or "").startswith("CB interior")
+                     else "cb_amber" if (cb.reason or "").startswith(CB_AMBER_REASON)
                      else "cb_near" if cb.intensity >= 0.2 else "clean", cb)
         consider("cb_near", sources.get("conv"))
         sigmet = sources.get("sigmet")
@@ -5864,10 +5884,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         "event" bursts) while it lasts. Severe and extreme bursts are sent
         as they are: their effect on the aircraft is meant to be real.
         """
-        if self._turb_area[0] == "cb_core":
+        if self._turb_area[0] in ("cb_core", "cb_amber"):
             # scaled like the CB turbulence itself by the turbulence page's sliders
             scale = self._turb_intensity_bias * self._turb_type_effective_bias("cb") / 10000.0
-            intensity = min(max(intensity, _TURB_CB_CORE[0] * scale), _TURB_CB_CORE[1] * scale)
+            band = _TURB_CB_CORE if self._turb_area[0] == "cb_core" else _TURB_CB_AMBER
+            intensity = min(max(intensity, band[0] * scale), band[1] * scale)
         else:
             intensity = min(intensity, _TURB_BG_MAX)
         self._turb_event_burst_sent = False

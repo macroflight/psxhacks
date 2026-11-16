@@ -191,8 +191,18 @@ Features:
   (5 nm at the default 50 %) -- about the size PSX draws on the radar,
   which is smaller when another weather zone is near (red about 6 nm,
   amber about 19 nm across with no zone within 45 nm, 30 % of that with
-  one 7 nm away) -- and a flank zone beyond it of up to 20 nm, depending
-  on how big the CB is. DEM tiles (about
+  one 7 nm away). Around a weather-zone CB, at the CB's cloud levels,
+  the turbulence beyond the core follows the colours PSX's weather radar
+  shows there: moderate in the amber echo (held at 42-50 %, with more
+  frequent moderate and severe events), light to moderate in the solid
+  green that PSX draws around every CB out to about 20 nm (32 % at the
+  amber's edge to 24 % at 20 nm), and fading to nothing in the speckled
+  green by 30 nm. That matches how a real 747 pilot reads the radar:
+  solid green is uncomfortable for passengers but not dangerous, amber
+  is where it starts to get dangerous, red and magenta are avoided.
+  PSX adds its own CB turbulence within about 14 nm (see
+  `docs/developers/psx-cb-turbulence.md`). Planet-weather CBs keep a
+  flank zone of up to 20 nm, depending on how big the CB is. DEM tiles (about
   33 MB each, 1°×1°) are downloaded on demand and cached at
   `~/.cache/frankenturb/terrain/`, up to 10 GB in total
   (`--terrain-cache-gb`, 0 for no limit). Above the limit the least

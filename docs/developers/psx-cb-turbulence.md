@@ -46,8 +46,8 @@ Wind at FL300 284/28 (PSX's own planet weather), eastbound.
 - Bursts by distance from the centre (nm: count): 0-2: 58, 2-4: 29,
   4-6: 91, 6-8: 14, 8-10: 19, 10-12: 21, 12-14: 14, 14-16: 1.
 - Kinds: sink/balloon 138, yaw 56, bank 35, speed 18. Strength (value
-  mod 100) median 10, max 63; within 3 nm median 10, beyond 8 nm median
-  31. Max bank 5.1 degrees. Altitude stayed within a few feet.
+  mod 100) median 10, max 63; within 3 nm median 10, beyond 8 nm
+  median 31. Max bank 5.1 degrees. Altitude stayed within a few feet.
 
 ### All CB sizes, passes 0-16 nm to the side
 

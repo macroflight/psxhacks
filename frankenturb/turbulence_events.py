@@ -45,6 +45,7 @@ AREA_RATES = {
     "sev_sigmet": (5.0, 0.5, 1 / 1000),        # SEV TURB SIGMET, SEV PIREP
     "mtw": (3.0, 0.2, 1 / 2000),               # MTW SIGMET (wave breaking)
     "cb_near": (7.0, 0.75, 1 / 500),           # near a CB, TS/TC SIGMET area
+    "cb_amber": (10.0, 2.0, 1 / 200),          # in a CB's amber radar echo (guess 11-16)
     "cb_core": (20.0, 8.0, 1 / 20),            # in a CB
     "bl_strong": (7.0, 0.1, 1 / 10000),        # strong low-level wind, rotor
 }

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **CB turbulence follows the weather radar's colours (new default).**
+  Around a weather-zone CB, at its cloud levels, the turbulence outside
+  the core now matches what PSX's radar shows there: moderate in the
+  amber, light to moderate in the solid green PSX draws around every CB
+  out to about 20 nm, fading out by 30 nm in the speckled green. A crew
+  that flies through amber gets moderate turbulence; one that keeps
+  clear of the solid green, as real 747 crews do, gets light chop at
+  most. Until now the turbulence beyond the core depended on the CB's
+  size and reached up to 20 nm only around the biggest CBs. First
+  levels, to be tuned with a real 747 pilot.
 - **The departure airport's weather zone is released 50 nm after
   takeoff** (it was kept for 200 nm), so it can be used for the weather
   ahead. The destination still gets its zone within 200 nm.
