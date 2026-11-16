@@ -118,6 +118,7 @@ class DriftCell:  # pylint: disable=too-many-instance-attributes
     test: str = ""              # a test CB (frankenweather's /weather/cbtest): what it is
     radar: str = ""             # --radar-cbs: the radar cell it sits on (fw_radar.Cell key)
     radar_frame: Optional[int] = None   # ... the radar frame it was last matched with
+    radar_cell: Optional[object] = None   # ... that cell (fw_radar.Cell): gives its position
     stepped_at: float = math.nan   # time.monotonic() of the last step (position_at())
     wind_motion: Optional[tuple] = None   # test CB: (heading, kt) the mean wind would give it
     elev0_ft: float = math.nan  # the zone's own WxMode elevation (mode's is raised from it)

@@ -27,7 +27,11 @@
   and a drifting CB sits on its radar cell and moves with it. Outside
   radar coverage nothing changes. Like the zones along the FMC route
   (`--route-zones`), it can also be switched on on the web UI's CB test
-  page.
+  page. Every PSX sim flying in the same area sees a radar storm's CB in
+  the same place, sitting exactly on the storm, and the radar alone sets
+  its size. Outside radar coverage, inside TS SIGMET areas and near
+  lightning, frankenweather makes up the storms the same way in every sim
+  (on a fixed grid, by the hour), so those CBs match too.
 - **Lightning from EUMETSAT's MTG Lightning Imager instead of
   Blitzortung.** Blitzortung's terms don't allow this use. The new
   source is the Meteosat-12 satellite's lightning images (free, no

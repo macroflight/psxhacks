@@ -423,28 +423,56 @@ the same picture VATSIM Radar can show) decides where the CBs are.
 - Every new radar frame (every 10 minutes), frankenweather finds the storm
   cells within 250 nm of the aircraft: areas of 40 dBZ or more, with large
   areas split into their stronger cores. Each cell's motion comes from the
-  frame before. A cell peaking at 45 dBZ or more counts as a CB; weaker
-  ones count as towering cumulus or heavy showers.
+  three newest frames. A cell peaking at 45 dBZ or more counts as a CB;
+  weaker ones count as towering cumulus or heavy showers.
+- **Every sim sees a storm's CB in the same place.** Two or more PSX sims
+  flying in the same area put the CB on a radar storm at the same position,
+  to well under a mile. Each frankenweather works it out from the radar
+  frames alone, never from how long it has run or where its aircraft is:
+  - the motion comes from the same three frames;
+  - a cell cut off at the edge of the area one frankenweather looked at is
+    left out;
+  - a new frame takes over three minutes after its time, on the UTC clock
+    every sim shares.
+
+  The sims don't necessarily show the same set of storms: each has only
+  seven weather zones, so an aircraft further ahead may use them for other
+  storms.
 - **Inside radar coverage** (RainViewer's own coverage map), a zone only
   keeps a CB when a radar CB lies within 20 nm of it. When the forecast has
-  none there, the cell gives the zone one, with oktas and top from its
-  strength and size. METARs and SIGMETs no longer create CBs there. A zone
-  keeps its cell while the cell stays within 28 nm, so its CB doesn't come
-  and go as PSX's CB circles the zone centre. New zones go onto the
-  strongest unclaimed radar CBs ahead, from 40 nm ahead: a storm the
-  pilot already sees on the radar is no surprise, and its CB grows in.
-- A drifting CB (advanced zones) starts on its radar cell and moves with
-  the cell's tracked motion (once the cell has been tracked for 20
-  minutes and its motion roughly agrees with the 850-300 hPa mean wind:
-  within 60 degrees and 25 kt; otherwise with the mean wind). A radar frame is 10-20 minutes old when it
-  arrives, so frankenweather runs the cell on to where it is now. On every
-  new frame the CB steers gently back towards its cell: the cell's motion
-  plus at most 15 kt, never faster than 60 kt in all. Not startling the
-  pilot matters more than following the radar exactly, so a big gap takes
-  a few frames to close. The CB stays alive as long as the radar has the
-  cell, and fades when the cell is gone (or more than 12 nm away).
-- **Outside radar coverage** (oceans, most of Africa, Russia, polar areas)
-  nothing changes: lightning (MTG), SIGMETs and the forecast place the CBs.
+  none there, the cell gives the zone one. The radar alone sets the CB's
+  oktas and top, from the cell's strength and size, so every sim has the
+  same CB. METARs and SIGMETs no longer create CBs there. A zone keeps its
+  cell while the cell stays within 28 nm. New zones go onto the strongest
+  unclaimed radar CBs ahead, from 40 nm ahead: a storm the pilot already
+  sees on the radar is no surprise.
+- **A CB on a radar storm sits exactly on it.** PSX draws a zone's CB 7 nm
+  from the zone centre, on a bearing that turns once an hour, so
+  frankenweather moves the zone centre to put the CB on the storm. The CB
+  starts there at once and moves with the cell's tracked motion (once the
+  cell has been tracked over the three frames, 20 minutes; otherwise it
+  stays where the frame has it). On a new frame the CB moves smoothly, over
+  10 minutes, from where the frame before puts the storm to where the new
+  one does, so it never jumps. This works at any altitude, even while
+  maneuvering. The CB stays alive as long as the radar has the cell, and
+  fades when the cell is gone (or more than 12 nm away).
+- **Outside radar coverage** (oceans, most of Africa, Russia, polar areas),
+  inside TS/TC SIGMET areas and near satellite lightning (MTG),
+  frankenweather makes up the storms, but every sim makes up the same ones:
+  - storms can only be born on a fixed grid of points about 30 nm apart,
+    with one chance per point per UTC hour;
+  - whether a storm is born, when, exactly where near the point and how
+    long it lives (30-60 minutes) come from the grid point and the hour,
+    never from a random number of this frankenweather's own;
+  - the chance comes from the SIGMET's qualifier (ISOL about one storm per
+    7 points, OCNL one per 3, FRQ one per 2) or lightning nearby;
+  - a storm moves with the 850-300 hPa mean wind at its grid point, from
+    the same forecast hour.
+
+  CBs go onto these storms exactly as onto radar storms (at the storm,
+  moving with it, fading at the end of its life), and the SIGMET's other
+  points get no CB. Elsewhere outside radar coverage nothing changes yet:
+  the forecast places the CBs, and they differ between sims.
 - The log shows each frame ("Radar cells: ..."), and a zone's reason shows
   what the radar did ("radar: 52 dBZ cell 140 km2", "radar: no storm
   cell"). Needs Pillow.

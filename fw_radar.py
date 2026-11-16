@@ -95,6 +95,15 @@ TRACK_GAP_NM = 4.0            # ... plus this (centres wobble as cells change sh
 TRACK_PREDICTED_NM = 8.0      # a tracked cell: this far from where its motion puts it
 TRACK_SANE_KT = 60.0          # a tracked motion faster than this is a mismatch, not a storm
 EARTH_KM = 6371.0
+# Every sim must put the same storm in the same place (user, 2026-11-16), so a
+# storm's position comes from the radar frames alone, never from what one
+# frankenweather saw first or how long it has run: the cells' motion from a
+# fixed window of frames, and frame changes on a clock all sims share
+FRAME_STEP_S = 600            # RainViewer's frames are 10 minutes apart
+WINDOW_FRAMES = 3             # motion from this many frames (the newest and the two before)
+ACTIVE_DELAY_S = 180          # a frame decides from this long after its time (online within 1 min)
+BLEND_S = 600                 # ... and its positions take over from the frame before over this long
+LINK_NM = 1.0                 # the same cell, found again in the same frame (other tiles fetched)
 
 
 def tile_url(path: str, zoom: int, tx: int, ty: int) -> str:
@@ -178,6 +187,7 @@ class Cell:  # pylint: disable=too-many-instance-attributes
     motion: Optional[tuple] = None   # (towards deg true, kt) from earlier frames, None: new
     age_s: int = 0              # since it was first seen (0: this frame)
     key: str = ""               # stays the same while the cell is tracked
+    prev: Optional[tuple] = None   # (lat, lon) in the frame before, if tracked from there
 
     def __post_init__(self):
         """Give a new cell its own key (track() hands a tracked cell its earlier one).
@@ -237,7 +247,10 @@ def find_cells(tiles: dict, zoom: int, frame: int, area: Optional[tuple] = None)
     Connected areas of at least CELL_DBZ (8-connected over the mosaic, so
     across tile edges); a large one (a line, a cluster) is split into its
     cores at 5 dBZ steps (_cores()). area (lat_min, lon_min, lat_max,
-    lon_max) keeps only cells centred in it.
+    lon_max) keeps only cells centred in it. An area that touches the edge
+    of the tiles given is left out: part of it is missing, so another
+    frankenweather with more tiles there would put its centre elsewhere.
+    Ties sort by position, so every frankenweather has the same order.
     """
     pixels = {}
     for (tx, ty), grid in tiles.items():
@@ -248,6 +261,8 @@ def find_cells(tiles: dict, zoom: int, frame: int, area: Optional[tuple] = None)
                 pixels[(base_x + x, base_y + y)] = value - 64
     cells = []
     for group in _components(pixels, CELL_DBZ):
+        if _touches_edge(group, tiles, zoom):
+            continue
         lat0, _ = px_latlon(group[0][0], group[0][1], zoom)
         px_km = 2 * math.pi * EARTH_KM * math.cos(math.radians(lat0)) / (TILE_PX * 2 ** zoom)
         px_km2 = px_km * px_km
@@ -263,8 +278,21 @@ def find_cells(tiles: dict, zoom: int, frame: int, area: Optional[tuple] = None)
             if area and not (area[0] <= lat <= area[2] and area[1] <= lon <= area[3]):
                 continue
             cells.append(Cell(lat, lon, max(pixels[p] for p in members), area_km2, frame))
-    cells.sort(key=lambda c: (-c.max_dbz, -c.area_km2))
+    cells.sort(key=lambda c: (-c.max_dbz, -round(c.area_km2, 3), round(c.lat, 5), round(c.lon, 5)))
     return cells
+
+
+def _touches_edge(group: list, tiles: dict, zoom: int) -> bool:
+    """Return True if a pixel group reaches the edge of the tiles loaded (it may go on beyond)."""
+    n = 2 ** zoom
+    for x, y in group:
+        if 0 < x % TILE_PX < TILE_PX - 1 and 0 < y % TILE_PX < TILE_PX - 1:
+            continue
+        for nx, ny in ((x + dx, y + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)):
+            ntx, nty = nx // TILE_PX, ny // TILE_PX
+            if 0 <= nty < n and (ntx % n, nty) not in tiles and (ntx, nty) not in tiles:
+                return True
+    return False
 
 
 def ahead(lat: float, lon: float, hdg: float, nm: float) -> tuple:
@@ -303,6 +331,8 @@ def track(previous: list, cells: list, dt_s: float) -> None:  # pylint: disable=
             continue
         free.remove(best)
         cell.key, cell.age_s = best.key, best.age_s + int(max(0.0, dt_s))
+        if dt_s > 0:
+            cell.prev = (best.lat, best.lon)
         if dt_s <= 0:
             cell.motion = best.motion
             continue
@@ -320,3 +350,63 @@ def track(previous: list, cells: list, dt_s: float) -> None:  # pylint: disable=
         motion = (math.degrees(math.atan2(u, v)) % 360.0, math.hypot(u, v))
         # Faster than storms move: a mismatch (cores splitting and merging), keep the old
         cell.motion = motion if motion[1] <= TRACK_SANE_KT else best.motion
+
+
+def track_window(frames: list) -> list:
+    """Return the newest frame's cells, tracked through a window of frames.
+
+    frames: [(frame time, find_cells() list)], oldest first, fresh lists (they
+    get keys, motion, age and prev). The same frames give the same motion in
+    every frankenweather, however long each has been running.
+    """
+    previous, prev_time = [], None
+    for frame_time, cells in frames:
+        if previous and 0 < frame_time - prev_time <= 1500:
+            track(previous, cells, frame_time - prev_time)
+        previous, prev_time = cells, frame_time
+    return previous
+
+
+def active_frame(frame_times, now_s: float) -> Optional[int]:
+    """Return the newest frame time that decides at now_s (ACTIVE_DELAY_S after it), or None."""
+    due = [t for t in frame_times if t + ACTIVE_DELAY_S <= now_s]
+    return max(due) if due else None
+
+
+def linked(cells: list, pos: Optional[tuple]) -> Optional[Cell]:
+    """Return the cell at pos (within LINK_NM) in a frame's cells, or None."""
+    if pos is None:
+        return None
+    best = min(cells, key=lambda c: _dist_nm(pos[0], pos[1], c.lat, c.lon), default=None)
+    return best if best is not None and _dist_nm(pos[0], pos[1], best.lat, best.lon) <= LINK_NM \
+        else None
+
+
+def cell_at(cell: Cell, now_s: float, trust_age_s: float) -> tuple:
+    """Return where a cell is at now_s (unix s): its frame position run on by its motion.
+
+    Only a motion tracked for trust_age_s counts (a newer cell stays where
+    the frame has it); at most an hour on.
+    """
+    if not cell.motion or cell.age_s < trust_age_s:
+        return cell.lat, cell.lon
+    hours = max(0.0, min(3600.0, now_s - cell.frame)) / 3600.0
+    return ahead(cell.lat, cell.lon, cell.motion[0], cell.motion[1] * hours)
+
+
+def storm_position(cur: Cell, before: Optional[Cell], now_s: float, trust_age_s: float) -> tuple:
+    """Return where a storm is at now_s, the same in every frankenweather.
+
+    cur: its cell in the frame that decides now; before: the same storm in
+    the frame before (None: a new cell). Over BLEND_S from when cur's frame
+    decides, the position moves smoothly from where the frame before puts
+    it to where cur's frame does, so a new frame never makes it jump.
+    """
+    lat1, lon1 = cell_at(cur, now_s, trust_age_s)
+    if before is None:
+        return lat1, lon1
+    w = max(0.0, min(1.0, (now_s - cur.frame - ACTIVE_DELAY_S) / BLEND_S))
+    w = w * w * (3.0 - 2.0 * w)
+    lat0, lon0 = cell_at(before, now_s, trust_age_s)
+    dlon = ((lon1 - lon0 + 180.0) % 360.0) - 180.0
+    return lat0 + (lat1 - lat0) * w, ((lon0 + dlon * w + 180.0) % 360.0) - 180.0

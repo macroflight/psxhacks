@@ -78,6 +78,7 @@ import fw_drift as _fw_drift  # pylint: disable=wrong-import-order
 import fw_cbmsg as _fw_cbmsg  # pylint: disable=wrong-import-order
 import fw_route as _fw_route  # pylint: disable=wrong-import-order
 import fw_radar as _fw_radar  # pylint: disable=wrong-import-order
+import fw_storms as _fw_storms  # pylint: disable=wrong-import-order
 import fw_lightning as _fw_lightning  # pylint: disable=wrong-import-order
 import fw_holdover as _fw_holdover  # pylint: disable=wrong-import-order
 import fw_icing as _fw_icing  # pylint: disable=wrong-import-order
@@ -475,6 +476,14 @@ _RADAR_MOTION_MAX_DIFF_KT = 25.0   # ... this of its speed, else the mean wind
 _RADAR_TRUST_AGE_S = 1200     # a cell's own motion counts once tracked over 2 frames (20 min)
 _RADAR_CORRECT_MAX_KT = 15.0   # ... with at most this much on top of the cell's own motion
 _RADAR_STEER_MAX_KT = 60.0     # ... and never faster than this in all (realistic storm speeds)
+_STORM_LTG_NM = 20.0           # fw_storms: a grid point this near lightning can get storms
+_STORM_WINDS_PER_LOOK = 12     # ... and at most this many grid points' winds fetched a minute
+# --radar-cbs: every sim ranks the storms it could show the same way (_storms_ranked()), so
+# aircraft in the same area show the same ones: storms up to this far, ahead within this angle
+_STORM_VIEW_NM = 200.0
+_STORM_VIEW_DEG = 90.0
+_STORM_PLACE_INTERVAL_S = 30.0  # ... a zone moved onto a top storm at most this often
+_STORM_KEEP_NM = 80.0          # ... never taking away a CB ahead nearer than this
 _CBS_CHECK_S = 5.0            # CBS messages: look for changes this often
 _CBS_SAME_CB_NM = 20.0        # a zone's CB this far from where it was: a new CB (new id)
 _FUEL_SITU_LOAD_S = 30.0      # fuel changes this soon after a situ load: the load, not a refuel
@@ -2850,6 +2859,18 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # and the coverage mask tiles {(tx, ty): (time.monotonic(), fw_radar.tile_covered())}
         self._radar_cells: list = []
         self._radar_frame: Optional[int] = None
+        # ... every frame worked out: {frame time: cells tracked through the frames
+        # before it (fw_radar.track_window())}; the one that decides now is
+        # _radar_cells (fw_radar.active_frame()); decoded tiles {(frame time, tile)}
+        self._radar_frames: dict = {}
+        self._radar_tiles: dict = {}
+        self._radar_found: dict = {}   # frame time -> (tiles, fw_radar.find_cells()), untouched
+        # ... outside radar coverage, the storms every sim makes up the same way
+        # (fw_storms) in SIGMET areas and near lightning, and their grid points'
+        # motion {(lat, lon, hour): (towards, kt) or None}
+        self._storm_cells: list = []
+        self._storm_motion: dict = {}
+        self._storm_place_last = 0.0   # time.monotonic() of _place_storm_zones()' last move
         self._radar_hold_until = time.monotonic() + _RADAR_STARTUP_HOLD_S
         self._radar_at: Optional[tuple] = None
         self._radar_cov: dict = {}
@@ -7049,7 +7070,108 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         _, _, lat_c, lon_c, icao = candidates[0]
         return lat_c, lon_c, icao
 
-    def _radar_cell_position(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    def _storms_ranked(self, view_nm: float = _STORM_VIEW_NM,
+                       view_deg: float = _STORM_VIEW_DEG) -> list:
+        """Return [(cell, lat, lon, dist_nm, rel_deg)] of storm CBs to show, most important first.
+
+        Every sim ranks them the same way, so aircraft near each other show
+        the same storms (user, 2026-11-16): stronger first (5 dBZ classes,
+        60 dBZ and more alike), then nearer. Only storms up to view_nm away
+        and within view_deg of ahead (the heading, or the route's course
+        with --route-zones), radar ones only with a fresh frame and inside
+        coverage.
+        """
+        out = []
+        fresh = self._radar_fresh()
+        ahead = self.ac_hdg
+        if self._route_mode == "on" and self._route_pos is not None:
+            ahead = self._route_pos.course
+        for cell in self._cells():
+            storm = _fw_storms.is_storm(cell)
+            if not cell.is_cb or (not storm and not fresh):
+                continue
+            lat, lon = self._radar_cell_now(cell)
+            az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
+            dist_nm, rel = dist_m / _NM_TO_M, _fw_route.angle_diff(az % 360.0, ahead)
+            if dist_nm > view_nm or rel > view_deg:
+                continue
+            if not storm and not self._radar_covered(lat, lon):
+                continue
+            out.append((cell, lat, lon, dist_nm, rel))
+        out.sort(key=lambda r: (-(min(r[0].max_dbz, 60) // 5), round(r[3], 1), r[0].key))
+        return out
+
+    def _place_storm_zones(self) -> bool:  # pylint: disable=too-many-locals
+        """--radar-cbs: move a zone onto the most important storm no zone shows; True if one moved.
+
+        The storms every sim ranks the same way (_storms_ranked()): as many
+        as there are zones to show them get one, so two aircraft in the same
+        area show the same storms, not whichever their zone history gave
+        them. A zone moved: one without a CB, else one whose storm ranks
+        lower, behind first; never an airport, anchor or focused zone, one
+        whose CB turbulence reaches the aircraft, or a CB ahead within
+        _STORM_KEEP_NM. At most one move per _STORM_PLACE_INTERVAL_S.
+        """
+        if (not self.args.radar_cbs or self.ac_lat is None or self.ac_hdg is None or
+                not self._cells_live() or self._maneuvering):
+            return False
+        now = time.monotonic()
+        if now - self._storm_place_last < _STORM_PLACE_INTERVAL_S:
+            return False
+        arpt_icaos = {icao for icao, _, _ in self._arpt_coverage_needed()}
+        usable = [zn for zn, (_, _, icao) in self.zone_positions.items()
+                  if icao not in arpt_icaos and zn not in (self._anchor_zone, self.focused_zone) and
+                  not self._is_cb_free_zone(zn)]
+        ranked = self._storms_ranked()
+        top = ranked[:len(usable)]
+        rank_of = {r[0].key: i for i, r in enumerate(ranked)}
+        shown = ({c.radar for c in self._drift.values() if c.radar and c.decay_from is None} |
+                 {k for zn, k in self._radar_zone_cell.items() if zn not in self._drift})
+        missing = next((r for r in top if r[0].key not in shown), None)
+        if missing is None:
+            return False
+        cell, lat, lon, dist_nm, rel = missing
+        best, best_key = None, None
+        for zone_num in usable:
+            zlat, zlon, _ = self.zone_positions[zone_num]
+            if self._cb_turb_in_reach(zone_num) is not None:
+                continue
+            drift = self._drift.get(zone_num)
+            wx = (self.zone_wx.get(zone_num) or "").split(";")
+            has_cb = drift is not None or (len(wx) > 9 and wx[9] not in ("", "0"))
+            az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, zlon, zlat)
+            behind = _fw_route.angle_diff(az % 360.0, self.ac_hdg) > 90.0
+            if has_cb and not behind and dist_m / _NM_TO_M < _STORM_KEEP_NM:
+                continue
+            its_rank = rank_of.get(drift.radar, len(ranked)) if drift and drift.radar else None
+            if its_rank is not None and its_rank < len(top):
+                continue   # it shows a top storm already
+            key = (not has_cb, its_rank or 0, behind, dist_m)
+            if best_key is None or key > best_key:
+                best, best_key = zone_num, key
+        if best is None:
+            return False
+        if best in self._drift:
+            self._end_drift(best, "its zone goes to a storm that matters more", retire=False)
+        self._zone_pinned.pop(best, None)
+        self._drift_retired.pop(best, None)
+        old = self.zone_positions[best]
+        icao = f"X{random.randint(100, 999):03d}"
+        self.zone_positions[best] = (lat, lon, icao)
+        self.zone_placement_reason[best] = (
+            f"{self._placement_desc(lat, lon, icao)}, on a {cell.max_dbz} dBZ storm")
+        self.zone_relocated_time[best] = now
+        self.zone_cb_ramp.pop(best, None)
+        self.zone_cb_create_dist_nm[best] = dist_nm
+        self._radar_zone_cell[best] = cell.key
+        self._storm_place_last = now
+        self.logger.info("Zone %d: relocated from %s @ %.3f/%.3f → %s @ %.3f/%.3f [%.0fnm, %.0f°"
+                         " off ahead] (onto storm #%d of %d, %d dBZ%s)", best, old[2], old[0],
+                         old[1], icao, lat, lon, dist_nm, rel, rank_of[cell.key] + 1, len(ranked),
+                         cell.max_dbz, ", made up" if _fw_storms.is_storm(cell) else "")
+        return True
+
+    def _radar_cell_position(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
             self, fwd_min: float, fwd_max: float, min_sep: float, others: list,
             initial: bool) -> Optional[tuple]:
         """--radar-cbs: return (lat, lon, icao) on the strongest unclaimed radar CB ahead, or None.
@@ -7059,28 +7181,22 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         usual fwd_min: a storm the pilot already sees on the radar 60-80 nm
         ahead is no surprise, and its CB still grows in; FTECH1 2026-11-15: a
         line 67-83 nm ahead got no zone); anywhere up to fwd_max at startup or
-        while maneuvering. Unclaimed: no zone within min_sep. The strongest
-        first, the nearer of equals.
+        while maneuvering. Unclaimed: no zone within min_sep. In the order
+        every sim ranks them (_storms_ranked()): the strongest first, the
+        nearer of equals.
         """
-        if not self._radar_fresh():
+        if not self._cells_live():
             return None
         all_round = initial or self._maneuvering
         near_min = min(fwd_min, _RADAR_PLACE_MIN_NM)
-        for cell in (c for c in self._radar_cells if c.is_cb):
-            az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, cell.lon, cell.lat)
-            dist_nm = dist_m / _NM_TO_M
-            if dist_nm > fwd_max or (not all_round and dist_nm < near_min):
+        # the order every sim uses (_storms_ranked()), so they pick the same storms
+        for _, lat, lon, dist_nm, _ in self._storms_ranked(fwd_max,
+                                                           180.0 if all_round else 60.0):
+            if not all_round and dist_nm < near_min:
                 continue
-            ahead = self.ac_hdg
-            if self._route_mode == "on" and self._route_pos is not None:
-                ahead = self._route_pos.course
-            if not all_round and _fw_route.angle_diff(az % 360.0, ahead) > 60.0:
+            if any(self._dist_nm(lat, lon, o[0], o[1]) < min_sep for o in others):
                 continue
-            if any(self._dist_nm(cell.lat, cell.lon, o[0], o[1]) < min_sep for o in others):
-                continue
-            if not self._radar_covered(cell.lat, cell.lon):
-                continue
-            return (*self._radar_cell_now(cell), f"X{random.randint(100, 999):03d}")
+            return lat, lon, f"X{random.randint(100, 999):03d}"
         return None
 
     def _cb_turb_in_reach(self, zone_num: int) -> Optional[str]:
@@ -7687,11 +7803,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             if zone_num in self._drift_retired:
                 new_wxs[i] = _strip_cb(new_wxs[i])   # a drift ended here: no new CB until moved
 
-    async def _start_drifts(self, new_modes: list, new_wxs: list) -> None:  # pylint: disable=too-many-locals
+    async def _start_drifts(self, new_modes: list, new_wxs: list) -> None:  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
         """At the end of _update_zones(): CB zones that may drift start drifting."""
         if not self._drift_enabled() or self._turb_engine is None:
             return
-        if self.ac_alt_ft is None or self.ac_alt_ft < _DRIFT_MIN_ALT_FT or self._maneuvering:
+        # Low or maneuvering, only radar CBs: they're where their storm is, in every sim
+        radar_only = (self.ac_alt_ft is None or self.ac_alt_ft < _DRIFT_MIN_ALT_FT or
+                      self._maneuvering)
+        if radar_only and not self._cells_live():
             return
         if self.sim_time_ms() is None:
             return   # no TimeEarth yet: can't tell where PSX draws the CBs
@@ -7705,7 +7824,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     zone_num in self._zone_pinned or zone_num not in self.zone_positions)
             if skip or self._is_cb_free_zone(zone_num) or _fw_drift.cb_oktas(wx) <= 0:
                 continue
-            if self._cb_still_growing(zone_num, wx):
+            on_radar = self._radar_zone_cell.get(zone_num) if self._cells_live() else None
+            if radar_only and on_radar is None:
+                continue
+            if on_radar is None and self._cb_still_growing(zone_num, wx):
                 # A drifting cell keeps the CB it starts with: it would stay at
                 # its first growth step for its whole life (main sim, FTECH2,
                 # 2026-11-06: 1/8 for 30-60 min instead of 5/8)
@@ -7721,10 +7843,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 continue
             if self._cb_removed_near_airport(lat, lon):
                 continue
-            radar = (self._radar_cb_near(lat, lon, _RADAR_MATCH_NM + _fw_drift.CB_OFFSET_NM,
-                                         {c.radar for c in self._drift.values() if c.radar})
-                     if self._radar_fresh() else None)
-            if radar is not None:   # --radar-cbs: the CB sits on the cell, moves with it
+            taken = {c.radar for c in self._drift.values() if c.radar}
+            radar = (next((c for c in self._cells() if c.key == on_radar and c.is_cb and
+                           c.key not in taken), None) or
+                     self._radar_cb_near(lat, lon, _RADAR_MATCH_NM + _fw_drift.CB_OFFSET_NM, taken)
+                     if self._cells_live() else None)
+            if radar_only and radar is None:
+                continue
+            if radar is not None:   # --radar-cbs: the CB sits on its storm, moves with it
                 lat, lon = self._radar_cell_now(radar)
             profile = await loop.run_in_executor(
                 None, self._turb_engine.wind_fetcher.get, lat, lon, datetime.now(timezone.utc))
@@ -7733,6 +7859,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                        _radar_motion_plausible(radar.motion, wind))
             motion = ((radar.motion[0], min(radar.motion[1], _RADAR_STEER_MAX_KT)) if trusted
                       else wind)
+            if motion is None and radar is not None:
+                motion = (0.0, 0.0)   # still on its storm (its position comes from the radar)
             if motion is None:
                 self.logger.debug("CB drift: Zone %d stays put (no or calm 850-300hPa wind)",
                                   zone_num)
@@ -7746,6 +7874,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                                        stepped_at=time.monotonic(),
                                        radar=radar.key if radar is not None else "",
                                        wind_motion=wind if radar is not None else None)
+            if radar is not None:
+                self._radar_take(cell, radar)
+                cell.radar_frame = self._radar_frame
+                cell.start_oktas = _fw_drift.cb_oktas(cell.wx)
             self._drift[zone_num] = cell
             self.zone_positions[zone_num] = (centre[0], centre[1],
                                              self.zone_positions[zone_num][2])
@@ -7759,50 +7891,68 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 cell.start_oktas, cell.lifetime_s / 60.0)
             self._state_changed_event.set()
 
-    def _radar_follow(self, zone_num: int, cell, now: float) -> None:
-        """--radar-cbs: keep a drifting CB on its radar cell; decay it when the cell is gone.
+    def _radar_follow(self, zone_num: int, cell, now: float) -> None:  # pylint: disable=too-many-return-statements
+        """--radar-cbs: keep a drifting CB on its radar storm; decay it when the storm is gone.
 
-        On each new frame the cell (same key, else the nearest CB within
-        _RADAR_GONE_NM) gives the CB its position and motion and keeps it
-        alive past its lifetime; no cell: the CB decays.
+        On each frame that decides (_radar_activate()) the CB's storm is its
+        cell there (the same key: tracked from the frame before, else the
+        nearest CB within _RADAR_GONE_NM). That cell gives the CB its
+        position (_radar_cell_now(), the same in every frankenweather: no
+        steering of our own, user 2026-11-16) and size, and keeps it alive
+        past its lifetime; no cell: the CB decays.
         """
-        if not self._radar_fresh() or cell.decay_from is not None:
+        if cell.decay_from is not None:
             return
-        if cell.radar_frame == self._radar_frame:
+        if _fw_storms.is_storm(cell.radar_cell):   # a made-up storm: alive or not, every tick
+            match = next((c for c in self._storm_cells if c.key == cell.radar), None)
+            if match is None:
+                cell.radar_cell = None
+                cell.start_decay(now, "its storm's life is over")
+                self.logger.info("CB drift: Zone %d starts to decay (%s)", zone_num,
+                                 cell.decay_why)
+            else:   # alive while its storm is (its life is the storm's, the same everywhere)
+                cell.radar_cell = match
+                cell.lifetime_s = max(cell.lifetime_s, cell.age_s + 1200.0)
+            return
+        if not self._radar_fresh() and not self._storm_cells:
+            return
+        if cell.radar_frame == self._radar_frame and (cell.radar or not self._storm_cells):
             return
         if not cell.radar and (cell.test or not self._radar_adopt(zone_num, cell, now)):
+            return
+        if not self._radar_fresh() or _fw_storms.is_storm(cell.radar_cell):
             return
         cell.radar_frame = self._radar_frame
         match = next((c for c in self._radar_cells if c.key == cell.radar and c.is_cb), None) or \
             self._radar_cb_near(cell.lat, cell.lon, _RADAR_GONE_NM,
                                 {c.radar for zn, c in self._drift.items() if zn != zone_num})
         if match is None:
+            cell.radar_cell = None
             cell.start_decay(now, "its radar cell is gone")
             self.logger.info("CB drift: Zone %d starts to decay (%s)", zone_num, cell.decay_why)
             return
-        cell.radar = match.key
+        self._radar_take(cell, match)
         cell.lifetime_s = max(cell.lifetime_s, cell.age_s + 1200.0)   # alive while the radar has it
-        # Where the cell is now (the frame is 10-20 min old), and where it will be
-        # when the next frame is due: steer there instead of jumping
         lat, lon = self._radar_cell_now(match)
-        motion = (match.motion if match.age_s >= _RADAR_TRUST_AGE_S and
-                  _radar_motion_plausible(match.motion, cell.wind_motion)
-                  else cell.wind_motion or (cell.heading_deg, cell.speed_kt))
-        # Gently, not to startle the pilot: the cell's motion plus a correction of
-        # at most _RADAR_CORRECT_MAX_KT towards it, at most _RADAR_STEER_MAX_KT in all
-        # (a big gap takes a few frames to close)
-        az, _, dist_m = self.geod.inv(cell.lon, cell.lat, lon, lat)
-        corr_kt = min(_RADAR_CORRECT_MAX_KT, dist_m / _NM_TO_M / (_RADAR_STEER_S / 3600.0))
-        u = (motion[1] * math.sin(math.radians(motion[0])) +
-             corr_kt * math.sin(math.radians(az)))
-        v = (motion[1] * math.cos(math.radians(motion[0])) +
-             corr_kt * math.cos(math.radians(az)))
-        cell.heading_deg = math.degrees(math.atan2(u, v)) % 360.0
-        cell.speed_kt = min(math.hypot(u, v), _RADAR_STEER_MAX_KT)
-        self.logger.info("CB drift: Zone %d follows its radar cell %.1fnm away: %03.0f/%.0fkt "
-                         "(cell %03.0f/%.0fkt)", zone_num,
+        self.logger.info("CB drift: Zone %d on its radar cell (%d dBZ), %.1fnm from the last step:"
+                         " %03.0f/%.0fkt", zone_num, match.max_dbz,
                          self._dist_nm(cell.lat, cell.lon, lat, lon), cell.heading_deg,
-                         cell.speed_kt, motion[0], motion[1])
+                         cell.speed_kt)
+
+    def _radar_take(self, cell, match) -> None:
+        """Put a drifting CB on radar cell match: its key, motion (shown) and CB size."""
+        cell.radar, cell.radar_cell = match.key, match
+        if match.motion and match.age_s >= _RADAR_TRUST_AGE_S:
+            cell.heading_deg, cell.speed_kt = match.motion[0], min(match.motion[1],
+                                                                   _RADAR_STEER_MAX_KT)
+        elif cell.wind_motion:
+            cell.heading_deg, cell.speed_kt = cell.wind_motion
+        month = datetime.now(timezone.utc).month
+        oktas, top = self._radar_cb_size(match, match.lat, month)
+        parts = cell.wx.split(';')
+        if len(parts) > 11 and cell.decay_from is None:
+            parts[9], parts[10] = str(oktas), str(top)
+            cell.wx = ';'.join(parts)
 
     def _radar_adopt(self, zone_num: int, cell, now: float) -> bool:
         """--radar-cbs: give a drifting CB without a radar cell one; True if it has one now.
@@ -7815,17 +7965,19 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         on for 30 min where the radar had no storm.
         """
         cell.radar_frame = self._radar_frame
-        if not self._radar_covered(cell.lat, cell.lon):
+        covered = self._radar_fresh() and self._radar_covered(cell.lat, cell.lon)
+        if not covered and not self._storm_area(cell.lat, cell.lon):
             return False
         taken = {c.radar for zn, c in self._drift.items() if zn != zone_num and c.radar}
         match = self._radar_cb_near(cell.lat, cell.lon,
                                     _RADAR_MATCH_NM + _fw_drift.CB_OFFSET_NM, taken)
         if match is None:
-            cell.start_decay(now, "no radar storm cell near it (inside radar coverage)")
+            cell.start_decay(now, "no radar storm cell near it (inside radar coverage)" if covered
+                             else "no storm near it (SIGMET area or lightning)")
             self.logger.info("CB drift: Zone %d starts to decay (%s)", zone_num, cell.decay_why)
             return False
-        cell.radar = match.key
         cell.wind_motion = cell.wind_motion or (cell.heading_deg, cell.speed_kt)
+        self._radar_take(cell, match)
         self.logger.info("CB drift: Zone %d takes radar cell %s %.1fnm away (%d dBZ)", zone_num,
                          _fw_drift.pos_text(match.lat, match.lon),
                          self._dist_nm(cell.lat, cell.lon, match.lat, match.lon), match.max_dbz)
@@ -7946,6 +8098,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         moving = (self.ac_alt_ft is not None and self.ac_alt_ft >= _DRIFT_MIN_ALT_FT and
                   not self._maneuvering)
         self._inject_wx_slow_transit()
+        if self.args.radar_cbs:
+            self._radar_activate()   # a new frame decides on the shared clock, not our next look
+        self._storms_refresh()
         sim_ms = self.sim_time_ms()
         accel = self.time_accel()
         lead_ms = _DRIFT_TICK_S * 500.0 * accel   # half a tick, in sim time
@@ -7961,9 +8116,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 self.logger.info("CB drift: Zone %d starts to decay (%s)", zone_num, cell.decay_why)
             if cell.decay_from is not None and not self._cb_cycle_oktas:
                 cell.decay_from = min(cell.decay_from, cell.age_s - _fw_drift.DECAY_S)   # gone now
-            if moving or cell.test:
+            on_radar = (cell.radar_cell is not None and cell.decay_from is None and
+                        (self._radar_fresh() or _fw_storms.is_storm(cell.radar_cell)))
+            if on_radar or moving or cell.test:
                 old = (cell.lat, cell.lon, cell.moved_nm)
-                cell.step(self.geod, dt_s * accel)   # the drift is in sim time
+                if on_radar:   # where its storm is (the same in every sim), on the ground too
+                    cell.lat, cell.lon = self._radar_cell_now(cell.radar_cell)
+                    cell.moved_nm += self._dist_nm(old[0], old[1], cell.lat, cell.lon)
+                else:
+                    cell.step(self.geod, dt_s * accel)   # the drift is in sim time
                 cell.stepped_at = now
                 removed_for = self._cb_removed_near_airport(cell.lat, cell.lon)
                 if removed_for:
@@ -7974,7 +8135,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             oktas = cell.decayed_oktas(now)
             if oktas <= 0 and cell.decay_from is not None:
                 self._write_zone_wx(zone_num, _fw_drift.with_oktas(cell.wx, 0))
-                self._end_drift(zone_num, f"CB gone: {cell.decay_why}", retire=True)
+                # A storm's CB (radar, fw_storms) leaves its zone free: the storms decide
+                # where CBs are, not a "no new CB here" pin (which kept a zone the radar
+                # gave a CB again off its storm, headless P2 2026-11-16)
+                self._end_drift(zone_num, f"CB gone: {cell.decay_why}", retire=not cell.radar)
                 continue
             if sim_ms is not None:
                 cell.place(self.geod, sim_ms, lead_ms)
@@ -8217,6 +8381,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         setattr(self.args, name, on)
         if name == "radar_cbs" and not on:
             self._radar_cells, self._radar_frame, self._radar_at = [], None, None
+            self._radar_frames, self._radar_tiles, self._radar_found = {}, {}, {}
+            self._storm_cells = []
         self.logger.info("%s switched %s (web UI)", label, "on" if on else "off")
         self._state_changed_event.set()
         return f"{label} {'on' if on else 'off'}"
@@ -8706,7 +8872,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 best, best_key = zone_num, key
         return best
 
-    def _sigmet_zone_position(self, entry: dict, exclude_zone: int) -> Optional[tuple]:
+    def _sigmet_zone_position(self, entry: dict, exclude_zone: int) -> Optional[tuple]:  # pylint: disable=too-many-locals
         """Return (lat, lon, dist_nm, bearing) for a new zone inside a SIGMET area, or None.
 
         See _place_sigmet_zones(). For a TC the points nearest the
@@ -8714,9 +8880,19 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         tighter zone separation, so its zones form a cluster.
         """
         points = []
-        for poly in entry["polygons"]:
-            points += _fw_sigmet.points_in_polygon(
-                self.ac_lat, self.ac_lon, poly, self._sigmet_zone_range_nm())
+        if self.args.radar_cbs and self._storm_cells:
+            # fw_storms: onto the storms in the area (every sim has the same ones)
+            for cell in self._storm_cells:
+                lat, lon = self._radar_cell_now(cell)
+                if any(_point_in_polygon(lat, lon, poly) for poly in entry["polygons"]):
+                    brg, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
+                    dist_nm = dist_m / _NM_TO_M
+                    if dist_nm <= self._sigmet_zone_range_nm():
+                        points.append((lat, lon, dist_nm, brg % 360.0))
+        else:
+            for poly in entry["polygons"]:
+                points += _fw_sigmet.points_in_polygon(
+                    self.ac_lat, self.ac_lon, poly, self._sigmet_zone_range_nm())
         # never behind the aircraft (nor just abeam, _SIGMET_PLACE_MAX_REL_DEG): the
         # relocation moved such a zone away 3 s later,
         # and the next placement put one back, every minute for 7 minutes alongside a
@@ -10065,6 +10241,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         await self._radar_cells_refresh(session)
                     except Exception as exc:  # pylint: disable=broad-exception-caught
                         self.logger.info("Radar cells: not available (%s)", exc)
+                    try:
+                        await self._storm_motions_refresh()
+                    except Exception as exc:  # pylint: disable=broad-exception-caught
+                        self.logger.info("Storms: winds not available (%s)", exc)
                     await asyncio.sleep(60.0)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
@@ -10087,7 +10267,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         return dict(await asyncio.gather(*[one(k, u) for k, u in urls.items()]))
 
     async def _radar_cells_refresh(self, session) -> None:  # pylint: disable=too-many-locals
-        """Look for a new radar frame (or a long move) and find its cells (radar_cells_coro())."""
+        """Work out a new radar frame's cells (or all again after a long move); radar_cells_coro().
+
+        Every frankenweather must put a storm in the same place (user,
+        2026-11-16), so nothing here depends on how long it has run: each
+        frame's cells are tracked through the WINDOW_FRAMES frames up to it
+        (fw_radar.track_window(), their motion), the two newest frames are
+        kept (a storm blends from the one before), and the frame that
+        decides changes on a clock all share (_radar_activate()).
+        """
         if self.ac_lat is None or not self.psx_connected:
             return
         here = (self.ac_lat, self.ac_lon)
@@ -10095,31 +10283,45 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  self._dist_nm(*here, *self._radar_at) > _RADAR_MOVED_NM)
         async with session.get(_RV_API, timeout=_RV_TIMEOUT) as resp:
             past = ((await resp.json(content_type=None)).get('radar') or {}).get('past') or []
-        if not past or (past[-1]['time'] == self._radar_frame and not moved):
+        past = sorted(past, key=lambda f: f['time'])
+        newest = [f['time'] for f in past[-3:]]   # a storm blends from the frame before
+        if not past or (not moved and all(t in self._radar_frames for t in newest)):
+            self._radar_activate()
             return
         loop = asyncio.get_running_loop()
         zoom = _fw_radar.CELL_ZOOM
-        tiles = _fw_radar.tiles_around(*here, _RADAR_CELL_NM, zoom)
-        frames = [past[-1]]
-        if self._radar_frame is None or past[-1]['time'] - self._radar_frame > 1200:
-            frames = past[-2:]   # the one before too, for the cells' motion
-        # Cells stay where they are when the aircraft moves: only a jump (a
-        # reposition) loses them
-        jumped = (self._radar_at is not None and
-                  self._dist_nm(*here, *self._radar_at) > 2 * _RADAR_CELL_NM)
-        previous = [] if jumped else self._radar_cells
-        prev_time = None if jumped else self._radar_frame
-        for frame in frames:
-            imgs = await self._radar_get_tiles(session, {
-                t: _fw_radar.tile_url(frame['path'], zoom, *t) for t in tiles})
-            decoded = await loop.run_in_executor(None, lambda imgs=imgs: {
-                t: _fw_radar.tile_dbz(img) for t, img in imgs.items() if img is not None})
-            cells = await loop.run_in_executor(
-                None, _fw_radar.find_cells, decoded, zoom, frame['time'])
-            cells = [c for c in cells if self._dist_nm(*here, c.lat, c.lon) <= _RADAR_CELL_NM]
-            if previous and prev_time is not None and 0 <= frame['time'] - prev_time <= 1500:
-                _fw_radar.track(previous, cells, frame['time'] - prev_time)   # 0: same frame
-            previous, prev_time = cells, frame['time']
+        tiles = _fw_radar.tiles_around(*here, _RADAR_CELL_NM + 30.0, zoom)
+        window = past[-(_fw_radar.WINDOW_FRAMES + 2):]
+        wanted = {(f['time'], t) for f in window for t in tiles}
+        self._radar_tiles = {k: v for k, v in self._radar_tiles.items() if k in wanted}
+        missing = {k: _fw_radar.tile_url(f['path'], zoom, *k[1])
+                   for f in window for k in ((f['time'], t) for t in tiles)
+                   if k not in self._radar_tiles}
+        if missing:
+            imgs = await self._radar_get_tiles(session, missing)
+            decoded = await loop.run_in_executor(None, lambda: {
+                k: _fw_radar.tile_dbz(img) for k, img in imgs.items() if img is not None})
+            self._radar_tiles.update(decoded)
+        found, key = {}, tuple(sorted(tiles))
+        for f in window:
+            if self._radar_found.get(f['time'], (None,))[0] == key:
+                found[f['time']] = self._radar_found[f['time']][1]
+                continue
+            grid = {t: self._radar_tiles[(f['time'], t)] for t in tiles
+                    if (f['time'], t) in self._radar_tiles}
+            found[f['time']] = await loop.run_in_executor(
+                None, _fw_radar.find_cells, grid, zoom, f['time'])
+            if len(grid) == len(tiles):   # all there: the same next time
+                self._radar_found[f['time']] = (key, found[f['time']])
+        self._radar_found = {t: v for t, v in self._radar_found.items() if t in found}
+        times = [f['time'] for f in window]
+        frames = {}
+        for i, t in enumerate(times):
+            if t not in newest:
+                continue
+            chain = [(u, [dataclasses.replace(c) for c in found[u]])
+                     for u in times[max(0, i - _fw_radar.WINDOW_FRAMES + 1):i + 1]]
+            frames[t] = _fw_radar.track_window(chain)
         # coverage mask (changes rarely)
         now = time.monotonic()
         cov_tiles = [t for t in _fw_radar.tiles_around(*here, _RADAR_CELL_NM + 60.0,
@@ -10131,24 +10333,114 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             for t, img in imgs.items():
                 if img is not None:
                     self._radar_cov[t] = (now, _fw_radar.tile_covered(img))
-        self._radar_cells, self._radar_frame, self._radar_at = previous, past[-1]['time'], here
-        cbs = [c for c in previous if c.is_cb]
-        self.logger.info("Radar cells: %d (%d CB) within %.0fnm, frame %s%s", len(previous),
-                         len(cbs), _RADAR_CELL_NM,
-                         time.strftime("%H:%MZ", time.gmtime(past[-1]['time'])),
+        self._radar_frames, self._radar_at = frames, here
+        if moved:
+            self._radar_frame = None if self._radar_frame not in frames else self._radar_frame
+        self._radar_activate(force=moved)
+
+    def _radar_activate(self, force: bool = False) -> None:
+        """Make the frame that decides now (fw_radar.active_frame()) the radar cells.
+
+        Cells that are the same storm as one in the frame before (tracked
+        there) keep its key, so a zone or drifting CB stays on its storm.
+        """
+        frame = _fw_radar.active_frame(self._radar_frames, time.time())
+        if frame is None or (frame == self._radar_frame and not force):
+            return
+        here = self._radar_at or (self.ac_lat, self.ac_lon)
+        cells = [c for c in self._radar_frames[frame]
+                 if self._dist_nm(*here, c.lat, c.lon) <= _RADAR_CELL_NM]
+        if self._radar_frame is not None and self._radar_frame != frame:
+            for c in cells:
+                old = _fw_radar.linked(self._radar_cells, c.prev)
+                if old is not None:
+                    c.key = old.key
+        elif self._radar_frame == frame:   # the same frame again (a move): keep the keys
+            for c in cells:
+                old = _fw_radar.linked(self._radar_cells, (c.lat, c.lon))
+                if old is not None:
+                    c.key = old.key
+        self._radar_cells, self._radar_frame = cells, frame
+        cbs = [c for c in cells if c.is_cb]
+        self.logger.info("Radar cells: %d (%d CB) within %.0fnm, frame %s%s", len(cells),
+                         len(cbs), _RADAR_CELL_NM, time.strftime("%H:%MZ", time.gmtime(frame)),
                          "; strongest " + ", ".join(
                              f"{_fw_drift.pos_text(c.lat, c.lon)} {c.max_dbz} dBZ" +
                              (f" {c.motion[0]:03.0f}/{c.motion[1]:.0f}kt" if c.motion else "")
                              for c in cbs[:3]) if cbs else "")
 
     def _radar_cell_now(self, cell) -> tuple:
-        """Return (lat, lon) where a radar cell is now: its frame position run on by its motion."""
-        if not cell.motion or cell.age_s < _RADAR_TRUST_AGE_S:
-            return cell.lat, cell.lon
-        sim_ms = self.sim_time_ms()
-        now_s = sim_ms / 1000.0 if sim_ms is not None else time.time()
-        hours = max(0.0, min(3600.0, now_s - cell.frame)) / 3600.0
-        return _fw_radar.ahead(cell.lat, cell.lon, cell.motion[0], cell.motion[1] * hours)
+        """Return where a radar cell's storm is now, the same in every frankenweather.
+
+        Its position in the frame that decides, run on by its motion (UTC: the
+        radar is real-world), blending from the frame before after a change
+        (fw_radar.storm_position()).
+        """
+        if _fw_storms.is_storm(cell):
+            return _fw_radar.cell_at(cell, time.time(), 0)
+        older = [t for t in self._radar_frames if t < cell.frame]
+        before = (_fw_radar.linked(self._radar_frames[max(older)], cell.prev)
+                  if older and cell.prev else None)
+        return _fw_radar.storm_position(cell, before, time.time(), _RADAR_TRUST_AGE_S)
+
+    def _cells(self) -> list:
+        """Return the storms CBs go on: the radar's (inside coverage) and fw_storms' (outside)."""
+        return self._radar_cells + self._storm_cells
+
+    def _cells_live(self) -> bool:
+        """Return True if --radar-cbs has storms to decide with (a recent frame, or fw_storms')."""
+        return self._radar_fresh() or bool(self.args.radar_cbs and self._storm_cells)
+
+    def _storm_chance(self, lat: float, lon: float) -> Optional[tuple]:
+        """Return fw_storms' (chance per hour, peak dBZ) at a grid point, or None (no storms)."""
+        best = self._sigmet_cb_at((lat, lon))
+        got = _fw_storms.sigmet_chance(best[0]) if best else None
+        if any(self._dist_nm(lat, lon, flat, flon) <= _STORM_LTG_NM
+               for flat, flon in self._ltg_points):
+            got = max(got or (0.0, 0), (_fw_storms.LIGHTNING_CHANCE, 55))
+        return got
+
+    def _storm_area(self, lat: float, lon: float) -> bool:
+        """Return True if fw_storms decides about CBs at (lat, lon) (outside radar coverage)."""
+        return (bool(self.args.radar_cbs) and self._radar_uncovered(lat, lon) and
+                self._storm_chance(lat, lon) is not None)
+
+    def _storms_refresh(self) -> None:
+        """Work out the storms alive now near the aircraft (fw_storms), outside radar coverage."""
+        if not self.args.radar_cbs or self.ac_lat is None:
+            self._storm_cells = []
+            return
+        now_s = time.time()
+        hour = int(now_s // _fw_storms.HOUR_S)
+
+        def motion(plat, plon):
+            node = (round(plat), round(plon))
+            return self._storm_motion.get((*node, hour))
+
+        points = _fw_storms.grid_points(self.ac_lat, self.ac_lon, _RADAR_CELL_NM)
+        storms = _fw_storms.storms_at(now_s, points, self._storm_chance, motion)
+        self._storm_cells = [c for c in storms
+                             if self._radar_uncovered(*_fw_radar.cell_at(c, now_s, 0))]
+
+    async def _storm_motions_refresh(self) -> None:
+        """Fetch the 850-300 hPa mean wind for fw_storms' grid points that have storms.
+
+        One forecast profile per whole-degree point and UTC hour (the same
+        download every sim makes), at most _STORM_WINDS_PER_LOOK a minute.
+        """
+        if not self.args.radar_cbs or self.ac_lat is None or self._turb_engine is None:
+            return
+        hour = int(time.time() // _fw_storms.HOUR_S)
+        points = _fw_storms.grid_points(self.ac_lat, self.ac_lon, _RADAR_CELL_NM)
+        want = sorted({(round(p[2]), round(p[3]), hour) for p in points
+                       if self._storm_chance(p[2], p[3]) is not None} - set(self._storm_motion))
+        loop = asyncio.get_running_loop()
+        when = datetime.fromtimestamp(hour * _fw_storms.HOUR_S, timezone.utc)
+        for nlat, nlon, h in want[:_STORM_WINDS_PER_LOOK]:
+            profile = await loop.run_in_executor(
+                None, self._turb_engine.wind_fetcher.get, float(nlat), float(nlon), when)
+            self._storm_motion[(nlat, nlon, h)] = _fw_drift.mean_wind_motion(profile)
+        self._storm_motion = {k: v for k, v in self._storm_motion.items() if k[2] >= hour - 1}
 
     def _radar_fresh(self) -> bool:
         """Return True if --radar-cbs has a recent radar frame to decide with."""
@@ -10159,6 +10451,18 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         """Return True if --radar-cbs still waits for its first frame after the start."""
         return (self.args.radar_cbs and _HAS_PIL and self._radar_frame is None and
                 time.monotonic() < self._radar_hold_until)
+
+    def _radar_uncovered(self, lat: float, lon: float) -> bool:
+        """Return True if (lat, lon) is known to be outside weather radar coverage.
+
+        Unknown (the coverage mask not fetched there yet, e.g. just after the
+        start): False, so fw_storms makes no storms where the radar may decide.
+        """
+        zoom = _fw_radar.COVERAGE_ZOOM
+        x, y = _fw_radar.global_px(lat, lon, zoom)
+        if (int(x // _fw_radar.TILE_PX), int(y // _fw_radar.TILE_PX)) not in self._radar_cov:
+            return False
+        return not self._radar_covered(lat, lon)
 
     def _radar_covered(self, lat: float, lon: float) -> bool:
         """Return True if (lat, lon) is inside weather radar coverage (unknown: False)."""
@@ -10171,12 +10475,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                             int(x % _fw_radar.TILE_PX)])
 
     def _radar_cb_near(self, lat: float, lon: float, nm: float, taken=()) -> Optional[object]:
-        """Return the strongest radar CB within nm of (lat, lon) not in taken (keys), or None."""
+        """Return the strongest storm CB within nm of (lat, lon) not in taken (keys), or None.
+
+        Radar and fw_storms' storms, measured from where each is now.
+        """
         best = None
-        for cell in self._radar_cells:
+        for cell in self._cells():
             if (cell.is_cb and cell.key not in taken and
-                    self._dist_nm(lat, lon, cell.lat, cell.lon) <= nm and
-                    (best is None or cell.max_dbz > best.max_dbz)):
+                    (best is None or cell.max_dbz > best.max_dbz) and
+                    self._dist_nm(lat, lon, *self._radar_cell_now(cell)) <= nm):
                 best = cell
         return best
 
@@ -10193,7 +10500,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         cell = None
         kept = self._radar_zone_cell.get(zone_num)
         if kept is not None:
-            cell = next((c for c in self._radar_cells if c.key == kept and c.is_cb and
+            cell = next((c for c in self._cells() if c.key == kept and c.is_cb and
                          self._dist_nm(lat, lon, c.lat, c.lon) <= _RADAR_KEEP_NM), None)
         # one storm, one zone: cells other zones (or drifting CBs) have are taken
         taken = ({k for zn, k in self._radar_zone_cell.items() if zn != zone_num} |
@@ -10205,18 +10512,25 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self._radar_zone_cell.pop(zone_num, None)
         if cell is None:
             return (_strip_cb(wx), "radar: no storm cell") if _fw_drift.cb_oktas(wx) else (wx, "")
-        oktas = (3 if cell.max_dbz < 50 else 4 if cell.max_dbz < 55 else 6 if cell.max_dbz < 60
-                 else 7) + (1 if cell.area_km2 >= 200.0 else 0)
-        top = min(_cb_top_ceiling_ft(lat, month), 25000 + (cell.max_dbz - 45) * 1500)
+        oktas, top = self._radar_cb_size(cell, lat, month)
         parts = wx.split(';')
         if len(parts) < 12:
             return wx, ""
         had = parts[9] not in ('', '0')
-        parts[9] = str(min(8, max(oktas, int(parts[9]) if had else 0)))
-        parts[10] = str(max(top, int(parts[10]) if had else 0))
+        # The radar alone sizes it (not the bigger of it and the model's), so
+        # every frankenweather has the same CB on a storm
+        parts[9], parts[10] = str(oktas), str(top)
         if not had:
             parts[11] = "3000"
         return ";".join(parts), f"radar: {cell.max_dbz} dBZ cell {cell.area_km2:.0f} km2"
+
+    @staticmethod
+    def _radar_cb_size(cell, lat: float, month: int) -> tuple:
+        """Return (oktas, top ft) of the CB on a radar cell: by its strength and size."""
+        oktas = (3 if cell.max_dbz < 50 else 4 if cell.max_dbz < 55 else 6 if cell.max_dbz < 60
+                 else 7) + (1 if cell.area_km2 >= 200.0 else 0)
+        return min(8, oktas), int(min(_cb_top_ceiling_ft(lat, month),
+                                      25000 + (cell.max_dbz - 45) * 1500))
 
     # ------------------------------------------------------------------
     # Lightning (MTG Lightning Imager, fw_lightning) helpers
@@ -10285,6 +10599,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
     async def _update_zones(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
             self, session: aiohttp.ClientSession) -> None:
         """Recalculate and push all 7 weather zones to PSX."""
+        self._storms_refresh()
         positions = list(self.zone_positions[i] for i in range(1, 8))
         self.logger.info("Updating zone weather — ac=%.2f/%.2f hdg=%.0f° [%s]",
                          self.ac_lat, self.ac_lon, self.ac_hdg,
@@ -10617,9 +10932,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 sigmet_label = None
             final_wx = self._limit_close_cb(zone_num, final_wx, positions[i])
             radar_why = ""
-            if (self._radar_fresh() and not cb_removed_for and
-                    not self._is_cb_free_zone(zone_num) and self._radar_covered(lat, lon)):
-                # --radar-cbs: inside radar coverage the radar alone decides
+            if (not cb_removed_for and not self._is_cb_free_zone(zone_num) and
+                    ((self._radar_fresh() and self._radar_covered(lat, lon)) or
+                     self._storm_area(lat, lon))):
+                # --radar-cbs: inside radar coverage the radar alone decides, and
+                # outside it fw_storms' storms do where it makes them
                 before = _fw_drift.cb_oktas(final_wx)
                 # where PSX draws the zone's CB (7 nm from its centre), if known
                 sim_ms = self.sim_time_ms()
@@ -11378,6 +11695,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         any_relocated = self._ensure_arpt_zones() or any_relocated
                         any_relocated = self._maintain_anchor_zone() or any_relocated
                         any_relocated = self._place_sigmet_zones() or any_relocated
+                        any_relocated = self._place_storm_zones() or any_relocated
                     elapsed = time.time() - last_update_time
                     force = self._manual_wx_force_update
                     self._manual_wx_force_update = False
