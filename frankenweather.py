@@ -358,6 +358,10 @@ _SIGMET_ZONES_PER_TS = 2           # zones per TS area
 _SIGMET_ZONES_PER_TC = 3           # zones per TC area, a tight cluster
 _SIGMET_TC_CLUSTER_SEP_NM = 20.0   # separation between zones in a TC cluster
 _SIGMET_PLACE_INTERVAL_S = 60.0    # move at most one zone this often
+# a zone placed in a SIGMET area: at most this far off the heading (not 90: a point
+# just abeam was "behind" seconds later and moved away, then placed again, every
+# 35 s for minutes; headless US1 2026-11-15)
+_SIGMET_PLACE_MAX_REL_DEG = 75.0
 # --sigmet: turbulence frankenweather generates itself for TURB/MTW
 # SIGMETs (PSX doesn't get them). The intensity varies over time between
 # 10% and 75%, mostly light (frankenturb/intensity_profile.py), scaled per
@@ -7749,9 +7753,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         _RADAR_GONE_NM) gives the CB its position and motion and keeps it
         alive past its lifetime; no cell: the CB decays.
         """
-        if not cell.radar or not self._radar_fresh() or cell.decay_from is not None:
+        if not self._radar_fresh() or cell.decay_from is not None:
             return
         if cell.radar_frame == self._radar_frame:
+            return
+        if not cell.radar and (cell.test or not self._radar_adopt(zone_num, cell, now)):
             return
         cell.radar_frame = self._radar_frame
         match = next((c for c in self._radar_cells if c.key == cell.radar and c.is_cb), None) or \
@@ -7784,6 +7790,33 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                          "(cell %03.0f/%.0fkt)", zone_num,
                          self._dist_nm(cell.lat, cell.lon, lat, lon), cell.heading_deg,
                          cell.speed_kt, motion[0], motion[1])
+
+    def _radar_adopt(self, zone_num: int, cell, now: float) -> bool:
+        """--radar-cbs: give a drifting CB without a radar cell one; True if it has one now.
+
+        A CB that started drifting before the first radar frame (or one a SIGMET
+        or the model made) inside radar coverage: the radar decides there, as for
+        the zones. A radar CB near it: it follows that one from now on; none: it
+        decays. Outside coverage it keeps drifting on its own. Headless US1
+        2026-11-15: 4 CBs started 14-28 s before the first frame and one drifted
+        on for 30 min where the radar had no storm.
+        """
+        cell.radar_frame = self._radar_frame
+        if not self._radar_covered(cell.lat, cell.lon):
+            return False
+        taken = {c.radar for zn, c in self._drift.items() if zn != zone_num and c.radar}
+        match = self._radar_cb_near(cell.lat, cell.lon,
+                                    _RADAR_MATCH_NM + _fw_drift.CB_OFFSET_NM, taken)
+        if match is None:
+            cell.start_decay(now, "no radar storm cell near it (inside radar coverage)")
+            self.logger.info("CB drift: Zone %d starts to decay (%s)", zone_num, cell.decay_why)
+            return False
+        cell.radar = match.key
+        cell.wind_motion = cell.wind_motion or (cell.heading_deg, cell.speed_kt)
+        self.logger.info("CB drift: Zone %d takes radar cell %s %.1fnm away (%d dBZ)", zone_num,
+                         _fw_drift.pos_text(match.lat, match.lon),
+                         self._dist_nm(cell.lat, cell.lon, match.lat, match.lon), match.max_dbz)
+        return True
 
     def _cb_still_growing(self, zone_num: int, wx: str) -> bool:
         """Return True if zone_num's CB (wx) hasn't yet grown to its fade target (_fade_cb_wx())."""
@@ -8671,13 +8704,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         for poly in entry["polygons"]:
             points += _fw_sigmet.points_in_polygon(
                 self.ac_lat, self.ac_lon, poly, self._sigmet_zone_range_nm())
-        # never behind the aircraft: the relocation moved such a zone away 3 s later,
+        # never behind the aircraft (nor just abeam, _SIGMET_PLACE_MAX_REL_DEG): the
+        # relocation moved such a zone away 3 s later,
         # and the next placement put one back, every minute for 7 minutes alongside a
         # TS area the aircraft had nearly passed (test sim 2026-10-29, OOMM A2).
         # While maneuvering there is no "behind" (zones go all-around): any bearing,
         # but only within the behind-relocation limit (see _sigmet_zone_range_nm()).
         points = [p for p in points if p[2] >= _CB_SQUEEZE_MIN_FWD_NM and
-                  (self._maneuvering or abs((p[3] - self.ac_hdg + 180) % 360 - 180) <= 90.0)]
+                  (self._maneuvering or
+                   abs((p[3] - self.ac_hdg + 180) % 360 - 180) <= _SIGMET_PLACE_MAX_REL_DEG)]
         if not points:
             return None
         others = [(lat, lon) for zn, (lat, lon, _) in self.zone_positions.items()
