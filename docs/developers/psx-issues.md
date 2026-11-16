@@ -373,6 +373,24 @@ from the MCP speed. 10.190 and earlier don't do it (tested 10.178, 10.186,
 
 ## Networking and shared cockpit
 
+### PSX sometimes stops accepting new clients
+
+*Seen on the headless test sims, most recently 2026-11-16 at 04:30Z (PSX
+on port 42747, after about 9 hours up).* PSX stopped accepting new
+connections, while the client already connected (the router) carried on
+normally for hours. The listen queue stayed full (51 of 50): connections
+the kernel had completed but PSX never accepted, their clients long gone
+(CLOSE-WAIT). New connects timed out. A test driver had connected and
+disconnected about once a minute all night; the other headless PSX, with
+the same driver, was fine until 09:00Z, when it stopped the same way.
+The driver read the aircraft position over a fresh connection every 60 s
+(every 15 s while steering), so PSX had seen several thousand short
+connections by then. Reading through a frankenrouter instead avoids it.
+
+- **Workaround:** restart PSX. Addons that keep one connection open (or
+  connect through a frankenrouter) aren't affected.
+- **For Aerowinx:** keep accepting new clients (a stuck accept loop?).
+
 ### A PSX main client sends some of its own values right after connecting
 
 *Confirmed (2026-11-02, WorldFlight; slave router traffic logs).* A PSX
