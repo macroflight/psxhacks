@@ -459,6 +459,10 @@ _ROUTE_TRACK_MAX_S = 60.0     # ... at most this long
 _RADAR_CELL_NM = 250.0        # --radar-cbs: radar cells looked for this far around the aircraft
 _RADAR_MOVED_NM = 60.0        # ... again (before the next frame) after a move this far
 _RADAR_FRESH_S = 1800.0       # a radar frame older than this doesn't decide any more
+# --radar-cbs, after a start: zones keep the CB PSX already has until the first radar frame,
+# at most this long (a restart took a radar CB 129 nm ahead away 20 s after the start,
+# before the radar could keep it, and the radar put it back 5 min later; headless AU4)
+_RADAR_STARTUP_HOLD_S = 300.0
 _RADAR_MATCH_NM = 20.0        # a radar CB within this of a zone's CB is that zone's CB
 _RADAR_KEEP_NM = 28.0         # ... and stays it within this (PSX's CB circles the zone centre)
 _RADAR_GONE_NM = 12.0         # a drifting CB's radar cell must be within this, else it's gone
@@ -2846,6 +2850,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # and the coverage mask tiles {(tx, ty): (time.monotonic(), fw_radar.tile_covered())}
         self._radar_cells: list = []
         self._radar_frame: Optional[int] = None
+        self._radar_hold_until = time.monotonic() + _RADAR_STARTUP_HOLD_S
         self._radar_at: Optional[tuple] = None
         self._radar_cov: dict = {}
         self._radar_logged: dict = {}   # zone -> its last logged radar decision
@@ -10150,6 +10155,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         return (self.args.radar_cbs and self._radar_frame is not None and
                 time.time() - self._radar_frame <= _RADAR_FRESH_S)
 
+    def _radar_pending(self) -> bool:
+        """Return True if --radar-cbs still waits for its first frame after the start."""
+        return (self.args.radar_cbs and _HAS_PIL and self._radar_frame is None and
+                time.monotonic() < self._radar_hold_until)
+
     def _radar_covered(self, lat: float, lon: float) -> bool:
         """Return True if (lat, lon) is inside weather radar coverage (unknown: False)."""
         zoom = _fw_radar.COVERAGE_ZOOM
@@ -10623,6 +10633,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         self._radar_logged[zone_num] = decided
                         self.logger.info("Zone %d radar: CB %d -> %d oktas (%s)", zone_num,
                                          before, decided[1], radar_why)
+            elif (self._radar_pending() and not cb_removed_for and
+                  not self._is_cb_free_zone(zone_num)):
+                # no radar frame yet after the start: keep the CB PSX already has
+                now_wx = self.psx.get(f"Wx{zone_num}") or ""
+                if _fw_drift.cb_oktas(now_wx) > _fw_drift.cb_oktas(final_wx):
+                    final_wx = _fw_drift.with_cb_of(final_wx, now_wx)
+                    self.logger.info("Zone %d radar: keeps its %d/8 CB until the first radar "
+                                     "frame", zone_num, _fw_drift.cb_oktas(final_wx))
             elif self._radar_fresh():
                 self.logger.debug("Zone %d radar: not deciding (covered %s, removed %s, "
                                   "CB-free %s)",
