@@ -64,7 +64,9 @@
   heights above the ground, and the radar's top went in as a height above
   sea level. Also: a drifting CB took its radar cell's own motion without
   the check against the wind it started with (two CBs next to each other
-  drifting 86 degrees apart).
+  drifting 86 degrees apart). And a zone put on a storm almost abeam, far
+  out, counted as behind at once and went away, then back, every 30-60 s:
+  storms now count only within 75 degrees of the nose (was 90).
 - **Lightning from EUMETSAT's MTG Lightning Imager instead of
   Blitzortung.** Blitzortung's terms don't allow this use. The new
   source is the Meteosat-12 satellite's lightning images (free, no

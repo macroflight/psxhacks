@@ -483,7 +483,9 @@ _STORM_WINDS_PER_LOOK = 12     # ... and at most this many grid points' winds fe
 # --radar-cbs: every sim ranks the storms it could show the same way (_storms_ranked()), so
 # aircraft in the same area show the same ones: storms up to this far, ahead within this angle
 _STORM_VIEW_NM = 200.0
-_STORM_VIEW_DEG = 90.0
+_STORM_VIEW_DEG = 75.0
+#   (90 until 2026-11-17: a zone put on a storm 85-90 degrees off the nose, 151 nm out, had its
+#   centre past 90 degrees, behind (_zone_relocate_reason()); moved away and back every 30-60 s)
 # ... with --route-zones: storms within this of the route ahead (through its turns), and at most
 # _STORM_OFF_ROUTE_MAX of those only within the angle (the crew sees them on the radar too); by
 # the angle alone, storms 150 nm left of a route about to turn right took five of seven zones
