@@ -7132,9 +7132,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         lower, behind first; never an airport, anchor or focused zone, one
         whose CB turbulence reaches the aircraft, or a CB ahead within
         _STORM_KEEP_NM. At most one move per _STORM_PLACE_INTERVAL_S.
+        Holding or vectored (maneuvering mode): storms all round, up to the
+        maneuvering placement range, and no CB within _STORM_KEEP_NM or
+        _HOLD_KEEP_CB_NM is taken away.
         """
         if (not self.args.radar_cbs or self.ac_lat is None or self.ac_hdg is None or
-                not self._cells_live() or self._maneuvering):
+                not self._cells_live()):
             return False
         now = time.monotonic()
         if now - self._storm_place_last < _STORM_PLACE_INTERVAL_S:
@@ -7143,7 +7146,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         usable = [zn for zn, (_, _, icao) in self.zone_positions.items()
                   if icao not in arpt_icaos and zn not in (self._anchor_zone, self.focused_zone) and
                   not self._is_cb_free_zone(zn)]
-        ranked = self._storms_ranked()
+        if self._maneuvering:
+            # holding or vectored: all round, and not beyond where a zone would count as
+            # behind after the next turn (two sims holding at the same airport each ranked
+            # the storms ahead of their own heading and showed different CBs; test 2026-11-16)
+            ranked = self._storms_ranked(self.args.low_alt_dist - _MANEUVER_PLACE_MARGIN_NM, 180.0)
+        else:
+            ranked = self._storms_ranked()
         top = ranked[:len(usable)]
         rank_of = {r[0].key: i for i, r in enumerate(ranked)}
         shown = ({c.radar for c in self._drift.values() if c.radar and c.decay_from is None} |
@@ -7155,13 +7164,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         best, best_key = None, None
         for zone_num in usable:
             zlat, zlon, _ = self.zone_positions[zone_num]
-            if self._cb_turb_in_reach(zone_num) is not None:
+            if self._cb_kept_in_hold(zone_num) is not None:
                 continue
             drift = self._drift.get(zone_num)
             wx = (self.zone_wx.get(zone_num) or "").split(";")
             has_cb = drift is not None or (len(wx) > 9 and wx[9] not in ("", "0"))
             az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, zlon, zlat)
-            behind = _fw_route.angle_diff(az % 360.0, self.ac_hdg) > 90.0
+            behind = (not self._maneuvering and   # no ahead or behind while turning
+                      _fw_route.angle_diff(az % 360.0, self.ac_hdg) > 90.0)
             if has_cb and not behind and dist_m / _NM_TO_M < _STORM_KEEP_NM:
                 continue
             its_rank = rank_of.get(drift.radar, len(ranked)) if drift and drift.radar else None
