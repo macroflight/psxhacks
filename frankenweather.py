@@ -482,6 +482,12 @@ _STORM_WINDS_PER_LOOK = 12     # ... and at most this many grid points' winds fe
 # aircraft in the same area show the same ones: storms up to this far, ahead within this angle
 _STORM_VIEW_NM = 200.0
 _STORM_VIEW_DEG = 90.0
+# ... with --route-zones: storms within this of the route ahead (through its turns), and at most
+# _STORM_OFF_ROUTE_MAX of those only within the angle (the crew sees them on the radar too); by
+# the angle alone, storms 150 nm left of a route about to turn right took five of seven zones
+# (FTECH1 2026-11-17; user: some zones along the route, not all of them)
+_STORM_ROUTE_NM = 60.0
+_STORM_OFF_ROUTE_MAX = 2
 _STORM_PLACE_INTERVAL_S = 30.0  # ... a zone moved onto a top storm at most this often
 _STORM_KEEP_NM = 80.0          # ... never taking away a CB ahead nearer than this
 _CBS_CHECK_S = 5.0            # CBS messages: look for changes this often
@@ -2048,6 +2054,12 @@ _AT_SPD_MINUS_MIN = 35
 # the behind-relocation limit (low_alt_dist): a hold or vectoring takes the aircraft tens of nm
 # away from where a zone was placed (_place_zone(), _sigmet_zone_range_nm()).
 _MANEUVER_PLACE_MARGIN_NM = 50.0
+# --radar-cbs while maneuvering this near the FMC destination: storms are ranked from the
+# destination, not from the aircraft, so sims in the same hold (up to ~20 nm apart) rank the
+# same list; ranked from each aircraft, a storm near the range's edge was in one sim's list and
+# not the other's (late in a hold 68-84 % matching CBs, test 2026-11-17). Ranked out to the
+# maneuvering placement range less this, so no storm is farther than that from the aircraft.
+_MANEUVER_RANK_DEST_NM = 60.0
 _BURST_NAMES = {_BURST_SINK: "SINK", _BURST_BANK: "BANK", _BURST_YAW: "YAW",
                 _BURST_SPD: "SPD", _BURST_GUST: "GUST"}
 _BURST_SUMMARY_S = 60.0               # the burst summary log line's period (_log_burst_summary())
@@ -2875,6 +2887,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._storm_cells: list = []
         self._storm_motion: dict = {}
         self._storm_place_last = 0.0   # time.monotonic() of _place_storm_zones()' last move
+        self._maneuver_rank_logged: Optional[str] = None   # _maneuver_storms_ranked() log
+        self._radar_withdrawn_logged: set = set()   # frame times logged as withdrawn by RainViewer
         self._radar_hold_until = time.monotonic() + _RADAR_STARTUP_HOLD_S
         self._radar_at: Optional[tuple] = None
         self._radar_cov: dict = {}
@@ -7091,8 +7105,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         _, _, lat_c, lon_c, icao = candidates[0]
         return lat_c, lon_c, icao
 
-    def _storms_ranked(self, view_nm: float = _STORM_VIEW_NM,
-                       view_deg: float = _STORM_VIEW_DEG) -> list:
+    def _storms_ranked(self, view_nm: float = _STORM_VIEW_NM,  # pylint: disable=too-many-locals
+                       view_deg: float = _STORM_VIEW_DEG,
+                       origin: Optional[tuple] = None) -> list:
         """Return [(cell, lat, lon, dist_nm, rel_deg)] of storm CBs to show, most important first.
 
         Every sim ranks them the same way, so aircraft near each other show
@@ -7100,11 +7115,19 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         60 dBZ and more alike), then nearer. Only storms up to view_nm away
         and within view_deg of ahead (the heading, or the route's course
         with --route-zones), radar ones only with a fresh frame and inside
-        coverage.
+        coverage. With origin (lat, lon), "away" and "nearer" are from
+        there instead of the aircraft (all round: view_deg is not used);
+        dist_nm and rel_deg are still from the aircraft. Following the FMC
+        route (--route-zones), not all round: also storms within
+        _STORM_ROUTE_NM of the route's next view_nm (beyond the angle, after
+        its turns), and only the _STORM_OFF_ROUTE_MAX most important of those
+        farther from it.
         """
         out = []
         fresh = self._radar_fresh()
         ahead = self.ac_hdg
+        on_route = (self._route_mode == "on" and self._route_pos is not None and
+                    origin is None and view_deg < 180.0)
         if self._route_mode == "on" and self._route_pos is not None:
             ahead = self._route_pos.course
         for cell in self._cells():
@@ -7114,13 +7137,66 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             lat, lon = self._radar_cell_now(cell)
             az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
             dist_nm, rel = dist_m / _NM_TO_M, _fw_route.angle_diff(az % 360.0, ahead)
-            if dist_nm > view_nm or rel > view_deg:
+            rank_nm = dist_nm if origin is None else self._dist_nm(origin[0], origin[1], lat, lon)
+            view = 0 if rank_nm > view_nm else self._storm_in_view(
+                lat, lon, rel, view_nm, view_deg, origin is None, on_route)
+            if not view or (not storm and not self._radar_covered(lat, lon)):
                 continue
-            if not storm and not self._radar_covered(lat, lon):
-                continue
-            out.append((cell, lat, lon, dist_nm, rel))
-        out.sort(key=lambda r: (-(min(r[0].max_dbz, 60) // 5), round(r[3], 1), r[0].key))
-        return out
+            out.append((cell, lat, lon, dist_nm, rel, rank_nm, view))
+        out.sort(key=lambda r: (-(min(r[0].max_dbz, 60) // 5), round(r[5], 1), r[0].key))
+        dropped = {id(r) for r in [r for r in out if r[6] == 2][_STORM_OFF_ROUTE_MAX:]}
+        return [r[:5] for r in out if id(r) not in dropped]
+
+    def _storm_in_view(self, lat: float, lon: float, rel: float, view_nm: float,  # pylint: disable=too-many-arguments,too-many-positional-arguments
+                       view_deg: float, use_angle: bool, on_route: bool) -> int:
+        """Return whether a storm is in _storms_ranked()'s view (beyond its distance check).
+
+        0 not, 1 yes, 2 yes but away from the route (on_route: only within
+        the angle, not within _STORM_ROUTE_NM of the route ahead).
+        """
+        in_angle = not use_angle or rel <= view_deg
+        if on_route:
+            along = self._route_pos.along_nm
+            off = _fw_route.offset_ahead(self._route_points, along, along + view_nm, lat, lon)
+            # nearest to where the aircraft is: only abeam or ahead, not behind it
+            if (off is not None and off[0] <= _STORM_ROUTE_NM and
+                    (off[1] > along + 0.5 or rel <= _STORM_VIEW_DEG)):
+                return 1
+            return 2 if in_angle else 0
+        return 1 if in_angle else 0
+
+    def _maneuver_rank_origin(self) -> Optional[tuple]:
+        """Return (lat, lon, icao) to rank storms from while maneuvering, or None (the aircraft).
+
+        The FMC destination when the aircraft is within
+        _MANEUVER_RANK_DEST_NM of it (see there).
+        """
+        icao = self.fmc_dst_icao
+        if not icao or icao not in self.airports or self.ac_lat is None:
+            return None
+        lat, lon = self.airports[icao]
+        if self._dist_nm(self.ac_lat, self.ac_lon, lat, lon) > _MANEUVER_RANK_DEST_NM:
+            return None
+        return lat, lon, icao
+
+    def _maneuver_storms_ranked(self) -> list:
+        """Return _storms_ranked() for maneuvering mode: all round, within the placement range.
+
+        Not beyond where a zone would count as behind after the next turn
+        (two sims holding at the same airport each ranked the storms ahead
+        of their own heading and showed different CBs; test 2026-11-16).
+        Near the destination, from the destination (_MANEUVER_RANK_DEST_NM).
+        """
+        reach_nm = self.args.low_alt_dist - _MANEUVER_PLACE_MARGIN_NM
+        origin = self._maneuver_rank_origin()
+        if origin is None:
+            return self._storms_ranked(reach_nm, 180.0)
+        if origin[2] != self._maneuver_rank_logged:
+            self._maneuver_rank_logged = origin[2]
+            self.logger.info("Radar CBs: maneuvering near %s — storms ranked from %s, within "
+                             "%.0fnm of it", origin[2], origin[2],
+                             reach_nm - _MANEUVER_RANK_DEST_NM)
+        return self._storms_ranked(reach_nm - _MANEUVER_RANK_DEST_NM, 180.0, origin[:2])
 
     def _place_storm_zones(self) -> bool:  # pylint: disable=too-many-locals
         """--radar-cbs: move a zone onto the most important storm no zone shows; True if one moved.
@@ -7133,7 +7209,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         whose CB turbulence reaches the aircraft, or a CB ahead within
         _STORM_KEEP_NM. At most one move per _STORM_PLACE_INTERVAL_S.
         Holding or vectored (maneuvering mode): storms all round, up to the
-        maneuvering placement range, and no CB within _STORM_KEEP_NM or
+        maneuvering placement range, near the destination ranked from there
+        (_maneuver_storms_ranked()), and no CB within _STORM_KEEP_NM or
         _HOLD_KEEP_CB_NM is taken away.
         """
         if (not self.args.radar_cbs or self.ac_lat is None or self.ac_hdg is None or
@@ -7146,13 +7223,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         usable = [zn for zn, (_, _, icao) in self.zone_positions.items()
                   if icao not in arpt_icaos and zn not in (self._anchor_zone, self.focused_zone) and
                   not self._is_cb_free_zone(zn)]
-        if self._maneuvering:
-            # holding or vectored: all round, and not beyond where a zone would count as
-            # behind after the next turn (two sims holding at the same airport each ranked
-            # the storms ahead of their own heading and showed different CBs; test 2026-11-16)
-            ranked = self._storms_ranked(self.args.low_alt_dist - _MANEUVER_PLACE_MARGIN_NM, 180.0)
-        else:
-            ranked = self._storms_ranked()
+        ranked = self._maneuver_storms_ranked() if self._maneuvering else self._storms_ranked()
         top = ranked[:len(usable)]
         rank_of = {r[0].key: i for i, r in enumerate(ranked)}
         shown = ({c.radar for c in self._drift.values() if c.radar and c.decay_from is None} |
@@ -7221,8 +7292,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         all_round = initial or self._maneuvering
         near_min = min(fwd_min, _RADAR_PLACE_MIN_NM)
         # the order every sim uses (_storms_ranked()), so they pick the same storms
-        for _, lat, lon, dist_nm, _ in self._storms_ranked(fwd_max,
-                                                           180.0 if all_round else 60.0):
+        ranked = (self._maneuver_storms_ranked() if self._maneuvering and not initial else
+                  self._storms_ranked(fwd_max, 180.0 if all_round else 60.0))
+        for _, lat, lon, dist_nm, _ in ranked:
             if not all_round and dist_nm < near_min:
                 continue
             if any(self._dist_nm(lat, lon, o[0], o[1]) < min_sep for o in others):
@@ -10353,6 +10425,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             chain = [(u, [dataclasses.replace(c) for c in found[u]])
                      for u in times[max(0, i - _fw_radar.WINDOW_FRAMES + 1):i + 1]]
             frames[t] = _fw_radar.track_window(chain)
+        self._radar_keep_withdrawn(frames, newest, moved)
         # coverage mask (changes rarely)
         now = time.monotonic()
         cov_tiles = [t for t in _fw_radar.tiles_around(*here, _RADAR_CELL_NM + 60.0,
@@ -10368,6 +10441,28 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if moved:
             self._radar_frame = None if self._radar_frame not in frames else self._radar_frame
         self._radar_activate(force=moved)
+
+    def _radar_keep_withdrawn(self, frames: dict, newest: list, moved: bool) -> None:
+        """Add to frames the frames we have that are newer than RainViewer's newest listed one.
+
+        A frame RainViewer withdrew (listed, then gone from a later list) is
+        kept until a newer one is listed: FTECH1 2026-11-17, the 19:10Z frame
+        was in the 19:13 list and not in the 19:15 one, and a CB 130 nm ahead
+        on a 45 dBZ line went away with it. The real weather matters more than
+        every sim showing the same (user, 2026-11-17). Not after a long move
+        (the frames we have are for somewhere else).
+        """
+        if moved or not newest:
+            return
+        for t, cells in self._radar_frames.items():
+            if t > newest[-1] and t not in frames:
+                frames[t] = cells
+                if t not in self._radar_withdrawn_logged:
+                    self._radar_withdrawn_logged.add(t)
+                    self.logger.info("Radar: RainViewer no longer lists the %s frame (newest "
+                                     "listed %s); keeping it until a newer one is listed",
+                                     time.strftime("%H:%MZ", time.gmtime(t)),
+                                     time.strftime("%H:%MZ", time.gmtime(newest[-1])))
 
     def _radar_activate(self, force: bool = False) -> None:
         """Make the frame that decides now (fw_radar.active_frame()) the radar cells.

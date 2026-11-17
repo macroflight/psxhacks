@@ -136,3 +136,42 @@ def place_ahead(points: list, ac_along_nm: float, fwd_nm: float,
         return lat, lon
     return destination(lat, lon, (course + (90.0 if right_nm > 0 else -90.0)) % 360.0,
                        abs(right_nm))
+
+
+def _leg_xtk_atk(a: tuple, b: tuple, lat: float, lon: float) -> tuple:
+    """Return (xtk_nm, atk_nm) of (lat, lon) against the great circle a -> b (atk from a)."""
+    course_ab, _ = _bearing_dist(*a, *b)
+    course_ap, dist_ap = _bearing_dist(*a, lat, lon)
+    dap = dist_ap / EARTH_NM
+    xtk = math.asin(max(-1.0, min(1.0, math.sin(dap) * math.sin(
+        math.radians(course_ap - course_ab))))) * EARTH_NM
+    cos_x = math.cos(xtk / EARTH_NM)
+    atk = math.acos(max(-1.0, min(1.0, math.cos(dap) / cos_x))) * EARTH_NM if cos_x else 0.0
+    if math.cos(math.radians(course_ap - course_ab)) < 0:
+        atk = -atk
+    return xtk, atk
+
+
+def offset_ahead(points: list, from_nm: float, to_nm: float, lat: float,  # pylint: disable=too-many-locals
+                 lon: float) -> Optional[tuple]:
+    """Return (off_nm, along_nm): (lat, lon)'s distance from the route between from_nm and to_nm.
+
+    from_nm/to_nm: distances along the route from its first point (the
+    aircraft's and how far ahead of it). off_nm is to the nearest point of
+    that part (beyond its ends: to the end), along_nm that point's distance
+    along the route. None if the part is empty.
+    """
+    if len(points) < 2 or to_nm <= from_nm:
+        return None
+    best_off, best_along = math.inf, None
+    start = 0.0
+    for i, length in enumerate(leg_lengths(points)):
+        lo_nm, hi_nm = max(0.0, from_nm - start), min(length, to_nm - start)
+        if lo_nm <= hi_nm:
+            xtk, atk = _leg_xtk_atk(points[i], points[i + 1], lat, lon)
+            clamped = max(lo_nm, min(hi_nm, atk))
+            off = abs(xtk) if clamped == atk else math.hypot(atk - clamped, xtk)
+            if off < best_off:
+                best_off, best_along = off, start + clamped
+        start += length
+    return None if best_along is None else (best_off, best_along)

@@ -44,6 +44,15 @@
   (on a fixed grid, by the hour), so those CBs match too.
   Sims holding in the same hold or being vectored in the same area also
   get the same CBs.
+  Near the destination they rank the storms from the destination, not
+  from where each aircraft is, so sims holding there show the same ones
+  (79 % of CBs within a mile in a test hold, 58 % before). With the zones
+  along the FMC route, CBs go on storms near the route ahead, through its
+  turns, and at most two on storms away from it: before, storms 150 nm
+  left of a route about to turn right took five of seven zones. A radar
+  frame RainViewer withdraws (it happens: the 19:10Z frame on 2026-11-17
+  never came back) is kept until a newer one comes, instead of taking
+  away the CBs only it had.
 - **Lightning from EUMETSAT's MTG Lightning Imager instead of
   Blitzortung.** Blitzortung's terms don't allow this use. The new
   source is the Meteosat-12 satellite's lightning images (free, no
