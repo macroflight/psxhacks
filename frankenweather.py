@@ -12694,7 +12694,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         parser.add_argument(
             '--radar-cbs', action='store_true',
             help="The weather radar decides where CBs are (testing). Inside radar coverage "
-                 "(RainViewer), a zone only keeps a CB where the radar has a storm cell (45 dBZ "
+                 "(RainViewer), a zone only keeps a CB where the radar has a storm cell (43 dBZ "
                  "or more) within 20nm, and gets one where the forecast has none; METARs and "
                  "SIGMETs no longer make CBs there. A drifting CB sits exactly on its radar cell "
                  "and moves with the cell's tracked motion, and fades when the cell is gone. "

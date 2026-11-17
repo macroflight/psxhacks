@@ -433,7 +433,7 @@ the same picture VATSIM Radar can show) decides where the CBs are.
 - Every new radar frame (every 10 minutes), frankenweather finds the storm
   cells within 250 nm of the aircraft: areas of 40 dBZ or more, with large
   areas split into their stronger cores. Each cell's motion comes from the
-  three newest frames. A cell peaking at 45 dBZ or more counts as a CB;
+  three newest frames. A cell peaking at 43 dBZ or more counts as a CB;
   weaker ones count as towering cumulus or heavy showers.
 - **Every sim sees a storm's CB in the same place.** Two or more PSX sims
   flying in the same area put the CB on a radar storm at the same position,

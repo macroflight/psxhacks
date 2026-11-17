@@ -53,6 +53,8 @@
   frame RainViewer withdraws (it happens: the 19:10Z frame on 2026-11-17
   never came back) is kept until a newer one comes, instead of taking
   away the CBs only it had.
+  A radar cell counts as a CB from 43 dBZ (was 45): a line of storms in a
+  TS SIGMET area peaking at 44 dBZ frame after frame got no CB.
 - **Lightning from EUMETSAT's MTG Lightning Imager instead of
   Blitzortung.** Blitzortung's terms don't allow this use. The new
   source is the Meteosat-12 satellite's lightning images (free, no

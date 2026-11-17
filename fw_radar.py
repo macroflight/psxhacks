@@ -87,7 +87,8 @@ CELL_ZOOM = 7                 # RainViewer's most (about 1.2 km a pixel at the e
 COVERAGE_ZOOM = 5             # the coverage mask needs less
 COVERAGE_PATH = "/v2/coverage/0"
 CELL_DBZ = 40                 # a cell: connected pixels of at least this
-CB_DBZ = 45                   # a cell this strong (its peak) is a CB; weaker ones TCU/showers
+CB_DBZ = 43                   # a cell this strong (its peak) is a CB; weaker ones TCU/showers
+#   (45 until 2026-11-17: a TS SIGMET line peaking at 44 dBZ frame after frame got no CB)
 CELL_MIN_KM2 = 8.0            # smaller ones are noise or speckle
 SPLIT_KM2 = 400.0             # a larger one is split into its stronger cores
 TRACK_MAX_KT = 70.0           # a cell can't have moved faster than this between frames
