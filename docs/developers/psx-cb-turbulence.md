@@ -164,9 +164,48 @@ CB's upwind (west) and downwind (east) side:
 - In 60 kt of wind the core passes had a little more turbulence (280-332
   bursts) than in light wind (247).
 
+### Above the top and below the base (2026-11-17, frankenweather on)
+
+Test CB 8/8, 3,000-40,000 ft, frankenweather's radar-colour CB turbulence on
+(`~/psx-headless/tests/cbfw-20261116/D1-*`). PSX's own bursts per minute by
+distance from the CB centre:
+
+| | 0-4 nm | 4-8 nm | 8-12 nm | 12-16 nm | 16-20 nm |
+| --- | --- | --- | --- | --- | --- |
+| FL413-422 (above the top) | 143 | 138 | 61 | 44 | 14 |
+| 2,000 ft (below the base) | 205 | 138 | 79 | 39 | 6 |
+| FL300 (in cloud, 2026-11-16) | 189 | 151 | 51-79 | 51-79 | 24-34 |
+
+- PSX's CB turbulence doesn't depend on altitude: above the top and below the
+  base it is about as strong as inside the cloud.
+- frankenweather adds at most 0.34 there (anvil CAT above the top, inflow and
+  outflow below the base), against 0.45-0.65 in the cloud's amber and core.
+- A 747 at the test weight couldn't hold FL420 once it turned; it sank into
+  the cloud (only the first pass counts as above the top).
+
+### PSX's own TS SIGMET cells (2026-11-17, frankenweather off)
+
+With a client-written TS SIGMET (WxSigmet, SigmetOn = 1) and no zone CBs,
+PSX draws its own cells in the SIGMET area
+(`~/psx-headless/tests/sigecho-20261117/`):
+
+- ISOL, OCNL, EMBD, FRQ and SQL drew the same cells in the same places.
+- None within ~40 nm of the aircraft when the SIGMET was written (the box
+  started 26 nm ahead); the nearest cell ~60 nm out.
+- Among them one **big cell with three red/magenta cores** in one amber area,
+  about 30 nm long, cores ~8-10 nm apart; also long cells with one red core,
+  and a small round one. These are the cells a real 747 pilot called "long
+  elliptical (BIG) cell with three red echoes"; zone CBs and planet-weather
+  (WxClust) cells never show more than one red core.
+- Flying straight through the three-core cell at FL300: PSX turbulence from
+  ~15 nm before the first core to ~10 nm after the last (40-165 bursts/min),
+  none elsewhere; lightning flashes out to ~40 nm from the cells.
+- frankenweather's own-SIGMET mode leaves TS out of what it gives PSX, so
+  these cells only appear with the PSX SIGMET preset.
+
 ### Not measured yet
 
-- Other altitudes (only FL300 so far) and CB tops below the aircraft.
+- CB tops below the aircraft by more than ~2,000 ft.
 - Whether PSX uses the zone's wind or the aircraft's for anything here
   (the turbulence ignored the wind; the radar echo's shape follows the
   zone's surface wind direction, see above).
