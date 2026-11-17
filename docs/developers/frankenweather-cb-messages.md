@@ -110,6 +110,10 @@ change. The CBS message is **not** delayed: its positions are for `time`.
 - **Top above PSX's limit**: when PSX's limit cut the top, `top_ft_msl_fw` is the
   tropopause (forecast at the CB, or the climate value for the latitude and
   month if higher) plus 2,000 ft.
+- **Satellite top**: a CB on a radar storm (`--radar-cbs`) with a satellite
+  cloud top (Meteosat's Cloud Top Height, see frankenweather.md) has that as
+  `top_ft_msl_fw` when it is higher than PSX's top, also above PSX's limit (up
+  to about 52,500 ft, where the satellite product's scale ends).
 - **Drift**: frankenweather's advanced zones (on by default, off with
   `--no-advanced-zones`) move enroute CBs with the 850-300 hPa mean wind,
   5 degrees to the right. With `--radar-cbs` a CB on a radar storm cell

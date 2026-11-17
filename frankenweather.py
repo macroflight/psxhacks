@@ -61,6 +61,7 @@ from frankenturb.intensity_profile import (
 from fw_cb import (
     WX_DEFAULTS as _WX_DEFAULTS,
     CB_TOP_MAX_FT as _CB_TOP_MAX_FT,
+    CB_TOP_MIN_FT as _CB_TOP_MIN_FT,
     cape_to_cb_oktas as _cape_to_cb_oktas,
     cb_base_ft as _cb_base_ft,
     cb_top_ceiling_ft as _cb_top_ceiling_ft,
@@ -80,6 +81,7 @@ import fw_route as _fw_route  # pylint: disable=wrong-import-order
 import fw_radar as _fw_radar  # pylint: disable=wrong-import-order
 import fw_storms as _fw_storms  # pylint: disable=wrong-import-order
 import fw_lightning as _fw_lightning  # pylint: disable=wrong-import-order
+import fw_cloudtop as _fw_cloudtop  # pylint: disable=wrong-import-order
 import fw_holdover as _fw_holdover  # pylint: disable=wrong-import-order
 import fw_icing as _fw_icing  # pylint: disable=wrong-import-order
 from psxhacks_version import get_version
@@ -830,6 +832,11 @@ _LTG_RADIUS_NM = 40.0
 _LTG_MIN_PIXELS = 3
 _LTG_CACHE_S = 300.0      # fetch new images no more often than this
 _LTG_MOVED_DEG = 2.0      # ... unless the aircraft is this far from where they were fetched
+# Satellite cloud tops (fw_cloudtop, --radar-cbs): a radar CB's top is the highest cloud top
+# within this of its cell (the image is 10-20 min behind the radar frame: the storm moved)
+_CTOP_RADIUS_NM = 10.0
+_CTOP_CACHE_S = 300.0     # fetch a new image no more often than this (one per 15 min)
+_CTOP_MOVED_DEG = 2.0     # ... unless the aircraft is this far from where it was fetched
 
 # ---------------------------------------------------------------------------
 # Coordinate parsing (UCAR stations.txt format)
@@ -2900,6 +2907,15 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._ltg_fetch_time: float = 0.0
         self._ltg_fetch_at: Optional[tuple] = None
         self._ltg_image_time: Optional[str] = None
+        # Satellite cloud tops (fw_cloudtop): the decoded image (m, None: no top), its area,
+        # time, when and where it was fetched, the legend's colours; each radar cell's top
+        self._ctop_grid: list = []
+        self._ctop_bbox: Optional[tuple] = None
+        self._ctop_image_time: Optional[str] = None
+        self._ctop_fetch_time: float = 0.0
+        self._ctop_fetch_at: Optional[tuple] = None
+        self._ctop_palette: list = []
+        self._cb_top_actual: dict = {}   # radar cell key -> its CB's real top (ft MSL)
 
         # API state broadcast
         self._instance_uuid: str = str(uuid.uuid4())
@@ -8045,17 +8061,25 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
     def _radar_take(self, cell, match) -> None:
         """Put a drifting CB on radar cell match: its key, motion (shown) and CB size."""
         cell.radar, cell.radar_cell = match.key, match
-        if match.motion and match.age_s >= _RADAR_TRUST_AGE_S:
+        # the same check as when it started drifting (_radar_motion_plausible()): without it,
+        # FTECH1 2026-11-17, a CB took its cell's 180/16kt in a 094/28kt mean wind, next to
+        # one going 094/28 (cores shifting, not the storm moving)
+        if (match.motion and match.age_s >= _RADAR_TRUST_AGE_S and
+                _radar_motion_plausible(match.motion, cell.wind_motion)):
             cell.heading_deg, cell.speed_kt = match.motion[0], min(match.motion[1],
                                                                    _RADAR_STEER_MAX_KT)
         elif cell.wind_motion:
             cell.heading_deg, cell.speed_kt = cell.wind_motion
         month = datetime.now(timezone.utc).month
-        oktas, top = self._radar_cb_size(match, match.lat, month)
+        oktas, top, _ = self._radar_cb_size(match, match.lat, month)
         parts = cell.wx.split(';')
         if len(parts) > 11 and cell.decay_from is None:
             parts[9], parts[10] = str(oktas), str(top)
-            cell.wx = ';'.join(parts)
+            # the top is above sea level, PSX's above the zone (headless 2026-11-17: a CB
+            # over the Turkish plateau 5,300 ft too high)
+            mode = cell.mode.split(';')
+            elev = int(float(mode[3])) if len(mode) > 3 and mode[3] else 0
+            cell.wx = _cb_top_above_zone(';'.join(parts), elev)
 
     def _radar_adopt(self, zone_num: int, cell, now: float) -> bool:
         """--radar-cbs: give a drifting CB without a radar cell one; True if it has one now.
@@ -8668,6 +8692,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             if max(cb["top_ft"], top_psx) >= _CB_TOP_MAX_FT:
                 top_fw = max(_climate_tropopause_ft(pos[0], month),
                              tropo_ft or 0.0) + _CB_OVERSHOOT_FT
+            # a radar CB with a satellite top: that, also above PSX's limit (fw_cloudtop)
+            top_sat = self._cb_top_actual_of(zone_num)
+            if top_sat is not None and top_sat > top_psx:
+                top_fw = top_sat
             top = max(top_psx, top_fw or 0.0)
             top_wind = None
             if profile is not None:
@@ -10638,7 +10666,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self._radar_zone_cell.pop(zone_num, None)
         if cell is None:
             return (_strip_cb(wx), "radar: no storm cell") if _fw_drift.cb_oktas(wx) else (wx, "")
-        oktas, top = self._radar_cb_size(cell, lat, month)
+        oktas, top, top_from = self._radar_cb_size(cell, lat, month)
         parts = wx.split(';')
         if len(parts) < 12:
             return wx, ""
@@ -10648,15 +10676,102 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         parts[9], parts[10] = str(oktas), str(top)
         if not had:
             parts[11] = "3000"
-        return ";".join(parts), f"radar: {cell.max_dbz} dBZ cell {cell.area_km2:.0f} km2"
+        return ";".join(parts), (f"radar: {cell.max_dbz} dBZ cell {cell.area_km2:.0f} km2, "
+                                 f"top {top_from}")
 
-    @staticmethod
-    def _radar_cb_size(cell, lat: float, month: int) -> tuple:
-        """Return (oktas, top ft) of the CB on a radar cell: by its strength and size."""
+    def _radar_cb_size(self, cell, lat: float, month: int) -> tuple:
+        """Return (oktas, top ft, where the top is from) of the CB on a radar cell.
+
+        Oktas by its strength and size. The top: the satellite's highest cloud
+        top near the cell (_cloud_top_ft(); at least fw_cb.CB_TOP_MIN_FT, at
+        most PSX's limit; the real one is kept for the CB messages), else by
+        its strength up to the tropopause plus an overshoot.
+        """
         oktas = (3 if cell.max_dbz < 50 else 4 if cell.max_dbz < 55 else 6 if cell.max_dbz < 60
                  else 7) + (1 if cell.area_km2 >= 200.0 else 0)
-        return min(8, oktas), int(min(_cb_top_ceiling_ft(lat, month),
-                                      25000 + (cell.max_dbz - 45) * 1500))
+        sat_ft = self._cloud_top_ft(cell.lat, cell.lon)
+        if sat_ft is None:
+            self._cb_top_actual.pop(cell.key, None)
+            return min(8, oktas), int(min(_cb_top_ceiling_ft(lat, month),
+                                          25000 + (cell.max_dbz - 45) * 1500)), "by strength"
+        actual = max(float(_CB_TOP_MIN_FT), sat_ft)
+        if len(self._cb_top_actual) > 200:   # storms long gone
+            live = {c.key for c in self._cells()}
+            self._cb_top_actual = {k: v for k, v in self._cb_top_actual.items() if k in live}
+        self._cb_top_actual[cell.key] = actual
+        return min(8, oktas), int(min(_CB_TOP_MAX_FT, actual)), f"{sat_ft:.0f}ft (satellite)"
+
+    async def _fetch_cloud_tops(self, session: aiohttp.ClientSession) -> None:
+        """--radar-cbs: refresh the satellite cloud top heights around the aircraft (fw_cloudtop).
+
+        Every _CTOP_CACHE_S (sooner after a long move), the newest EUMETView
+        Cloud Top Height image. Outside Meteosat's view, without Pillow or on a
+        failure: none (the CB tops go by the storms' strength).
+        """
+        if not self.args.radar_cbs or self.ac_lat is None:
+            return
+        here = (self.ac_lat, self.ac_lon)
+        moved = (self._ctop_fetch_at is None or
+                 abs(here[0] - self._ctop_fetch_at[0]) > _CTOP_MOVED_DEG or
+                 abs(((here[1] - self._ctop_fetch_at[1] + 180.0) % 360.0) - 180.0) >
+                 _CTOP_MOVED_DEG)
+        if not moved and time.monotonic() - self._ctop_fetch_time < _CTOP_CACHE_S:
+            return
+        self._ctop_fetch_time = time.monotonic()
+        if _PIL_Image is None or not _fw_cloudtop.covers(*here):
+            self._ctop_grid, self._ctop_fetch_at = [], here
+            return
+        try:
+            if not self._ctop_palette:
+                async with session.get(_fw_cloudtop.WMS_URL, timeout=_RV_TIMEOUT,
+                                       params=_fw_cloudtop.legend_params()) as r:
+                    img = _PIL_Image.open(BytesIO(await r.read())).convert('RGBA')
+                self._ctop_palette = _fw_cloudtop.legend_palette(img)
+                if not self._ctop_palette:
+                    raise ValueError("no colour bar in the legend")
+            async with session.get(_fw_cloudtop.WMS_URL, timeout=_RV_TIMEOUT, params={
+                    "service": "WMS", "version": "1.3.0", "request": "GetCapabilities"}) as r:
+                latest = _fw_cloudtop.latest_time(await r.text()) if r.status == 200 else None
+            if latest is None:
+                raise ValueError("no image time in the WMS capabilities")
+            bbox, size = _fw_cloudtop.box(*here)
+            async with session.get(_fw_cloudtop.WMS_URL, timeout=_RV_TIMEOUT,
+                                   params=_fw_cloudtop.getmap_params(bbox, size, latest)) as r:
+                if r.status != 200 or not r.content_type.startswith("image/"):
+                    raise ValueError(f"WMS GetMap HTTP {r.status} {r.content_type}")
+                img = _PIL_Image.open(BytesIO(await r.read())).convert('RGBA')
+            grid = await asyncio.get_running_loop().run_in_executor(
+                None, _fw_cloudtop.decode, img, self._ctop_palette)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.info("Satellite cloud tops: not available (%s)", exc)
+            return
+        if latest != self._ctop_image_time:
+            self.logger.info("Satellite cloud tops: image %s (%.0f min old)", latest[11:16] + "Z",
+                             _fw_cloudtop.age_s(latest, datetime.now(timezone.utc)) / 60.0)
+        self._ctop_grid, self._ctop_bbox = grid, bbox
+        self._ctop_fetch_at, self._ctop_image_time = here, latest
+
+    def _cb_top_actual_of(self, zone_num: int) -> Optional[float]:
+        """Return the satellite top (ft MSL) of zone_num's radar CB, or None (_radar_cb_size())."""
+        drift = self._drift.get(zone_num)
+        key = drift.radar if drift is not None and drift.radar else \
+            self._radar_zone_cell.get(zone_num)
+        return self._cb_top_actual.get(key) if key else None
+
+    def _cloud_top_ft(self, lat: float, lon: float) -> Optional[float]:
+        """Return the satellite's highest cloud top (ft MSL) within _CTOP_RADIUS_NM, or None.
+
+        None without an image, with one older than fw_cloudtop.MAX_AGE_S, or
+        without a cloud top there.
+        """
+        if not self._ctop_grid or self._ctop_image_time is None or self._ctop_bbox is None:
+            return None
+        if _fw_cloudtop.age_s(self._ctop_image_time,
+                              datetime.now(timezone.utc)) > _fw_cloudtop.MAX_AGE_S:
+            return None
+        metres = _fw_cloudtop.top_near(self._ctop_grid, self._ctop_bbox, lat, lon,
+                                       _CTOP_RADIUS_NM)
+        return None if metres is None else metres / 0.3048
 
     # ------------------------------------------------------------------
     # Lightning (MTG Lightning Imager, fw_lightning) helpers
@@ -10973,6 +11088,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         await self._fetch_rv_frame(session)
         await self._fetch_rv_tiles(session, snap_positions + self._rv_local_sample_points())
         await self._fetch_lightning(session)
+        await self._fetch_cloud_tops(session)
 
         now = datetime.now(timezone.utc)
         month = now.month
@@ -11069,6 +11185,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 cb_at = (_fw_drift.cb_position(self.geod, new_modes[-1], sim_ms)
                          if sim_ms is not None else None) or (lat, lon)
                 final_wx, radar_why = self._radar_cb_wx(final_wx, *cb_at, month, zone_num)
+                if radar_why.startswith("radar: ") and "no storm" not in radar_why:
+                    # its top is above sea level, PSX's above the zone (the conversion above
+                    # ran before: headless 2026-11-17, CBs on the Turkish plateau 5,300 ft
+                    # too high)
+                    final_wx = _cb_top_above_zone(final_wx, int(new_modes[-1].split(';')[3]))
                 if radar_why:
                     sigmet_label = None
                     decided = (before, _fw_drift.cb_oktas(final_wx), radar_why.split(" cell")[0])

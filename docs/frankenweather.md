@@ -435,6 +435,16 @@ the same picture VATSIM Radar can show) decides where the CBs are.
   areas split into their stronger cores. Each cell's motion comes from the
   three newest frames. A cell peaking at 43 dBZ or more counts as a CB;
   weaker ones count as towering cumulus or heavy showers.
+- **The CB's size comes from the radar and the satellite.** Its oktas go by
+  the cell's strength (3 below 50 dBZ, 4 to 54, 6 to 59, 7 from 60), one
+  more for a cell of 200 km² or more. Its top is the highest cloud top within
+  10 nm of the cell in EUMETSAT's Meteosat Cloud Top Height image (one every
+  15 minutes, about 20-25 minutes old; Europe, Africa, the Atlantic and the
+  Middle East), at least 15,000 ft and at most PSX's 44,999 ft. Without an
+  image under 45 minutes old (elsewhere, or a download failure), the top
+  goes by the cell's strength: 25,000 ft at 45 dBZ and 1,500 ft more per
+  dBZ, up to the tropopause plus 2,000 ft. Where a high cloud deck covers
+  the storm, the satellite sees the deck; the CB then reaches that high.
 - **Every sim sees a storm's CB in the same place.** Two or more PSX sims
   flying in the same area put the CB on a radar storm at the same position,
   to well under a mile. Each frankenweather works it out from the radar

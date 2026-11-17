@@ -55,6 +55,16 @@
   away the CBs only it had.
   A radar cell counts as a CB from 43 dBZ (was 45): a line of storms in a
   TS SIGMET area peaking at 44 dBZ frame after frame got no CB.
+  A radar CB's top comes from EUMETSAT's Meteosat cloud top heights where
+  there is a recent image (Europe, Africa, the Atlantic, the Middle East),
+  else from the storm's strength as before; the CB messages send the
+  satellite's top also above PSX's 44,999 ft limit.
+- **Fix: radar CBs over high ground were too tall** by the ground's
+  elevation (5,000-5,800 ft on the Turkish plateau): PSX takes CB tops as
+  heights above the ground, and the radar's top went in as a height above
+  sea level. Also: a drifting CB took its radar cell's own motion without
+  the check against the wind it started with (two CBs next to each other
+  drifting 86 degrees apart).
 - **Lightning from EUMETSAT's MTG Lightning Imager instead of
   Blitzortung.** Blitzortung's terms don't allow this use. The new
   source is the Meteosat-12 satellite's lightning images (free, no
