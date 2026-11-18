@@ -60,7 +60,7 @@ tomlcheck:
 
 unittests:
 	$(info * LINT: Running unit tests)
-	. $(LINTVENVDIR)/bin/activate; python3 -m unittest -v router/frankenrouter/*.py
+	. $(LINTVENVDIR)/bin/activate; python3 -m unittest -v router/frankenrouter/*.py test_fw_planner.py
 
 pslint:
 	$(info * LINT: Running PSScriptAnalyzer on PowerShell scripts)
