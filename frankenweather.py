@@ -2930,6 +2930,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._maneuver_rank_logged: Optional[str] = None   # _maneuver_storms_ranked() log
         self._nd_range_seen: list = []   # [(monotonic, nm)]: the NDs' longer range, when (hold)
         self._no_new_cb_logged: set = set()   # zones logged as kept CB-free in view
+        self._drift_ended: set = set()   # zones whose drifting CB just ended (_no_new_cb_in_view())
         self._radar_withdrawn_logged: set = set()   # frame times logged as withdrawn by RainViewer
         self._radar_hold_until = time.monotonic() + _RADAR_STARTUP_HOLD_S
         self._radar_at: Optional[tuple] = None
@@ -7495,13 +7496,16 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
     def _no_new_cb_in_view(self, zone_num: int, wx: str, mode: str, pos: tuple) -> str:
         """Return wx without its CB if that CB would be new and the crew may see it.
 
-        New: the zone (at pos) shows no CB yet; a CB it already shows may go on
-        (the radar resizes it, it drifts). Where PSX draws it: 7 nm from the
-        zone centre (fw_drift.cb_position()). See _no_new_cb_at().
+        New: the zone (at pos) shows no CB yet, or only the drifting CB that
+        just ended; a CB it already shows may go on (the radar resizes it).
+        Where PSX draws it: 7 nm from the zone centre (fw_drift.cb_position()).
+        See _no_new_cb_at().
         """
         if _fw_drift.cb_oktas(wx) <= 0:
             return wx
-        if (self._zone_wx_pos.get(zone_num) == pos and
+        drift_ended = zone_num in self._drift_ended
+        self._drift_ended.discard(zone_num)
+        if (not drift_ended and self._zone_wx_pos.get(zone_num) == pos and
                 _fw_drift.cb_oktas(self.zone_wx.get(zone_num) or "") > 0):
             return wx
         sim_ms = self.sim_time_ms()
@@ -8382,6 +8386,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         cell = self._drift.pop(zone_num)
         self.logger.info("CB drift: Zone %d CB stops at %s after %.0fnm (%s)",
                          zone_num, _fw_drift.pos_text(cell.lat, cell.lon), cell.moved_nm, why)
+        # the zone's CB target is the drifting CB's: the CB fade task stepped it back in at the
+        # zone centre (a 7/8 CB 86 nm ahead, 9 s after its storm's life ended; headless
+        # 2026-11-18); the next zone update sets the zone's own (no new CB in view)
+        self.zone_cb_target[zone_num] = None
+        self.zone_cb_ramp.pop(zone_num, None)
+        self._drift_ended.add(zone_num)   # its CB was the drifting one: the zone's own is new
         if retire:
             self._drift_retired[zone_num] = (cell.clat, cell.clon)
             self._zone_pinned[zone_num] = (cell.clat, cell.clon)
