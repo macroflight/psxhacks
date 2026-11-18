@@ -435,6 +435,15 @@ the same picture VATSIM Radar can show) decides where the CBs are.
   areas split into their stronger cores. Each cell's motion comes from the
   three newest frames. A cell peaking at 43 dBZ or more counts as a CB;
   weaker ones count as towering cumulus or heavy showers.
+- **A CB the crew may see stays.** A CB within 200 nm (`--cb-visible-dist`,
+  how far CBs show out of the window), or within the longest range either ND
+  has shown the weather radar at in the last 10 minutes (WXR on, terrain off,
+  not PLN) if that is farther (at most 320 nm, the weather radar's reach; a short zoom-in doesn't count; off with
+  `--no-cb-visible-nd`), and not behind the aircraft (holding or vectored:
+  all round) is never moved to make room for
+  another storm, however strong: zones without a CB, or with one behind or
+  farther away, are used for new storms. A CB only goes when its own storm
+  dies on the radar (it then shrinks away) or once it is behind.
 - **The CB's size comes from the radar and the satellite.** Its oktas go by
   the cell's strength (3 below 50 dBZ, 4 to 54, 6 to 59, 7 from 60), one
   more for a cell of 200 km² or more. Its top is the highest cloud top within

@@ -494,6 +494,20 @@ _STORM_ROUTE_NM = 60.0
 _STORM_OFF_ROUTE_MAX = 2
 _STORM_PLACE_INTERVAL_S = 30.0  # ... a zone moved onto a top storm at most this often
 _STORM_KEEP_NM = 80.0          # ... never taking away a CB ahead nearer than this
+# A CB the crew may see on the weather radar or out of the window (_cb_visible(), within
+# --cb-visible-dist) is never moved to make room for another one; zones without a CB, or with
+# one behind or farther, go first (user, 2026-11-17: CB positions stable; a 75 min headless
+# cruise through dense storms moved a zone onto a storm every 90 s, each taking a CB 80-200 nm
+# ahead off the radar). 200 nm until how far MSFS shows CBs is checked in the sim (user 11-18).
+# Or farther: the longest range either ND has shown within _ND_RANGE_HOLD_S (a pilot on 320 nm
+# who zooms to 80 nm for a few seconds still sees the CBs at 100-320 nm a moment later; user)
+_ND_RANGES_NM = (5, 10, 20, 40, 80, 160, 320, 640)   # EcpNdRangeCp/Fo 0-7 (747-400 EFIS panel)
+_ND_RANGE_HOLD_S = 600.0
+_ND_WXR_MAX_NM = 320.0        # the weather radar shows nothing farther (640 nm: no WXR returns)
+# An ND shows the weather radar with WXR on, TERR off (terrain replaces it) and not in PLN mode:
+# EfisActL/R's last field, position 6 WXR and 12 TERR ("1": on; as frankenpilot reads them);
+# EcpNdModeCp/Fo 0 APP, 1 VOR, 2 MAP, 3 PLN (situations: 2 in cruise, 0 on approach)
+_ND_FLAG_WXR, _ND_FLAG_TERR, _ND_MODE_PLN = 6, 12, 3
 _CBS_CHECK_S = 5.0            # CBS messages: look for changes this often
 _CBS_SAME_CB_NM = 20.0        # a zone's CB this far from where it was: a new CB (new id)
 _FUEL_SITU_LOAD_S = 30.0      # fuel changes this soon after a situ load: the load, not a refuel
@@ -2897,6 +2911,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._storm_motion: dict = {}
         self._storm_place_last = 0.0   # time.monotonic() of _place_storm_zones()' last move
         self._maneuver_rank_logged: Optional[str] = None   # _maneuver_storms_ranked() log
+        self._nd_range_seen: list = []   # [(monotonic, nm)]: the NDs' longer range, when (hold)
         self._radar_withdrawn_logged: set = set()   # frame times logged as withdrawn by RainViewer
         self._radar_hold_until = time.monotonic() + _RADAR_STARTUP_HOLD_S
         self._radar_at: Optional[tuple] = None
@@ -7253,7 +7268,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         best, best_key = None, None
         for zone_num in usable:
             zlat, zlon, _ = self.zone_positions[zone_num]
-            if self._cb_kept_in_hold(zone_num) is not None:
+            if self._cb_kept_in_hold(zone_num) is not None or self._cb_visible(zone_num):
                 continue
             drift = self._drift.get(zone_num)
             wx = (self.zone_wx.get(zone_num) or "").split(";")
@@ -7344,6 +7359,79 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if dist_nm > reach_nm:
             return None
         return f"CB turbulence reaches {reach_nm:.0f}nm, aircraft {dist_nm:.0f}nm away"
+
+    def _cb_visible(self, zone_num: int) -> bool:
+        """Return True if zone_num has a CB the crew may see (radar or window).
+
+        Within --cb-visible-dist and not behind (holding or vectored: all
+        round, the radar sweeps everything while turning).
+        """
+        if zone_num not in self.zone_positions or self.ac_lat is None or self.ac_hdg is None:
+            return False
+        wx = (self.zone_wx.get(zone_num) or "").split(";")
+        if zone_num not in self._drift and (len(wx) < 10 or wx[9] in ("", "0")):
+            return False
+        lat, lon, _ = self.zone_positions[zone_num]
+        az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
+        if dist_m / _NM_TO_M > self._cb_visible_range_nm():
+            return False
+        return self._maneuvering or _fw_route.angle_diff(az % 360.0, self.ac_hdg) <= 90.0
+
+    def handle_nd_range(self, _key: str, _value: str) -> None:
+        """Note what the NDs show after a range, mode or WXR/TERR change."""
+        self._note_nd_range()
+
+    def _nd_range_now_nm(self) -> Optional[float]:
+        """Return the longest range of an ND showing the weather radar now (nm; 0: none does).
+
+        An ND counts with WXR on, TERR off and not in PLN mode (_ND_FLAG_*);
+        one whose EFIS state isn't known yet counts. None if no range is known.
+        """
+        ranges, known = [], False
+        for seat, side in (("Cp", "L"), ("Fo", "R")):
+            raw = self.psx.get(f"EcpNdRange{seat}") if self.psx else None
+            try:
+                rng = _ND_RANGES_NM[int(raw)]
+            except (TypeError, ValueError, IndexError):
+                continue
+            known = True
+            flags = ((self.psx.get(f"EfisAct{side}") or "").split(";"))[-1]
+            mode = self.psx.get(f"EcpNdMode{seat}")
+            if mode is not None and str(mode).strip() == str(_ND_MODE_PLN):
+                continue
+            if len(flags) > _ND_FLAG_TERR and (flags[_ND_FLAG_WXR] != "1" or
+                                               flags[_ND_FLAG_TERR] == "1"):
+                continue
+            ranges.append(rng)
+        if not known:
+            return None
+        return float(max(ranges)) if ranges else 0.0
+
+    def _note_nd_range(self) -> None:
+        """Remember the NDs' range now (_nd_range_seen); forget what the hold no longer needs."""
+        now = time.monotonic()
+        rng = self._nd_range_now_nm()
+        if rng is not None and (not self._nd_range_seen or self._nd_range_seen[-1][1] != rng):
+            self._nd_range_seen.append((now, rng))
+        cutoff = now - _ND_RANGE_HOLD_S
+        # keep the last entry before the cutoff: that range was in use until the next one
+        while len(self._nd_range_seen) > 1 and self._nd_range_seen[1][0] <= cutoff:
+            self._nd_range_seen.pop(0)
+
+    def _cb_visible_range_nm(self) -> float:
+        """Return how far a CB counts as visible to the crew (_cb_visible()).
+
+        The larger of --cb-visible-dist (out of the window, MSFS) and, unless
+        --no-cb-visible-nd, the longest range an ND showed the weather radar
+        at within _ND_RANGE_HOLD_S (at most _ND_WXR_MAX_NM).
+        """
+        visible = self.args.cb_visible_dist
+        if self.args.cb_visible_nd:
+            self._note_nd_range()
+            if self._nd_range_seen:
+                visible = max(visible, min(_ND_WXR_MAX_NM,
+                                           max(r for _, r in self._nd_range_seen)))
+        return visible
 
     def _cb_kept_in_hold(self, zone_num: int) -> Optional[str]:
         """Return why zone_num stays put in maneuvering mode, or None (see _HOLD_KEEP_CB_NM).
@@ -7682,14 +7770,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         return result
 
     def _most_expendable_zone(self, exclude_icaos: set) -> Optional[int]:
-        """Return the zone number farthest from aircraft not serving an excluded airport."""
-        best_zn, best_dist = None, -1.0
+        """Return the zone farthest from the aircraft not serving an excluded airport.
+
+        A CB the crew may see (_cb_visible()) only if there is no other.
+        """
+        best_zn, best_key = None, None
         for zn, (zlat, zlon, zicao) in self.zone_positions.items():
             if zicao in exclude_icaos or self._cb_turb_in_reach(zn) is not None:
                 continue
-            d = self._dist_nm(self.ac_lat, self.ac_lon, zlat, zlon)
-            if d > best_dist:
-                best_dist, best_zn = d, zn
+            key = (not self._cb_visible(zn), self._dist_nm(self.ac_lat, self.ac_lon, zlat, zlon))
+            if best_key is None or key > best_key:
+                best_key, best_zn = key, zn
         return best_zn
 
     def _reposition_arpt_zones_for_cb_avoidance(self) -> None:
@@ -8856,10 +8947,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
     def _expendable_for_anchor(self) -> Optional[int]:
         """Return the zone to turn into a new anchor zone, or None.
 
-        Never the nearest zone, PSX's focused zone, the current anchor or a
-        dep/dst airport zone. Preferred: a zone behind the aircraft (the
-        farthest), then one ahead without a CB (the farthest) -- a CB that
-        may be on the radar is only taken away if nothing else is left.
+        Never the nearest zone, PSX's focused zone, the current anchor, a
+        dep/dst airport zone or a CB the crew may see (_cb_visible()).
+        Preferred: a zone behind the aircraft (the farthest), then one ahead
+        without a CB (the farthest).
         """
         arpt_icaos = {icao for icao, _, _ in self._arpt_coverage_needed()}
         protected = {self._nearest_zone_num(), self.focused_zone, self._anchor_zone}
@@ -8867,7 +8958,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         best, best_key = None, None
         for zone_num, (lat, lon, icao) in self.zone_positions.items():
             if (zone_num in protected or icao in arpt_icaos or
-                    self._cb_turb_in_reach(zone_num) is not None):
+                    self._cb_turb_in_reach(zone_num) is not None or self._cb_visible(zone_num)):
                 continue
             az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
             behind = abs((az - self.ac_hdg + 180) % 360 - 180) > 90.0
@@ -11470,6 +11561,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         config = {
             "cruise_behind_dist": cfg.cruise_behind_dist,
             "low_alt_dist": cfg.low_alt_dist,
+            "cb_visible_dist": cfg.cb_visible_dist,
+            "cb_visible_nm": self._cb_visible_range_nm(),
             "wxautoset_handoff_dist": cfg.wxautoset_handoff_dist,
             "new_zone_infront_range": list(cfg.new_zone_infront_range),
             "new_zone_leftright_range": list(cfg.new_zone_leftright_range),
@@ -12612,6 +12705,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.psx.subscribe("PiBaHeAlTas", self.handle_piba)
             self.psx.subscribe("WxBasic", self.handle_owned_change)
             self.psx.subscribe("FocussedWxZone", self.handle_focused_zone)
+            for name in ("EcpNdRangeCp", "EcpNdRangeFo", "EcpNdModeCp", "EcpNdModeFo",
+                         "EfisActL", "EfisActR"):
+                self.psx.subscribe(name, self.handle_nd_range)
             self.psx.subscribe("FmcRteViAcMo", self.handle_fmc_change)
             self.psx.subscribe("FmcRte1", self.handle_fmc_change)
             self.psx.subscribe("FmcRte2", self.handle_fmc_change)
@@ -12752,6 +12848,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             '--low-alt-dist', type=float, default=200.0, metavar='NM',
             help="Below 18,000 ft or while maneuvering: relocate a zone more than this many "
                  "nm behind the aircraft (maneuvering places zones up to 50 nm inside it).")
+        parser.add_argument(
+            '--cb-visible-dist', type=float, default=200.0, metavar='NM',
+            help="A CB within this many nm and not behind the aircraft (holding or "
+                 "vectored: all round) counts as one the crew may see on the weather radar "
+                 "or out of the window, and is never moved to make room for another one "
+                 "(default 200). The longest ND range of the last 10 minutes counts if longer "
+                 "(up to 320 nm; see --no-cb-visible-nd).")
+        parser.add_argument(
+            '--no-cb-visible-nd', dest='cb_visible_nd', action='store_false',
+            help="Don't count the NDs' range in how far a CB is visible to the crew: only "
+                 "--cb-visible-dist.")
         parser.add_argument(
             '--wxautoset-handoff-dist', type=float, default=320.0, metavar='NM',
             help="During an Open-Meteo outage, reposition onto the nearest cached "

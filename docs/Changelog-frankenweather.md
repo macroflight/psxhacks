@@ -67,6 +67,13 @@
   drifting 86 degrees apart). And a zone put on a storm almost abeam, far
   out, counted as behind at once and went away, then back, every 30-60 s:
   storms now count only within 75 degrees of the nose (was 90).
+- **Radar CBs: a CB the crew may see stays where it is.** A CB within
+  200 nm (`--cb-visible-dist`), or within the longest range either ND has
+  shown the weather radar at in the last 10 minutes (up to 320 nm), and not behind the aircraft
+  is no longer taken away to put a
+  zone on a stronger storm: in dense storms a zone moved every 90 s, and
+  CBs vanished from the radar and the MSFS visuals. New storms get the
+  zones without a CB, or with one behind or farther away.
 - **Lightning from EUMETSAT's MTG Lightning Imager instead of
   Blitzortung.** Blitzortung's terms don't allow this use. The new
   source is the Meteosat-12 satellite's lightning images (free, no
