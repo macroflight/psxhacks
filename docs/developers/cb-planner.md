@@ -12,13 +12,13 @@ Agreed with the user on 2026-11-18:
 1. **Don't startle the pilot.** No new CB where the crew may see it (out of
    the window or on an ND showing the weather radar), and no CB they may see
    moves or disappears suddenly.
-2. **Only place CBs where there are CBs in real life** (radar storms, or
+1. **Only place CBs where there are CBs in real life** (radar storms, or
    storms made up near lightning and inside TS SIGMETs where there is no
    radar).
-3. **Sims in the same area see similar CBs.** The same storms, zones and
+1. **Sims in the same area see similar CBs.** The same storms, zones and
    aircraft give the same plan; ties go by storm key and zone number.
-4. **At least one CB in each distinct area of CB activity.**
-5. **More CBs where there is more activity.**
+1. **At least one CB in each distinct area of CB activity.**
+1. **More CBs where there is more activity.**
 
 ## How it decides
 
