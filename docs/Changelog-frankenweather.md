@@ -73,7 +73,9 @@
   is no longer taken away to put a
   zone on a stronger storm: in dense storms a zone moved every 90 s, and
   CBs vanished from the radar and the MSFS visuals. New storms get the
-  zones without a CB, or with one behind or farther away.
+  zones without a CB, or with one behind or farther away. A CB whose storm
+  dies on the radar also stays while the crew may see it (at most 30
+  minutes) and goes once it is out of view.
 - **Lightning from EUMETSAT's MTG Lightning Imager instead of
   Blitzortung.** Blitzortung's terms don't allow this use. The new
   source is the Meteosat-12 satellite's lightning images (free, no

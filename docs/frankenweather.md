@@ -442,8 +442,11 @@ the same picture VATSIM Radar can show) decides where the CBs are.
   `--no-cb-visible-nd`), and not behind the aircraft (holding or vectored:
   all round) is never moved to make room for
   another storm, however strong: zones without a CB, or with one behind or
-  farther away, are used for new storms. A CB only goes when its own storm
-  dies on the radar (it then shrinks away) or once it is behind.
+  farther away, are used for new storms. A CB goes once it is behind, or
+  when its own storm dies on the radar: then it stays while the crew may see
+  it (in that range, within 90° of the heading, also while turning), at most
+  30 minutes, and goes once it is out of view (shrinking away only with the
+  CB oktas life cycle on).
 - **The CB's size comes from the radar and the satellite.** Its oktas go by
   the cell's strength (3 below 50 dBZ, 4 to 54, 6 to 59, 7 from 60), one
   more for a cell of 200 km² or more. Its top is the highest cloud top within

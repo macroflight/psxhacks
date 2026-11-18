@@ -503,6 +503,11 @@ _STORM_KEEP_NM = 80.0          # ... never taking away a CB ahead nearer than th
 # who zooms to 80 nm for a few seconds still sees the CBs at 100-320 nm a moment later; user)
 _ND_RANGES_NM = (5, 10, 20, 40, 80, 160, 320, 640)   # EcpNdRangeCp/Fo 0-7 (747-400 EFIS panel)
 _ND_RANGE_HOLD_S = 600.0
+# A drifting radar CB whose storm left the radar stays while the crew may see it (within the
+# visible range, within 90 degrees of the heading, also while turning), at most this long, then
+# goes as before (user 2026-11-18: startling the pilot matters far more than our data saying it
+# should go; a headless cruise lost 3 CBs in view that way in 35 min)
+_DEAD_STORM_KEEP_S = 1800.0
 _ND_WXR_MAX_NM = 320.0        # the weather radar shows nothing farther (640 nm: no WXR returns)
 # An ND shows the weather radar with WXR on, TERR off (terrain replaces it) and not in PLN mode:
 # EfisActL/R's last field, position 6 WXR and 12 TERR ("1": on; as frankenpilot reads them);
@@ -8103,7 +8108,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 cell.start_oktas, cell.lifetime_s / 60.0)
             self._state_changed_event.set()
 
-    def _radar_follow(self, zone_num: int, cell, now: float) -> None:  # pylint: disable=too-many-return-statements
+    def _radar_follow(self, zone_num: int, cell, now: float) -> None:  # pylint: disable=too-many-return-statements,too-many-branches
         """--radar-cbs: keep a drifting CB on its radar storm; decay it when the storm is gone.
 
         On each frame that decides (_radar_activate()) the CB's storm is its
@@ -8114,6 +8119,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         past its lifetime; no cell: the CB decays.
         """
         if cell.decay_from is not None:
+            return
+        if cell.dead_since is not None and self._dead_storm_cb_ends(zone_num, cell, now):
             return
         if _fw_storms.is_storm(cell.radar_cell):   # a made-up storm: alive or not, every tick
             match = next((c for c in self._storm_cells if c.key == cell.radar), None)
@@ -8140,9 +8147,19 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                                 {c.radar for zn, c in self._drift.items() if zn != zone_num})
         if match is None:
             cell.radar_cell = None
+            if self._in_crew_view(cell.lat, cell.lon):
+                if cell.dead_since is None:
+                    cell.dead_since = now
+                    self.logger.info("CB drift: Zone %d: its radar cell is gone, but the crew may"
+                                     " see the CB: kept until it is out of view (at most %.0f min)",
+                                     zone_num, _DEAD_STORM_KEEP_S / 60.0)
+                return
             cell.start_decay(now, "its radar cell is gone")
             self.logger.info("CB drift: Zone %d starts to decay (%s)", zone_num, cell.decay_why)
             return
+        if cell.dead_since is not None:
+            self.logger.info("CB drift: Zone %d: its storm is back on the radar", zone_num)
+            cell.dead_since = None
         self._radar_take(cell, match)
         cell.lifetime_s = max(cell.lifetime_s, cell.age_s + 1200.0)   # alive while the radar has it
         lat, lon = self._radar_cell_now(match)
@@ -8150,6 +8167,37 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                          " %03.0f/%.0fkt", zone_num, match.max_dbz,
                          self._dist_nm(cell.lat, cell.lon, lat, lon), cell.heading_deg,
                          cell.speed_kt)
+
+    def _in_crew_view(self, lat: float, lon: float) -> bool:
+        """Return True if a CB at (lat, lon) is in the crew's view now (radar or window).
+
+        Within _cb_visible_range_nm() and 90 degrees of the heading, also while
+        turning: a turn that takes it out of view lets a dead storm's CB go.
+        """
+        if self.ac_lat is None or self.ac_hdg is None:
+            return False
+        az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
+        return (dist_m / _NM_TO_M <= self._cb_visible_range_nm() and
+                _fw_route.angle_diff(az % 360.0, self.ac_hdg) <= 90.0)
+
+    def _dead_storm_cb_ends(self, zone_num: int, cell, now: float) -> bool:
+        """Return True if a dead storm's CB (cell.dead_since) starts to decay now.
+
+        Out of the crew's view, or kept _DEAD_STORM_KEEP_S: it decays as any CB
+        does (the CB life-cycle settings decide how). Kept: alive meanwhile.
+        """
+        why = None
+        if not self._in_crew_view(cell.lat, cell.lon):
+            why = "its radar cell is gone, and it is out of view now"
+        elif now - cell.dead_since > _DEAD_STORM_KEEP_S:
+            why = f"its radar cell is gone, kept {_DEAD_STORM_KEEP_S / 60.0:.0f} min in view"
+        if why is None:
+            cell.lifetime_s = max(cell.lifetime_s, cell.age_s + 60.0)
+            return False
+        cell.dead_since = None
+        cell.start_decay(now, why)
+        self.logger.info("CB drift: Zone %d starts to decay (%s)", zone_num, cell.decay_why)
+        return True
 
     def _radar_take(self, cell, match) -> None:
         """Put a drifting CB on radar cell match: its key, motion (shown) and CB size."""
