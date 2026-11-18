@@ -270,6 +270,25 @@ def cb_position(geod, mode: str, time_earth_ms: float) -> Optional[tuple]:
     return lat, ((lon + 180.0) % 360.0) - 180.0
 
 
+def mode_with_cb_at(geod, mode: str, time_earth_ms: float, lat: float, lon: float) -> str:
+    """Return the WxMode that makes PSX draw the zone's CB at (lat, lon) at time_earth_ms.
+
+    The zone's elevation (which turns PSX's CB bearing) stays; its centre goes
+    CB_OFFSET_NM from (lat, lon), opposite the bearing PSX gives the CB then
+    (the inverse of cb_position()). For a new CB: written so, the zone needs no
+    second move when the CB starts drifting (a CB first drawn 7 nm from its zone
+    centre and moved onto its storm seconds later, headless 2026-11-18).
+    """
+    try:
+        elev_ft = float(mode.split(';')[3])
+    except (IndexError, ValueError):
+        elev_ft = 0.0
+    bearing = cb_bearing_deg(int(time_earth_ms), elev_ft)
+    clon, clat, _ = geod.fwd(lons=lon, lats=lat, az=(bearing + 180.0) % 360.0,
+                             dist=CB_OFFSET_NM * _NM_TO_M)
+    return wxmode_at(mode, clat, ((clon + 180.0) % 360.0) - 180.0)
+
+
 def wxmode_pos(mode: str) -> Optional[tuple]:
     """Return (lat, lon) in degrees from a WxMode<N> string, or None."""
     try:

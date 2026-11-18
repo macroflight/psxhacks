@@ -8168,6 +8168,36 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                          self._dist_nm(cell.lat, cell.lon, lat, lon), cell.heading_deg,
                          cell.speed_kt)
 
+    def _cb_on_storm_mode(self, zone_num: int, mode: str) -> Optional[str]:
+        """Return the WxMode that puts zone_num's radar CB on its storm, or None (leave it).
+
+        For a new CB in a zone not drifting (the drift places its own): written
+        so from the first write, the CB doesn't appear 7 nm from its storm and
+        jump onto it when it starts drifting (fw_drift.mode_with_cb_at()). New:
+        the zone shows no CB yet, or it moves elsewhere anyway; a CB already
+        shown stays where it is (re-centring a zone that doesn't drift, near an
+        airport, every update moved it 4-12 nm and the CB was cleared and
+        redrawn each time: headless hold 2026-11-18). Not for the dep/dst
+        airport zones, the anchor or a pinned zone (they stay put).
+        """
+        if (zone_num in self._drift or zone_num in self._dep_dst_zone_nums() or
+                zone_num == self._anchor_zone or zone_num in self._zone_pinned):
+            return None
+        old_mode = self.zone_mode.get(zone_num)
+        old_pos, new_pos = _fw_drift.wxmode_pos(old_mode or ""), _fw_drift.wxmode_pos(mode)
+        moving = (old_pos is None or new_pos is None or
+                  self._dist_nm(*old_pos, *new_pos) >= _ZONE_MOVE_CLEAR_CB_NM)
+        if not moving and _fw_drift.cb_oktas(self.zone_wx.get(zone_num) or "") > 0:
+            return None
+        key = self._radar_zone_cell.get(zone_num)
+        cell = next((c for c in self._cells() if c.key == key), None) if key else None
+        sim_ms = self.sim_time_ms()
+        if cell is None or sim_ms is None:
+            return None
+        lat, lon = self._radar_cell_now(cell)
+        lead_ms = _DRIFT_TICK_S * 500.0 * self.time_accel()   # as the drift's place()
+        return _fw_drift.mode_with_cb_at(self.geod, mode, sim_ms + lead_ms, lat, lon)
+
     def _in_crew_view(self, lat: float, lon: float) -> bool:
         """Return True if a CB at (lat, lon) is in the crew's view now (radar or window).
 
@@ -11331,6 +11361,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     # ran before: headless 2026-11-17, CBs on the Turkish plateau 5,300 ft
                     # too high)
                     final_wx = _cb_top_above_zone(final_wx, int(new_modes[-1].split(';')[3]))
+                    on_storm = self._cb_on_storm_mode(zone_num, new_modes[-1])
+                    if on_storm is not None:   # PSX draws the CB on its storm from the start
+                        new_modes[-1] = on_storm
+                        clat, clon = _fw_drift.wxmode_pos(on_storm)
+                        self.zone_positions[zone_num] = (clat, clon, snap_icaos[i])
                 if radar_why:
                     sigmet_label = None
                     decided = (before, _fw_drift.cb_oktas(final_wx), radar_why.split(" cell")[0])
