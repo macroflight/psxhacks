@@ -25,7 +25,7 @@ LEGEND_MIN_M = 320.0         # the legend's colour bar, left end
 LEGEND_MAX_M = 16000.0       # ... right end (higher tops show as this)
 MAX_AGE_S = 2700             # an image older than this (45 min) isn't used
 DEG_PER_PX = 0.025           # about 1.5 nm a pixel (coarser ones skip MSG pixels: 3-5 km here)
-BOX_DEG = 5.0                # images reach this far around the aircraft (radar cells: 250 nm)
+BOX_DEG = 7.0                # images reach this far around the aircraft (radar cells: up to 380 nm)
 MAX_COLOUR_DIST = 40         # a pixel further from every legend colour: not a cloud top
 # Meteosat at 0 degrees: usable up to about 70 degrees of arc from the point under it
 SUBSAT_LON = 0.0

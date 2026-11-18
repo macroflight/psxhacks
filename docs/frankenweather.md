@@ -447,6 +447,13 @@ the same picture VATSIM Radar can show) decides where the CBs are.
   it (in that range, within 90° of the heading, also while turning), at most
   30 minutes, and goes once it is out of view (shrinking away only with the
   CB oktas life cycle on).
+- **No new CB appears where the crew may see it:** within `--cb-visible-dist`
+  (200 nm) and 120° either side of the nose (the side windows too), or within
+  the range an ND showed the weather radar at in the last 10 minutes and 90°;
+  holding or vectored, anywhere within that range. New CBs are born just
+  beyond (the radar storms are looked for out to 60 nm past it: 260 nm, or
+  380 nm with an ND on 320 nm). In the first 2 minutes after a start or a
+  situ load CBs may appear anywhere.
 - **The CB's size comes from the radar and the satellite.** Its oktas go by
   the cell's strength (3 below 50 dBZ, 4 to 54, 6 to 59, 7 from 60), one
   more for a cell of 200 km² or more. Its top is the highest cloud top within

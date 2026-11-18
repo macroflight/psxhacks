@@ -77,7 +77,11 @@
   dies on the radar also stays while the crew may see it (at most 30
   minutes) and goes once it is out of view. A new radar CB is drawn on its
   storm from the start (it appeared 7 nm from it and jumped onto it a few
-  seconds later).
+  seconds later). And no new CB appears where the crew may see it (out of
+  the window within 200 nm, or on an ND showing the weather radar): new CBs
+  are born just beyond, so the radar storms are now looked for out to 260
+  nm (380 nm with an ND on 320 nm). Before, nearly every new CB appeared
+  in view, often within 100 nm.
 - **Lightning from EUMETSAT's MTG Lightning Imager instead of
   Blitzortung.** Blitzortung's terms don't allow this use. The new
   source is the Meteosat-12 satellite's lightning images (free, no

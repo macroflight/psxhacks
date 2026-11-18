@@ -459,7 +459,11 @@ _FUEL_JUMP_C = 5.0            # PSX's own fuel temperature this far off: a situa
 _FUEL_JUMP_KG = 3000.0        # fuel this much lower in one step: a situation load, start over
 _ROUTE_TRACK_S = 30.0         # --route-zones: the track over the ground over this long
 _ROUTE_TRACK_MAX_S = 60.0     # ... at most this long
-_RADAR_CELL_NM = 250.0        # --radar-cbs: radar cells looked for this far around the aircraft
+_RADAR_CELL_NM = 250.0        # --radar-cbs: radar cells looked for at least this far around the
+# aircraft, and to _CB_NEW_BEYOND_NM past what the crew may see (_radar_cell_nm()): new CBs are
+# only born out of their view, so storms and zones must reach past it (headless tile count at
+# 50N: 36 a frame up to 260 nm, as for 250; 64 up to 380 nm with an ND on 320 nm)
+_CB_NEW_BEYOND_NM = 60.0
 _RADAR_MOVED_NM = 60.0        # ... again (before the next frame) after a move this far
 _RADAR_FRESH_S = 1800.0       # a radar frame older than this doesn't decide any more
 # --radar-cbs, after a start: zones keep the CB PSX already has until the first radar frame,
@@ -508,6 +512,14 @@ _ND_RANGE_HOLD_S = 600.0
 # goes as before (user 2026-11-18: startling the pilot matters far more than our data saying it
 # should go; a headless cruise lost 3 CBs in view that way in 35 min)
 _DEAD_STORM_KEEP_S = 1800.0
+# What the crew may see (_crew_sees()): out of the window within --cb-visible-dist and this far
+# either side of the nose (conservative: the side windows), and on an ND showing the weather
+# radar within its range (held, _ND_RANGE_HOLD_S) and 90 degrees. No new CB appears there
+# (user 2026-11-18: no CBs created that the pilots can see out of the window or on the ND),
+# except in the first _CB_NEW_ANYWHERE_S after a start or a situ load (nothing on screen yet)
+_WINDOW_VIEW_DEG = 120.0
+_ND_VIEW_DEG = 90.0
+_CB_NEW_ANYWHERE_S = 120.0
 _ND_WXR_MAX_NM = 320.0        # the weather radar shows nothing farther (640 nm: no WXR returns)
 # An ND shows the weather radar with WXR on, TERR off (terrain replaces it) and not in PLN mode:
 # EfisActL/R's last field, position 6 WXR and 12 TERR ("1": on; as frankenpilot reads them);
@@ -2917,6 +2929,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._storm_place_last = 0.0   # time.monotonic() of _place_storm_zones()' last move
         self._maneuver_rank_logged: Optional[str] = None   # _maneuver_storms_ranked() log
         self._nd_range_seen: list = []   # [(monotonic, nm)]: the NDs' longer range, when (hold)
+        self._no_new_cb_logged: set = set()   # zones logged as kept CB-free in view
         self._radar_withdrawn_logged: set = set()   # frame times logged as withdrawn by RainViewer
         self._radar_hold_until = time.monotonic() + _RADAR_STARTUP_HOLD_S
         self._radar_at: Optional[tuple] = None
@@ -7143,7 +7156,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         _, _, lat_c, lon_c, icao = candidates[0]
         return lat_c, lon_c, icao
 
-    def _storms_ranked(self, view_nm: float = _STORM_VIEW_NM,  # pylint: disable=too-many-locals
+    def _radar_cell_nm(self) -> float:
+        """Return how far around the aircraft radar storms are looked for (see _RADAR_CELL_NM)."""
+        return max(_RADAR_CELL_NM, self._cb_visible_range_nm() + _CB_NEW_BEYOND_NM)
+
+    def _storms_ranked(self, view_nm: Optional[float] = None,  # pylint: disable=too-many-locals
                        view_deg: float = _STORM_VIEW_DEG,
                        origin: Optional[tuple] = None) -> list:
         """Return [(cell, lat, lon, dist_nm, rel_deg)] of storm CBs to show, most important first.
@@ -7161,6 +7178,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         its turns), and only the _STORM_OFF_ROUTE_MAX most important of those
         farther from it.
         """
+        if view_nm is None:   # past what the crew may see: new CBs are born there
+            view_nm = max(_STORM_VIEW_NM, self._radar_cell_nm())
         out = []
         fresh = self._radar_fresh()
         ahead = self.ac_hdg
@@ -7262,10 +7281,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                   if icao not in arpt_icaos and zn not in (self._anchor_zone, self.focused_zone) and
                   not self._is_cb_free_zone(zn)]
         ranked = self._maneuver_storms_ranked() if self._maneuvering else self._storms_ranked()
-        top = ranked[:len(usable)]
-        rank_of = {r[0].key: i for i, r in enumerate(ranked)}
         shown = ({c.radar for c in self._drift.values() if c.radar and c.decay_from is None} |
                  {k for zn, k in self._radar_zone_cell.items() if zn not in self._drift})
+        # a storm the crew may see gets no new CB (_no_new_cb_at()), so it doesn't take a place
+        # among the storms to show either; it may get one once out of view
+        ranked = [r for r in ranked if r[0].key in shown or not self._no_new_cb_at(r[1], r[2])]
+        top = ranked[:len(usable)]
+        rank_of = {r[0].key: i for i, r in enumerate(ranked)}
         missing = next((r for r in top if r[0].key not in shown), None)
         if missing is None:
             return False
@@ -7331,10 +7353,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         near_min = min(fwd_min, _RADAR_PLACE_MIN_NM)
         # the order every sim uses (_storms_ranked()), so they pick the same storms
         ranked = (self._maneuver_storms_ranked() if self._maneuvering and not initial else
-                  self._storms_ranked(fwd_max, 180.0 if all_round else 60.0))
+                  self._storms_ranked(max(fwd_max, self._radar_cell_nm()),
+                                      180.0 if all_round else 60.0))
         for _, lat, lon, dist_nm, _ in ranked:
             if not all_round and dist_nm < near_min:
                 continue
+            if not initial and self._no_new_cb_at(lat, lon):
+                continue   # no new CB the crew may see
             if any(self._dist_nm(lat, lon, o[0], o[1]) < min_sep for o in others):
                 continue
             return lat, lon, f"X{random.randint(100, 999):03d}"
@@ -7377,10 +7402,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if zone_num not in self._drift and (len(wx) < 10 or wx[9] in ("", "0")):
             return False
         lat, lon, _ = self.zone_positions[zone_num]
-        az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
-        if dist_m / _NM_TO_M > self._cb_visible_range_nm():
-            return False
-        return self._maneuvering or _fw_route.angle_diff(az % 360.0, self.ac_hdg) <= 90.0
+        if not self._maneuvering:
+            return self._crew_sees(lat, lon)
+        return self._dist_nm(self.ac_lat, self.ac_lon, lat, lon) <= self._cb_visible_range_nm()
 
     def handle_nd_range(self, _key: str, _value: str) -> None:
         """Note what the NDs show after a range, mode or WXR/TERR change."""
@@ -7423,6 +7447,77 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         while len(self._nd_range_seen) > 1 and self._nd_range_seen[1][0] <= cutoff:
             self._nd_range_seen.pop(0)
 
+    def _nd_wxr_range_nm(self) -> float:
+        """Return the longest range an ND showed the weather radar at recently (nm; 0: none).
+
+        Within _ND_RANGE_HOLD_S, at most _ND_WXR_MAX_NM; 0 with --no-cb-visible-nd.
+        """
+        if not self.args.cb_visible_nd:
+            return 0.0
+        self._note_nd_range()
+        if not self._nd_range_seen:
+            return 0.0
+        return min(_ND_WXR_MAX_NM, max(r for _, r in self._nd_range_seen))
+
+    def _crew_sees(self, lat: float, lon: float) -> bool:
+        """Return True if the crew may see a CB at (lat, lon) now: out of the window or on an ND.
+
+        Window: within --cb-visible-dist and _WINDOW_VIEW_DEG of the heading;
+        ND: within the weather radar's recent range (_nd_wxr_range_nm()) and
+        _ND_VIEW_DEG.
+        """
+        if self.ac_lat is None or self.ac_hdg is None:
+            return False
+        az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
+        dist_nm, rel = dist_m / _NM_TO_M, _fw_route.angle_diff(az % 360.0, self.ac_hdg)
+        return ((dist_nm <= self.args.cb_visible_dist and rel <= _WINDOW_VIEW_DEG) or
+                (dist_nm <= self._nd_wxr_range_nm() and rel <= _ND_VIEW_DEG))
+
+    def _no_new_cb_at(self, lat: float, lon: float) -> bool:
+        """Return True if no new CB may appear at (lat, lon): the crew may see it (soon).
+
+        _crew_sees(), or while holding or vectored anywhere within
+        _cb_visible_range_nm(): the next turn brings it into view. Never in the
+        first _CB_NEW_ANYWHERE_S after a start or a situ load.
+        """
+        if self._new_cb_anywhere() or self.ac_lat is None:
+            return False
+        if self._maneuvering:
+            return self._dist_nm(self.ac_lat, self.ac_lon, lat, lon) <= self._cb_visible_range_nm()
+        return self._crew_sees(lat, lon)
+
+    def _new_cb_anywhere(self) -> bool:
+        """Return True in the first _CB_NEW_ANYWHERE_S after a start or a situ load."""
+        now = time.monotonic()
+        return (now < self._cb_close_grace_until or
+                now - self._last_situ_load_mono < _CB_NEW_ANYWHERE_S)
+
+    def _no_new_cb_in_view(self, zone_num: int, wx: str, mode: str, pos: tuple) -> str:
+        """Return wx without its CB if that CB would be new and the crew may see it.
+
+        New: the zone (at pos) shows no CB yet; a CB it already shows may go on
+        (the radar resizes it, it drifts). Where PSX draws it: 7 nm from the
+        zone centre (fw_drift.cb_position()). See _no_new_cb_at().
+        """
+        if _fw_drift.cb_oktas(wx) <= 0:
+            return wx
+        if (self._zone_wx_pos.get(zone_num) == pos and
+                _fw_drift.cb_oktas(self.zone_wx.get(zone_num) or "") > 0):
+            return wx
+        sim_ms = self.sim_time_ms()
+        at = (_fw_drift.cb_position(self.geod, mode, sim_ms) if sim_ms is not None else None) \
+            or pos[:2]
+        if not self._no_new_cb_at(*at):
+            self._no_new_cb_logged.discard(zone_num)
+            return wx
+        if zone_num not in self._no_new_cb_logged:
+            self._no_new_cb_logged.add(zone_num)
+            az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, at[1], at[0])
+            self.logger.info("Zone %d: no new %d/8 CB where the crew may see it (%.0fnm, %.0f° "
+                             "off the nose)", zone_num, _fw_drift.cb_oktas(wx),
+                             dist_m / _NM_TO_M, _fw_route.angle_diff(az % 360.0, self.ac_hdg))
+        return _strip_cb(wx)
+
     def _cb_visible_range_nm(self) -> float:
         """Return how far a CB counts as visible to the crew (_cb_visible()).
 
@@ -7430,13 +7525,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         --no-cb-visible-nd, the longest range an ND showed the weather radar
         at within _ND_RANGE_HOLD_S (at most _ND_WXR_MAX_NM).
         """
-        visible = self.args.cb_visible_dist
-        if self.args.cb_visible_nd:
-            self._note_nd_range()
-            if self._nd_range_seen:
-                visible = max(visible, min(_ND_WXR_MAX_NM,
-                                           max(r for _, r in self._nd_range_seen)))
-        return visible
+        return max(self.args.cb_visible_dist, self._nd_wxr_range_nm())
 
     def _cb_kept_in_hold(self, zone_num: int) -> Optional[str]:
         """Return why zone_num stays put in maneuvering mode, or None (see _HOLD_KEEP_CB_NM).
@@ -8204,11 +8293,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         Within _cb_visible_range_nm() and 90 degrees of the heading, also while
         turning: a turn that takes it out of view lets a dead storm's CB go.
         """
-        if self.ac_lat is None or self.ac_hdg is None:
-            return False
-        az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
-        return (dist_m / _NM_TO_M <= self._cb_visible_range_nm() and
-                _fw_route.angle_diff(az % 360.0, self.ac_hdg) <= 90.0)
+        return self._crew_sees(lat, lon)
 
     def _dead_storm_cb_ends(self, zone_num: int, cell, now: float) -> bool:
         """Return True if a dead storm's CB (cell.dead_since) starts to decay now.
@@ -10592,7 +10677,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return
         loop = asyncio.get_running_loop()
         zoom = _fw_radar.CELL_ZOOM
-        tiles = _fw_radar.tiles_around(*here, _RADAR_CELL_NM + 30.0, zoom)
+        cell_nm = self._radar_cell_nm()
+        tiles = _fw_radar.tiles_around(*here, cell_nm + 30.0, zoom)
         window = past[-(_fw_radar.WINDOW_FRAMES + 2):]
         wanted = {(f['time'], t) for f in window for t in tiles}
         self._radar_tiles = {k: v for k, v in self._radar_tiles.items() if k in wanted}
@@ -10627,7 +10713,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._radar_keep_withdrawn(frames, newest, moved)
         # coverage mask (changes rarely)
         now = time.monotonic()
-        cov_tiles = [t for t in _fw_radar.tiles_around(*here, _RADAR_CELL_NM + 60.0,
+        cov_tiles = [t for t in _fw_radar.tiles_around(*here, cell_nm + 60.0,
                                                        _fw_radar.COVERAGE_ZOOM)
                      if now - self._radar_cov.get(t, (-1e9, None))[0] > _RADAR_COVERAGE_KEEP_S]
         if cov_tiles:
@@ -10674,7 +10760,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return
         here = self._radar_at or (self.ac_lat, self.ac_lon)
         cells = [c for c in self._radar_frames[frame]
-                 if self._dist_nm(*here, c.lat, c.lon) <= _RADAR_CELL_NM]
+                 if self._dist_nm(*here, c.lat, c.lon) <= self._radar_cell_nm()]
         if self._radar_frame is not None and self._radar_frame != frame:
             for c in cells:
                 old = _fw_radar.linked(self._radar_cells, c.prev)
@@ -10688,7 +10774,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._radar_cells, self._radar_frame = cells, frame
         cbs = [c for c in cells if c.is_cb]
         self.logger.info("Radar cells: %d (%d CB) within %.0fnm, frame %s%s", len(cells),
-                         len(cbs), _RADAR_CELL_NM, time.strftime("%H:%MZ", time.gmtime(frame)),
+                         len(cbs), self._radar_cell_nm(),
+                         time.strftime("%H:%MZ", time.gmtime(frame)),
                          "; strongest " + ", ".join(
                              f"{_fw_drift.pos_text(c.lat, c.lon)} {c.max_dbz} dBZ" +
                              (f" {c.motion[0]:03.0f}/{c.motion[1]:.0f}kt" if c.motion else "")
@@ -10742,7 +10829,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             node = (round(plat), round(plon))
             return self._storm_motion.get((*node, hour))
 
-        points = _fw_storms.grid_points(self.ac_lat, self.ac_lon, _RADAR_CELL_NM)
+        points = _fw_storms.grid_points(self.ac_lat, self.ac_lon, self._radar_cell_nm())
         storms = _fw_storms.storms_at(now_s, points, self._storm_chance, motion)
         self._storm_cells = [c for c in storms
                              if self._radar_uncovered(*_fw_radar.cell_at(c, now_s, 0))]
@@ -10756,7 +10843,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if not self.args.radar_cbs or self.ac_lat is None or self._turb_engine is None:
             return
         hour = int(time.time() // _fw_storms.HOUR_S)
-        points = _fw_storms.grid_points(self.ac_lat, self.ac_lon, _RADAR_CELL_NM)
+        points = _fw_storms.grid_points(self.ac_lat, self.ac_lon, self._radar_cell_nm())
         want = sorted({(round(p[2]), round(p[3]), hour) for p in points
                        if self._storm_chance(p[2], p[3]) is not None} - set(self._storm_motion))
         loop = asyncio.get_running_loop()
@@ -11386,6 +11473,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                                   "CB-free %s)",
                                   zone_num, self._radar_covered(lat, lon), cb_removed_for,
                                   self._is_cb_free_zone(zone_num))
+            # after every CB source (radar, SIGMET, model, METAR) and before the CB target is
+            # set (the CB fade task steps a zone's CB to it: headless 2026-11-18, a CB kept out
+            # of view was stepped in 5 s later): no new CB where the crew may see it
+            final_wx = self._no_new_cb_in_view(zone_num, final_wx, new_modes[-1], positions[i])
             self.zone_cb_sigmet[zone_num] = sigmet_label
             target_parts = final_wx.split(';')
             target_oktas_val = int(target_parts[9]) if len(target_parts) > 11 else 0
