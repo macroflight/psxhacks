@@ -479,6 +479,7 @@ _RADAR_CELL_NM = 250.0        # --radar-cbs: radar cells looked for at least thi
 # 50N: 36 a frame up to 260 nm, as for 250; 64 up to 380 nm with an ND on 320 nm)
 _CB_NEW_BEYOND_NM = 60.0
 _RADAR_MOVED_NM = 60.0        # ... again (before the next frame) after a move this far
+_RADAR_MISSING_TRIES = 3   # a frame with tiles missing is used after this many tries
 _RADAR_FRESH_S = 1800.0       # a radar frame older than this doesn't decide any more
 # --radar-cbs, after a start: zones keep the CB PSX already has until the first radar frame,
 # at most this long (a restart took a radar CB 129 nm ahead away 20 s after the start,
@@ -488,6 +489,12 @@ _RADAR_MATCH_NM = 20.0        # a radar CB within this of a zone's CB is that zo
 _RADAR_KEEP_NM = 28.0         # ... and stays it within this (PSX's CB circles the zone centre)
 _RADAR_GONE_NM = 12.0         # a drifting CB's radar cell must be within this, else it's gone
 _RADAR_COVERAGE_KEEP_S = 6 * 3600.0
+# --radar-cbs: RainViewer tiles kept on disk (--radar-tile-cache), so a restart doesn't fetch
+# them all again (RainViewer slows down clients asking for many at once): a frame's tiles never
+# change (each frame has its own path) and go after this long, coverage tiles after
+# _RADAR_COVERAGE_KEEP_S (a few MB)
+_RADAR_TILE_CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "frankenweather", "radar")
+_RADAR_TILE_CACHE_KEEP_S = 3600.0
 _RADAR_STEER_S = 600.0         # a drifting CB steers onto its radar cell over this long
 _DEP_ZONE_AIRBORNE_NM = 50.0   # the departure airport's zone is kept this far once airborne
 _RADAR_PLACE_MIN_NM = 40.0     # new zones on radar cells from this far ahead (not just 150-250 nm)
@@ -511,7 +518,11 @@ _STORM_VIEW_DEG = 75.0
 _STORM_ROUTE_NM = 60.0
 _STORM_OFF_ROUTE_MAX = 2
 _STORM_PLACE_INTERVAL_S = 30.0  # ... a zone moved onto a top storm at most this often
-_PLANNER_INTERVAL_S = 600.0    # --cb-planner: replan at least this often (and on every new frame)
+_PLANNER_TICK_S = 60.0         # --cb-planner: replan every this on the UTC clock (the same moments
+# in every sim), on every new frame and when zones were freed. A storm only gets a new CB between
+# what the crew may see and _CB_NEW_BEYOND_NM past it: a few minutes' flight. Replanning only on
+# frames (10 min) left it to chance which storms got a CB in each sim (headless pair 8 nm apart
+# 2026-11-19: 22 % of the CBs both crews could see shown by both; synthetic 71 % -> 91 %)
 _PLANNER_LTG_NM = 10.0         # ... a storm's lightning: MTG flash pixels (15 min) this near it
 # The /devel map's zone changes list: frankenweather's log lines about zone decisions (where a
 # zone went and why, its CB decided, drifting, kept or held back), the last so many
@@ -831,7 +842,8 @@ _CB_AREA_ZONE_SEP_NM = 70.0
 # over an active region everything was within 80 nm (Congo, night test 2026-11-15)
 _LTG_RADIUS_NM = 40.0
 _LTG_MIN_PIXELS = 3
-_LTG_CACHE_S = 300.0      # fetch new images no more often than this
+_LTG_CACHE_S = 300.0      # fetch new images every this on the UTC clock (MTG: one image per 5 min)
+_LTG_TICK_OFFSET_S = 60.0   # ... this long after each image time (published by then)
 _LTG_MOVED_DEG = 2.0      # ... unless the aircraft is this far from where they were fetched
 # Satellite cloud tops (fw_cloudtop, --radar-cbs): a radar CB's top is the highest cloud top
 # within this of its cell (the image is 10-20 min behind the radar frame: the storm moved)
@@ -2904,6 +2916,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._radar_frames: dict = {}
         self._radar_tiles: dict = {}
         self._radar_found: dict = {}   # frame time -> (tiles, fw_radar.find_cells()), untouched
+        self._radar_missing = 0   # tiles the last refresh couldn't get (it tries again)
+        self._radar_missing_tries = 0   # refreshes in a row with tiles missing
+        self._radar_cov_missing = 0   # coverage mask tiles the last refresh couldn't get
         # ... outside radar coverage, the storms every sim makes up the same way
         # (fw_storms) in SIGMET areas and near lightning, and their grid points'
         # motion {(lat, lon, hour): (towards, kt) or None}
@@ -2912,6 +2927,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._storm_place_last = 0.0   # time.monotonic() of _place_storm_zones()' last move
         self._planner_stamp: Optional[tuple] = None   # --cb-planner: the inputs last planned for
         self._planner_last = 0.0       # ... and when
+        self._planner_tick = 0         # ... and in which _PLANNER_TICK_S of the UTC clock
         self._maneuver_rank_logged: Optional[str] = None   # _maneuver_storms_ranked() log
         self._nd_range_seen: list = []   # [(monotonic, nm)]: the NDs' longer range, when (hold)
         self._no_new_cb_logged: set = set()   # zones logged as kept CB-free in view
@@ -2926,7 +2942,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # MTG lightning: flash positions [(lat, lon)] of the last 15 minutes
         # (fw_lightning), when and where (lat, lon) they were fetched
         self._ltg_points: list = []
-        self._ltg_fetch_time: float = 0.0
+        self._ltg_fetch_tick = 0   # the _LTG_CACHE_S of the UTC clock lightning was last fetched in
         self._ltg_fetch_at: Optional[tuple] = None
         self._ltg_image_time: Optional[str] = None
         # Satellite cloud tops (fw_cloudtop): the decoded image (m, None: no top), its area,
@@ -7144,18 +7160,20 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
     def _plan_cbs(self) -> bool:
         """--cb-planner: replan which storms the movable zones show; True if a zone moved.
 
-        On every new radar frame (or made-up storm list), at least every
-        _PLANNER_INTERVAL_S (fw_planner, docs/developers/cb-planner.md).
+        On every new radar frame (or made-up storm list) and every
+        _PLANNER_TICK_S on the UTC clock (fw_planner, docs/developers/cb-planner.md).
         """
         if self.ac_lat is None or self.ac_hdg is None or not self._cells_live():
             return False
         now = time.monotonic()
         stamp = (self._radar_frame, len(self._storm_cells))
-        if stamp == self._planner_stamp and now - self._planner_last < _PLANNER_INTERVAL_S:
+        tick = int(time.time() // _PLANNER_TICK_S)
+        if stamp == self._planner_stamp and tick == self._planner_tick:
             return False
         if self._planner_stamp is None and now - self._planner_last < _STORM_PLACE_INTERVAL_S:
             return False   # zones freed: plan again, but not more often than this
-        self._planner_stamp, self._planner_last = stamp, now
+        new_input = stamp != self._planner_stamp
+        self._planner_stamp, self._planner_last, self._planner_tick = stamp, now, tick
         storms, zones, ac = self._planner_inputs()
         plan = _fw_planner.plan(storms, zones, ac)
         self._planner_snapshot = {
@@ -7163,9 +7181,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "score_of": {k: round(v, 2) for k, v in plan.score_of.items()},
             "moves": [{"zone": m.zone, "storm": m.storm, "lat": m.lat, "lon": m.lon,
                        "score": round(m.score, 2)} for m in plan.moves]}
-        self.logger.info("CB planner: %d storms in %d clusters, %d zones movable, %d move(s)",
-                         len(storms), len(set(plan.cluster_of.values())),
-                         sum(1 for z in zones if not (z.fixed or z.visible_cb)), len(plan.moves))
+        self.logger.log(logging.INFO if new_input or plan.moves else logging.DEBUG,
+                        "CB planner: %d storms in %d clusters, %d zones movable, %d move(s)",
+                        len(storms), len(set(plan.cluster_of.values())),
+                        sum(1 for z in zones if not (z.fixed or z.visible_cb)), len(plan.moves))
         for move in plan.moves:
             self._apply_plan_move(move, now)
         return bool(plan.moves)
@@ -10589,28 +10608,92 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         await self._storm_motions_refresh()
                     except Exception as exc:  # pylint: disable=broad-exception-caught
                         self.logger.info("Storms: winds not available (%s)", exc)
+                    # lightning on its clock ticks too, not only with the next zone update (up
+                    # to 5 min later): the CB planner counts flashes near each storm
+                    await self._fetch_lightning(session)
                     await asyncio.sleep(60.0)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
             self.logger.critical(traceback.format_exc())
 
-    async def _radar_get_tiles(self, session, urls: dict) -> dict:
-        """Return {key: PIL image or None} for {key: url}, a few at a time."""
+    def _radar_tile_file(self, url: str) -> Optional[str]:
+        """Return the --radar-tile-cache file of a RainViewer tile URL, or None (no cache)."""
+        root = self.args.radar_tile_cache
+        if not root:
+            return None
+        name = url.removeprefix(_fw_radar.TILE_URL).strip("/").replace("/", "_")
+        return os.path.join(root, name)
+
+    @staticmethod
+    def _radar_tile_read(path: Optional[str], max_age_s: float) -> Optional[bytes]:
+        """Return a cached tile's bytes if it is younger than max_age_s, else None."""
+        try:
+            if path and time.time() - os.path.getmtime(path) < max_age_s:
+                with open(path, "rb") as f:
+                    return f.read()
+        except OSError:
+            pass
+        return None
+
+    @staticmethod
+    def _radar_tile_write(path: str, data: bytes) -> None:
+        """Write a tile to the cache (a temporary file renamed: other frankenweathers may read)."""
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp = f"{path}.{os.getpid()}.tmp"
+            with open(tmp, "wb") as f:
+                f.write(data)
+            os.replace(tmp, path)
+        except OSError:
+            pass
+
+    def _radar_tile_prune(self) -> None:
+        """Delete --radar-tile-cache files past their keep time (and left-over temporary files)."""
+        root = self.args.radar_tile_cache
+        if not root or not os.path.isdir(root):
+            return
+        now = time.time()
+        for entry in os.scandir(root):
+            keep = (_RADAR_COVERAGE_KEEP_S if "coverage" in entry.name
+                    else _RADAR_TILE_CACHE_KEEP_S)
+            try:
+                if now - entry.stat().st_mtime > keep + 600.0:
+                    os.remove(entry.path)
+            except OSError:
+                pass
+
+    async def _radar_get_tiles(self, session, urls: dict,
+                               max_age_s: float = _RADAR_TILE_CACHE_KEEP_S) -> dict:
+        """Return {key: PIL image or None} for {key: url}, a few at a time.
+
+        From --radar-tile-cache if it has the tile (younger than max_age_s),
+        else fetched (and kept there).
+        """
         sem = asyncio.Semaphore(6)
 
         async def one(key, url):
+            path = self._radar_tile_file(url)
+            data = await asyncio.to_thread(self._radar_tile_read, path, max_age_s)
+            if data is not None:
+                try:
+                    return key, _PIL_Image.open(BytesIO(data)).convert('RGBA')
+                except Exception:  # pylint: disable=broad-exception-caught
+                    pass   # a broken file: fetch it again
             async with sem:
                 try:
                     async with session.get(url, timeout=_RV_TIMEOUT) as r:
                         if r.status != 200:
                             return key, None
                         data = await r.read()
-                    return key, _PIL_Image.open(BytesIO(data)).convert('RGBA')
+                    img = _PIL_Image.open(BytesIO(data)).convert('RGBA')
                 except Exception:  # pylint: disable=broad-exception-caught
                     return key, None
+            if path:
+                await asyncio.to_thread(self._radar_tile_write, path, data)
+            return key, img
         return dict(await asyncio.gather(*[one(k, u) for k, u in urls.items()]))
 
-    async def _radar_cells_refresh(self, session) -> None:  # pylint: disable=too-many-locals
+    async def _radar_cells_refresh(self, session) -> None:  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
         """Work out a new radar frame's cells (or all again after a long move); radar_cells_coro().
 
         Every frankenweather must put a storm in the same place (user,
@@ -10633,7 +10716,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         paths = {**self._radar_frame_paths, **{f['time']: f['path'] for f in past}}
         self._radar_frame_paths = dict(sorted(paths.items())[-40:])   # a few hours are plenty
         newest = [f['time'] for f in past[-3:]]   # a storm blends from the frame before
-        if not past or (not moved and all(t in self._radar_frames for t in newest)):
+        # missing tiles: again in a minute, not at the next frame (two headless sims started at
+        # once had 0-19 storms for 10 minutes, then 130-180: the first tiles hadn't all come)
+        if not past or (not moved and not self._radar_missing and not self._radar_cov_missing and
+                        all(t in self._radar_frames for t in newest)):
             self._radar_activate()
             return
         loop = asyncio.get_running_loop()
@@ -10651,7 +10737,23 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             decoded = await loop.run_in_executor(None, lambda: {
                 k: _fw_radar.tile_dbz(img) for k, img in imgs.items() if img is not None})
             self._radar_tiles.update(decoded)
+            await asyncio.to_thread(self._radar_tile_prune)
         found, key = {}, tuple(sorted(tiles))
+        missing_now = sum(1 for f in window for t in tiles
+                          if (f['time'], t) not in self._radar_tiles)
+        # a frame with tiles missing isn't used (its storms there would be gone: CBs going
+        # away, or none at the start) until _RADAR_MISSING_TRIES tries have failed
+        self._radar_missing_tries = self._radar_missing_tries + 1 if missing_now else 0
+        if missing_now:
+            self.logger.info("Radar: %d of %d tiles not received (RainViewer busy?); trying them "
+                             "again in a minute%s", missing_now, len(window) * len(tiles),
+                             "" if self._radar_missing_tries < _RADAR_MISSING_TRIES else
+                             " (using the frames without them meanwhile)")
+        elif self._radar_missing:
+            self.logger.info("Radar: all tiles received now")
+        was_missing, self._radar_missing = self._radar_missing, missing_now
+        if 0 < self._radar_missing_tries < _RADAR_MISSING_TRIES:
+            return
         for f in window:
             if self._radar_found.get(f['time'], (None,))[0] == key:
                 found[f['time']] = self._radar_found[f['time']][1]
@@ -10679,14 +10781,24 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                      if now - self._radar_cov.get(t, (-1e9, None))[0] > _RADAR_COVERAGE_KEEP_S]
         if cov_tiles:
             imgs = await self._radar_get_tiles(session, {
-                t: _fw_radar.coverage_url(_fw_radar.COVERAGE_ZOOM, *t) for t in cov_tiles})
+                t: _fw_radar.coverage_url(_fw_radar.COVERAGE_ZOOM, *t) for t in cov_tiles},
+                _RADAR_COVERAGE_KEEP_S)
             for t, img in imgs.items():
                 if img is not None:
                     self._radar_cov[t] = (now, _fw_radar.tile_covered(img))
+        # coverage tiles missing: again in a minute too (no coverage, no radar storms: a
+        # headless sim had none for 8 minutes after the start, its pair sim had them, 2026-11-19)
+        cov_missing = sum(1 for t in cov_tiles if t not in self._radar_cov)
+        if cov_missing:
+            self.logger.info("Radar: %d of %d coverage tiles not received; trying them again "
+                             "in a minute", cov_missing, len(cov_tiles))
+        elif self._radar_cov_missing:
+            self.logger.info("Radar: all coverage tiles received now")
+        self._radar_cov_missing = cov_missing
         self._radar_frames, self._radar_at = frames, here
         if moved:
             self._radar_frame = None if self._radar_frame not in frames else self._radar_frame
-        self._radar_activate(force=moved)
+        self._radar_activate(force=moved or bool(was_missing))   # the same frame, now complete
 
     def _radar_keep_withdrawn(self, frames: dict, newest: list, moved: bool) -> None:
         """Add to frames the frames we have that are newer than RainViewer's newest listed one.
@@ -11016,9 +11128,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  abs(here[0] - self._ltg_fetch_at[0]) > _LTG_MOVED_DEG or
                  abs(((here[1] - self._ltg_fetch_at[1] + 180.0) % 360.0) - 180.0) >
                  _LTG_MOVED_DEG)
-        if not moved and time.monotonic() - self._ltg_fetch_time < _LTG_CACHE_S:
+        # on the UTC clock, the same moments in every sim (the same latest image: the CB planner
+        # counts the same flashes near each storm)
+        tick = int((time.time() - _LTG_TICK_OFFSET_S) // _LTG_CACHE_S)
+        if not moved and tick == self._ltg_fetch_tick:
             return
-        self._ltg_fetch_time = time.monotonic()
+        self._ltg_fetch_tick = tick
         if _PIL_Image is None or not _fw_lightning.covers(*here):
             self._ltg_points, self._ltg_fetch_at = [], here
             return
@@ -13079,6 +13194,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "and moves with the cell's tracked motion, and fades when the cell is gone. "
                  "Outside radar coverage nothing changes. Needs Pillow. See "
                  "docs/frankenweather.md.")
+        parser.add_argument(
+            '--radar-tile-cache', default=_RADAR_TILE_CACHE_DIR, metavar='DIR',
+            help="With --radar-cbs: keep the RainViewer radar and coverage tiles in this folder "
+                 "(default ~/.cache/frankenweather/radar, a few MB; frame tiles for an hour, "
+                 "coverage tiles for 6 hours), so a restart doesn't fetch them all again; "
+                 "frankenweathers on one computer may share it. \"\" (empty): don't keep them.")
         parser.add_argument(
             '--route-zones', action='store_true',
             help="Plan the weather zones along the FMC route (testing). While the aircraft "

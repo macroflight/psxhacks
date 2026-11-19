@@ -79,12 +79,20 @@ class TestPlanner(unittest.TestCase):
         self.assertEqual(P.plan(storms, zones, AC).moves, [])   # keeps A, no move
 
     def test_stability(self):
-        """A zone's current storm stays unless another scores clearly better."""
-        storms = [storm("A", 90.0, 150.0, dbz=50), storm("B", 80.0, 150.0, dbz=52)]
+        """A zone keeps its storm while the list has it; a small change doesn't swap it."""
+        storms = [storm("A", 90.0, 150.0, dbz=50), storm("B", 80.0, 160.0, dbz=52)]
         zones = [P.Zone(1, *at(90.0, 157.0), storm="A")]
+        self.assertEqual(P.plan(storms, zones, AC).moves, [])   # same step: A is nearer ahead
+        storms[0].area_km2 = 80.0                               # a little weaker: still A
         self.assertEqual(P.plan(storms, zones, AC).moves, [])
-        storms[1].dbz = 62
+        storms[1].dbz = 62                                      # clearly stronger: B
         self.assertEqual([m.storm for m in P.plan(storms, zones, AC).moves], ["B"])
+
+    def test_score_steps(self):
+        """Scores within SCORE_STEP count as equal: the storm nearer ahead wins (sims agree)."""
+        near = storm("N", 90.0, 150.0, dbz=50, area=100.0)
+        far = storm("F", 90.0, 250.0, dbz=50, area=120.0)    # a little stronger, farther
+        self.assertEqual([m.storm for m in P.plan([near, far], free_zones(1), AC).moves], ["N"])
 
     def test_behind_scores_little(self):
         """A storm behind loses to a weaker one ahead (relevance)."""

@@ -33,6 +33,10 @@ STABILITY = 1.3            # a zone's current storm scores this much more (no sw
 AHEAD_DEG = 75.0           # relevance: ahead within this (frankenweather's storm view)
 ABEAM_DEG = 110.0          # ... abeam up to this
 ROUTE_NM = 60.0            # with a route: storms within this of the route ahead count as ahead
+CANONICAL = True           # zones show the storms of one list ranked from the storms alone (each
+#                            zone's own history made two sims flying together diverge; synthetic
+#                            pairs 92 -> 93-94 %, 15 % more moves of zones the crew can't see)
+SCORE_STEP = 1.3           # scores within this factor count as equal (the one nearer ahead wins)
 RELEVANCE = {"ahead": 1.0, "abeam": 0.5, "behind": 0.05}
 
 
@@ -140,8 +144,42 @@ def clusters(storms: list) -> dict:
 def strength(storm: Storm) -> float:
     """Return how much a storm deserves a CB (priority 5): its dBZ class, area and lightning."""
     dbz_class = max(0, min(storm.dbz, 65) - 40) // 5 + 1     # 43-44: 1, 45-49: 2, ... 65: 6
-    return dbz_class * (1.0 + min(storm.area_km2, 400.0) / 400.0) * \
-        (1.0 + min(storm.lightning, 50) / 100.0)
+    return dbz_class * (1.0 + min(storm.area_km2, 400.0) / 400.0) * ltg_factor(storm.lightning)
+
+
+def pick(cands: list, ac: Aircraft) -> tuple:
+    """Return the (storm, score) to take next from [(storm, score)]: (None, 0.0) if none.
+
+    Of the storms scoring within SCORE_STEP of the best, the one nearest ahead (along the
+    heading; then by key). In a big field of similar cells the exact scores differ a little
+    in each sim (its own lightning counts, a storm just in view or not): taking the exact
+    best, each sim chose other cells (synthetic pairs).
+    """
+    if not cands:
+        return None, 0.0
+    top = max(score for _, score in cands)
+    return min(((s, score) for s, score in cands if score >= top / SCORE_STEP),
+               key=lambda c: (_along(c[0], ac), c[0].key))
+
+
+def ltg_factor(flashes: int) -> float:
+    """Return the score factor for lightning near a storm: in steps, not per flash.
+
+    Each sim downloads the lightning itself, a few flashes apart: counted per flash, that
+    picked other storms in each sim (synthetic pairs in big fields 89 % -> 84 %).
+    """
+    return 1.0 if flashes < 5 else 1.15 if flashes < 20 else 1.3 if flashes < 50 else 1.5
+
+
+def _along(storm: Storm, ac: Aircraft) -> float:
+    """Return how far ahead along the heading a storm is (nm; negative: behind).
+
+    The tie-break among storms of the same score step: their order only changes when the
+    aircraft turns (straight-line distance changes as it passes them), and it is the same for
+    sims in trail.
+    """
+    off = math.radians(bearing_deg(ac.lat, ac.lon, storm.lat, storm.lon) - ac.hdg)
+    return dist_nm(ac.lat, ac.lon, storm.lat, storm.lon) * math.cos(off)
 
 
 def _off_nose(storm: Storm, ac: Aircraft) -> float:
@@ -171,15 +209,50 @@ def spacing_factor(storm: Storm, placed: list) -> float:
     return (near - SPACING_MIN_NM) / (SPACING_SOFT_NM - SPACING_MIN_NM)
 
 
+def canonical(storms: list, result: Plan, base: dict, ac: Aircraft, n: int) -> list:
+    """Return up to n [(storm, score)] in the order every sim would show them (storms only).
+
+    Like plan()'s choice, but without the zones: no CBs shown yet, no STABILITY. Each sim
+    then shows as many of them, in this order, as it has zones for.
+    """
+    out: list = []
+    in_cluster: dict = {}
+    placed: list = []
+    used: set = set()
+    while len(out) < n:
+        cands = []
+        for s in sorted(storms, key=lambda s: s.key):
+            if s.key in used:
+                continue
+            score = (base[s.key] * DIVERSITY ** in_cluster.get(result.cluster_of[s.key], 0) *
+                     spacing_factor(s, placed))
+            result.score_of.setdefault(s.key, score)
+            if score <= 0.0:
+                continue
+            cands.append((s, score))
+        best, best_score = pick(cands, ac)
+        if best is None:
+            break
+        used.add(best.key)
+        placed.append((best.lat, best.lon))
+        cid = result.cluster_of[best.key]
+        in_cluster[cid] = in_cluster.get(cid, 0) + 1
+        out.append((best, best_score))
+    return out
+
+
 def plan(storms: list, zones: list, ac: Aircraft) -> Plan:  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     """Return which movable zones go onto which storms (see the module docstring).
 
     Kept as they are: fixed zones and zones with a visible CB (their storms count as shown).
-    The other zones are filled one by one with the storm that scores most now: strength x
-    relevance x DIVERSITY ** (CBs already in its cluster) x spacing, a zone's current storm
-    x STABILITY, never a storm the crew would see appear (in_view) unless the zone shows it
-    already. A zone whose current storm is chosen stays (no move); the others are moved,
-    the ones without a CB first. Deterministic: ties go by storm key and zone number.
+    CANONICAL: the movable zones show, in order, the storms of canonical() (ranked from the
+    storms alone: strength x relevance x DIVERSITY ** (CBs before it in its cluster) x
+    spacing, picked by pick()), skipping storms already shown, too close to a CB shown, or
+    that the crew would see appear (in_view) unless a zone shows them already; so a sim with
+    fewer zones free shows the start of the same list. (Not CANONICAL: filled one by one
+    with the storm that scores most now, a zone's current storm x STABILITY.) A zone whose
+    storm is chosen stays (no move); the others are moved, the ones without a CB first.
+    Deterministic: ties go by position ahead, storm key and zone number.
     """
     result = Plan()
     all_by_key = {s.key: s for s in storms}   # every storm: existing CBs keep their spacing
@@ -218,16 +291,28 @@ def plan(storms: list, zones: list, ac: Aircraft) -> Plan:  # pylint: disable=to
             movable.append(z)
     current = {z.storm: z for z in movable if z.storm in by_key}
     chosen = []
-    for _ in movable:
-        best, best_score = None, 0.0
+    if CANONICAL:
+        for s, score in canonical(storms, result, base, ac, 2 * len(zones)):
+            if len(chosen) == len(movable):
+                break
+            if (s.key in taken or (s.in_view and s.key not in current) or
+                    spacing_factor(s, placed) == 0.0):
+                continue
+            taken.add(s.key)
+            placed.append((s.lat, s.lon))
+            chosen.append((s, score))
+    for _ in [] if CANONICAL else movable:
+        cands = []
         for s in sorted(storms, key=lambda s: s.key):
             if s.key in taken or (s.in_view and s.key not in current):
                 continue
             score = (base[s.key] * DIVERSITY ** in_cluster.get(result.cluster_of[s.key], 0) *
                      spacing_factor(s, placed) * (STABILITY if s.key in current else 1.0))
             result.score_of[s.key] = score
-            if score > best_score:
-                best, best_score = s, score
+            if score <= 0.0:
+                continue
+            cands.append((s, score))
+        best, best_score = pick(cands, ac)
         if best is None:
             break
         taken.add(best.key)

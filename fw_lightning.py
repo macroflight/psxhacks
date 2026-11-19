@@ -44,10 +44,16 @@ def latest_time(capabilities_xml: str) -> Optional[str]:
 
 
 def box(lat: float, lon: float) -> tuple:
-    """Return the image area around a point (lat_min, lon_min, lat_max, lon_max) and its px size."""
+    """Return the image area around a point (lat_min, lon_min, lat_max, lon_max) and its px size.
+
+    Centred on the whole degree nearest the point, edges on whole pixels: every sim nearby
+    gets the same pixels, so it counts the same flashes near a storm (the CB planner).
+    """
+    lat, lon = float(round(lat)), float(round(lon))
     lat_min, lat_max = max(-89.0, lat - BOX_DEG), min(89.0, lat + BOX_DEG)
     # wider in longitude away from the equator, to reach as far east and west
     half_lon = min(60.0, BOX_DEG / max(0.2, math.cos(math.radians(lat))))
+    half_lon = round(half_lon / DEG_PER_PX) * DEG_PER_PX
     lon_min, lon_max = lon - half_lon, lon + half_lon
     width = max(1, round((lon_max - lon_min) / DEG_PER_PX))
     height = max(1, round((lat_max - lat_min) / DEG_PER_PX))

@@ -13,6 +13,7 @@ a second for hours of flight; any failure can be repeated from its seed.
 
 Usage: python3 -m flighttest.plansim [--runs N] [--seed S] [--hours H] [--kind cruise|hold|turn]
        [--pair NM]   (two sims NM apart in trail: how many CBs both show)
+       [--replan S]  (also replan every S seconds, on the clock)
 """
 import argparse
 import math
@@ -31,6 +32,8 @@ DEAD_KEEP_S = 1800.0
 BEHIND_CRUISE_NM = 50.0       # frankenweather's "behind" rule: a zone this far behind is moved
 BEHIND_MANEUVER_NM = 200.0    # ... holding: this far away, once a turn puts it behind
 ZONES = 7
+NEW_BEYOND_NM = 60.0          # storms only this far past what the crew may see (frankenweather's
+#                               radar range, _CB_NEW_BEYOND_NM): new CBs are born in that band
 FIXED = (1,)                  # zone 1: the anchor (it follows the aircraft)
 
 
@@ -47,6 +50,7 @@ class SimStorm:  # pylint: disable=too-many-instance-attributes
     life_s: float
     hdg: float
     kt: float
+    ltg: int = 0                  # lightning near it (flash pixels), before each sim's own noise
 
     def dbz(self, t: float) -> int:
         """Return the storm's strength at t (0: not alive; radar CB threshold 43)."""
@@ -69,8 +73,11 @@ def move(lat: float, lon: float, brg: float, dist: float) -> tuple:
             (60.0 * max(0.2, math.cos(math.radians(lat)))))
 
 
-def make_storms(rng: random.Random, ac: "Flight", hours: float) -> list:  # pylint: disable=too-many-locals
+def make_storms(rng: random.Random, ac: "Flight", hours: float,  # pylint: disable=too-many-locals
+                fields: bool = False) -> list:
     """Return made-up storms along the flight: clusters, lines and singles, born over hours.
+
+    fields: also big fields of many similar cells (live: 170 storms in 9 clusters).
 
     Areas anywhere from 300 nm behind the start to 400 nm past the end of a straight flight,
     up to 300 nm either side of it (a hold stays near the start: around it).
@@ -79,23 +86,26 @@ def make_storms(rng: random.Random, ac: "Flight", hours: float) -> list:  # pyli
     wind_hdg, wind_kt = rng.uniform(0, 360), rng.uniform(10, 50)
     length = 0.0 if ac.kind == "hold" else ac.kt * hours
     for _ in range(rng.randint(4, 10) + int(length / 300)):   # organised areas
-        kind = rng.choice(("cluster", "line", "single"))
+        kind = rng.choice(("cluster", "line", "single") + (("field", "field") if fields else ()))
         alat, alon = move(ac.lat, ac.lon, ac.hdg, rng.uniform(-300, length + 400))
         clat, clon = move(alat, alon, ac.hdg + 90, rng.uniform(-300, 300))
         t0 = rng.uniform(-3600, hours * 3600)
         strength = rng.choice((48, 52, 56, 60, 64))
-        count = {"cluster": rng.randint(3, 9), "line": rng.randint(4, 10), "single": 1}[kind]
+        count = {"cluster": rng.randint(3, 9), "line": rng.randint(4, 10), "single": 1,
+                 "field": rng.randint(20, 60)}[kind]
         line_brg = rng.uniform(0, 180)
         for i in range(count):
             if kind == "line":
                 lat, lon = move(clat, clon, line_brg, (i - count / 2) * rng.uniform(12, 30))
             else:
-                lat, lon = move(clat, clon, rng.uniform(0, 360), rng.uniform(0, 40))
+                lat, lon = move(clat, clon, rng.uniform(0, 360),
+                                rng.uniform(0, 120 if kind == "field" else 40))
             n += 1
             storms.append(SimStorm(f"S{n:03d}", lat, lon, strength + rng.randint(-6, 3),
                                    rng.uniform(20, 300), t0 + rng.uniform(0, 1800),
                                    rng.uniform(1800, 7200), (wind_hdg + rng.uniform(-20, 20)) % 360,
-                                   wind_kt * rng.uniform(0.7, 1.2)))
+                                   wind_kt * rng.uniform(0.7, 1.2),
+                                   random.Random(n).choice((0, 0, 5, 15, 40))))
     return storms
 
 
@@ -137,7 +147,7 @@ class Flight:
 
 
 @dataclass
-class SimZone:
+class SimZone:  # pylint: disable=too-many-instance-attributes
     """A zone in the simulation: the storm its CB is on, and when that storm died (if it did)."""
 
     num: int
@@ -147,16 +157,30 @@ class SimZone:
     dead_since: Optional[float] = None
     placed_t: float = -1e9
     placed_off: float = 0.0       # how far off the nose it was placed (degrees)
+    model_at: Optional[tuple] = None   # a startup CB without a storm (model CB) until model_until
+    model_until: float = 0.0
 
 
 class Sim:  # pylint: disable=too-many-instance-attributes
     """One simulated frankenweather: its aircraft, zones and counts (a pair test runs two)."""
 
-    def __init__(self, ac: Flight, tag: str, plan_delay_s: float = 0.0):
-        """Zones start far behind; tag names its storms (each sim's keys differ, as live)."""
-        self.ac, self.tag, self.plan_delay_s = ac, tag, plan_delay_s
+    def __init__(self, ac: Flight, tag: str, plan_delay_s: float = 0.0,  # pylint: disable=too-many-arguments,too-many-positional-arguments
+                 startup: Optional[random.Random] = None, replan_s: float = 0.0,
+                 noise: Optional[random.Random] = None):
+        """Zones start far behind; tag names its storms (each sim's keys differ, as live).
+
+        startup: some zones start with a model CB of their own (no storm) somewhere ahead that
+        goes within the first 4 minutes (live: the zones' first weather, each sim's own).
+        """
+        self.ac, self.tag, self.plan_delay_s, self.replan_s = ac, tag, plan_delay_s, replan_s
+        self.noise = noise            # each sim's own lightning count (its own MTG downloads)
         self.zones = [SimZone(i + 1, *move(ac.lat, ac.lon, ac.hdg + 180, 300 + 20 * i))
                       for i in range(ZONES)]
+        for z in self.zones[1:] if startup else ():
+            if startup.random() < 0.6:
+                z.lat, z.lon = move(ac.lat, ac.lon, ac.hdg + startup.uniform(-100, 100),
+                                    startup.uniform(50, 300))
+                z.model_at, z.model_until = (z.lat, z.lon), startup.uniform(20, 240)
         self.out = {"violations": [], "moves": 0, "cb_steps": 0, "steps": 0, "behind": 0,
                     "after_turn": 0, "clusters_ahead": 0, "clusters_covered": 0, "plans": 0}
         self.next_frame, self.last_plan, self.freed = plan_delay_s, -1e9, False
@@ -188,6 +212,10 @@ class Sim:  # pylint: disable=too-many-instance-attributes
                 z.lat, z.lon = move(ac.lat, ac.lon, ac.hdg, 150)
                 out["behind"] += 1
                 self.freed = True                             # frankenweather replans soon
+        for z in zones:                                       # startup model CBs go
+            if z.model_at and t >= z.model_until:
+                z.model_at = None
+                self.freed = True
         for z in zones:                                       # storms die: dead CBs kept in view
             if z.storm and by_key[z.storm].dbz(t) < 43:
                 if z.dead_since is None:
@@ -196,7 +224,9 @@ class Sim:  # pylint: disable=too-many-instance-attributes
                     z.storm, z.dead_since = None, None
         # frankenweather replans on every new radar frame (each sim notices it a little later
         # or sooner) and, at most every 30 s, when the behind rule freed zones
-        if t >= self.next_frame or (self.freed and t - self.last_plan >= 30.0):
+        # (replan_s: also every replan_s on the clock, the same moments in every sim)
+        tick = self.replan_s and t // self.replan_s > self.last_plan // self.replan_s
+        if t >= self.next_frame or tick or (self.freed and t - self.last_plan >= 30.0):
             if t >= self.next_frame:
                 self.next_frame += RADAR_S
             self.freed, self.last_plan = False, t
@@ -228,18 +258,22 @@ class Sim:  # pylint: disable=too-many-instance-attributes
                 continue
             lat, lon = s.pos(t)
             d = P.dist_nm(ac.lat, ac.lon, lat, lon)
+            if d > max(WINDOW_NM, ac.nd_nm) + NEW_BEYOND_NM:
+                continue
             off = abs((P.bearing_deg(ac.lat, ac.lon, lat, lon) - ac.hdg + 180) % 360 - 180)
             k = self.key(s.key)
             back[k] = s.key
-            p_storms.append(P.Storm(k, lat, lon, dbz=s.dbz(t), area_km2=s.area_km2,
+            ltg = max(0, s.ltg + self.noise.randint(-8, 8)) if self.noise else s.ltg
+            p_storms.append(P.Storm(k, lat, lon, dbz=s.dbz(t), area_km2=s.area_km2, lightning=ltg,
                                     in_view=ac.may_see(lat, lon),
                                     behind_nm=d if off > 90 and not ac.maneuvering else 0.0))
         p_zones = [P.Zone(z.num, z.lat, z.lon,
                           storm=self.key(z.storm) if z.storm and z.dead_since is None else None,
                           fixed=z.num in FIXED,
-                          visible_cb=bool(z.storm) and ac.sees(*cb_pos(z, by_key, t)),
+                          visible_cb=(bool(z.storm) and ac.sees(*cb_pos(z, by_key, t))) or
+                          (bool(z.model_at) and ac.sees(*z.model_at)),
                           cb_at=cb_pos(z, by_key, t) if z.storm and z.dead_since is not None
-                          else None)
+                          else z.model_at)
                    for z in zones]
         plan = P.plan(p_storms, p_zones,
                       P.Aircraft(ac.lat, ac.lon, ac.hdg, maneuvering=ac.maneuvering,
@@ -251,7 +285,7 @@ class Sim:  # pylint: disable=too-many-instance-attributes
             if z.num in FIXED:
                 out["violations"].append((t, f"fixed zone {z.num} moved"))
             z.storm = back[m.storm] if m.storm else None
-            z.dead_since, z.lat, z.lon = None, m.lat, m.lon
+            z.dead_since, z.lat, z.lon, z.model_at = None, m.lat, m.lon, None
             z.placed_t = t
             z.placed_off = abs((P.bearing_deg(ac.lat, ac.lon, m.lat, m.lon) - ac.hdg + 180)
                                % 360 - 180) if m.storm else 0.0
@@ -279,7 +313,8 @@ class Sim:  # pylint: disable=too-many-instance-attributes
                 out["clusters_covered"] += any(s.key in shown for s in members)
 
 
-def run(seed: int, hours: float, kind: str, pair_nm: Optional[float] = None) -> dict:  # pylint: disable=too-many-locals
+def run(seed: int, hours: float, kind: str, pair_nm: Optional[float] = None,  # pylint: disable=too-many-locals,too-many-arguments,too-many-positional-arguments
+        replan_s: float = 0.0, fields: bool = False, noise: bool = False) -> dict:
     """Fly one synthetic flight (two in trail with pair_nm); return counts and rule violations.
 
     A pair: the second aircraft pair_nm behind on the same track, with its own zones, storm
@@ -288,13 +323,17 @@ def run(seed: int, hours: float, kind: str, pair_nm: Optional[float] = None) -> 
     """
     rng = random.Random(seed)
     ac = Flight(kind, rng)
-    storms = make_storms(rng, ac, hours)
+    storms = make_storms(rng, ac, hours, fields)
     by_key = {s.key: s for s in storms}
-    sims = [Sim(ac, "")]
-    if pair_nm is not None:
+    sims = [Sim(ac, "", replan_s=replan_s)]
+    if pair_nm is not None:   # each sim: its own startup CBs, its first frame up to 2 min late
         ac2 = Flight(kind, random.Random(seed))
         ac2.lat, ac2.lon = move(ac.lat, ac.lon, ac.hdg + 180, pair_nm)
-        sims.append(Sim(ac2, "T", plan_delay_s=rng.uniform(0, 60)))
+        sims = [Sim(ac, "", plan_delay_s=rng.uniform(0, 120), startup=random.Random(seed * 2),
+                    replan_s=replan_s, noise=random.Random(seed * 3) if noise else None),
+                Sim(ac2, "T", plan_delay_s=rng.uniform(0, 120),
+                    startup=random.Random(seed * 2 + 1), replan_s=replan_s,
+                    noise=random.Random(seed * 3 + 1) if noise else None)]
     out = sims[0].out
     out.update({"seed": seed, "kind": kind, "both": 0, "same": 0})
     t = 0.0
@@ -329,12 +368,18 @@ def main() -> int:
     ap.add_argument("--kind", choices=("cruise", "hold", "turn", "all"), default="all")
     ap.add_argument("--pair", type=float, default=None, metavar="NM",
                     help="fly a second sim NM behind and count how many CBs both show")
+    ap.add_argument("--replan", type=float, default=0.0, metavar="S",
+                    help="also replan every S seconds on the clock (default: frames only)")
+    ap.add_argument("--fields", action="store_true",
+                    help="also big fields of many similar cells (as live)")
+    ap.add_argument("--noise", action="store_true",
+                    help="pairs: each sim's own lightning counts (its own MTG downloads)")
     a = ap.parse_args()
     kinds = ("cruise", "hold", "turn") if a.kind == "all" else (a.kind,)
     bad, totals = [], {"moves": 0, "cb_steps": 0, "steps": 0, "ahead": 0, "covered": 0,
                        "both": 0, "same": 0}
     for i in range(a.runs):
-        r = run(a.seed + i, a.hours, kinds[i % len(kinds)], a.pair)
+        r = run(a.seed + i, a.hours, kinds[i % len(kinds)], a.pair, a.replan, a.fields, a.noise)
         totals["both"] += r["both"]
         totals["same"] += r["same"]
         totals["moves"] += r["moves"]

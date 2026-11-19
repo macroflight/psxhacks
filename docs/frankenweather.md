@@ -513,16 +513,37 @@ the same picture VATSIM Radar can show) decides where the CBs are.
 - The log shows each frame ("Radar cells: ..."), and a zone's reason shows
   what the radar did ("radar: 52 dBZ cell 140 km2", "radar: no storm
   cell"). Needs Pillow.
+- When RainViewer doesn't send all of a frame's tiles (it slows down
+  clients asking for many at once, as at a start), frankenweather asks for
+  the missing ones again a minute later and keeps using the frame it had
+  (at a start: no radar decision yet) until it has them all, at most three
+  tries ("Radar: 153 of 405 tiles not received"). Before, a start could
+  run on a frame with no storms in it for up to 10 minutes. The same for
+  the radar coverage map's tiles ("Radar: 4 of 12 coverage tiles not
+  received"): without them no place counts as covered, so the radar has
+  no storms (a headless sim had none for its first 8 minutes while its
+  pair sim placed CBs, 2026-11-19).
+- The radar and coverage tiles are kept on disk (`--radar-tile-cache DIR`,
+  default `~/.cache/frankenweather/radar`, a few MB), so a restart reads
+  the tiles it already has instead of asking RainViewer for them all again.
+  A frame's tiles never change and are kept for an hour; coverage tiles
+  for 6 hours. Several frankenweathers on one computer may share the
+  folder (the headless test sims do). `--radar-tile-cache ""` keeps none.
 - **CB placement planner (`--cb-planner`, testing, with `--radar-cbs`):**
   instead of filling free zones with the strongest storms ahead one at a
   time, frankenweather makes one scored plan for all movable zones on every
-  radar frame (at least every 10 minutes): each distinct area of storms
+  radar frame and every minute on the UTC clock (the same moments in every
+  sim, so sims flying together catch the same storms; every sim ranks the
+  storms the same way and shows as many of them as it has zones free):
+  each distinct area of storms
   gets a CB before a strong area gets a second one, CBs stay at least 25 nm
-  apart, a zone keeps its storm unless another is clearly better, and
-  lightning makes a storm count more. The rules above (a CB the crew may
+  apart, storms scoring within 30 % of each other count as equal (the one
+  nearer ahead wins), and lightning makes a storm count more (fetched on
+  the UTC clock every 5 minutes, so sims nearby count the same flashes). The rules above (a CB the crew may
   see stays, no new CB in view, behind the aircraft) still apply. The log
-  shows each plan ("CB planner: 55 storms in 11 clusters, 4 zones movable,
-  4 move(s)") and each move's storm and score. How it decides:
+  shows each plan that moves a zone or has a new radar frame ("CB planner:
+  55 storms in 11 clusters, 4 zones movable, 4 move(s)") and each move's
+  storm and score. How it decides:
   [docs/developers/cb-planner.md](developers/cb-planner.md).
 
 **Status map (`/devel` on frankenweather's web UI, read-only):** a map of
