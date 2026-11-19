@@ -73,6 +73,14 @@ Agreed with the user on 2026-11-18:
   moves in 40 minutes, each CB gone within seconds. Existing CBs on such
   storms still keep other CBs at a distance.
 
+**Only the planner gives a zone a radar CB.** With the planner, a zone
+without a CB gets one only on the storm the planner chose for it; a zone
+that happens to lie near a storm (the zones of two sims are in different
+places) gets none. A zone already showing a CB may still follow a storm
+near it, so a CB the crew may see isn't taken away. Before this, most CBs
+only one of two sims flying together showed came from that rule (headless
+pair tests 2026-11-19).
+
 frankenweather decides what the crew may see (window range and angle, the ND's
 weather radar range, holding all round) and passes it in as `Storm.in_view` and
 `Zone.visible_cb`; the planner itself has no view of PSX.
@@ -89,7 +97,13 @@ weather radar range, holding all round) and passes it in as `Storm.in_view` and
   view, no visible CB moved or removed (a dead storm's CB only once out of
   view), no CB placed closer than the spacing minimum, fixed zones never moved.
   1,000 flights of 3 hours (3,000 hours) take a few seconds; any failure can be
-  repeated with `--seed`.
+  repeated with `--seed`. With `--pair NM` a second sim flies NM behind on
+  the same track over the same storms (its own zones, its own storm keys, a
+  frame noticed up to a minute later, a replan 30 s after the behind rule
+  frees a zone, as frankenweather does) and the run counts how many of the
+  CBs both crews could see both sims show: 8 nm apart, 92 % cruising and 89
+  % with a 90-degree turn (2026-11-19). Live pairs show far less (see
+  below): what makes the difference is outside the planner.
 
 The synthetic flights also apply frankenweather's "behind" rule, and flag a
 zone it takes away within 10 minutes of being placed off the nose (a

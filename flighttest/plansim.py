@@ -12,6 +12,7 @@ Counted too: CBs shown, clusters ahead with a CB, zone moves per hour. One run t
 a second for hours of flight; any failure can be repeated from its seed.
 
 Usage: python3 -m flighttest.plansim [--runs N] [--seed S] [--hours H] [--kind cruise|hold|turn]
+       [--pair NM]   (two sims NM apart in trail: how many CBs both show)
 """
 import argparse
 import math
@@ -148,18 +149,25 @@ class SimZone:
     placed_off: float = 0.0       # how far off the nose it was placed (degrees)
 
 
-def run(seed: int, hours: float, kind: str) -> dict:  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
-    """Fly one synthetic flight; return its counts and the rule violations found."""
-    rng = random.Random(seed)
-    ac = Flight(kind, rng)
-    storms = make_storms(rng, ac, hours)
-    by_key = {s.key: s for s in storms}
-    zones = [SimZone(i + 1, *move(0, 0, 180, 300 + 20 * i)) for i in range(ZONES)]
-    out = {"seed": seed, "kind": kind, "violations": [], "moves": 0, "cb_steps": 0, "steps": 0,
-           "behind": 0, "after_turn": 0,
-           "clusters_ahead": 0, "clusters_covered": 0}
-    t, next_plan = 0.0, 0.0
-    while t < hours * 3600:
+class Sim:  # pylint: disable=too-many-instance-attributes
+    """One simulated frankenweather: its aircraft, zones and counts (a pair test runs two)."""
+
+    def __init__(self, ac: Flight, tag: str, plan_delay_s: float = 0.0):
+        """Zones start far behind; tag names its storms (each sim's keys differ, as live)."""
+        self.ac, self.tag, self.plan_delay_s = ac, tag, plan_delay_s
+        self.zones = [SimZone(i + 1, *move(ac.lat, ac.lon, ac.hdg + 180, 300 + 20 * i))
+                      for i in range(ZONES)]
+        self.out = {"violations": [], "moves": 0, "cb_steps": 0, "steps": 0, "behind": 0,
+                    "after_turn": 0, "clusters_ahead": 0, "clusters_covered": 0, "plans": 0}
+        self.next_frame, self.last_plan, self.freed = plan_delay_s, -1e9, False
+
+    def key(self, storm_key: str) -> str:
+        """Return this sim's key for a storm (live, keys carry the frame a sim first saw it in)."""
+        return storm_key if not self.tag else f"{self.tag}{999 - int(storm_key[1:]):03d}"
+
+    def step(self, t: float, storms: list, by_key: dict) -> None:  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+        """Fly STEP_S seconds, apply the behind rule, replan when frankenweather would, check."""
+        ac, zones, out = self.ac, self.zones, self.out
         ac.step(t, STEP_S)
         zones[0].lat, zones[0].lon = ac.lat, ac.lon          # the anchor follows the aircraft
         shown_before = {z.num: (z.storm, ac.sees(*cb_pos(z, by_key, t))) for z in zones if z.storm}
@@ -179,64 +187,20 @@ def run(seed: int, hours: float, kind: str) -> dict:  # pylint: disable=too-many
                 z.storm, z.dead_since = None, None
                 z.lat, z.lon = move(ac.lat, ac.lon, ac.hdg, 150)
                 out["behind"] += 1
+                self.freed = True                             # frankenweather replans soon
         for z in zones:                                       # storms die: dead CBs kept in view
             if z.storm and by_key[z.storm].dbz(t) < 43:
                 if z.dead_since is None:
                     z.dead_since = t
                 if not ac.sees(*cb_pos(z, by_key, t)) or t - z.dead_since > DEAD_KEEP_S:
                     z.storm, z.dead_since = None, None
-        if t >= next_plan:
-            next_plan += RADAR_S
-            alive = [s for s in storms if s.dbz(t) >= 43]
-            p_storms = []
-            for s in alive:
-                lat, lon = s.pos(t)
-                d = P.dist_nm(ac.lat, ac.lon, lat, lon)
-                off = abs((P.bearing_deg(ac.lat, ac.lon, lat, lon) - ac.hdg + 180) % 360 - 180)
-                p_storms.append(P.Storm(s.key, lat, lon, dbz=s.dbz(t), area_km2=s.area_km2,
-                                        in_view=ac.may_see(lat, lon),
-                                        behind_nm=d if off > 90 and not ac.maneuvering else 0.0))
-            p_zones = [P.Zone(z.num, z.lat, z.lon, storm=z.storm if z.dead_since is None else None,
-                              fixed=z.num in FIXED,
-                              visible_cb=bool(z.storm) and ac.sees(*cb_pos(z, by_key, t)),
-                              cb_at=cb_pos(z, by_key, t) if z.storm and z.dead_since is not None
-                              else None)
-                       for z in zones]
-            plan = P.plan(p_storms, p_zones,
-                          P.Aircraft(ac.lat, ac.lon, ac.hdg, maneuvering=ac.maneuvering,
-                                     behind_limit_nm=BEHIND_CRUISE_NM,
-                                     maneuver_reach_nm=BEHIND_MANEUVER_NM - 50.0))
-            placed_now = set()
-            for m in plan.moves:
-                z = zones[m.zone - 1]
-                if z.num in FIXED:
-                    out["violations"].append((t, f"fixed zone {z.num} moved"))
-                z.storm, z.dead_since, z.lat, z.lon = m.storm, None, m.lat, m.lon
-                z.placed_t = t
-                z.placed_off = abs((P.bearing_deg(ac.lat, ac.lon, m.lat, m.lon) - ac.hdg + 180)
-                                   % 360 - 180) if m.storm else 0.0
-                out["moves"] += 1
-                if m.storm:
-                    placed_now.add(z.num)
-            # spacing: checked where CBs are placed (storms moving apart or together later
-            # is the weather's doing; a visible CB isn't moved for it)
-            for z in zones:
-                if z.num not in placed_now:
-                    continue
-                for o in zones:
-                    gap = (P.dist_nm(*cb_pos(z, by_key, t), *cb_pos(o, by_key, t))
-                           if o is not z and o.storm else math.inf)
-                    if gap < P.SPACING_MIN_NM - 0.5:
-                        out["violations"].append(
-                            (t, f"zone {z.num}: placed {gap:.0f} nm from zone {o.num}'s CB"))
-            # clusters within 320 nm ahead and whether one of their storms has a CB
-            shown = {z.storm for z in zones if z.storm}
-            for cid in set(plan.cluster_of.values()):
-                members = [s for s in p_storms if plan.cluster_of.get(s.key) == cid]
-                if any(P.dist_nm(ac.lat, ac.lon, s.lat, s.lon) <= 320 and
-                       P.relevance(s, P.Aircraft(ac.lat, ac.lon, ac.hdg)) == 1.0 for s in members):
-                    out["clusters_ahead"] += 1
-                    out["clusters_covered"] += any(s.key in shown for s in members)
+        # frankenweather replans on every new radar frame (each sim notices it a little later
+        # or sooner) and, at most every 30 s, when the behind rule freed zones
+        if t >= self.next_frame or (self.freed and t - self.last_plan >= 30.0):
+            if t >= self.next_frame:
+                self.next_frame += RADAR_S
+            self.freed, self.last_plan = False, t
+            self.plan(t, storms, by_key)
         # the rules
         for z in zones:
             if not z.storm:
@@ -247,12 +211,107 @@ def run(seed: int, hours: float, kind: str) -> dict:  # pylint: disable=too-many
                 out["violations"].append((t, f"zone {z.num}: new CB {z.storm} in view"))
         for num, (key, was_seen) in shown_before.items():
             z = zones[num - 1]
-            died = z.storm is None and by_key[key].dbz(t) < 43   # a dead storm's CB, out of view
+            died = by_key[key].dbz(t) < 43   # a dead storm's CB (out of view, or kept 30 min)
             if was_seen and z.storm != key and not died:
                 out["violations"].append((t, f"zone {num}: visible CB {key} moved/removed"))
         out["cb_steps"] += sum(1 for z in zones if z.storm)
         out["steps"] += 1
+
+    def plan(self, t: float, storms: list, by_key: dict) -> None:  # pylint: disable=too-many-locals
+        """Run the planner as frankenweather would and apply its moves."""
+        ac, zones, out = self.ac, self.zones, self.out
+        out["plans"] += 1
+        back = {}
+        p_storms = []
+        for s in storms:
+            if s.dbz(t) < 43:
+                continue
+            lat, lon = s.pos(t)
+            d = P.dist_nm(ac.lat, ac.lon, lat, lon)
+            off = abs((P.bearing_deg(ac.lat, ac.lon, lat, lon) - ac.hdg + 180) % 360 - 180)
+            k = self.key(s.key)
+            back[k] = s.key
+            p_storms.append(P.Storm(k, lat, lon, dbz=s.dbz(t), area_km2=s.area_km2,
+                                    in_view=ac.may_see(lat, lon),
+                                    behind_nm=d if off > 90 and not ac.maneuvering else 0.0))
+        p_zones = [P.Zone(z.num, z.lat, z.lon,
+                          storm=self.key(z.storm) if z.storm and z.dead_since is None else None,
+                          fixed=z.num in FIXED,
+                          visible_cb=bool(z.storm) and ac.sees(*cb_pos(z, by_key, t)),
+                          cb_at=cb_pos(z, by_key, t) if z.storm and z.dead_since is not None
+                          else None)
+                   for z in zones]
+        plan = P.plan(p_storms, p_zones,
+                      P.Aircraft(ac.lat, ac.lon, ac.hdg, maneuvering=ac.maneuvering,
+                                 behind_limit_nm=BEHIND_CRUISE_NM,
+                                 maneuver_reach_nm=BEHIND_MANEUVER_NM - 50.0))
+        placed_now = set()
+        for m in plan.moves:
+            z = zones[m.zone - 1]
+            if z.num in FIXED:
+                out["violations"].append((t, f"fixed zone {z.num} moved"))
+            z.storm = back[m.storm] if m.storm else None
+            z.dead_since, z.lat, z.lon = None, m.lat, m.lon
+            z.placed_t = t
+            z.placed_off = abs((P.bearing_deg(ac.lat, ac.lon, m.lat, m.lon) - ac.hdg + 180)
+                               % 360 - 180) if m.storm else 0.0
+            out["moves"] += 1
+            if m.storm:
+                placed_now.add(z.num)
+        # spacing: checked where CBs are placed (storms moving apart or together later
+        # is the weather's doing; a visible CB isn't moved for it)
+        for z in zones:
+            if z.num not in placed_now:
+                continue
+            for o in zones:
+                gap = (P.dist_nm(*cb_pos(z, by_key, t), *cb_pos(o, by_key, t))
+                       if o is not z and o.storm else math.inf)
+                if gap < P.SPACING_MIN_NM - 0.5:
+                    out["violations"].append(
+                        (t, f"zone {z.num}: placed {gap:.0f} nm from zone {o.num}'s CB"))
+        # clusters within 320 nm ahead and whether one of their storms has a CB
+        shown = {self.key(z.storm) for z in zones if z.storm}
+        for cid in set(plan.cluster_of.values()):
+            members = [s for s in p_storms if plan.cluster_of.get(s.key) == cid]
+            if any(P.dist_nm(ac.lat, ac.lon, s.lat, s.lon) <= 320 and
+                   P.relevance(s, P.Aircraft(ac.lat, ac.lon, ac.hdg)) == 1.0 for s in members):
+                out["clusters_ahead"] += 1
+                out["clusters_covered"] += any(s.key in shown for s in members)
+
+
+def run(seed: int, hours: float, kind: str, pair_nm: Optional[float] = None) -> dict:  # pylint: disable=too-many-locals
+    """Fly one synthetic flight (two in trail with pair_nm); return counts and rule violations.
+
+    A pair: the second aircraft pair_nm behind on the same track, with its own zones, storm
+    keys and a frame noticed up to a minute apart; "same" counts, every step, the CBs both
+    crews could see (within WINDOW_NM, ahead) and how many of them the other sim shows too.
+    """
+    rng = random.Random(seed)
+    ac = Flight(kind, rng)
+    storms = make_storms(rng, ac, hours)
+    by_key = {s.key: s for s in storms}
+    sims = [Sim(ac, "")]
+    if pair_nm is not None:
+        ac2 = Flight(kind, random.Random(seed))
+        ac2.lat, ac2.lon = move(ac.lat, ac.lon, ac.hdg + 180, pair_nm)
+        sims.append(Sim(ac2, "T", plan_delay_s=rng.uniform(0, 60)))
+    out = sims[0].out
+    out.update({"seed": seed, "kind": kind, "both": 0, "same": 0})
+    t = 0.0
+    while t < hours * 3600:
+        for sim in sims:
+            sim.step(t, storms, by_key)
+        if len(sims) == 2:
+            sa = {z.storm for z in sims[0].zones if z.storm}
+            sb = {z.storm for z in sims[-1].zones if z.storm}
+            for key in sa | sb:
+                lat, lon = by_key[key].pos(t)
+                if all(sim.ac.sees(lat, lon) for sim in sims):
+                    out["both"] += 1
+                    out["same"] += key in sa and key in sb
         t += STEP_S
+    if len(sims) == 2:
+        out["violations"] += [(t, f"(trailing sim) {v}") for t, v in sims[1].out["violations"]]
     return out
 
 
@@ -268,11 +327,16 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--hours", type=float, default=3.0)
     ap.add_argument("--kind", choices=("cruise", "hold", "turn", "all"), default="all")
+    ap.add_argument("--pair", type=float, default=None, metavar="NM",
+                    help="fly a second sim NM behind and count how many CBs both show")
     a = ap.parse_args()
     kinds = ("cruise", "hold", "turn") if a.kind == "all" else (a.kind,)
-    bad, totals = [], {"moves": 0, "cb_steps": 0, "steps": 0, "ahead": 0, "covered": 0}
+    bad, totals = [], {"moves": 0, "cb_steps": 0, "steps": 0, "ahead": 0, "covered": 0,
+                       "both": 0, "same": 0}
     for i in range(a.runs):
-        r = run(a.seed + i, a.hours, kinds[i % len(kinds)])
+        r = run(a.seed + i, a.hours, kinds[i % len(kinds)], a.pair)
+        totals["both"] += r["both"]
+        totals["same"] += r["same"]
         totals["moves"] += r["moves"]
         totals["cb_steps"] += r["cb_steps"]
         totals["steps"] += r["steps"]
@@ -285,6 +349,9 @@ def main() -> int:
     print(f"{a.runs} flights, {flight_h:.0f} h: CBs shown {shown:.1f}"
           f" on average, zone moves {totals['moves'] / flight_h:.1f}/h, clusters ahead with a CB "
           f"{100 * totals['covered'] / max(1, totals['ahead']):.0f}%")
+    if a.pair is not None:
+        print(f"pair {a.pair:g} nm apart: of the CBs both crews could see, both sims show "
+              f"{100 * totals['same'] / max(1, totals['both']):.0f}%")
     for r in bad[:10]:
         print(f"seed {r['seed']} ({r['kind']}): {len(r['violations'])} violations, first at "
               f"{r['violations'][0][0] / 60:.0f} min: {r['violations'][0][1]}")

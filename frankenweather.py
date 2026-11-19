@@ -10878,7 +10878,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # one storm, one zone: cells other zones (or drifting CBs) have are taken
         taken = ({k for zn, k in self._radar_zone_cell.items() if zn != zone_num} |
                  {c.radar for zn, c in self._drift.items() if zn != zone_num and c.radar})
-        cell = cell or self._radar_cb_near(lat, lon, _RADAR_MATCH_NM, taken)
+        # --cb-planner: a zone without a CB gets one only on the storm the planner gave it (a
+        # zone near a storm by chance, every sim's zones being elsewhere, made CBs only one of
+        # two sims flying together showed: headless pair 2026-11-19); one showing a CB may
+        # follow a storm near it, so a CB the crew may see isn't taken away
+        if cell is None and not (zone_num and self._cb_planner_on() and
+                                 _fw_drift.cb_oktas(self.zone_wx.get(zone_num) or "") == 0):
+            cell = self._radar_cb_near(lat, lon, _RADAR_MATCH_NM, taken)
         if cell is not None:
             self._radar_zone_cell[zone_num] = cell.key
         else:
