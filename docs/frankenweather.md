@@ -121,9 +121,7 @@ Features:
   CBs, since TS SIGMETs report observed thunderstorms. METAR convective indicators (TS, TSRA,
   SHRA, GR, LTG, FC, CB sky groups) are also used and can override or
   refine the Open-Meteo prediction. See [CB growth and
-  decay](#cb-growth-and-decay) below for `--cb-growth`, an opt-in
-  ramp of a CB's coverage/top instead of an instant snap to
-  its forecast value.
+  decay](#cb-growth-and-decay) below for the CB life cycle switches.
 
 - METAR TEMPO/BECMG/PROBnn trend groups are parsed out and excluded from
   the current-observation weather (they describe conditions that *may*
@@ -576,65 +574,12 @@ With both off, a CB appears and goes at its full size. That's what drawing
 the CBs in MSFS needs for now; the growing and shrinking described below
 only happens with a switch on.
 
-`--cb-growth` (experimental, off by default) is an option that
-ramps a CB's coverage (oktas) and top height gradually toward its forecast
-target instead of snapping to it the instant a zone is placed ahead of the
-aircraft or a new CB appears in an existing zone. Base height is never
-ramped — it always reflects the live forecast, since it moves slowly and
-smoothly on its own (it's derived from temperature/dewpoint, not CAPE).
-
-The starting size and growth rate are both picked from the CB's distance
-to the aircraft at the moment it first appears:
-
-- **Starting percentage**: a random value within a range picked by
-  distance (never less than 1 okta/a few thousand feet above base) —
-  70-100% beyond 200 nm, 50-80% beyond 150 nm, 30-60% beyond 100 nm,
-  10-40% beyond 50 nm, 5-20% at or inside 50 nm. Randomized (not a single
-  fixed value per distance) so CBs don't all look identically "grown" at
-  a given range. Counterintuitive at first, but the point is
-  *noticeability*, not realism: a CB 200+ nm out is too far away to
-  assess precisely, so starting it already mostly grown doesn't look
-  like a "pop"; the same jump at 50 nm or less, where the pilot can
-  actually judge its size, would.
-- **Growth rate**: fixed at that moment so the CB reaches its forecast
-  size at roughly the same time the aircraft reaches the zone (using true
-  airspeed as the speed estimate), so a CB doesn't finish forming only
-  after it's long gone, nor is there too little visible development by
-  the time the aircraft arrives — **but capped**, regardless of distance:
-  avoiding the "CB just popped up right next to the aircraft" effect
-  matters more than a close-in CB finishing growth in time, so one
-  created with little runway left (e.g. appearing in an already-nearby
-  zone) simply arrives still under-grown rather than rushing to finish in
-  a minute or two. The cap itself scales with the zone's forecast CAPE —
-  real storm updrafts (and so convective growth) are stronger at higher
-  CAPE, so a high-CAPE CB is allowed to grow faster than the 1000 ft/min
-  floor used for weak/no-CAPE CBs (e.g. one forced by a TS SIGMET/METAR
-  override) — but only up to a 4000 ft/min ceiling, matching real-world
-  references for an actively-growing CB; CAPE's own scaling has no
-  ceiling of its own, and would otherwise keep accelerating the rate even
-  past the point (~1750 J/kg) where the forecast top height itself has
-  already saturated at its own 55000ft ceiling. Coverage (oktas) growth
-  is capped at a flat rate regardless of CAPE.
-
-Once a CB is fully grown, if its forecast later shrinks or disappears
-entirely, it decays at a fixed rate rather than reusing the (now
-irrelevant) growth rate — removal isn't time-critical, since the zone
-will be left behind soon regardless, and a real CB doesn't collapse
-instantly either. This also means a CB that forms, then forecasts away,
-then comes back doesn't flicker in and out at the boundary.
-
-Ramping state is per-zone and resets whenever a zone is (re)placed
-(relocation, a new dep/dst airport zone, or the CB-near-airport-avoidance
-offset) — any CB in the newly-assigned zone starts fresh from its own
-distance at that moment. The feature is active in every flight phase,
-including maneuvering mode (holds, vectoring; it used to be off there, so
-CBs, e.g. a destination METAR's TEMPO CB, popped in and out at once).
-With the flag off, a CB appears or grows to its forecast at once, but a
-CB whose forecast shrinks or disappears (a TEMPO group switching off, a
-new METAR, a SIGMET expiring) still fades away rather than vanishing: up
-to about 15 minutes for a big one. "Remove CB near dep/arr" and
-CB-free zones remove CBs at once, and a zone that's moved starts fresh,
-so this never holds a zone back.
+With a switch on, a CB grows at fixed rates (oktas half an okta a
+minute, its top 2,500 ft a minute, from 1 okta and 5,000 ft deep) and
+shrinks more slowly (a quarter okta and 1,000 ft a minute). "Remove CB
+near dep/arr" and CB-free zones remove CBs at once, and a zone that's
+moved starts fresh. The old `--cb-growth` option (a distance-based
+growth) was retired on 2026-11-19: it's still accepted but does nothing.
 
 Inside a TS or TC SIGMET area (with the SIGMET system), zones are kept at least
 70 nm apart, and the all-around placement at startup, after a
@@ -753,6 +698,8 @@ is usually the better side.
   20 nm to the side of the track the wind comes from, drifting with the
   850-300 hPa mean wind (at least 20 kt; with the wind along the track it
   hardly closes on it); one each at 315 and 045 degrees relative, 30 nm;
+  one at a distance (1-500 nm) and bearing you enter, relative to the nose
+  or true (for finding how far out MSFS shows a CB);
   a CB smiley (two eyes and a three-CB smile, 40 nm ahead, upright on the
   ND); a drift speed for all test CBs (static ones then move with the
   mean wind's direction) and a reset to the motion they were placed with.

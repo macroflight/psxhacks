@@ -294,6 +294,18 @@ _STATIONS_CACHE = os.path.join(os.path.expanduser("~"), ".cache", "frankenweathe
 # Only ever loaded if it actually exists (see _load_config_file) — nothing is written
 # here unless the user explicitly saves from the web UI.
 _DEFAULT_CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".frankenweather.toml")
+
+
+class _HelpFormatter(argparse.ArgumentDefaultsHelpFormatter):
+    """--help with "(default: ...)", but not for None (not given: config file or help decides)."""
+
+    def _get_help_string(self, action):
+        """Return the option's help, without a "(default: None)" that only means "not given"."""
+        if action.default is None:
+            return action.help
+        return super()._get_help_string(action)
+
+
 _VATSIM_ALL_URL = "https://metar.vatsim.net/all"
 _VATSIM_CACHE_MAX_S = 1800             # re-fetch VATSIM METARs every 30 minutes
 # Departure/destination METAR refresh: metar.vatsim.net also serves a
@@ -737,60 +749,6 @@ _CONFLICT_LOG_INTERVAL_S = 60.0
 # transit either, so the window can just be generous.
 _WX_SLOW_TRANSIT_MS = 2000
 
-# CB growth/decay ramping (--cb-growth, cruise mode only): see
-# Script._ramp_cb_wx()/docs/frankenweather.md. Instead of a CB's oktas/top
-# snapping instantly to its forecast target, they ramp gradually -- growth
-# is sized at creation so a CB doesn't look like it "popped into view" at a
-# distance where it'd be noticeable, and (subject to the rate cap below)
-# finishes growing before the aircraft reaches it; shrinking/removal always
-# uses the fixed decay rate below, since a departing zone doesn't need to
-# hurry. Base (field 11) is never ramped -- it's applied straight from the
-# forecast every cycle.
-_CB_GROWTH_START_PCT_RANGES = (
-    # (dist_nm threshold, low_pct, high_pct) -- highest threshold first; the
-    # first range whose threshold the distance exceeds applies, picking a
-    # uniformly random percentage within it (never a single fixed value) --
-    # see _cb_growth_start_pct(). A CB this far out is too far away to
-    # assess precisely even at the high end of its range, so starting
-    # closer to fully-formed doesn't read as a "pop".
-    (200.0, 0.70, 1.00),
-    (150.0, 0.50, 0.80),
-    (100.0, 0.30, 0.60),
-    (50.0, 0.10, 0.40),
-)
-_CB_GROWTH_START_PCT_RANGE_BELOW = (0.05, 0.20)  # dist_nm <= 50
-_CB_GROWTH_MIN_TOP_ABOVE_BASE_FT = 3000.0   # "a few thousand feet above the base"
-_CB_GROWTH_MIN_OKTAS = 1                    # never less than 1/8 once a CB exists
-_CB_GROWTH_ASSUMED_GS_KT = 420.0            # ETA fallback if ac_tas_kt isn't known yet
-# Hard cap on the ETA-sized growth rate, regardless of distance -- avoiding
-# the "pops up right next to the aircraft" effect matters more than a
-# close-in CB finishing growth before arrival, so a CB created with little
-# runway left (e.g. one appearing in an already-nearby zone) simply arrives
-# still under-grown rather than rushing to finish in a minute or two. This
-# is the floor of the CAPE-scaled cap below (i.e. the cap for weak/no-CAPE
-# CBs, e.g. one forced by a TS SIGMET/METAR override with little CAPE
-# behind it) -- higher CAPE only ever raises it.
-_CB_GROWTH_MAX_TOP_FT_PER_MIN = 1000.0
-_CB_GROWTH_MAX_OKTAS_PER_MIN = 0.15
-# Real updrafts scale roughly with sqrt(2*CAPE) (parcel theory's unmixed
-# max vertical velocity); real-world updrafts run well under that unmixed
-# max (entrainment), and the visible cloud *top* rises slower still than
-# the internal updraft. _CB_GROWTH_CAPE_UPDRAFT_FRACTION folds both of
-# those discounts into one empirical factor, picked so the resulting top
-# growth rate lands in the ~1500-4000 ft/min range meteorology references
-# give for an actively-growing CB at moderate-to-severe CAPE (1500-3000
-# J/kg) -- see the growth-rate/CAPE discussion in
-# docs/Changelog-frankenweather.md. sqrt(CAPE) has no ceiling of its own,
-# so _CB_GROWTH_MAX_TOP_FT_PER_MIN_CEILING caps the result at the fast end
-# of that same real-world range -- without it, extreme CAPE (rare, but
-# Open-Meteo can report it) would keep accelerating the rate even after
-# cb_tops_ft()'s own CB_TOP_MAX_FT forecast ceiling (reached by CAPE ~1250
-# J/kg) stops giving it any more height left to climb towards.
-_CB_GROWTH_CAPE_UPDRAFT_FRACTION = 0.25
-_CB_GROWTH_MAX_TOP_FT_PER_MIN_CEILING = 4000.0
-_MPS_TO_FT_PER_MIN = 196.85
-_CB_DECAY_TOP_FT_PER_MIN = 150.0            # fixed, real-CB-collapse-plausible rate
-_CB_DECAY_OKTAS_PER_MIN = 0.1               # ~1 okta every 10 minutes
 # Without --cb-growth a CB fades in and out (_fade_cb_wx()). Real CBs grow
 # from towering cumulus in ~10-20 min and take ~20-30 min to dissipate, so
 # growing is quicker than fading: 6/8 in ~12 min, gone in ~25 (user,
@@ -2615,9 +2573,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._last_situ_load_mono = 0.0
         self._owned_restore_situ = False  # the pending restore follows a situ load
 
-        # --cb-growth ramp state (see _ramp_cb_wx()): zone_num → dict of
-        # current_oktas/current_top_ft/growth_rate_*_per_min/last_update_ts,
-        # present only while that zone's CB is actively growing/decaying.
+        # CB fade state (_fade_cb_wx()): zone_num → dict of current_oktas/
+        # current_top_ft/base_ft/last_update_ts/last_*_rate_per_min, present
+        # only while that zone's CB is fading in or out.
         self.zone_cb_ramp: dict = {}
         # zone -> the Wx a fading CB is heading for (_fade_cb_wx(), cb_fade_coro())
         self._zone_cb_fade_target: dict = {}
@@ -2631,16 +2589,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # _adopt_psx_zones()); once per process
         self._psx_zones_checked = False
         self._zone_wx_pos: dict = {}
-        # zone_num → distance (nm) to the aircraft captured at the moment the
-        # zone was last (re)placed; consumed (popped) by _ramp_cb_wx() the
-        # first time it sees a CB there, so it only ever reflects placement,
-        # never a later update.
-        self.zone_cb_create_dist_nm: dict = {}
         # zone_num → {'oktas','base','top'} forecast target (pre-ramp), or
-        # None if no CB is forecast there -- set every _update_zones() cycle
-        # regardless of --cb-growth, so the web UI/console can always show
-        # the target even when ramping itself is inactive (in which case
-        # current == target, since nothing is ramped).
+        # None if no CB is forecast there -- set every _update_zones() cycle,
+        # so the web UI/console can always show the target (current ==
+        # target once a CB has faded in).
         self.zone_cb_target: dict = {}
 
         # Fixed zone positions: zone_num (1-7) → (lat, lon, icao)
@@ -6309,38 +6261,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 best, best_oktas = (oktas, sig), oktas
         return best
 
-    @staticmethod
-    def _cb_growth_start_pct(dist_nm: float) -> float:
-        """Return a random starting fraction of forecast CB size for a CB this far out.
-
-        Picks uniformly within whichever _CB_GROWTH_START_PCT_RANGES bracket
-        dist_nm falls into (see --cb-growth / _ramp_cb_wx()) -- the same
-        CB created at the same distance won't always start at the same
-        size, only within the same range.
-        """
-        for threshold, low, high in _CB_GROWTH_START_PCT_RANGES:
-            if dist_nm > threshold:
-                return random.uniform(low, high)
-        return random.uniform(*_CB_GROWTH_START_PCT_RANGE_BELOW)
-
-    @staticmethod
-    def _cb_growth_max_top_ft_per_min(cape_jkg: float) -> float:
-        """Return the top-growth-rate cap for this CAPE, bounded at both ends.
-
-        Real-world updrafts (and so convective growth) are stronger at
-        higher CAPE -- scaled from parcel theory's sqrt(2*CAPE) max vertical
-        velocity via _CB_GROWTH_CAPE_UPDRAFT_FRACTION (see that constant's
-        comment). _CB_GROWTH_MAX_TOP_FT_PER_MIN is the floor for weak/zero
-        CAPE (e.g. a CB forced by a TS SIGMET/METAR override);
-        _CB_GROWTH_MAX_TOP_FT_PER_MIN_CEILING caps the other end, since
-        sqrt(CAPE) alone has no ceiling of its own.
-        """
-        cape = max(cape_jkg, 0.0)
-        updraft_mps = math.sqrt(2.0 * cape)
-        scaled = updraft_mps * _CB_GROWTH_CAPE_UPDRAFT_FRACTION * _MPS_TO_FT_PER_MIN
-        return min(_CB_GROWTH_MAX_TOP_FT_PER_MIN_CEILING,
-                   max(_CB_GROWTH_MAX_TOP_FT_PER_MIN, scaled))
-
     def _limit_close_cb(self, zone_num: int, wx: str, pos: tuple) -> str:
         """Return wx with the CB of a zone near the aircraft limited (_CB_CLOSE_*).
 
@@ -6391,7 +6311,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         return ';'.join(parts)
 
     def _fade_cb_wx(self, zone_num: int, target_wx: str) -> str:  # pylint: disable=too-many-locals
-        """Let zone_num's CB fade in and out instead of popping (without --cb-growth).
+        """Let zone_num's CB fade in and out instead of popping.
 
         A CB that appears or grows changes at _CB_FADE_IN_*_PER_MIN (from
         1 okta and _CB_MIN_DEPTH_FT deep when it's new); one whose forecast
@@ -6466,25 +6386,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         parts[11] = str(round(base))
         return ';'.join(parts)
 
-    def _cb_cycle_clamp(self, stepped_wx: str, target_wx: str) -> str:
-        """--cb-growth's ramp with the CB life cycle switches off: full oktas / height at once.
-
-        Without the oktas life cycle the CB has its target oktas (gone: gone at
-        once unless the height life cycle still shrinks it); without the height
-        life cycle its target top.
-        """
-        step, goal = stepped_wx.split(';'), target_wx.split(';')
-        if len(step) < 12 or len(goal) < 12:
-            return stepped_wx
-        if goal[9] in ('', '0'):
-            off = not self._cb_cycle_oktas and not self._cb_cycle_height
-            return target_wx if off else stepped_wx
-        if not self._cb_cycle_oktas:
-            step[9] = goal[9]
-        if not self._cb_cycle_height:
-            step[10], step[11] = goal[10], goal[11]
-        return ';'.join(step)
-
     def _psx_cb_in_place(self, zone_num: int) -> Optional[tuple]:
         """Return (oktas, top, base) of PSX's CB in zone_num if the zone stays where PSX has it.
 
@@ -6517,7 +6418,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.logger.debug("Starting %s", myname)
             while True:
                 await asyncio.sleep(_CB_FADE_STEP_S)
-                if (self.args.cb_growth or not self.psx_connected or self.psx is None or
+                if (not self.psx_connected or self.psx is None or
                         self.psx_paused or self._should_skip_wx_update()):
                     continue
                 for zone_num, target in list(self._zone_cb_fade_target.items()):
@@ -6536,121 +6437,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
             self.logger.critical(traceback.format_exc())
-
-    def _ramp_cb_wx(  # pylint: disable=too-many-locals,too-many-statements
-            self, zone_num: int, target_wx: str, cape_jkg: float = 0.0) -> str:
-        """Ramp zone_num's CB oktas/top toward target_wx's values (--cb-growth).
-
-        Growth is sized at CB creation (new zone placement, or a CB first
-        appearing in an already-settled zone) from the distance to the
-        aircraft at that moment, so it both avoids an abrupt "pop" at a
-        distance where it'd be noticeable and still finishes growing before
-        the aircraft arrives (see _cb_growth_start_pct()/docs). The top
-        growth rate's cap also scales with cape_jkg (this zone's forecast
-        CAPE, if known) via _cb_growth_max_top_ft_per_min() -- stronger
-        storms are allowed to grow faster, same as in reality. Once sized,
-        the growth rate stays fixed; shrinking/removal always uses the
-        fixed _CB_DECAY_*_PER_MIN rates instead, regardless of distance.
-        Base (field 11) is never touched -- it's always the fresh forecast.
-        """
-        parts = target_wx.split(';')
-        target_oktas = int(parts[9])
-        target_top = float(parts[10])
-        target_base = float(parts[11])
-        now = time.time()
-        ramp = self.zone_cb_ramp.get(zone_num)
-
-        if target_oktas <= 0:
-            if ramp is None or ramp['current_oktas'] <= 0:
-                self.zone_cb_ramp.pop(zone_num, None)
-                return target_wx
-            elapsed_min = max(0.0, (now - ramp['last_update_ts']) / 60.0)
-            new_oktas = max(0.0, ramp['current_oktas'] - _CB_DECAY_OKTAS_PER_MIN * elapsed_min)
-            new_top = max(target_base,
-                          ramp['current_top_ft'] - _CB_DECAY_TOP_FT_PER_MIN * elapsed_min)
-            if new_oktas <= 0:
-                self.zone_cb_ramp.pop(zone_num, None)
-                return target_wx
-            ramp.update(current_oktas=new_oktas, current_top_ft=new_top, last_update_ts=now,
-                        last_oktas_rate_per_min=-_CB_DECAY_OKTAS_PER_MIN,
-                        last_top_rate_per_min=-_CB_DECAY_TOP_FT_PER_MIN)
-            parts[9] = str(max(1, round(new_oktas)))
-            parts[10] = str(round(new_top))
-            return ';'.join(parts)
-
-        if ramp is None or ramp.get('current_oktas', 0) <= 0:
-            dist_nm = self.zone_cb_create_dist_nm.pop(zone_num, None)
-            if dist_nm is None:
-                lat, lon, _ = self.zone_positions[zone_num]
-                dist_nm = self._dist_nm(self.ac_lat, self.ac_lon, lat, lon)
-            start_pct = self._cb_growth_start_pct(dist_nm)
-            current_oktas = min(
-                float(target_oktas),
-                max(float(_CB_GROWTH_MIN_OKTAS), round(target_oktas * start_pct)))
-            current_top = min(
-                target_top,
-                target_base + max(_CB_GROWTH_MIN_TOP_ABOVE_BASE_FT,
-                                  start_pct * (target_top - target_base)))
-            gs_kt = self.ac_tas_kt or _CB_GROWTH_ASSUMED_GS_KT
-            time_to_arrival_min = max(1.0, dist_nm / gs_kt * 60.0)
-            # Capped, not just sized to finish by arrival: avoiding a "pop"
-            # right next to the aircraft matters more than a close-in CB
-            # reaching full size in time -- see _CB_GROWTH_MAX_*_PER_MIN /
-            # _cb_growth_max_top_ft_per_min() (CAPE raises the top cap).
-            rate_oktas = min((target_oktas - current_oktas) / time_to_arrival_min,
-                             _CB_GROWTH_MAX_OKTAS_PER_MIN)
-            max_top_rate = self._cb_growth_max_top_ft_per_min(cape_jkg)
-            rate_top = min((target_top - current_top) / time_to_arrival_min, max_top_rate)
-            ramp = {
-                'current_oktas': current_oktas,
-                'current_top_ft': current_top,
-                'growth_rate_oktas_per_min': rate_oktas,
-                'growth_rate_top_per_min': rate_top,
-                'last_oktas_rate_per_min': rate_oktas,
-                'last_top_rate_per_min': rate_top,
-                'last_update_ts': now,
-            }
-            self.zone_cb_ramp[zone_num] = ramp
-            top_fill_min = (target_top - current_top) / rate_top if rate_top else 0.0
-            self.logger.info(
-                "Zone %d: CB growth starting at %.0fnm (%.0f%%, CAPE=%.0fJ/kg):"
-                " %.1f/%d oktas, %.0f/%.0fft top (rate %.2fokt/min, %.0fft/min"
-                " [cap %.0f], ac ETA %.0fmin, full growth in %.0fmin%s)",
-                zone_num, dist_nm, start_pct * 100, cape_jkg, current_oktas,
-                target_oktas, current_top, target_top, rate_oktas, rate_top,
-                max_top_rate, time_to_arrival_min, top_fill_min,
-                " -- capped, won't finish in time" if
-                top_fill_min > time_to_arrival_min else "")
-        else:
-            old_oktas, old_top = ramp['current_oktas'], ramp['current_top_ft']
-            elapsed_min = max(0.0, (now - ramp['last_update_ts']) / 60.0)
-            if target_oktas >= old_oktas:
-                new_oktas = min(
-                    float(target_oktas),
-                    old_oktas + ramp['growth_rate_oktas_per_min'] * elapsed_min)
-            else:
-                new_oktas = max(
-                    float(target_oktas), old_oktas - _CB_DECAY_OKTAS_PER_MIN * elapsed_min)
-            if target_top >= old_top:
-                new_top = min(
-                    target_top, old_top + ramp['growth_rate_top_per_min'] * elapsed_min)
-            else:
-                new_top = max(target_top, old_top - _CB_DECAY_TOP_FT_PER_MIN * elapsed_min)
-            new_top = max(new_top, target_base)
-            if elapsed_min > 0:
-                oktas_rate = (new_oktas - old_oktas) / elapsed_min
-                top_rate = (new_top - old_top) / elapsed_min
-            else:
-                oktas_rate = (ramp['growth_rate_oktas_per_min'] if target_oktas >= old_oktas
-                              else -_CB_DECAY_OKTAS_PER_MIN)
-                top_rate = (ramp['growth_rate_top_per_min'] if target_top >= old_top
-                            else -_CB_DECAY_TOP_FT_PER_MIN)
-            ramp.update(current_oktas=new_oktas, current_top_ft=new_top, last_update_ts=now,
-                        last_oktas_rate_per_min=oktas_rate, last_top_rate_per_min=top_rate)
-
-        parts[9] = str(max(_CB_GROWTH_MIN_OKTAS, round(ramp['current_oktas'])))
-        parts[10] = str(round(ramp['current_top_ft']))
-        return ';'.join(parts)
 
     # ------------------------------------------------------------------
     # MSFS sync (in-cloud and QNH)
@@ -7411,7 +7197,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             f"{self._placement_desc(move.lat, move.lon, icao)}, on a {dbz} dBZ storm (planner)")
         self.zone_relocated_time[zn] = now
         self.zone_cb_ramp.pop(zn, None)
-        self.zone_cb_create_dist_nm[zn] = dist_nm
         self._radar_zone_cell[zn] = move.storm
         self.logger.info("Zone %d: relocated from %s @ %.3f/%.3f → %s @ %.3f/%.3f [%.0fnm] (CB "
                          "planner: storm %s, %d dBZ, score %.2f)", zn, old[2], old[0], old[1],
@@ -7486,7 +7271,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             f"{self._placement_desc(lat, lon, icao)}, on a {cell.max_dbz} dBZ storm")
         self.zone_relocated_time[best] = now
         self.zone_cb_ramp.pop(best, None)
-        self.zone_cb_create_dist_nm[best] = dist_nm
         self._radar_zone_cell[best] = cell.key
         self._storm_place_last = now
         self.logger.info("Zone %d: relocated from %s @ %.3f/%.3f → %s @ %.3f/%.3f [%.0fnm, %.0f°"
@@ -7767,7 +7551,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 self.zone_wx[zone_num] = wx
             self.zone_placement_reason[zone_num] = "kept from before restart"
             az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
-            self.zone_cb_create_dist_nm[zone_num] = dist_m / _NM_TO_M
             self.logger.info(
                 "Zone %d: kept from before restart at %s @ %.3f/%.3f  %.0f°/%.0fnm",
                 zone_num, name, lat, lon, az % 360, dist_m / _NM_TO_M)
@@ -7795,7 +7578,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         for per_zone in (self._drift, self._zone_pinned, self._drift_retired):
             for zone_num in [zn for zn in per_zone if zn not in kept]:
                 del per_zone[zone_num]
-        for per_zone in (self.zone_relocated_time, self.zone_cb_ramp, self.zone_cb_create_dist_nm):
+        for per_zone in (self.zone_relocated_time, self.zone_cb_ramp):
             for zone_num in [zn for zn in per_zone if zn not in kept]:
                 del per_zone[zone_num]
         free = [zn for zn in range(1, 8) if zn not in kept]
@@ -7810,7 +7593,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.zone_positions[next_zone] = (lat, lon, icao)
             self.zone_placement_reason[next_zone] = self._placement_desc(
                 lat, lon, icao, is_arpt=True)
-            self.zone_cb_create_dist_nm[next_zone] = dist_m / _NM_TO_M
             self.logger.info(
                 "Zone %d: initial placement at %s @ %.3f/%.3f  %.0f°/%.0fnm (dep/dst arpt)",
                 next_zone, icao, lat, lon, az % 360, dist_m / _NM_TO_M)
@@ -7819,7 +7601,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.zone_positions[zone_num] = (lat, lon, icao)
             self.zone_placement_reason[zone_num] = self._placement_desc(lat, lon, icao)
             az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
-            self.zone_cb_create_dist_nm[zone_num] = dist_m / _NM_TO_M
             self.logger.info(
                 "Zone %d: initial placement at %s @ %.3f/%.3f  %.0f°/%.0fnm",
                 zone_num, icao, lat, lon, az % 360, dist_m / _NM_TO_M)
@@ -7977,7 +7758,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.zone_cb_ramp.pop(zone_num, None)
             new_az, _, new_dist_m = self.geod.inv(
                 self.ac_lon, self.ac_lat, new_lon, new_lat)
-            self.zone_cb_create_dist_nm[zone_num] = new_dist_m / _NM_TO_M
             self.logger.info(
                 "Zone %d: relocated from %s @ %.3f/%.3f [%.0f°/%.0fnm] (%s)"
                 " → %s @ %.3f/%.3f [%.0f°/%.0fnm]",
@@ -8071,8 +7851,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 new_lat, new_lon, icao, is_arpt=True)
             self.zone_relocated_time[zone_num] = time.time()
             self.zone_cb_ramp.pop(zone_num, None)
-            _, _, new_dist_m = self.geod.inv(self.ac_lon, self.ac_lat, new_lon, new_lat)
-            self.zone_cb_create_dist_nm[zone_num] = new_dist_m / _NM_TO_M
             self.logger.info(
                 "Zone %d: repositioned %s for cb_airport_mode %s "
                 "(%.3f/%.3f → %.3f/%.3f)",
@@ -8180,7 +7958,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self.zone_placement_reason[zone_num] = self._placement_desc(lat, lon, icao)
         self.zone_relocated_time[zone_num] = time.time()
         self.zone_cb_ramp.pop(zone_num, None)
-        self.zone_cb_create_dist_nm[zone_num] = _ANCHOR_BEHIND_NM
         self.logger.info("Zone %d: relocated from %s @ %.3f/%.3f → %s @ %.3f/%.3f"
                          " [%.0fnm behind] (anchor zone)",
                          zone_num, old[2], old[0], old[1], icao, lat, lon, _ANCHOR_BEHIND_NM)
@@ -8534,7 +8311,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
     def _cb_still_growing(self, zone_num: int, wx: str) -> bool:
         """Return True if zone_num's CB (wx) hasn't yet grown to its fade target (_fade_cb_wx())."""
         target = self._zone_cb_fade_target.get(zone_num)
-        if not target or self.args.cb_growth:
+        if not target:
             return False
         try:
             cur, goal = wx.split(';'), target.split(';')
@@ -8859,6 +8636,16 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             if dist not in self._CB_TEST_DISTANCES_NM:
                 return f"Unknown distance {cmd.get('dist')!r}"
             targets = [(f"dead ahead {dist}nm", self._fwd(*here, hdg, dist), 0.0, 0.0)]
+        elif action == "custom":   # one CB dist nm out on a bearing (relative or true)
+            try:
+                dist, brg = float(cmd.get("dist", "")), float(cmd.get("brg", ""))
+            except ValueError:
+                return f"Not a distance and bearing: {cmd.get('dist')!r}, {cmd.get('brg')!r}"
+            if not 1.0 <= dist <= 500.0 or not 0.0 <= brg <= 360.0:
+                return "The distance must be 1-500 nm and the bearing 0-360°"
+            true_brg = cmd.get("ref") == "true"
+            targets = [(f"{brg:03.0f}°{'T' if true_brg else ' rel'} {dist:g}nm",
+                        self._fwd(*here, brg if true_brg else hdg + brg, dist), 0.0, 0.0)]
         elif action == "pair":
             targets = [(f"{rel:03d}° {30}nm", self._fwd(*here, hdg + rel, 30), 0.0, 0.0)
                        for rel in (315, 45)]
@@ -9374,7 +9161,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 f"{self._placement_desc(lat, lon, icao)}, inside {entry['hazard']} SIGMET {label}")
             self.zone_relocated_time[zone_num] = now
             self.zone_cb_ramp.pop(zone_num, None)
-            self.zone_cb_create_dist_nm[zone_num] = dist_nm
             self._sigmet_place_last = now
             self.logger.info("Zone %d: relocated from %s @ %.3f/%.3f → %s @ %.3f/%.3f"
                              " [%.0f°/%.0fnm] (inside %s SIGMET %s)",
@@ -9513,7 +9299,6 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             old_az, _, old_dm = self.geod.inv(
                 self.ac_lon, self.ac_lat, old_pos[1], old_pos[0])
             new_az, _, new_dm = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
-            self.zone_cb_create_dist_nm[best_zn] = new_dm / _NM_TO_M
             self.logger.info(
                 "Zone %d: relocated from %s @ %.3f/%.3f [%.0f°/%.0fnm]"
                 " → %s @ %.3f/%.3f [%.0f°/%.0fnm] (dep/dst arpt)",
@@ -11661,14 +11446,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  'top': int(target_parts[10])} if target_oktas_val > 0 else None)
             # In every flight phase: it used to be off in maneuvering mode
             # (holds, vectoring), where CBs then popped in and out at once.
-            # Without --cb-growth CBs still fade away (_fade_cb_wx()); CB
+            # CBs fade in and out (_fade_cb_wx()); CB
             # removal near dep/arr and CB-free zones act at once.
             if cb_removed_for or self._is_cb_free_zone(zone_num):
                 self.zone_cb_ramp.pop(zone_num, None)
-            elif self.args.cb_growth:
-                cape_here = _om_hval(om.get("hourly", {}), "cape", now.hour, 0) if om else 0.0
-                final_wx = self._cb_cycle_clamp(self._ramp_cb_wx(zone_num, final_wx, cape_here),
-                                                final_wx)
             else:
                 final_wx = self._fade_cb_wx(zone_num, final_wx)
             new_wxs.append(final_wx)
@@ -13180,7 +12961,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         parser = argparse.ArgumentParser(
             prog=__MYNAME__,
             description=__MY_DESCRIPTION__,
-            formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+            formatter_class=_HelpFormatter)
         parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
         parser.add_argument(
             '--psx-host', type=str, default='127.0.0.1',
@@ -13371,13 +13152,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "--fake-cb-only=EHAM,EHRD).")
         parser.add_argument(
             '--cb-growth', action='store_true',
-            help="EXPERIMENTAL: ramp a CB's coverage (oktas) "
-                 "and top height gradually toward its forecast target instead "
-                 "of snapping instantly, so new CBs don't appear to pop into "
-                 "view and don't finish growing before the aircraft reaches "
-                 "them. Shrinking/removal always decays at a fixed rate "
-                 "regardless of distance. Off by default -- CBs snap to "
-                 "forecast instantly, as before.")
+            help=argparse.SUPPRESS)   # retired 2026-11-19 (the CB life cycle switches); ignored
         parser.add_argument(
             '--terrain-cache-gb', type=float, default=10.0, metavar='GB',
             help="Size limit for the terrain tiles cached on disk"

@@ -3275,6 +3275,13 @@ def _build_cb_test_page(ctx, message: str = '') -> str:  # pylint: disable=too-m
         body += button('ahead', f'{dist} nm', f'<input type="hidden" name="dist" value="{dist}">')
     body += (sep + button('upwind', 'Upwind of track, moving downwind') +
              button('pair', '315° and 045°, 30 nm') + button('smiley', 'CB smiley') + '</div>\n')
+    body += ('<div class="row"><form action="/api/weather/cbtest" method="post">'
+             '<input type="hidden" name="action" value="custom">One CB '
+             '<input type="number" name="dist" min="1" max="500" step="1" value="40" required> nm, '
+             'bearing <input type="number" name="brg" min="0" max="360" step="1" value="0" '
+             'required>° <select name="ref"><option value="rel">relative to the nose</option>'
+             '<option value="true">true</option></select> '
+             '<button type="submit" class="btn btn-blue btn-sm">Place</button></form></div>\n')
     body += ('<details><summary>About this page</summary><p>Testing only. Advanced zones: CBs '
              'drift with the wind (on by default; off with --no-advanced-zones). The routers give '
              'PSX.NET.Orchestration every weather-zone change the delay late, to match PSX\'s '
