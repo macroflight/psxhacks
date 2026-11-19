@@ -27,6 +27,8 @@ RADAR_S = 600.0
 WINDOW_NM, WINDOW_DEG = 200.0, 120.0
 ND_DEG = 90.0
 DEAD_KEEP_S = 1800.0
+BEHIND_CRUISE_NM = 50.0       # frankenweather's "behind" rule: a zone this far behind is moved
+BEHIND_MANEUVER_NM = 200.0    # ... holding: this far away, once a turn puts it behind
 ZONES = 7
 FIXED = (1,)                  # zone 1: the anchor (it follows the aircraft)
 
@@ -66,13 +68,19 @@ def move(lat: float, lon: float, brg: float, dist: float) -> tuple:
             (60.0 * max(0.2, math.cos(math.radians(lat)))))
 
 
-def make_storms(rng: random.Random, lat0: float, lon0: float, hours: float) -> list:  # pylint: disable=too-many-locals
-    """Return made-up storms over hours around a 900 nm area: clusters, lines and singles."""
+def make_storms(rng: random.Random, ac: "Flight", hours: float) -> list:  # pylint: disable=too-many-locals
+    """Return made-up storms along the flight: clusters, lines and singles, born over hours.
+
+    Areas anywhere from 300 nm behind the start to 400 nm past the end of a straight flight,
+    up to 300 nm either side of it (a hold stays near the start: around it).
+    """
     storms, n = [], 0
     wind_hdg, wind_kt = rng.uniform(0, 360), rng.uniform(10, 50)
-    for _ in range(rng.randint(3, 8)):            # organised areas, born over the flight
+    length = 0.0 if ac.kind == "hold" else ac.kt * hours
+    for _ in range(rng.randint(4, 10) + int(length / 300)):   # organised areas
         kind = rng.choice(("cluster", "line", "single"))
-        clat, clon = move(lat0, lon0, rng.uniform(0, 360), rng.uniform(0, 450))
+        alat, alon = move(ac.lat, ac.lon, ac.hdg, rng.uniform(-300, length + 400))
+        clat, clon = move(alat, alon, ac.hdg + 90, rng.uniform(-300, 300))
         t0 = rng.uniform(-3600, hours * 3600)
         strength = rng.choice((48, 52, 56, 60, 64))
         count = {"cluster": rng.randint(3, 9), "line": rng.randint(4, 10), "single": 1}[kind]
@@ -136,22 +144,41 @@ class SimZone:
     lon: float
     storm: Optional[str] = None
     dead_since: Optional[float] = None
+    placed_t: float = -1e9
+    placed_off: float = 0.0       # how far off the nose it was placed (degrees)
 
 
 def run(seed: int, hours: float, kind: str) -> dict:  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     """Fly one synthetic flight; return its counts and the rule violations found."""
     rng = random.Random(seed)
     ac = Flight(kind, rng)
-    storms = make_storms(rng, ac.lat, ac.lon, hours)
+    storms = make_storms(rng, ac, hours)
     by_key = {s.key: s for s in storms}
     zones = [SimZone(i + 1, *move(0, 0, 180, 300 + 20 * i)) for i in range(ZONES)]
     out = {"seed": seed, "kind": kind, "violations": [], "moves": 0, "cb_steps": 0, "steps": 0,
+           "behind": 0, "after_turn": 0,
            "clusters_ahead": 0, "clusters_covered": 0}
     t, next_plan = 0.0, 0.0
     while t < hours * 3600:
         ac.step(t, STEP_S)
         zones[0].lat, zones[0].lon = ac.lat, ac.lon          # the anchor follows the aircraft
         shown_before = {z.num: (z.storm, ac.sees(*cb_pos(z, by_key, t))) for z in zones if z.storm}
+        for z in zones[1:]:                                   # the "behind" rule (frankenweather)
+            if not z.storm or ac.sees(*cb_pos(z, by_key, t)):
+                continue
+            lat, lon = cb_pos(z, by_key, t)
+            d = P.dist_nm(ac.lat, ac.lon, lat, lon)
+            off = abs((P.bearing_deg(ac.lat, ac.lon, lat, lon) - ac.hdg + 180) % 360 - 180)
+            if off > 90 and d > (BEHIND_MANEUVER_NM if ac.maneuvering else BEHIND_CRUISE_NM):
+                turned = ac.kind == "turn" and ac.t_turn <= t < ac.t_turn + 900
+                if turned:
+                    out["after_turn"] += 1   # a 90-degree turn makes zones ahead "behind"
+                elif t - z.placed_t < 600 and z.placed_off > P.AHEAD_DEG:   # placed abeam/behind
+                    out["violations"].append((t, f"zone {z.num}: placed {t - z.placed_t:.0f} s ago "
+                                                 "and moved by the behind rule"))
+                z.storm, z.dead_since = None, None
+                z.lat, z.lon = move(ac.lat, ac.lon, ac.hdg, 150)
+                out["behind"] += 1
         for z in zones:                                       # storms die: dead CBs kept in view
             if z.storm and by_key[z.storm].dbz(t) < 43:
                 if z.dead_since is None:
@@ -164,8 +191,11 @@ def run(seed: int, hours: float, kind: str) -> dict:  # pylint: disable=too-many
             p_storms = []
             for s in alive:
                 lat, lon = s.pos(t)
+                d = P.dist_nm(ac.lat, ac.lon, lat, lon)
+                off = abs((P.bearing_deg(ac.lat, ac.lon, lat, lon) - ac.hdg + 180) % 360 - 180)
                 p_storms.append(P.Storm(s.key, lat, lon, dbz=s.dbz(t), area_km2=s.area_km2,
-                                        in_view=ac.may_see(lat, lon)))
+                                        in_view=ac.may_see(lat, lon),
+                                        behind_nm=d if off > 90 and not ac.maneuvering else 0.0))
             p_zones = [P.Zone(z.num, z.lat, z.lon, storm=z.storm if z.dead_since is None else None,
                               fixed=z.num in FIXED,
                               visible_cb=bool(z.storm) and ac.sees(*cb_pos(z, by_key, t)),
@@ -173,13 +203,18 @@ def run(seed: int, hours: float, kind: str) -> dict:  # pylint: disable=too-many
                               else None)
                        for z in zones]
             plan = P.plan(p_storms, p_zones,
-                          P.Aircraft(ac.lat, ac.lon, ac.hdg, maneuvering=ac.maneuvering))
+                          P.Aircraft(ac.lat, ac.lon, ac.hdg, maneuvering=ac.maneuvering,
+                                     behind_limit_nm=BEHIND_CRUISE_NM,
+                                     maneuver_reach_nm=BEHIND_MANEUVER_NM - 50.0))
             placed_now = set()
             for m in plan.moves:
                 z = zones[m.zone - 1]
                 if z.num in FIXED:
                     out["violations"].append((t, f"fixed zone {z.num} moved"))
                 z.storm, z.dead_since, z.lat, z.lon = m.storm, None, m.lat, m.lon
+                z.placed_t = t
+                z.placed_off = abs((P.bearing_deg(ac.lat, ac.lon, m.lat, m.lon) - ac.hdg + 180)
+                                   % 360 - 180) if m.storm else 0.0
                 out["moves"] += 1
                 if m.storm:
                     placed_now.add(z.num)
@@ -197,7 +232,7 @@ def run(seed: int, hours: float, kind: str) -> dict:  # pylint: disable=too-many
             # clusters within 320 nm ahead and whether one of their storms has a CB
             shown = {z.storm for z in zones if z.storm}
             for cid in set(plan.cluster_of.values()):
-                members = [s for s in p_storms if plan.cluster_of[s.key] == cid]
+                members = [s for s in p_storms if plan.cluster_of.get(s.key) == cid]
                 if any(P.dist_nm(ac.lat, ac.lon, s.lat, s.lon) <= 320 and
                        P.relevance(s, P.Aircraft(ac.lat, ac.lon, ac.hdg)) == 1.0 for s in members):
                     out["clusters_ahead"] += 1

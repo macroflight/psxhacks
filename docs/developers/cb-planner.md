@@ -1,9 +1,29 @@
 # CB placement planner (fw_planner.py)
 
-Status (2026-11-18): the planner and its tests exist; frankenweather doesn't use it
-yet. It is to replace frankenweather's separate storm placer, SIGMET placer and
-route storm view with one scored decision per radar frame, behind a switch at
-first, then A/B tested on the headless test sims.
+Status (2026-11-18): in frankenweather behind `--cb-planner` (with `--radar-cbs`),
+being A/B tested on the headless test sims. It replaces frankenweather's
+separate storm placer, SIGMET placer and the radar part of zone placement with
+one scored decision per radar frame (at least every 10 minutes).
+
+## Data
+
+frankenweather passes the planner:
+
+- **Storms:** RainViewer radar cells (43 dBZ and more, inside radar coverage,
+  moved on by their tracked motion) and, outside radar coverage, frankenweather's
+  made-up storms near MTG lightning and inside TS SIGMET areas. Per storm: its
+  position, peak dBZ, area, the MTG lightning flash pixels of the last 15
+  minutes within 10 nm, whether the crew would see a new CB there, and (with
+  `--route-zones`) its distance from the route ahead.
+- **Zones:** which storm each zone's CB is on; fixed (the anchor, airports,
+  PSX's focused zone, CB-free zones, a CB whose turbulence reaches the
+  aircraft); whether the crew may see its CB; a CB it shows without a storm
+  (a dead storm's CB kept in view, a model CB).
+- **The aircraft:** position, heading, holding or vectored.
+
+What the crew may see comes from `--cb-visible-dist` and PSX's two NDs (range,
+mode, WXR and TERR). The CB's size, once placed, comes from the radar and the
+Meteosat cloud top heights as without the planner.
 
 ## Goals, in order
 
@@ -44,6 +64,14 @@ Agreed with the user on 2026-11-18:
   distance too (`Zone.cb_at`).
 - **No new CB in view:** a storm marked `in_view` gets no new CB; a zone that
   already shows it keeps it.
+- **Nothing frankenweather would take away at once:** no storm behind the
+  aircraft (frankenweather measures how far behind, along the route if it
+  follows one), none more than 75 degrees off the nose and beyond the
+  behind limit (behind a minute later), and while holding or vectored none
+  beyond the maneuvering placement range (every turn makes a zone farther than
+  `--low-alt-dist` "behind"). Without this, a headless hold had 49 planner
+  moves in 40 minutes, each CB gone within seconds. Existing CBs on such
+  storms still keep other CBs at a distance.
 
 frankenweather decides what the crew may see (window range and angle, the ND's
 weather radar range, holding all round) and passes it in as `Storm.in_view` and
@@ -63,7 +91,42 @@ weather radar range, holding all round) and passes it in as `Storm.in_view` and
   1,000 flights of 3 hours (3,000 hours) take a few seconds; any failure can be
   repeated with `--seed`.
 
-First synthetic results (2026-11-18): no rule violations in 3,000 flight
-hours; on average 2.7 CBs shown, 4.8 zone moves an hour, and 36 % of the
+The synthetic flights also apply frankenweather's "behind" rule, and flag a
+zone it takes away within 10 minutes of being placed off the nose (a
+90-degree turn making zones "behind" is counted apart). Storm areas are
+spread along the whole flight.
+
+Synthetic results (2026-11-18, 1,000 flights, 3,000 hours): no rule
+violations; on average 1.4 CBs shown, 2.6 zone moves an hour, and 50 % of the
 clusters within 320 nm ahead have a CB (storms that form where the crew can
 already see them get none: priority 1 before 4).
+
+## Headless A/B tests (2026-11-17/18)
+
+Stack A with `--cb-planner`, stack B without, the same flight and weather
+(`--radar-cbs` on both). Per run: new CBs first seen where the crew could
+see them, CBs gone while visible (within 200 nm and 90 degrees), new CBs gone
+again within 90 s, and the largest jump of a CB within 90 s.
+
+| run | new in view A/B | gone visible A/B | short-lived A/B | max jump A/B | CBs shown A/B |
+| --- | --- | --- | --- | --- | --- |
+| Y1 Europe, ND 320 | 1 / 0 | 0 / 0 | 0 / 2 | 1.0 / 6.8 nm | 4.8 / 4.9 |
+| Y2 Europe | 0 / 0 | 0 / 5 | 2 / 1 | 1.1 / 2.0 nm | 5.0 / 6.5 |
+| Y3 US west coast | 0 / 0 | 6 / 1 | 0 / 0 | 0.8 / 2.1 nm | 4.3 / 4.5 |
+| Y4 Europe, 2 h | 0 / 0 | 4 / 2 | 0 / 1 | 1.5 / 8.8 nm | 3.6 / 3.6 |
+| Y5 hold | 0 / 1 | 1 / 1 | 0 / 0 | 0.0 / 1.0 nm | 4.7 / 3.8 |
+| X5 route turn (before the holding fix) | 1 / 0 | 4 / 4 | 3 / 0 | 1.2 / 2.2 nm | 4.3 / 5.1 |
+
+No errors. Four of Y3's six "gone while visible" are model CBs the
+ordinary zone update removed 6 minutes after the start (no showers, no
+radar), before the planner had any movable zone; Y4's four are drifting CBs
+at 87-89 degrees off the nose that the behind rule took away (both modes do
+this).
+
+Pair tests (both sims with the planner, 8 nm apart in trail): 25 % (cruise)
+and 33 % (Y6) of the CBs both sims could show had the other sim's CB within
+1 nm. Earlier pair tests without the planner, mostly 0-2 nm apart, had 60-94
+%. Not yet comparable; seen so far: the two sims replan at different times
+(zones freed by the behind rule a minute apart), and a storm's key carries
+the frame in which each sim first saw it, so ties may break differently.
+Open.

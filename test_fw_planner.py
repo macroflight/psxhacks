@@ -97,6 +97,19 @@ class TestPlanner(unittest.TestCase):
                   storm("B", 180.0, 150.0, dbz=50)]
         self.assertEqual([m.storm for m in P.plan(storms, free_zones(1), AC).moves], ["A"])
 
+    def test_not_behind_or_far_abeam(self):
+        """Storms behind, or abeam beyond the behind limit, get no zone (it would go at once)."""
+        ac = P.Aircraft(lat=50.0, lon=0.0, hdg=90.0, behind_limit_nm=50.0)
+        storms = [storm("B", 200.0, 40.0, dbz=62, behind_nm=40.0),
+                  storm("S", 175.0, 150.0, dbz=60), storm("A", 90.0, 250.0, dbz=45)]
+        self.assertEqual([m.storm for m in P.plan(storms, free_zones(3), ac).moves], ["A"])
+
+    def test_holding_reach(self):
+        """Holding: no storm beyond the maneuvering reach (every turn makes it behind)."""
+        ac = P.Aircraft(lat=50.0, lon=0.0, hdg=90.0, maneuvering=True, maneuver_reach_nm=150.0)
+        storms = [storm("F", 270.0, 300.0, dbz=62), storm("N", 0.0, 120.0, dbz=48)]
+        self.assertEqual([m.storm for m in P.plan(storms, free_zones(2), ac).moves], ["N"])
+
     def test_deterministic(self):
         """The same storms in any order give the same plan (prio 3)."""
         storms = strong_line("L", 50.0) + strong_line("M", 130.0) + \

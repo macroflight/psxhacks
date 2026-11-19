@@ -82,6 +82,8 @@ import fw_radar as _fw_radar  # pylint: disable=wrong-import-order
 import fw_storms as _fw_storms  # pylint: disable=wrong-import-order
 import fw_lightning as _fw_lightning  # pylint: disable=wrong-import-order
 import fw_cloudtop as _fw_cloudtop  # pylint: disable=wrong-import-order
+import fw_planner as _fw_planner  # pylint: disable=wrong-import-order
+import fw_develmap as _fw_develmap  # pylint: disable=wrong-import-order
 import fw_holdover as _fw_holdover  # pylint: disable=wrong-import-order
 import fw_icing as _fw_icing  # pylint: disable=wrong-import-order
 from psxhacks_version import get_version
@@ -497,6 +499,14 @@ _STORM_VIEW_DEG = 75.0
 _STORM_ROUTE_NM = 60.0
 _STORM_OFF_ROUTE_MAX = 2
 _STORM_PLACE_INTERVAL_S = 30.0  # ... a zone moved onto a top storm at most this often
+_PLANNER_INTERVAL_S = 600.0    # --cb-planner: replan at least this often (and on every new frame)
+_PLANNER_LTG_NM = 10.0         # ... a storm's lightning: MTG flash pixels (15 min) this near it
+# The /devel map's zone changes list: frankenweather's log lines about zone decisions (where a
+# zone went and why, its CB decided, drifting, kept or held back), the last so many
+_ZONE_EVENT_PREFIXES = ("Zone ", "CB drift: Zone ", "CB planner", "Radar CBs:", "Route zones:",
+                        "MANEUVERING mode", "CRUISE mode")
+_ZONE_EVENTS_KEPT = 500
+_ZONE_EVENTS_SHOWN = 100
 _STORM_KEEP_NM = 80.0          # ... never taking away a CB ahead nearer than this
 # A CB the crew may see on the weather radar or out of the window (_cb_visible(), within
 # --cb-visible-dist) is never moved to make room for another one; zones without a CB, or with
@@ -2478,6 +2488,24 @@ class StandaloneFWContext:
 # Main script class
 # ---------------------------------------------------------------------------
 
+class _ZoneEventHandler(logging.Handler):
+    """Copy zone decision log lines (_ZONE_EVENT_PREFIXES) for the /devel map's zone changes."""
+
+    def __init__(self, events: collections.deque):
+        """Append to events: (epoch, message)."""
+        super().__init__(logging.INFO)
+        self.events = events
+
+    def emit(self, record: logging.LogRecord) -> None:
+        """Keep the record if its message starts with one of _ZONE_EVENT_PREFIXES."""
+        try:
+            msg = record.getMessage()
+        except (TypeError, ValueError):
+            return
+        if msg.startswith(_ZONE_EVENT_PREFIXES):
+            self.events.append((record.created, msg))
+
+
 class _ColdEventHandler(logging.Handler):
     """Copy Advanced Icing, fuel temperature and holdover log lines for the Cold weather page."""
 
@@ -2804,6 +2832,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # and (signature, time.monotonic()) of the last one sent
         self._cbs_ids: dict = {}
         self._cbs_sent = (None, 0.0)
+        self._cbs_latest: Optional[dict] = None   # the last CB message built (/devel map)
+        self._zone_events: collections.deque = collections.deque(maxlen=_ZONE_EVENTS_KEPT)
+        self._planner_snapshot: Optional[dict] = None   # --cb-planner: the last plan (/devel map)
         # Set when we take over the SIGMETs: _place_sigmet_zones() then
         # places every zone it wants at once instead of one per interval.
         self._sigmet_place_burst: bool = False
@@ -2927,11 +2958,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._storm_cells: list = []
         self._storm_motion: dict = {}
         self._storm_place_last = 0.0   # time.monotonic() of _place_storm_zones()' last move
+        self._planner_stamp: Optional[tuple] = None   # --cb-planner: the inputs last planned for
+        self._planner_last = 0.0       # ... and when
         self._maneuver_rank_logged: Optional[str] = None   # _maneuver_storms_ranked() log
         self._nd_range_seen: list = []   # [(monotonic, nm)]: the NDs' longer range, when (hold)
         self._no_new_cb_logged: set = set()   # zones logged as kept CB-free in view
         self._drift_ended: set = set()   # zones whose drifting CB just ended (_no_new_cb_in_view())
         self._radar_withdrawn_logged: set = set()   # frame times logged as withdrawn by RainViewer
+        self._radar_frame_paths: dict = {}   # frame time -> RainViewer tile path
         self._radar_hold_until = time.monotonic() + _RADAR_STARTUP_HOLD_S
         self._radar_at: Optional[tuple] = None
         self._radar_cov: dict = {}
@@ -7256,6 +7290,133 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                              reach_nm - _MANEUVER_RANK_DEST_NM)
         return self._storms_ranked(reach_nm - _MANEUVER_RANK_DEST_NM, 180.0, origin[:2])
 
+    def _cb_planner_on(self) -> bool:
+        """Return True if the CB planner (--cb-planner, fw_planner) decides which storms get CBs."""
+        return bool(self.args.cb_planner and self.args.radar_cbs)
+
+    def _planner_inputs(self) -> tuple:  # pylint: disable=too-many-locals
+        """Return (storms, zones, aircraft) for fw_planner.plan() from what frankenweather knows."""
+        route_on = self._route_mode == "on" and self._route_pos is not None
+        storms = []
+        limit = (self.args.cruise_behind_dist
+                 if (self.ac_alt_ft or 0.0) >= 18000.0 and not self._maneuvering
+                 else self.args.low_alt_dist)
+        for cell, lat, lon, dist_nm, rel in self._storms_ranked(None, 180.0):
+            # not a storm the "behind" rule would take its zone away from at once: a CB that
+            # came and went in 17 s (headless 2026-11-18, the planner's last choice behind)
+            # how far behind it is, as _zone_relocate_reason() measures it (the planner leaves
+            # storms its "behind" rule would take a zone away from at once)
+            behind = (self._route_behind_nm(lat, lon) if self._behind_by_route()
+                      else (dist_nm if rel > 90.0 and not self._maneuvering else 0.0))
+            off = None
+            if route_on:
+                along = self._route_pos.along_nm
+                got = _fw_route.offset_ahead(self._route_points, along,
+                                             along + self._radar_cell_nm(), lat, lon)
+                off = got[0] if got else None
+            storms.append(_fw_planner.Storm(cell.key, lat, lon, dbz=cell.max_dbz,
+                                            area_km2=cell.area_km2,
+                                            lightning=self._lightning_count(lat, lon),
+                                            in_view=self._no_new_cb_at(lat, lon),
+                                            route_off_nm=off, behind_nm=max(0.0, behind)))
+        arpt_icaos = {icao for icao, _, _ in self._arpt_coverage_needed()}
+        sim_ms = self.sim_time_ms()
+        zones = []
+        for zn, (lat, lon, icao) in sorted(self.zone_positions.items()):
+            drift = self._drift.get(zn)
+            if drift is not None:
+                live = drift.radar and drift.decay_from is None and drift.dead_since is None
+                storm = drift.radar if live else None
+                cb_at = None if live else (drift.lat, drift.lon)
+            else:
+                storm = self._radar_zone_cell.get(zn)
+                shows = _fw_drift.cb_oktas(self.zone_wx.get(zn) or "") > 0
+                mode = self.zone_mode.get(zn)
+                cb_at = ((_fw_drift.cb_position(self.geod, mode, sim_ms) if mode and sim_ms
+                          else None) or (lat, lon)) if shows and storm is None else None
+            fixed = (zn in (self._anchor_zone, self.focused_zone) or icao in arpt_icaos or
+                     self._is_cb_free_zone(zn) or self._cb_turb_in_reach(zn) is not None)
+            zones.append(_fw_planner.Zone(
+                zn, lat, lon, storm=storm, fixed=fixed, cb_at=cb_at,
+                visible_cb=self._cb_visible(zn) or self._cb_kept_in_hold(zn) is not None))
+        # holding or vectored: within the maneuvering placement range (every turn makes a zone
+        # farther than --low-alt-dist "behind": placed at 360 nm, moved, placed again; headless
+        # hold 2026-11-18, 49 planner moves in 40 min)
+        ac = _fw_planner.Aircraft(
+            self.ac_lat, self.ac_lon, self.ac_hdg, maneuvering=self._maneuvering,
+            behind_limit_nm=limit,
+            maneuver_reach_nm=self.args.low_alt_dist - _MANEUVER_PLACE_MARGIN_NM)
+        return storms, zones, ac
+
+    def _lightning_count(self, lat: float, lon: float) -> int:
+        """Return the MTG flash pixels of the last 15 min within _PLANNER_LTG_NM (fw_lightning)."""
+        dlat = _PLANNER_LTG_NM / 60.0 + 0.05
+        return sum(1 for flat, flon in self._ltg_points
+                   if abs(flat - lat) <= dlat and
+                   self._dist_nm(lat, lon, flat, flon) <= _PLANNER_LTG_NM)
+
+    def _plan_cbs(self) -> bool:
+        """--cb-planner: replan which storms the movable zones show; True if a zone moved.
+
+        On every new radar frame (or made-up storm list), at least every
+        _PLANNER_INTERVAL_S (fw_planner, docs/developers/cb-planner.md).
+        """
+        if self.ac_lat is None or self.ac_hdg is None or not self._cells_live():
+            return False
+        now = time.monotonic()
+        stamp = (self._radar_frame, len(self._storm_cells))
+        if stamp == self._planner_stamp and now - self._planner_last < _PLANNER_INTERVAL_S:
+            return False
+        if self._planner_stamp is None and now - self._planner_last < _STORM_PLACE_INTERVAL_S:
+            return False   # zones freed: plan again, but not more often than this
+        self._planner_stamp, self._planner_last = stamp, now
+        storms, zones, ac = self._planner_inputs()
+        plan = _fw_planner.plan(storms, zones, ac)
+        self._planner_snapshot = {
+            "time": time.time(), "cluster_of": dict(plan.cluster_of),
+            "score_of": {k: round(v, 2) for k, v in plan.score_of.items()},
+            "moves": [{"zone": m.zone, "storm": m.storm, "lat": m.lat, "lon": m.lon,
+                       "score": round(m.score, 2)} for m in plan.moves]}
+        self.logger.info("CB planner: %d storms in %d clusters, %d zones movable, %d move(s)",
+                         len(storms), len(set(plan.cluster_of.values())),
+                         sum(1 for z in zones if not (z.fixed or z.visible_cb)), len(plan.moves))
+        for move in plan.moves:
+            self._apply_plan_move(move, now)
+        return bool(plan.moves)
+
+    def _apply_plan_move(self, move, now: float) -> None:
+        """Apply one fw_planner move: the zone onto its new storm, or its CB off (storm None)."""
+        zn = move.zone
+        old = self.zone_positions[zn]
+        if move.storm is None:   # too close to a CB placed: CB-free until moved (not visible)
+            if zn in self._drift:
+                self._end_drift(zn, "the CB planner clears it (too close to another CB)",
+                                retire=True)
+            else:
+                self._zone_pinned[zn] = (old[0], old[1])
+                self._drift_retired[zn] = (old[0], old[1])
+            self._radar_zone_cell.pop(zn, None)
+            self.logger.info("Zone %d: CB planner: CB off (too close to another CB)", zn)
+            return
+        if zn in self._drift:
+            self._end_drift(zn, "the CB planner moves its zone to another storm", retire=False)
+        self._zone_pinned.pop(zn, None)
+        self._drift_retired.pop(zn, None)
+        icao = f"X{random.randint(100, 999):03d}"
+        self.zone_positions[zn] = (move.lat, move.lon, icao)
+        dist_nm = self._dist_nm(self.ac_lat, self.ac_lon, move.lat, move.lon)
+        cell = next((c for c in self._cells() if c.key == move.storm), None)
+        dbz = cell.max_dbz if cell is not None else 0
+        self.zone_placement_reason[zn] = (
+            f"{self._placement_desc(move.lat, move.lon, icao)}, on a {dbz} dBZ storm (planner)")
+        self.zone_relocated_time[zn] = now
+        self.zone_cb_ramp.pop(zn, None)
+        self.zone_cb_create_dist_nm[zn] = dist_nm
+        self._radar_zone_cell[zn] = move.storm
+        self.logger.info("Zone %d: relocated from %s @ %.3f/%.3f → %s @ %.3f/%.3f [%.0fnm] (CB "
+                         "planner: storm %s, %d dBZ, score %.2f)", zn, old[2], old[0], old[1],
+                         icao, move.lat, move.lon, dist_nm, move.storm, dbz, move.score)
+
     def _place_storm_zones(self) -> bool:  # pylint: disable=too-many-locals
         """--radar-cbs: move a zone onto the most important storm no zone shows; True if one moved.
 
@@ -7348,7 +7509,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         every sim ranks them (_storms_ranked()): the strongest first, the
         nearer of equals.
         """
-        if not self._cells_live():
+        if not self._cells_live() or self._cb_planner_on():   # the planner puts zones on storms
             return None
         all_round = initial or self._maneuvering
         near_min = min(fwd_min, _RADAR_PLACE_MIN_NM)
@@ -8993,6 +9154,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 if not self.psx_connected or self.psx is None or self._fw_mode == "disabled":
                     continue
                 msg = await loop.run_in_executor(None, self._cbs_message)
+                self._cbs_latest = msg   # the /devel map shows it
                 if msg is None:
                     continue
                 sig = _fw_cbmsg.signature(msg)
@@ -10681,6 +10843,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         async with session.get(_RV_API, timeout=_RV_TIMEOUT) as resp:
             past = ((await resp.json(content_type=None)).get('radar') or {}).get('past') or []
         past = sorted(past, key=lambda f: f['time'])
+        # each frame's tile path (the /devel map shows the frame that decides; a withdrawn
+        # frame keeps its path)
+        paths = {**self._radar_frame_paths, **{f['time']: f['path'] for f in past}}
+        self._radar_frame_paths = dict(sorted(paths.items())[-40:])   # a few hours are plenty
         newest = [f['time'] for f in past[-3:]]   # a storm blends from the frame before
         if not past or (not moved and all(t in self._radar_frames for t in newest)):
             self._radar_activate()
@@ -12220,8 +12386,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                         any_relocated = self._check_and_relocate()
                         any_relocated = self._ensure_arpt_zones() or any_relocated
                         any_relocated = self._maintain_anchor_zone() or any_relocated
-                        any_relocated = self._place_sigmet_zones() or any_relocated
-                        any_relocated = self._place_storm_zones() or any_relocated
+                        if self._cb_planner_on():   # one scored plan instead of the two placers
+                            if any_relocated:   # zones freed by the rules above: plan again now
+                                self._planner_stamp = None
+                            any_relocated = self._plan_cbs() or any_relocated
+                        else:
+                            any_relocated = self._place_sigmet_zones() or any_relocated
+                            any_relocated = self._place_storm_zones() or any_relocated
                     elapsed = time.time() - last_update_time
                     force = self._manual_wx_force_update
                     self._manual_wx_force_update = False
@@ -13040,6 +13211,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "(default 200). The longest ND range of the last 10 minutes counts if longer "
                  "(up to 320 nm; see --no-cb-visible-nd).")
         parser.add_argument(
+            '--cb-planner', action='store_true',
+            help="With --radar-cbs: the CB planner (testing) decides once per radar frame which "
+                 "storms the weather zones show: one CB in each area of storms first, more "
+                 "where they are stronger, spaced apart, never moving a CB the crew may see "
+                 "(docs/developers/cb-planner.md). Instead of placing zones on storms one by "
+                 "one and into TS SIGMET areas.")
+        parser.add_argument(
             '--no-cb-visible-nd', dest='cb_visible_nd', action='store_false',
             help="Don't count the NDs' range in how far a CB is visible to the crew: only "
                  "--cb-visible-dist.")
@@ -13391,6 +13569,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             handler.formatter.converter = time.gmtime
         self.logger = logging.getLogger(__MYNAME__)
         logging.getLogger().addHandler(_ColdEventHandler(self._cold_events))
+        logging.getLogger().addHandler(_ZoneEventHandler(self._zone_events))
         if self.args.debug:
             self.logger.setLevel(logging.DEBUG)
         if self._event_log_path:
@@ -13535,6 +13714,209 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         async def _sigmet_latest(request):
             return self._sigmet_text_response(request.match_info['kind'])
 
+    def _devel_why_not(self, lat: float, lon: float) -> dict:  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+        """Return why there is no CB at (lat, lon) now: each rule that blocks one (/devel map)."""
+        why: list = []
+        if self.ac_lat is None:
+            return {"lines": ["no aircraft position yet"]}
+        az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
+        dist_nm, rel = dist_m / _NM_TO_M, _fw_route.angle_diff(az % 360.0, self.ac_hdg)
+        why.append(f"{dist_nm:.0f} nm from the aircraft, {rel:.0f}° off the nose")
+        # a CB already here?
+        for c in (self._cbs_latest or {}).get("cbs", []):
+            d = self._dist_nm(lat, lon, c["lat"], c["lon"])
+            if d <= 10.0:
+                why.append(f"there is a CB {d:.0f} nm away (zone {c['zone']})")
+        # the storms
+        if not self.args.radar_cbs:
+            why.append("radar CBs (--radar-cbs) are off: CBs come only from the model "
+                       "(CAPE and showers), METARs and SIGMETs")
+        covered = self._radar_covered(lat, lon) if self._radar_fresh() else None
+        if covered is False:
+            why.append("no weather radar coverage here (RainViewer): storms are only made up "
+                       "near lightning and inside TS SIGMET areas")
+        near = sorted(((self._dist_nm(lat, lon, *self._radar_cell_now(c)), c)
+                       for c in self._cells()), key=lambda x: x[0])
+        storm = None
+        if not near or near[0][0] > 20.0:
+            nearest = f" (nearest {near[0][0]:.0f} nm, {near[0][1].max_dbz} dBZ)" if near else ""
+            why.append("no storm cell within 20 nm" + nearest)
+        else:
+            d, storm = near[0]
+            kind = "made-up storm" if _fw_storms.is_storm(storm) else "radar storm cell"
+            why.append(f"nearest {kind}: {storm.max_dbz} dBZ, {storm.area_km2:.0f} km², "
+                       f"{d:.0f} nm away")
+            if not storm.is_cb:
+                why.append(f"too weak for a CB: a storm needs {_fw_radar.CB_DBZ} dBZ or more")
+        # reach, behind, in view
+        if dist_nm > self._radar_cell_nm():
+            why.append(f"beyond the storm scan range ({self._radar_cell_nm():.0f} nm)")
+        limit = (self.args.cruise_behind_dist
+                 if (self.ac_alt_ft or 0.0) >= 18000.0 and not self._maneuvering
+                 else self.args.low_alt_dist)
+        behind = (self._route_behind_nm(lat, lon) if self._behind_by_route()
+                  else (dist_nm if rel > 90.0 and not self._maneuvering else 0.0))
+        if behind > limit:
+            why.append(f"behind the aircraft ({behind:.0f} nm, limit {limit:.0f} nm): a zone "
+                       "there would be moved ahead at once")
+        if self._no_new_cb_at(lat, lon):
+            why.append("the crew may see a new CB here (window "
+                       f"{self.args.cb_visible_dist:.0f} nm / {_WINDOW_VIEW_DEG:.0f}°, ND "
+                       f"{self._nd_wxr_range_nm():.0f} nm / {_ND_VIEW_DEG:.0f}°"
+                       f"{', holding: all round' if self._maneuvering else ''}): no new CB in view")
+        # spacing
+        for c in (self._cbs_latest or {}).get("cbs", []):
+            d = self._dist_nm(lat, lon, c["lat"], c["lon"])
+            if 10.0 < d < _fw_planner.SPACING_MIN_NM:
+                why.append(f"another CB {d:.0f} nm away (zone {c['zone']}): CBs keep "
+                           f"{_fw_planner.SPACING_MIN_NM:.0f} nm apart")
+        # the zones: free ones, and what the others show
+        fixed, visible, busy = [], [], []
+        for zn in sorted(self.zone_positions):
+            icao = self.zone_positions[zn][2]
+            if (zn in (self._anchor_zone, self.focused_zone) or self._is_cb_free_zone(zn) or
+                    icao in {i for i, _, _ in self._arpt_coverage_needed()}):
+                fixed.append(zn)
+            elif self._cb_visible(zn):
+                visible.append(zn)
+            elif _fw_drift.cb_oktas(self.zone_wx.get(zn) or "") > 0 or zn in self._drift:
+                busy.append(zn)
+        free = len(self.zone_positions) - len(fixed) - len(visible) - len(busy)
+        why.append(f"zones: {len(fixed)} fixed (anchor, airports, the one the aircraft is in), "
+                   f"{len(visible)} with a CB the crew may see (never moved), {len(busy)} with "
+                   f"another CB, {free} free")
+        if storm is not None and storm.is_cb:
+            if self._cb_planner_on():
+                snap = self._planner_snapshot or {}
+                score = snap.get("score_of", {}).get(storm.key)
+                cid = snap.get("cluster_of", {}).get(storm.key)
+                shown = {c.radar for c in self._drift.values() if c.radar} | \
+                    set(self._radar_zone_cell.values())
+                mates = [k for k, v in snap.get("cluster_of", {}).items() if v == cid]
+                why.append(f"planner: score {score if score is not None else '?'}"
+                           f"{'' if cid is None else f', cluster of {len(mates)} storm(s)'}"
+                           f"{', which already has a CB' if any(k in shown for k in mates) else ''}"
+                           "; other storms scored higher for the free zones")
+            else:
+                ranked = [r[0].key for r in self._storms_ranked()]
+                if storm.key in ranked:
+                    why.append(f"storm placer: ranked {ranked.index(storm.key) + 1} of "
+                               f"{len(ranked)} (stronger, then nearer, first)")
+                else:
+                    why.append("storm placer: not among the storms it considers (outside its "
+                               f"view: {_STORM_VIEW_DEG:.0f}° of the nose, or the route corridor)")
+        # context
+        for s in self.sigmets:
+            if s["hazard"] in _fw_sigmet.CB_HAZARDS and _point_in_polygon(lat, lon, s["polygon"]):
+                why.append(f"inside {s.get('label', 'a TS SIGMET')}")
+                break
+        top = self._cloud_top_ft(lat, lon)
+        if top:
+            why.append(f"satellite cloud top within {_CTOP_RADIUS_NM:.0f} nm: {top:.0f} ft")
+        why.append(f"lightning within {_PLANNER_LTG_NM:.0f} nm (15 min): "
+                   f"{self._lightning_count(lat, lon)} flash pixels")
+        return {"lines": why}
+
+    def _devel_sigmets(self) -> list:
+        """Return the SIGMET areas near the aircraft with their details, for the /devel map.
+
+        frankenweather's own SIGMET system's full entries (FIR, series, levels,
+        validity, text) within 800 nm, else the state's areas (type and levels).
+        """
+        out = []
+        for e in self._own_sigmets_in_use() if self._own_sigmets_applied else []:
+            if not e["ok"] or _fw_sigmet.entry_distance(self.ac_lat, self.ac_lon, e)[0] > 800:
+                continue
+            for poly in e["polygons"]:
+                out.append({"hazard": e["hazard"], "qualifier": e["qualifier"], "fir": e["fir"],
+                            "series": e["series"], "base_ft": e["base_ft"], "top_ft": e["top_ft"],
+                            "valid_from": e["valid_from"], "valid_to": e["valid_to"],
+                            "raw": (e["raw"] or "")[:800],
+                            "used_by": ("frankenweather" if self._sigmet_handle.get(e["hazard"])
+                                        else "PSX"),
+                            "polygon": [[round(a, 4), round(b, 4)] for a, b in poly]})
+        return out or (self._web_state or {}).get("sigmets", [])
+
+    def _devel_map_data(self) -> dict:  # pylint: disable=too-many-locals
+        """Return what the read-only /devel map shows (fw_develmap): CB inputs, CBs, decisions."""
+        out: dict = {"time": time.time(), "aircraft": None}
+        if self.ac_lat is None:
+            return out
+        out["aircraft"] = {"lat": self.ac_lat, "lon": self.ac_lon, "hdg": self.ac_hdg,
+                           "alt_ft": self.ac_alt_ft, "maneuvering": self._maneuvering}
+        out["view"] = {"window_nm": self.args.cb_visible_dist, "window_deg": _WINDOW_VIEW_DEG,
+                       "nd_nm": self._nd_wxr_range_nm(), "nd_deg": _ND_VIEW_DEG,
+                       "visible_nm": self._cb_visible_range_nm(),
+                       "scan_nm": self._radar_cell_nm(), "new_anywhere": self._new_cb_anywhere()}
+        frame = self._radar_frame
+        # the frame that decides (--radar-cbs), else the newest one frankenweather fetches anyway
+        out["radar"] = {"frame": frame,
+                        "path": self._radar_frame_paths.get(frame) or self._rv_frame_path,
+                        "tile_url": _fw_radar.TILE_URL,
+                        "coverage_path": _fw_radar.COVERAGE_PATH}
+        out["satellite"] = {"wms": _fw_cloudtop.WMS_URL, "layer": _fw_cloudtop.LAYER,
+                            "time": self._ctop_image_time}
+        planner = self._planner_snapshot or {}
+        cells = []
+        fetcher = self._turb_engine.wind_fetcher if self._turb_engine else None
+        now_utc = datetime.now(timezone.utc)
+        for cell in self._cells():
+            lat, lon = self._radar_cell_now(cell)
+            top = self._cloud_top_ft(cell.lat, cell.lon)
+            # the motion frankenweather uses: the cell's own once tracked and plausible next to
+            # the 850-300 hPa mean wind, else that wind (the raw tracker output is noisy)
+            wind = (_fw_drift.mean_wind_motion(fetcher.get(lat, lon, now_utc))
+                    if fetcher is not None and cell.is_cb else None)
+            own = (cell.motion and cell.age_s >= _RADAR_TRUST_AGE_S and
+                   _radar_motion_plausible(cell.motion, wind))
+            used = (list(cell.motion) if own else list(wind) if wind else None)
+            cells.append({
+                "key": cell.key, "lat": round(lat, 4), "lon": round(lon, 4),
+                "dbz": cell.max_dbz, "area_km2": round(cell.area_km2), "cb": cell.is_cb,
+                "made_up": _fw_storms.is_storm(cell),
+                "motion": [round(v) for v in used] if used else None,
+                "motion_own": bool(own),
+                "motion_raw": [round(v) for v in cell.motion] if cell.motion else None,
+                "lightning": self._lightning_count(lat, lon) if cell.is_cb else 0,
+                "top_ft": round(top) if top else None,
+                "in_view": self._no_new_cb_at(lat, lon) if cell.is_cb else False,
+                "cluster": planner.get("cluster_of", {}).get(cell.key),
+                "score": planner.get("score_of", {}).get(cell.key)})
+        out["cells"] = cells
+        pts = self._ltg_points
+        step = max(1, len(pts) // 3000)
+        out["lightning"] = [[round(a, 3), round(b, 3)] for a, b in pts[::step]]
+        out["cbs"] = (self._cbs_latest or {}).get("cbs", [])
+        # each zone's CB turbulence area (core, flank, anvil), as the /weather map has it
+        out["cb_turb"] = {z.get("zone"): z.get("cb_turb")
+                          for z in (self._web_state or {}).get("zones", []) if z.get("cb_turb")}
+        arpt_icaos = {icao for icao, _, _ in self._arpt_coverage_needed()}
+        zones = []
+        for zn, (lat, lon, icao) in sorted(self.zone_positions.items()):
+            drift = self._drift.get(zn)
+            zones.append({
+                "zone": zn, "icao": icao, "lat": round(lat, 4), "lon": round(lon, 4),
+                "anchor": zn == self._anchor_zone, "focused": zn == self.focused_zone,
+                "airport": icao in arpt_icaos, "cb_free": self._is_cb_free_zone(zn),
+                "oktas": _fw_drift.cb_oktas(self.zone_wx.get(zn) or ""),
+                "storm": (drift.radar if drift else self._radar_zone_cell.get(zn)) or None,
+                "visible": self._cb_visible(zn),
+                "kept_cb_free_in_view": zn in self._no_new_cb_logged,
+                "dead_storm_kept": bool(drift and drift.dead_since is not None),
+                "placement": self.zone_placement_reason.get(zn, ""),
+                # why the zone has (or hasn't) a CB: model CAPE/showers, METAR, SIGMET, radar
+                "weather": self.zone_weather_detail.get(zn, ""),
+                "cb_sigmet": self.zone_cb_sigmet.get(zn),
+                "drifts": drift is not None})
+        out["zones"] = zones
+        out["route"] = ([[round(a, 4), round(b, 4)] for a, b in self._route_points]
+                        if self._route_mode == "on" and self._route_points else None)
+        out["sigmets"] = self._devel_sigmets()
+        out["planner"] = ({"time": planner.get("time"), "moves": planner.get("moves", [])}
+                          if self._cb_planner_on() else None)
+        out["events"] = [[round(t), m] for t, m in list(self._zone_events)[-_ZONE_EVENTS_SHOWN:]]
+        return out
+
     async def run_web_ui_coro(self) -> None:
         """Run a standalone aiohttp web server exposing the FrankenWeather UI."""
         from aiohttp import web as _web  # pylint: disable=import-outside-toplevel
@@ -13555,6 +13937,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # Standalone-only, --advanced-zones: test CBs placed on request
         _fw_webui.register_cb_test_routes(routes, ctx)
         self._register_sigmet_text_routes(routes)
+        # Standalone-only, read-only: the CB status map with switchable layers (fw_develmap)
+        _fw_develmap.register_routes(routes, self._devel_map_data, self._devel_why_not)
 
         static_path = pathlib.Path(__file__).parent / 'router' / 'frankenrouter' / 'static'
 

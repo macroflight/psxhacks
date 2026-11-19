@@ -515,6 +515,37 @@ the same picture VATSIM Radar can show) decides where the CBs are.
 - The log shows each frame ("Radar cells: ..."), and a zone's reason shows
   what the radar did ("radar: 52 dBZ cell 140 km2", "radar: no storm
   cell"). Needs Pillow.
+- **CB placement planner (`--cb-planner`, testing, with `--radar-cbs`):**
+  instead of filling free zones with the strongest storms ahead one at a
+  time, frankenweather makes one scored plan for all movable zones on every
+  radar frame (at least every 10 minutes): each distinct area of storms
+  gets a CB before a strong area gets a second one, CBs stay at least 25 nm
+  apart, a zone keeps its storm unless another is clearly better, and
+  lightning makes a storm count more. The rules above (a CB the crew may
+  see stays, no new CB in view, behind the aircraft) still apply. The log
+  shows each plan ("CB planner: 55 storms in 11 clusters, 4 zones movable,
+  4 move(s)") and each move's storm and score. How it decides:
+  [docs/developers/cb-planner.md](developers/cb-planner.md).
+
+**Status map (`/devel` on frankenweather's web UI, read-only):** a map of
+what frankenweather bases its CB placement on, served by frankenweather
+itself (it needs no extra PSX data). Each layer can be switched on and off
+(the choice is remembered in the browser):
+
+- the radar picture, radar storm cells (weak ones apart), MTG lightning,
+  the satellite cloud top image and the radar coverage;
+- PSX's CBs as PSX shows them: red core, yellow radar echo, dashed circle
+  for the CB turbulence, violet anvil, and an arrow for a drifting CB;
+- the weather zones (a dot for zones without a CB), the crew's view
+  (window and ND weather radar range), the aircraft, the route, TS
+  SIGMETs and the planner's storm clusters.
+
+Click a CB for why it is there (which storm or forecast placed the zone,
+its strength, top and motion) and a SIGMET for its text. "Zone changes"
+lists the last 100 zone moves and CB decisions with their reasons. "Why no
+CB here?" then a click on the map lists the reasons there is no CB at that
+point (no storm on the radar, behind, in view, too close to another CB,
+the planner's score, and so on).
 
 **Keeping the zones:** frankenweather watches every weather variable it
 sets (the zones' positions, weather and METARs, `WxBasic`, `WxAutoSet`).

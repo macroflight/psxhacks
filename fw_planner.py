@@ -48,6 +48,8 @@ class Storm:  # pylint: disable=too-many-instance-attributes
     lightning: int = 0          # flashes near it (MTG), if known
     in_view: bool = False       # a new CB here would be seen by the crew (frankenweather decides)
     route_off_nm: Optional[float] = None   # distance from the route ahead, if following one
+    behind_nm: float = 0.0      # how far behind the aircraft it is (0: ahead or abeam), as the
+    #                             caller's "behind" rule measures it (along the route if any)
 
 
 @dataclass
@@ -72,6 +74,8 @@ class Aircraft:
     lon: float
     hdg: float
     maneuvering: bool = False     # holding or vectored: all round
+    behind_limit_nm: float = math.inf   # the caller moves zones farther behind than this away
+    maneuver_reach_nm: float = math.inf   # holding or vectored: no storm farther than this
 
 
 @dataclass
@@ -140,6 +144,11 @@ def strength(storm: Storm) -> float:
         (1.0 + min(storm.lightning, 50) / 100.0)
 
 
+def _off_nose(storm: Storm, ac: Aircraft) -> float:
+    """Return how far off the aircraft's nose a storm is (degrees, 0-180)."""
+    return abs((bearing_deg(ac.lat, ac.lon, storm.lat, storm.lon) - ac.hdg + 180.0) % 360.0 - 180.0)
+
+
 def relevance(storm: Storm, ac: Aircraft) -> float:
     """Return how much the crew will meet a storm: ahead (or near the route), abeam, behind."""
     if ac.maneuvering:
@@ -162,7 +171,7 @@ def spacing_factor(storm: Storm, placed: list) -> float:
     return (near - SPACING_MIN_NM) / (SPACING_SOFT_NM - SPACING_MIN_NM)
 
 
-def plan(storms: list, zones: list, ac: Aircraft) -> Plan:  # pylint: disable=too-many-locals,too-many-branches
+def plan(storms: list, zones: list, ac: Aircraft) -> Plan:  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     """Return which movable zones go onto which storms (see the module docstring).
 
     Kept as they are: fixed zones and zones with a visible CB (their storms count as shown).
@@ -173,6 +182,18 @@ def plan(storms: list, zones: list, ac: Aircraft) -> Plan:  # pylint: disable=to
     the ones without a CB first. Deterministic: ties go by storm key and zone number.
     """
     result = Plan()
+    all_by_key = {s.key: s for s in storms}   # every storm: existing CBs keep their spacing
+    # not a storm the caller's "behind" rule would take the zone away from at once: a CB that
+    # comes and goes (frankenweather, headless 2026-11-18): behind the aircraft, or (holding)
+    # farther than the maneuvering reach, where every turn makes it "behind"
+    # Nor abeam and farther than the limit: it is behind a minute later (frankenweather's
+    # storm placer: 75 degrees of the nose since a zone went away and back every 30-60 s)
+    # Behind at all: going away, the rule takes it soon (placed 43 nm behind, moved 30 s later
+    # at 50 nm: synthetic flights 2026-11-18)
+    storms = [s for s in storms if s.behind_nm <= 0.0 and not (
+        ac.maneuvering and dist_nm(ac.lat, ac.lon, s.lat, s.lon) > ac.maneuver_reach_nm) and not (
+        not ac.maneuvering and s.route_off_nm is None and _off_nose(s, ac) > AHEAD_DEG and
+        dist_nm(ac.lat, ac.lon, s.lat, s.lon) > ac.behind_limit_nm)]
     if not storms:
         return result
     by_key = {s.key: s for s in storms}
@@ -183,8 +204,10 @@ def plan(storms: list, zones: list, ac: Aircraft) -> Plan:  # pylint: disable=to
     taken: set = set()
     movable = []
     for z in sorted(zones, key=lambda z: z.num):
-        if z.cb_at is not None and z.storm not in by_key:
+        if z.cb_at is not None and z.storm not in all_by_key:
             placed.append(z.cb_at)
+        elif z.storm in all_by_key and z.storm not in by_key:   # its storm left out above
+            placed.append((all_by_key[z.storm].lat, all_by_key[z.storm].lon))
         if (z.fixed or z.visible_cb) and z.storm in by_key:
             s = by_key[z.storm]
             taken.add(s.key)
@@ -222,6 +245,8 @@ def plan(storms: list, zones: list, ac: Aircraft) -> Plan:  # pylint: disable=to
     # it is far enough from every CB placed, else it goes (the crew can't see it: movable)
     for z in free[len(new):]:
         s = by_key.get(z.storm) if z.storm else None
+        if s is None and z.storm in all_by_key:   # its storm left out: already in placed
+            continue
         if s is not None and spacing_factor(s, placed) == 0.0:
             result.moves.append(Move(z.num, None, z.lat, z.lon, 0.0))
         elif s is not None:
