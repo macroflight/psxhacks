@@ -34,6 +34,11 @@ try:
 except ImportError:
     _PIL_Image = None
     _HAS_PIL = False
+try:
+    import h5py  # noqa: F401  pylint: disable=unused-import
+    _HAS_H5PY = True   # GOES lightning files (fw_glm)
+except ImportError:
+    _HAS_H5PY = False
 from pyproj import Geod
 
 import psx
@@ -80,6 +85,8 @@ import fw_cbmsg as _fw_cbmsg  # pylint: disable=wrong-import-order
 import fw_route as _fw_route  # pylint: disable=wrong-import-order
 import fw_radar as _fw_radar  # pylint: disable=wrong-import-order
 import fw_storms as _fw_storms  # pylint: disable=wrong-import-order
+import fw_geosat as _fw_geosat
+import fw_glm as _fw_glm
 import fw_lightning as _fw_lightning  # pylint: disable=wrong-import-order
 import fw_cloudtop as _fw_cloudtop  # pylint: disable=wrong-import-order
 import fw_planner as _fw_planner  # pylint: disable=wrong-import-order
@@ -2965,6 +2972,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._ltg_fetch_tick = 0   # the _LTG_CACHE_S of the UTC clock lightning was last fetched in
         self._ltg_fetch_at: Optional[tuple] = None
         self._ltg_image_time: Optional[str] = None
+        self._mtg_points: list = []   # MTG flash pixels; _ltg_points = these + GOES's
+        self._glm_points: list = []   # GOES GLM flash pixels (--glm-lightning)
+        self._glm_files: dict = {}    # {file key: (start time, [(lat, lon), ...])}
+        self._glm_sat: Optional[str] = None
+        self._glm_tick = 0            # the UTC minute GOES lightning was last fetched in
         # Satellite cloud tops (fw_cloudtop): the decoded image (m, None: no top), its area,
         # time, when and where it was fetched, the legend's colours; each radar cell's top
         self._ctop_grid: list = []
@@ -2973,6 +2985,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._ctop_fetch_time: float = 0.0
         self._ctop_fetch_at: Optional[tuple] = None
         self._ctop_palette: list = []
+        self._ctop_source = "MSG"         # whose image _ctop_grid is (fw_cloudtop / fw_geosat)
+        self._ctop_near: dict = {}        # _cloud_top_ft()'s answers for the current image
+        self._ctop_near_image: Optional[tuple] = None
+        self._ctop_max_age_s = _fw_cloudtop.MAX_AGE_S
+        self._gibs_colormap: dict = {}
+        # --sat-storms: {(lat, lon, hour): (CAPE J/kg, showers mm/h) or None}
+        self._sat_cape: dict = {}
         self._cb_top_actual: dict = {}   # radar cell key -> its CB's real top (ft MSL)
 
         # API state broadcast
@@ -10983,7 +11002,29 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if any(self._dist_nm(lat, lon, flat, flon) <= _STORM_LTG_NM
                for flat, flon in self._ltg_points):
             got = max(got or (0.0, 0), (_fw_storms.LIGHTNING_CHANCE, 55))
+        sat = self._sat_storm_chance(lat, lon) if self.args.sat_storms else None
+        if sat is not None:
+            got = max(got or (0.0, 0), sat)
         return got
+
+    def _sat_deep_top(self, lat: float, lon: float) -> bool:
+        """Return True if the satellite sees a deep convective top near (lat, lon) (fw_geosat)."""
+        top_ft = self._cloud_top_ft(lat, lon)
+        return top_ft is not None and _fw_geosat.deep_top(top_ft * 0.3048, lat)
+
+    def _sat_storm_chance(self, lat: float, lon: float) -> Optional[tuple]:
+        """--sat-storms: fw_geosat's (chance, dBZ) for the cloud tops near a point, or None.
+
+        The CAPE and showers come from the forecast at the whole-degree point
+        and UTC hour (fetched by _storm_motions_refresh()); unknown: no storm yet.
+        """
+        if not self._sat_deep_top(lat, lon):
+            return None
+        got = self._sat_cape.get((round(lat), round(lon), int(time.time() // _fw_storms.HOUR_S)))
+        if got is None:
+            return None
+        top_ft = self._cloud_top_ft(lat, lon)
+        return _fw_geosat.storm_chance(None if top_ft is None else top_ft * 0.3048, lat, *got)
 
     def _storm_area(self, lat: float, lon: float) -> bool:
         """Return True if fw_storms decides about CBs at (lat, lon) (outside radar coverage)."""
@@ -11026,6 +11067,20 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 None, self._turb_engine.wind_fetcher.get, float(nlat), float(nlon), when)
             self._storm_motion[(nlat, nlon, h)] = _fw_drift.mean_wind_motion(profile)
         self._storm_motion = {k: v for k, v in self._storm_motion.items() if k[2] >= hour - 1}
+        if self.args.sat_storms and self._turb_cape_fetcher is not None:
+            # the forecast's CAPE where the satellite sees deep tops (fw_geosat's storm test)
+            cape_want = sorted({(round(p[2]), round(p[3]), hour) for p in points
+                                if self._sat_deep_top(p[2], p[3])} - set(self._sat_cape))
+            for nlat, nlon, h in cape_want[:_STORM_WINDS_PER_LOOK]:
+                sample = await loop.run_in_executor(
+                    None, self._turb_locked, "cape", self._turb_cape_fetcher.get,
+                    float(nlat), float(nlon))
+                cape = sample.cape_j_kg if sample is not None else float('nan')
+                showers = sample.showers_mm_h if sample is not None else float('nan')
+                self._sat_cape[(nlat, nlon, h)] = (
+                    None if math.isnan(cape) else
+                    (float(cape), 0.0 if math.isnan(showers) else float(showers)))
+            self._sat_cape = {k: v for k, v in self._sat_cape.items() if k[2] >= hour - 1}
 
     def _radar_fresh(self) -> bool:
         """Return True if --radar-cbs has a recent radar frame to decide with."""
@@ -11159,24 +11214,31 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if not moved and time.monotonic() - self._ctop_fetch_time < _CTOP_CACHE_S:
             return
         self._ctop_fetch_time = time.monotonic()
+        # the satellite nearest overhead: Meteosat (0 or 45.5 E), GOES or Himawari
+        if (_fw_geosat.source(*here) is not None and
+                _fw_geosat.best_arc(*here) < _fw_cloudtop.best_arc(*here)):
+            await self._fetch_geosat_tops(session, here)
+            return
         if _PIL_Image is None or not _fw_cloudtop.covers(*here):
             self._ctop_grid, self._ctop_fetch_at = [], here
             return
+        wms = _fw_cloudtop.service(*here)
+        source = "MSG" if wms == _fw_cloudtop.WMS_URL else "MSG-IODC"
         try:
             if not self._ctop_palette:
-                async with session.get(_fw_cloudtop.WMS_URL, timeout=_RV_TIMEOUT,
+                async with session.get(wms, timeout=_RV_TIMEOUT,
                                        params=_fw_cloudtop.legend_params()) as r:
                     img = _PIL_Image.open(BytesIO(await r.read())).convert('RGBA')
                 self._ctop_palette = _fw_cloudtop.legend_palette(img)
                 if not self._ctop_palette:
                     raise ValueError("no colour bar in the legend")
-            async with session.get(_fw_cloudtop.WMS_URL, timeout=_RV_TIMEOUT, params={
+            async with session.get(wms, timeout=_RV_TIMEOUT, params={
                     "service": "WMS", "version": "1.3.0", "request": "GetCapabilities"}) as r:
                 latest = _fw_cloudtop.latest_time(await r.text()) if r.status == 200 else None
             if latest is None:
                 raise ValueError("no image time in the WMS capabilities")
             bbox, size = _fw_cloudtop.box(*here)
-            async with session.get(_fw_cloudtop.WMS_URL, timeout=_RV_TIMEOUT,
+            async with session.get(wms, timeout=_RV_TIMEOUT,
                                    params=_fw_cloudtop.getmap_params(bbox, size, latest)) as r:
                 if r.status != 200 or not r.content_type.startswith("image/"):
                     raise ValueError(f"WMS GetMap HTTP {r.status} {r.content_type}")
@@ -11187,10 +11249,85 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self.logger.info("Satellite cloud tops: not available (%s)", exc)
             return
         if latest != self._ctop_image_time:
-            self.logger.info("Satellite cloud tops: image %s (%.0f min old)", latest[11:16] + "Z",
+            self.logger.info("Satellite cloud tops: %s image %s (%.0f min old)", source,
+                             latest[11:16] + "Z",
                              _fw_cloudtop.age_s(latest, datetime.now(timezone.utc)) / 60.0)
         self._ctop_grid, self._ctop_bbox = grid, bbox
         self._ctop_fetch_at, self._ctop_image_time = here, latest
+        self._ctop_source, self._ctop_max_age_s = source, _fw_cloudtop.MAX_AGE_S
+
+    async def _fetch_geosat_tops(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+            self, session: aiohttp.ClientSession, here: tuple) -> None:
+        """Refresh the cloud tops outside Meteosat's view: GOES (Americas) or Himawari (fw_geosat).
+
+        GOES: the newest Cloud Top Height file (needs h5py). Himawari: the
+        newest GIBS band 13 image GIBS has (about 45 minutes late, needs
+        Pillow). On a failure the last grid stays until it's too old.
+        """
+        sat = _fw_geosat.source(*here)
+        now = datetime.now(timezone.utc)
+        try:
+            if sat in _fw_geosat.GOES:
+                if not _HAS_H5PY:
+                    raise ValueError("h5py not installed")
+                key = None
+                for hour in (now, now - timedelta(hours=1)):
+                    async with session.get(_fw_geosat.goes_listing_url(sat, hour),
+                                           timeout=_RV_TIMEOUT) as r:
+                        if r.status != 200:
+                            raise ValueError(f"listing HTTP {r.status}")
+                        key = _fw_geosat.goes_latest_key(await r.text())
+                    if key:
+                        break
+                if key is None:
+                    raise ValueError("no Cloud Top Height file in the last 2 hours")
+                when = _fw_geosat.goes_time(key)
+                latest = when.strftime("%Y-%m-%dT%H:%M:%SZ")
+                if latest == self._ctop_image_time and self._ctop_source == sat:
+                    self._ctop_fetch_at = here
+                    return
+                async with session.get(_fw_geosat.goes_file_url(sat, key),
+                                       timeout=_RV_TIMEOUT) as r:
+                    if r.status != 200:
+                        raise ValueError(f"file HTTP {r.status}")
+                    data = await r.read()
+                bbox, size = _fw_geosat.box(*here, _fw_geosat.GOES_DEG_PER_PX)
+                grid = await asyncio.get_running_loop().run_in_executor(
+                    None, _fw_geosat.goes_grid, data, bbox, size)
+            else:
+                if _PIL_Image is None:
+                    raise ValueError("Pillow not installed")
+                if not self._gibs_colormap:
+                    async with session.get(_fw_geosat.GIBS_COLORMAP, timeout=_RV_TIMEOUT) as r:
+                        self._gibs_colormap = _fw_geosat.gibs_colormap(await r.text())
+                    if not self._gibs_colormap:
+                        raise ValueError("no colours in the GIBS colour map")
+                bbox, size = _fw_geosat.box(*here, _fw_geosat.GIBS_DEG_PER_PX)
+                grid, latest = None, None
+                for when_s in _fw_geosat.gibs_times(now):
+                    if when_s == self._ctop_image_time and self._ctop_source == sat:
+                        self._ctop_fetch_at = here
+                        return
+                    async with session.get(_fw_geosat.GIBS_WMS, timeout=_RV_TIMEOUT,
+                                           params=_fw_geosat.gibs_params(bbox, size, when_s)) as r:
+                        if r.status != 200 or not r.content_type.startswith("image/"):
+                            raise ValueError(f"GIBS GetMap HTTP {r.status} {r.content_type}")
+                        img = _PIL_Image.open(BytesIO(await r.read())).convert('RGBA')
+                    grid = await asyncio.get_running_loop().run_in_executor(
+                        None, _fw_geosat.gibs_grid, img, bbox, self._gibs_colormap)
+                    if grid is not None:
+                        latest = when_s
+                        break
+                if grid is None:
+                    raise ValueError("no recent Himawari image on GIBS")
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.info("Satellite cloud tops (%s): not available (%s)", sat, exc)
+            return
+        self.logger.info("Satellite cloud tops: %s image %s (%.0f min old)", sat,
+                         latest[11:16] + "Z", _fw_cloudtop.age_s(latest, now) / 60.0)
+        self._ctop_grid, self._ctop_bbox = grid, bbox
+        self._ctop_fetch_at, self._ctop_image_time = here, latest
+        self._ctop_source, self._ctop_max_age_s = sat, _fw_geosat.MAX_AGE_S
 
     def _cb_top_actual_of(self, zone_num: int) -> Optional[float]:
         """Return the satellite top (ft MSL) of zone_num's radar CB, or None (_radar_cb_size())."""
@@ -11208,10 +11345,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if not self._ctop_grid or self._ctop_image_time is None or self._ctop_bbox is None:
             return None
         if _fw_cloudtop.age_s(self._ctop_image_time,
-                              datetime.now(timezone.utc)) > _fw_cloudtop.MAX_AGE_S:
+                              datetime.now(timezone.utc)) > self._ctop_max_age_s:
             return None
-        metres = _fw_cloudtop.top_near(self._ctop_grid, self._ctop_bbox, lat, lon,
-                                       _CTOP_RADIUS_NM)
+        # the same points are asked about many times a minute (every fw_storms grid point by
+        # several callers, --sat-storms tripled frankenweather's CPU): kept per image
+        if self._ctop_near_image != (self._ctop_image_time, self._ctop_source):
+            self._ctop_near, self._ctop_near_image = {}, (self._ctop_image_time, self._ctop_source)
+        key = (round(lat, 3), round(lon, 3))
+        if key not in self._ctop_near:
+            self._ctop_near[key] = _fw_cloudtop.top_near(self._ctop_grid, self._ctop_bbox, lat,
+                                                         lon, _CTOP_RADIUS_NM)
+        metres = self._ctop_near[key]
         return None if metres is None else metres / 0.3048
 
     # ------------------------------------------------------------------
@@ -11219,6 +11363,68 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
     # ------------------------------------------------------------------
 
     async def _fetch_lightning(self, session: aiohttp.ClientSession) -> None:
+        """Refresh the flash pixels: MTG's Lightning Imager, with --glm-lightning GOES's GLMs."""
+        await self._fetch_mtg_lightning(session)
+        if self.args.glm_lightning:
+            await self._fetch_glm_lightning(session)
+        else:
+            self._glm_points = []
+        self._ltg_points = self._mtg_points + self._glm_points
+
+    async def _fetch_glm_lightning(  # pylint: disable=too-many-locals
+            self, session: aiohttp.ClientSession) -> None:
+        """Refresh the GOES GLM flash pixels around the aircraft (fw_glm), once a UTC minute.
+
+        Lists the satellite's files of this hour (and the last, early in an
+        hour), fetches the first file of every minute not fetched yet (the
+        first time: the last 17 minutes, about 4 MB; then one file of ~250 KB
+        a minute) and keeps their flashes for 17 minutes. Outside GOES's view
+        or without h5py: no GOES lightning. Failures keep what was fetched.
+        """
+        if self.ac_lat is None:
+            return
+        tick = int(time.time() // 60)
+        if tick == self._glm_tick:
+            return
+        self._glm_tick = tick
+        here = (self.ac_lat, self.ac_lon)
+        sat = _fw_glm.satellite(*here) if _HAS_H5PY else None
+        if sat != self._glm_sat:
+            self._glm_files, self._glm_sat = {}, sat
+        if sat is None:
+            self._glm_points = []
+            return
+        now = datetime.now(timezone.utc)
+        since = now - timedelta(seconds=_fw_glm.KEEP_S)
+        self._glm_files = {k: v for k, v in self._glm_files.items() if v[0] >= since}
+        try:
+            file_keys: list = []
+            hours = [now - timedelta(hours=1), now] if since.hour != now.hour else [now]
+            for hour in hours:
+                async with session.get(_fw_glm.listing_url(sat, hour), timeout=_RV_TIMEOUT) as r:
+                    if r.status != 200:
+                        raise ValueError(f"listing HTTP {r.status}")
+                    file_keys += _fw_glm.keys(await r.text())
+            for key in _fw_glm.one_per_minute(file_keys, since):
+                if key in self._glm_files:
+                    continue
+                async with session.get(_fw_glm.file_url(sat, key), timeout=_RV_TIMEOUT) as r:
+                    if r.status != 200:
+                        raise ValueError(f"file HTTP {r.status}")
+                    data = await r.read()
+                points = await asyncio.get_running_loop().run_in_executor(
+                    None, _fw_glm.flashes, data)
+                self._glm_files[key] = (_fw_glm.start_time(key), points)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.info("GOES lightning: not available (%s)", exc)
+        bbox, _ = _fw_lightning.box(*here)
+        points = _fw_glm.pixels(self._glm_files, now, bbox)
+        if bool(points) != bool(self._glm_points):
+            self.logger.debug("GOES lightning (%s): %d flash pixels around the aircraft, %d files",
+                              sat, len(points), len(self._glm_files))
+        self._glm_points = points
+
+    async def _fetch_mtg_lightning(self, session: aiohttp.ClientSession) -> None:
         """Refresh the flash positions from MTG's Lightning Imager (the last 15 minutes).
 
         Every _LTG_CACHE_S (sooner after a long move), one EUMETView WMS image per
@@ -11239,7 +11445,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return
         self._ltg_fetch_tick = tick
         if _PIL_Image is None or not _fw_lightning.covers(*here):
-            self._ltg_points, self._ltg_fetch_at = [], here
+            self._mtg_points, self._ltg_fetch_at = [], here
             return
         try:
             async with session.get(_fw_lightning.WMS_URL, timeout=_RV_TIMEOUT, params={
@@ -11259,10 +11465,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.info("MTG lightning: not available (%s)", exc)
             return
-        if bool(points) != bool(self._ltg_points) or latest != self._ltg_image_time:
+        if bool(points) != bool(self._mtg_points) or latest != self._ltg_image_time:
             self.logger.debug("MTG lightning: %d flash pixels around the aircraft (up to %s)",
                               len(points), latest)
-        self._ltg_points, self._ltg_fetch_at, self._ltg_image_time = points, here, latest
+        self._mtg_points, self._ltg_fetch_at, self._ltg_image_time = points, here, latest
 
     def _lightning_near(self, lat: float, lon: float) -> bool:
         """Return True if at least _LTG_MIN_PIXELS recent flash pixels lie within _LTG_RADIUS_NM."""
@@ -13321,6 +13527,20 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "and moves with the cell's tracked motion, and fades when the cell is gone. "
                  "Outside radar coverage nothing changes. Needs Pillow. See "
                  "docs/frankenweather.md.")
+        parser.add_argument(
+            '--sat-storms', action='store_true',
+            help="With --radar-cbs, outside radar coverage: storms also near where the satellite "
+                 "sees a deep, cold cloud top (-40 C or colder with forecast showers, -50 C "
+                 "without) over air the forecast gives thunderstorm energy (CAPE 200 J/kg or "
+                 "more) (testing). Cloud tops from "
+                 "Meteosat (Europe, Africa), GOES (the Americas, needs h5py) and Himawari (Asia, "
+                 "Australia, the western Pacific). See docs/frankenweather.md.")
+        parser.add_argument(
+            '--glm-lightning', action='store_true',
+            help="Lightning from the GOES satellites' Geostationary Lightning Mappers too "
+                 "(testing): the Americas, the Atlantic and the eastern Pacific, where MTG's "
+                 "Lightning Imager doesn't see. NOAA's free files, one of about 250 KB a minute. "
+                 "Needs h5py. See docs/frankenweather.md.")
         parser.add_argument(
             '--radar-tile-cache', default=_RADAR_TILE_CACHE_DIR, metavar='DIR',
             help="With --radar-cbs: keep the RainViewer radar and coverage tiles in this folder "

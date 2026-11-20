@@ -30,14 +30,34 @@ MAX_COLOUR_DIST = 40         # a pixel further from every legend colour: not a c
 # Meteosat at 0 degrees: usable up to about 70 degrees of arc from the point under it
 SUBSAT_LON = 0.0
 COVERAGE_ARC_DEG = 70.0
+# Meteosat's Indian Ocean service (Meteosat-9 at 45.5 E, the same product and colours): Central
+# Asia, Pakistan, Iran, the Arabian Sea, India's west
+IODC_WMS_URL = "https://view.eumetsat.int/geoserver/msg_iodc/ows"
+IODC_SUBSAT_LON = 45.5
 _NM_PER_DEG = 60.0
 
 
+def _arc(lat: float, lon: float, sub_lon: float) -> float:
+    p, dl = math.radians(lat), math.radians(lon - sub_lon)
+    return math.degrees(math.acos(max(-1.0, min(1.0, math.cos(p) * math.cos(dl)))))
+
+
+def best_arc(lat: float, lon: float) -> float:
+    """Return how far (degrees of arc) (lat, lon) is from the nearer Meteosat's sub-point."""
+    return min(_arc(lat, lon, SUBSAT_LON), _arc(lat, lon, IODC_SUBSAT_LON))
+
+
 def covers(lat: float, lon: float) -> bool:
-    """Return True if Meteosat at 0 degrees sees (lat, lon) well enough."""
-    p, dl = math.radians(lat), math.radians(lon - SUBSAT_LON)
-    return math.degrees(math.acos(max(-1.0, min(1.0, math.cos(p) * math.cos(dl))))) <= \
-        COVERAGE_ARC_DEG
+    """Return True if a Meteosat (0 degrees or the Indian Ocean's) sees (lat, lon) well enough."""
+    return service(lat, lon) is not None
+
+
+def service(lat: float, lon: float) -> Optional[str]:
+    """Return the WMS URL of the Meteosat that sees (lat, lon) best, or None (neither does)."""
+    arc0, arc_io = _arc(lat, lon, SUBSAT_LON), _arc(lat, lon, IODC_SUBSAT_LON)
+    if min(arc0, arc_io) > COVERAGE_ARC_DEG:
+        return None
+    return WMS_URL if arc0 <= arc_io else IODC_WMS_URL
 
 
 def latest_time(capabilities_xml: str) -> Optional[str]:

@@ -22,7 +22,15 @@ set once (by hand, or baked into a saved situ) and never updated again
   CAPE/CIN data and TS SIGMETs, not hand-set oktas, checked against live
   weather radar (RainViewer) and satellite lightning. The lightning comes
   from EUMETSAT's MTG Lightning Imager (© EUMETSAT) over Europe, Africa,
-  the Atlantic and the western Indian Ocean; there's none elsewhere.
+  the Atlantic, the western Indian Ocean and northern South America (it
+  doesn't see southern Brazil, Paraguay, Uruguay or Argentina: measured
+  against GOES 2026-11-20), and with `--glm-lightning`
+  (testing, needs h5py) also from the GOES satellites' Geostationary
+  Lightning Mappers (NOAA, free) over the Americas, the Atlantic and the
+  eastern Pacific: one file of about 250 KB a minute, turned into the same
+  flash pixels as MTG's (0.05°, per 5 minutes, the latest 15 minutes). Live
+  2026-11-20 over north-east Argentina MTG had no flashes while GOES had
+  about 2,000 in 15 minutes within 300 nm. Asia and Australia have none.
 - A dedicated terrain-based turbulence engine — mountain wave, rotor,
   mechanical, wind-shear CAT, plus CB/CAPE/PIREP/G-AIRMET-driven bumps —
   using real wind and satellite terrain data.
@@ -509,7 +517,9 @@ the same picture VATSIM Radar can show) decides where the CBs are.
     long it lives (30-60 minutes) come from the grid point and the hour,
     never from a random number of this frankenweather's own;
   - the chance comes from the SIGMET's qualifier (ISOL about one storm per
-    7 points, OCNL one per 3, FRQ one per 2) or lightning nearby;
+    7 points, OCNL one per 3, FRQ one per 2), lightning nearby (MTG, or
+    GOES with `--glm-lightning`), or with `--sat-storms` (testing) a deep,
+    cold satellite cloud top over thunderstorm air (below);
   - a storm moves with the 850-300 hPa mean wind at its grid point, from
     the same forecast hour.
 
@@ -517,6 +527,33 @@ the same picture VATSIM Radar can show) decides where the CBs are.
   moving with it, fading at the end of its life), and the SIGMET's other
   points get no CB. Elsewhere outside radar coverage nothing changes yet:
   the forecast places the CBs, and they differ between sims.
+- **Satellite storms (`--sat-storms`, testing).** Outside radar coverage
+  and away from lightning, a cold cloud top is the next best sign of a
+  thunderstorm. The cloud tops come from the satellite nearest overhead:
+  Meteosat over Europe, Africa and the Atlantic, and its Indian Ocean
+  service (Meteosat-9, 45.5° E) over Central Asia, the Middle East and
+  India (EUMETSAT, about 20-25 minutes late), GOES-East and GOES-West
+  over the Americas and the eastern Pacific (NOAA's Cloud Top Height
+  product, about 15 minutes late, needs h5py), and Himawari over Asia,
+  Australia and the western Pacific (its infrared image from NASA's GIBS,
+  about 45 minutes late; the height comes from a standard temperature drop
+  with height). A grid point gets a storm chance when the highest top within
+  10 nm is
+  - as cold as -40 C and the forecast has thunderstorm energy (CAPE
+    200 J/kg or more) and convective showers (0.1 mm/h or more) there:
+    about one storm per 4 points;
+  - as cold as -50 C with that CAPE but no forecast showers: about one per
+    7 points (the forecast misses some storms the satellite sees).
+
+  The CAPE and showers are the forecast's at the whole degree and hour.
+  This is a rough guide, so the storms are made up near the cold tops, not
+  on them. Checked against real radar on 2026-11-20 (0.5° points, radar
+  storm of 43 dBZ or more within 20 nm): such a point had a radar storm
+  21-22 % of the time over southern Brazil, 12-16 % near Darwin, and over
+  the Gulf of Mexico the November cirrus (cold tops over CAPE, no showers,
+  no storms) got almost no storms. Without the forecast check the satellite
+  alone was wrong almost everywhere: 118 cold points over the Gulf, none
+  with a storm.
 - The log shows each frame ("Radar cells: ..."), and a zone's reason shows
   what the radar did ("radar: 52 dBZ cell 140 km2", "radar: no storm
   cell"). Needs Pillow.

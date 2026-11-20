@@ -4,11 +4,13 @@
 # Note: pywin32 is Windows-only.
 # rasterio is only needed for frankenturb.
 # Pillow is optional (radar imagery in frankenweather/fw_scanner; graceful fallback without it).
+# h5py is optional (GOES lightning, frankenweather --glm-lightning; none without it).
 # hidapi is required by show_hid.py; hid-parser is optional (human-readable -r mode only).
 
 aiohttp>=3.9
 hidapi>=0.14
 hid-parser>=0.0.4
+h5py>=3.10
 numpy>=1.26
 Pillow>=10.0
 psutil>=5.9

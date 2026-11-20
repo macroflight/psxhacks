@@ -29,8 +29,17 @@ SUBSAT_LON = 0.0
 COVERAGE_ARC_DEG = 65.0
 
 
+# Measured blind area inside that arc (2026-11-20, against GOES GLM over the same 15 minutes,
+# ~/fw-research/mtg/edge.py): south of 24 S and west of 48.5 W (southern Brazil, Paraguay,
+# Uruguay, north-east Argentina) MTG had no flash where GLM had up to 1,121 per 2-degree box,
+# while it saw the Amazon out to 70 W and the South Atlantic at 38 S 38 W
+BLIND = ((-90.0, -24.0, -180.0, -48.5),)   # (lat_min, lat_max, lon_min, lon_max)
+
+
 def covers(lat: float, lon: float) -> bool:
     """Return True if MTG's Lightning Imager sees (lat, lon)."""
+    if any(a <= lat <= b and c <= lon <= d for a, b, c, d in BLIND):
+        return False
     p, dl = math.radians(lat), math.radians(lon - SUBSAT_LON)
     return math.degrees(math.acos(max(-1.0, min(1.0, math.cos(p) * math.cos(dl))))) <= \
         COVERAGE_ARC_DEG
