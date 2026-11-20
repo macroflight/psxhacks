@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+- **A SID or STAR that turns back on itself no longer counts as a hold.**
+  Within 10 nm of the FMC route only the turns the route doesn't explain
+  count towards maneuvering mode, so a departure turn of 180° or a few
+  miles of vectors off the route no longer re-place every zone and take
+  away CBs the crew could see (live flight 2026-11-20). FMC holds are
+  still detected, on their first or second circuit.
+- **Zones follow the FMC route by default** (`--route-zones`; the CB test
+  page switches it off), and radar storms are looked for 120 nm past what
+  the crew may see (was 60 nm).
+- **Lightning over the Americas (new, testing: `--glm-lightning`).** The
+  GOES satellites' lightning mappers (NOAA, free) add lightning over the
+  Americas, the Atlantic and the eastern Pacific, where MTG doesn't see:
+  live over north-east Argentina, MTG had no flashes and GOES about 2,000
+  in 15 minutes. Needs h5py.
+- **Storms from satellite cloud tops (new, testing: `--sat-storms`).**
+  Outside radar coverage and away from lightning, storms are made up near
+  deep, cold cloud tops (Meteosat, GOES, Himawari) where the forecast has
+  thunderstorm energy. With `--radar-cbs`, radar CB tops in the Americas,
+  Asia and Australia now also come from the satellite.
+- **CB planner (testing, `--cb-planner`): fewer pointless changes far
+  out.** A CB the planner turns off stays off until its zone moves (it
+  came back every minute), and a CB out of sight changes only for a
+  clearly better storm.
+- **Realistic fuel cooling: refuelled fuel and parked aircraft.** Fuel
+  is delivered at half the air and half the soil temperature (underground
+  tanks and hydrant pipes), with a little randomness, between -15 and
+  +35 C (was the air temperature between +5 and +30 C), and a parked
+  aircraft's fuel follows the outside air as fast as in flight (was 1.5
+  times slower), as the FAA's fuel tank thermal model has it. Sources in
+  the documentation.
+
 - **CB turbulence follows the weather radar's colours (new default).**
   Around a weather-zone CB, at its cloud levels, the turbulence outside
   the core now matches what PSX's radar shows there: moderate in the
