@@ -2,6 +2,7 @@
 import math
 import random
 import unittest
+from unittest import mock
 
 import fw_planner as P
 
@@ -41,58 +42,88 @@ class TestPlanner(unittest.TestCase):
     """The planner's rules, one by one."""
 
     def test_each_cluster_gets_one_before_more(self):
-        """A very strong cluster left, a medium one right: the medium one gets a CB too (prio 4)."""
-        storms = strong_line("L", 50.0) + [storm("R0", 130.0, 150.0, dbz=50)]
-        plan = P.plan(storms, free_zones(3), AC)
-        got = [m.storm for m in plan.moves]
+        """A strong cluster and a medium one (over WEAK_CLUSTER_FRAC): the medium one gets a CB."""
+        right = [P.Storm(f"R{i}", *at(130.0 + 90.0, (i - 1.5) * 20.0, *at(130.0, 150.0)),
+                         dbz=55, area_km2=300.0) for i in range(4)]   # chained: one cluster
+        storms = strong_line("L", 50.0) + right
+        got = [m.storm for m in P.plan(storms, free_zones(3), AC).moves]
         self.assertEqual(len(got), 3)
-        self.assertIn("R0", got)
-        self.assertEqual(sum(1 for k in got if k.startswith("L")), 2)
+        self.assertTrue(any(k.startswith("R") for k in got))
+
+    def test_weak_cluster_only_left_over(self):
+        """A small weak cluster (under WEAK_CLUSTER_FRAC) only gets zones left over."""
+        storms = strong_line("L", 50.0) + [storm("W", 130.0, 150.0, dbz=45)]
+        got = [m.storm for m in P.plan(storms, free_zones(3), AC).moves]
+        self.assertEqual(len(got), 3)
+        self.assertNotIn("W", got)
+        got = [m.storm for m in P.plan(storms, free_zones(6), AC).moves]
+        self.assertIn("W", got)       # five strong storms, a sixth zone: the weak one gets it
 
     def test_strongest_first(self):
         """With one zone, the strongest storm gets it (prio 5)."""
-        storms = [storm("A", 80.0, 150.0, dbz=45), storm("B", 100.0, 150.0, dbz=58)]
-        plan = P.plan(storms, free_zones(1), AC)
-        self.assertEqual([m.storm for m in plan.moves], ["B"])
+        storms = [storm("A", 80.0, 250.0, dbz=45), storm("B", 100.0, 250.0, dbz=58)]
+        self.assertEqual([m.storm for m in P.plan(storms, free_zones(1), AC).moves], ["B"])
 
     def test_spacing(self):
         """No two CBs closer than SPACING_MIN_NM."""
-        storms = [storm("A", 90.0, 150.0, dbz=60), storm("B", 90.0, 165.0, dbz=60)]
-        plan = P.plan(storms, free_zones(2), AC)
-        self.assertEqual(len(plan.moves), 1)
+        storms = [storm("A", 90.0, 250.0, dbz=60), storm("B", 90.0, 265.0, dbz=60)]
+        self.assertEqual(len(P.plan(storms, free_zones(2), AC).moves), 1)
 
-    def test_fixed_and_visible_zones_stay(self):
-        """Fixed zones and zones with a visible CB are never moved; their storms count as shown."""
-        storms = [storm("A", 90.0, 150.0, dbz=60), storm("B", 60.0, 200.0, dbz=50)]
-        zones = [P.Zone(1, *at(90.0, 157.0), storm="A", visible_cb=True),
-                 P.Zone(2, *at(0.0, 10.0), fixed=True)] + [P.Zone(3, *at(270.0, 300.0))]
-        plan = P.plan(storms, zones, AC)
-        self.assertEqual([(m.zone, m.storm) for m in plan.moves], [(3, "B")])
+    def test_fixed_zones_stay(self):
+        """Fixed zones are never moved; their storms count as shown."""
+        storms = [storm("A", 90.0, 250.0, dbz=60), storm("B", 60.0, 300.0, dbz=50)]
+        zones = [P.Zone(1, *at(90.0, 257.0), storm="A", fixed=True),
+                 P.Zone(2, *at(0.0, 10.0), fixed=True), P.Zone(3, *at(270.0, 300.0))]
+        self.assertEqual([(m.zone, m.storm) for m in P.plan(storms, zones, AC).moves], [(3, "B")])
 
-    def test_no_new_cb_in_view(self):
-        """A storm the crew may see gets no new CB, but a zone already showing it keeps it."""
-        storms = [storm("A", 90.0, 100.0, dbz=60, in_view=True),
-                  storm("B", 90.0, 300.0, dbz=45)]
-        plan = P.plan(storms, free_zones(1), AC)
-        self.assertEqual([m.storm for m in plan.moves], ["B"])
-        zones = [P.Zone(1, *at(90.0, 107.0), storm="A")]
-        self.assertEqual(P.plan(storms, zones, AC).moves, [])   # keeps A, no move
-
-    def test_stability(self):
-        """A zone keeps its storm while the list has it; a small change doesn't swap it."""
-        storms = [storm("A", 90.0, 150.0, dbz=50), storm("B", 80.0, 160.0, dbz=52)]
-        zones = [P.Zone(1, *at(90.0, 157.0), storm="A")]
-        self.assertEqual(P.plan(storms, zones, AC).moves, [])   # same step: A is nearer ahead
-        storms[0].area_km2 = 80.0                               # a little weaker: still A
+    def test_hard_radius(self):
+        """Within HARD_NM no CB appears, and a CB there is kept even for a far stronger storm."""
+        storms = [storm("N", 90.0, 30.0, dbz=60), storm("F", 90.0, 250.0, dbz=45)]
+        self.assertEqual([m.storm for m in P.plan(storms, free_zones(1), AC).moves], ["F"])
+        zones = [P.Zone(1, *at(90.0, 35.0), storm="W")]
+        storms = [storm("W", 90.0, 35.0, dbz=43), storm("S", 80.0, 250.0, dbz=65, area=400.0)]
         self.assertEqual(P.plan(storms, zones, AC).moves, [])
-        storms[1].dbz = 62                                      # clearly stronger: B
-        self.assertEqual([m.storm for m in P.plan(storms, zones, AC).moves], ["B"])
+        big = [storm("B", 90.0, 50.0, dbz=60, big=True), storm("F", 90.0, 250.0, dbz=45)]
+        self.assertEqual([m.storm for m in P.plan(big, free_zones(1), AC).moves], ["F"])
 
-    def test_score_steps(self):
-        """Scores within SCORE_STEP count as equal: the storm nearer ahead wins (sims agree)."""
-        near = storm("N", 90.0, 150.0, dbz=50, area=100.0)
-        far = storm("F", 90.0, 250.0, dbz=50, area=120.0)    # a little stronger, farther
-        self.assertEqual([m.storm for m in P.plan([near, far], free_zones(1), AC).moves], ["N"])
+    def test_visible_cb_needs_a_margin(self):
+        """A CB the crew may see goes only for a storm scoring clearly more (change_cost)."""
+        zones = [P.Zone(1, *at(90.0, 150.0), storm="A", visible_cb=True)]
+        cost = P.change_cost(150.0, True, AC.visible_nm)
+        self.assertTrue(1.2 < cost < 1.5)
+        a = storm("A", 90.0, 150.0, dbz=50, area=100.0)
+        a_score = P.strength(a)
+        small = storm("B", 60.0, 300.0, dbz=50, area=100.0 * 1.1)          # a little better
+        self.assertEqual(P.plan([a, small], zones, AC).moves, [])
+        clear = storm("B", 60.0, 300.0, dbz=60, area=300.0)                 # much better
+        self.assertGreater(P.strength(clear), a_score * cost)
+        self.assertEqual([m.storm for m in P.plan([a, clear], zones, AC).moves], ["B"])
+
+    def test_change_gap(self):
+        """A CB the crew may see that changed within CHANGE_GAP_S stays, whatever comes."""
+        ac = P.Aircraft(lat=50.0, lon=0.0, hdg=90.0, now_s=1000.0)
+        zones = [P.Zone(1, *at(90.0, 150.0), storm="A", visible_cb=True, changed_s=900.0)]
+        storms = [storm("A", 90.0, 150.0, dbz=45), storm("B", 60.0, 300.0, dbz=65, area=400.0)]
+        self.assertEqual(P.plan(storms, zones, ac).moves, [])
+        zones[0].changed_s = 0.0
+        self.assertEqual([m.storm for m in P.plan(storms, zones, ac).moves], ["B"])
+
+    def test_new_cb_in_view_pays(self):
+        """A new CB where the crew would see it counts less (change_cost): one unseen wins."""
+        storms = [storm("V", 90.0, 120.0, dbz=50, in_view=True), storm("H", 80.0, 300.0, dbz=50)]
+        self.assertEqual([m.storm for m in P.plan(storms, free_zones(1), AC).moves], ["H"])
+        storms[0].dbz = 65
+        storms[0].area_km2 = 400.0     # much stronger: worth appearing in view
+        self.assertEqual([m.storm for m in P.plan(storms, free_zones(1), AC).moves], ["V"])
+
+    def test_hidden_cb_no_flapping(self):
+        """A CB the crew can't see changes only for a storm scoring HIDDEN_KEEP more."""
+        zones = [P.Zone(1, *at(90.0, 300.0), storm="A")]
+        storms = [storm("A", 90.0, 300.0, dbz=50, area=100.0),
+                  storm("B", 60.0, 300.0, dbz=50, area=105.0)]
+        self.assertEqual(P.plan(storms, zones, AC).moves, [])
+        storms[1].dbz = 55
+        self.assertEqual([m.storm for m in P.plan(storms, zones, AC).moves], ["B"])
 
     def test_behind_scores_little(self):
         """A storm behind loses to a weaker one ahead (relevance)."""
@@ -108,9 +139,25 @@ class TestPlanner(unittest.TestCase):
     def test_not_behind_or_far_abeam(self):
         """Storms behind, or abeam beyond the behind limit, get no zone (it would go at once)."""
         ac = P.Aircraft(lat=50.0, lon=0.0, hdg=90.0, behind_limit_nm=50.0)
-        storms = [storm("B", 200.0, 40.0, dbz=62, behind_nm=40.0),
+        storms = [storm("B", 200.0, 45.0, dbz=62, behind_nm=40.0),
                   storm("S", 175.0, 150.0, dbz=60), storm("A", 90.0, 250.0, dbz=45)]
         self.assertEqual([m.storm for m in P.plan(storms, free_zones(3), ac).moves], ["A"])
+
+    def test_far_abeam_off_route(self):
+        """With a route, a storm far from it and far abeam gets no zone (live 2026-11-19)."""
+        ac = P.Aircraft(lat=50.0, lon=0.0, hdg=90.0, behind_limit_nm=50.0)
+        storms = [storm("S", 0.0, 300.0, dbz=60, route_off_nm=250.0),
+                  storm("R", 90.0, 200.0, dbz=45, route_off_nm=30.0)]
+        self.assertEqual([m.storm for m in P.plan(storms, free_zones(2), ac).moves], ["R"])
+
+    def test_no_move_for_almost_nothing(self):
+        """A zone's CB makes way only for a new CB worth MIN_VALUE; an empty zone takes any."""
+        storms = [storm("W", 180.0, 150.0, dbz=43), storm("X", 170.0, 250.0, dbz=50)]
+        zone = P.Zone(1, 0.0, 0.0, storm="W")
+        with mock.patch.object(P, "MIN_VALUE", 10.0):
+            self.assertEqual(P.plan(storms, [zone], AC).moves, [])
+            self.assertEqual(P.plan(storms[1:], free_zones(1), AC).moves[0].storm, "X")
+        self.assertEqual(P.plan(storms, [zone], AC).moves[0].storm, "X")
 
     def test_holding_reach(self):
         """Holding: no storm beyond the maneuvering reach (every turn makes it behind)."""
@@ -119,7 +166,7 @@ class TestPlanner(unittest.TestCase):
         self.assertEqual([m.storm for m in P.plan(storms, free_zones(2), ac).moves], ["N"])
 
     def test_deterministic(self):
-        """The same storms in any order give the same plan (prio 3)."""
+        """The same storms in any order give the same plan."""
         storms = strong_line("L", 50.0) + strong_line("M", 130.0) + \
             [storm(f"S{i}", 60.0 + i * 7, 120.0 + i * 13, dbz=45 + i) for i in range(8)]
         ref = [(m.zone, m.storm) for m in P.plan(storms, free_zones(5), AC).moves]

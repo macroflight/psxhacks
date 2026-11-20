@@ -1,9 +1,11 @@
 # CB placement planner (fw_planner.py)
 
 Status (2026-11-19): in frankenweather behind `--cb-planner` (with `--radar-cbs`),
-being A/B tested on the headless test sims. It replaces frankenweather's
-separate storm placer, SIGMET placer and the radar part of zone placement with
-one scored decision per radar frame and every minute on the UTC clock.
+being tested. It replaces frankenweather's separate storm placer, SIGMET placer
+and the radar part of zone placement with one scored decision every minute.
+The rules were agreed afresh with the user on 2026-11-19 (below); the earlier
+version tried to make sims flying together show the same CBs, which is no
+longer a goal (see History).
 
 ## Data
 
@@ -25,137 +27,160 @@ What the crew may see comes from `--cb-visible-dist` and PSX's two NDs (range,
 mode, WXR and TERR). The CB's size, once placed, comes from the radar and the
 Meteosat cloud top heights as without the planner.
 
-## Goals, in order
+## Rules (user, 2026-11-19)
 
-Agreed with the user on 2026-11-18:
-
-1. **Don't startle the pilot.** No new CB where the crew may see it (out of
-   the window or on an ND showing the weather radar), and no CB they may see
-   moves or disappears suddenly.
-1. **Only place CBs where there are CBs in real life** (radar storms, or
-   storms made up near lightning and inside TS SIGMETs where there is no
-   radar).
-1. **Sims in the same area see similar CBs.** The same storms, zones and
-   aircraft give the same plan; ties go by storm key and zone number.
-1. **At least one CB in each distinct area of CB activity.**
+1. **Don't startle the pilot**, as a cost that grows the closer a CB is,
+   not a wall. The problem it came from: CBs appearing or going 10-30 nm
+   away on approach.
+   - Within 40 nm (60 nm for a big CB: 6/8 or more, or tops above 40,000 ft;
+     `--cb-startle-dist`) no CB appears, disappears or moves, in view or not.
+   - From there out to what the crew may see, a CB may appear, go or move if
+     the new placement is clearly better: by 3 times at 60 nm, 1.5 times at
+     100 nm, down to 1.2 times at the edge of what the crew may see
+     (`CHANGE_COST`, `EDGE_COST`). A CB appearing in view must also be worth
+     at least that times a 45-50 dBZ storm (`APPEAR_BASE`): for a free zone
+     the alternative is no CB.
+   - A CB the crew may see changes at most once in 10 minutes
+     (`CHANGE_GAP_S`).
+   - Beyond what the crew may see, any gain will do (10 % against flapping,
+     `HIDDEN_KEEP`).
+   - What the crew may see: out of the window within `--cb-visible-dist`
+     (200 nm) and `--cb-visible-angle` (120 degrees of the nose), and on an
+     ND showing the weather radar (its range, up to 320 nm). The user will
+     test how far a CB really startles, in MSFS and on the PSX ND; the
+     numbers are settings for that.
+1. **CBs where the world thinks they are:** strong radar returns; without
+   radar, lightning, then (later) the satellite's high cold cloud tops, then
+   TS SIGMETs, and the forecast only as the last fallback.
+1. **Sims in the same area showing the same CBs: no longer a goal** (20-50
+   PSX sims on VATSIM; two in the same area almost never). Maybe a Flight
+   Centre add-on later. The plan is still deterministic.
+1. **Each area of storms gets a CB first**, but only areas at least 25 %
+   (`WEAK_CLUSTER_FRAC`) as intense as the most intense one, the intensity
+   being the sum of its storms' scores (dBZ, area, lightning). A small weak
+   area next to a large intense one only gets zones left over.
 1. **More CBs where there is more activity.**
+
+Also agreed: new CBs may go up to 120 nm past what the crew may see
+(`_CB_NEW_BEYOND_NM`; every zone whose CB the crew can't see is movable, so
+a stronger storm takes a weaker one's zone before it comes into view);
+zones follow the FMC route by default (`--route-zones`, now on;
+`--no-route-zones`); in HDG SEL, with the selected heading more than 5
+degrees off, the planner plans for the heading after the turn, and no new
+CB goes where the crew will see it on the roll-out either.
 
 ## How it decides
 
 - **Clusters:** storms within 25 nm of each other, chained, are one cluster.
-- **Strength:** the storm's dBZ class (43-44 dBZ lowest, 65 highest), more for a
-  large area and for lightning (in steps: fewer than 5 flash pixels, 5-19,
-  20-49, 50 and more). frankenweather fetches the MTG lightning on 5-minute
-  ticks of the UTC clock, one minute after each image time, over an image
-  box centred on the nearest whole degree, so sims nearby count the same
-  flashes (before: each sim's own fetch times and a box centred on its own
-  aircraft gave other pixels and other counts).
-- **Relevance:** ahead (within 75 degrees, or within 60 nm of the route ahead)
-  counts fully, abeam half, behind almost nothing; holding or vectored, all
-  round.
-- **One per cluster first:** a cluster's first CB scores fully, each further one
-  a quarter of the one before, so a medium cluster gets a CB before a very
-  strong cluster gets its second.
-- **Spacing:** no CB within 25 nm of another, less score up to 45 nm (PSX
-  shrinks a CB's echo near another zone and only the aircraft's own zone's CB
-  turbulence counts, measured 2026-11-15/16). A zone the planner leaves with an
-  old CB too close to a new one loses that CB (the crew can't see it, or it
-  wouldn't be movable).
-- **One list for every sim:** the storms are ranked from the storms alone
-  (strength, relevance, one per cluster first, spacing), not from what the
-  zones show; each sim's movable zones show that list in order, skipping
-  storms already shown, too close to a CB shown or newly in view. A sim with
-  fewer zones free shows the start of the same list. Before (2026-11-19), a
-  zone's current storm scored 30 % more (`STABILITY`, still used with
-  `CANONICAL = False`): each zone's history then decided, and two sims
-  flying together drifted apart (synthetic pairs 92 -> 93-94 %, 15 % more
-  moves of zones the crew can't see).
-- **Near-equal scores count as equal:** of the storms within 30 %
-  (`SCORE_STEP`) of the best score, the one nearest ahead along the heading
-  wins (that order only changes when the aircraft turns, and is the same for
-  sims in trail). In a big field of similar cells the exact scores differ a
-  little in each sim; taking the exact best, each picked another cell. A
-  fixed grid of score steps was tried first: two storms 4 % apart straddling
-  a step boundary then counted as a whole step apart.
-- **Never moved:** fixed zones (the anchor, airports, the focused zone) and
-  zones whose CB the crew may see. Their storms count as shown, and a CB a zone
-  shows without a storm (a dead storm's CB kept in view) keeps others at a
-  distance too (`Zone.cb_at`).
-- **No new CB in view:** a storm marked `in_view` gets no new CB; a zone that
-  already shows it keeps it.
-- **Nothing frankenweather would take away at once:** no storm behind the
-  aircraft (frankenweather measures how far behind, along the route if it
-  follows one), none more than 75 degrees off the nose and beyond the
-  behind limit (behind a minute later), and while holding or vectored none
-  beyond the maneuvering placement range (every turn makes a zone farther than
-  `--low-alt-dist` "behind"). Without this, a headless hold had 49 planner
-  moves in 40 minutes, each CB gone within seconds. Existing CBs on such
-  storms still keep other CBs at a distance.
+- **Score:** the storm's strength (dBZ class, 43-44 lowest, 65 highest; more
+  for a large area and for lightning, in steps) times its relevance (ahead
+  within 75 degrees, or within 60 nm of the route ahead, fully; abeam half;
+  behind almost nothing; holding or vectored, all round), times a quarter
+  for each CB its cluster has already (`DIVERSITY`; a weak cluster starts as
+  if it had six), times the spacing (no CB within 25 nm of another, less up
+  to 45 nm: PSX shrinks a CB's echo near another zone).
+- **Best first:** each step takes the most valuable of keeping a movable
+  zone's CB (its score times its change cost if the crew may see it, else
+  times `HIDDEN_KEEP`) and a new CB on a storm (its score divided by its
+  change cost if the crew would see it appear). A new CB goes to a zone
+  without a CB, else to the zone whose CB is worth least, if worth less.
+- **Locked:** fixed zones (the anchor, airports, PSX's focused zone), CBs
+  within the startle distance, and CBs the crew may see that changed in the
+  last 10 minutes. A CB without a storm (a dead storm's CB kept in view, a
+  model CB) is worth `DEAD_SCORE`.
+- **Nothing frankenweather would take away at once, nor what the crew
+  will never meet:** no storm behind the aircraft, none more than 75
+  degrees off the nose and beyond the behind limit unless within 60 nm of
+  the route ahead, and while holding or vectored none beyond the
+  maneuvering placement range.
+- **No churn for nothing:** a zone showing a CB makes way only for a new
+  CB worth at least `MIN_VALUE` (0.25: a 45-49 dBZ storm ahead whose
+  cluster already has a CB or two); a zone without a CB takes any. The log
+  line of each move says what the zone's old CB was worth.
+- **Only the planner gives a zone a radar CB**, and a zone moved before the
+  first radar frame after the start gets no forecast CB (it would follow
+  whichever storm lay near it once the radar came).
+- **When:** every minute on the UTC clock, on every new radar frame, and
+  soon after the behind rule frees a zone.
 
-**Only the planner gives a zone a radar CB.** With the planner, a zone
-without a CB gets one only on the storm the planner chose for it; a zone
-that happens to lie near a storm (the zones of two sims are in different
-places) gets none. A zone already showing a CB may still follow a storm
-near it, so a CB the crew may see isn't taken away. Before this, most CBs
-only one of two sims flying together showed came from that rule (headless
-pair tests 2026-11-19).
-
-**When it plans: every minute on the clock.** A storm can only get a new
-CB between what the crew may see and `_CB_NEW_BEYOND_NM` (60 nm) past it,
-where frankenweather looks for radar storms: with an ND on 320 nm, 320-380
-nm out, a few minutes' flight. Planning only on radar frames (every 10
-minutes) and when zones were freed left it to chance which storms a sim
-caught in that band: in a headless pair 8 nm apart (2026-11-19) one sim
-placed a storm at 260 nm that the other, planning 94 s later, already saw;
-only 22 % of the CBs both crews could see were shown by both. frankenweather
-now also plans every `_PLANNER_TICK_S` (60 s) on the UTC clock, the same
-moments in every sim (synthetic pairs with the band: 71 % -> 91 %).
-
-frankenweather decides what the crew may see (window range and angle, the ND's
-weather radar range, holding all round) and passes it in as `Storm.in_view` and
-`Zone.visible_cb`; the planner itself has no view of PSX.
+frankenweather decides what the crew may see and passes it in
+(`Storm.in_view`, `Zone.visible_cb`); the planner has no view of PSX.
 
 ## Tests
 
-- `test_fw_planner.py`: unit tests, run by `make` (each rule above, including
-  the very strong cluster left / medium cluster right example, and that the
-  plan doesn't depend on the order of the storms).
-- `python3 -m flighttest.plansim`: synthetic flights through made-up storms
-  (clusters, lines and singles with a 15-minute growth and decay, moving with a
-  wind), cruising, turning or holding, with random ND ranges. The planner
-  replans every 10 minutes; every 30 s the rules are checked: no new CB in
-  view, no visible CB moved or removed (a dead storm's CB only once out of
-  view), no CB placed closer than the spacing minimum, fixed zones never moved.
-  1,000 flights of 3 hours (3,000 hours) take a few seconds; any failure can be
-  repeated with `--seed`. With `--pair NM` a second sim flies NM behind on
-  the same track over the same storms (its own zones, its own storm keys, a
-  frame noticed up to a minute later, a replan 30 s after the behind rule
-  frees a zone, as frankenweather does) and the run counts how many of the
-  CBs both crews could see both sims show. Each sim of a pair starts with
-  some model CBs of its own that go within 4 minutes and sees its first
-  frame up to 2 minutes apart; the planner only gets storms up to
-  `NEW_BEYOND_NM` (60 nm) past what the crew may see, as in frankenweather.
-  `--replan S` also replans every S seconds on the clock; `--fields` adds
-  big fields of 20-60 similar cells (live: 170 storms in 9 clusters);
-  `--noise` gives each sim its own lightning counts (± 8 flash pixels, new
-  every plan: harsher than live). 8 nm apart
-  (2026-11-19, 300 flights each): frames only 71 % cruising and 72 % with a
-  90-degree turn; `--replan 60` 91 % and 87 % (clusters ahead with a CB 68
-  -> 81 %, zone moves 1.5 -> 2.6 an hour). Without the range limit,
-  frames only gave 92 %, which is why the synthetic pairs first missed
-  what the live pairs showed.
+- `test_fw_planner.py`: unit tests, run by `make` (each rule above).
+- `python3 -m flighttest.plansim`: synthetic flights, cruising, turning or
+  holding, through made-up storms (clusters, lines, singles, `--fields`:
+  big fields) or, with `--wxlib`, real radar storms recorded by
+  `~/fw-weatherlib/capture.py` (every 10-minute frame, tracked and moved as
+  frankenweather does). Every 30 s the rules are checked (nothing within the
+  startle distance, a visible CB at most once in 10 minutes, spacing, fixed
+  zones). It counts the changes the crew may see by distance, zone moves,
+  CBs shown, significant clusters ahead with a CB, and strong storms in view
+  without a CB while a weaker one had a CB, split into "every zone's CB in
+  view" (a weaker CB took the zone) and "a zone free" (the change cost kept
+  it from appearing). `--band NM` changes how far past the crew's view
+  storms count; `--route` gives cruise and turn flights a route (the path
+  they fly; storms get their distance from it, as with `--route-zones`);
+  `--nd NM` fixes every flight's ND range; `--planner FILE` runs another
+  planner version.
 
-The synthetic flights also apply frankenweather's "behind" rule, and flag a
-zone it takes away within 10 minutes of being placed off the nose (a
-90-degree turn making zones "behind" is counted apart). Storm areas are
-spread along the whole flight.
+Results 2026-11-19 (no rule violations in any):
 
-Synthetic results (2026-11-18, 1,000 flights, 3,000 hours): no rule
-violations; on average 1.4 CBs shown, 2.6 zone moves an hour, and 50 % of the
-clusters within 320 nm ahead have a CB (storms that form where the crew can
-already see them get none: priority 1 before 4).
+| run | CBs shown | zone moves/h | significant clusters ahead with a CB | appearing in view/h | going in view/h |
+| --- | --- | --- | --- | --- | --- |
+| 300 made-up flights (900 h) | 0.8 | 1.9 | 45 % | 0.36 | 0.02 |
+| 300 with big fields (900 h) | 1.5 | 5.5 | 43 % | 0.94 | 0.55 |
+| old planner, made-up (180 h) | 0.4 | 1.1 | 27 % | 0 | 0 |
 
-## Headless A/B tests (2026-11-17/18)
+Real radar storms (9 recorded areas, 2-hour flights): how far past the
+crew's view storms count made little difference: 54 % (60 nm), 57 %
+(120 nm) and 56 % (180 nm) of the significant clusters ahead had a CB.
+A strong storm missed because a weaker CB had the only zone happened 0-0.13
+times an hour; almost all strong storms in view without a CB (about 6 an
+hour, in fields of 100 and more storms) were ones the change cost kept from
+appearing where the crew could already see them. So the startle limits are
+what decides how many storms get a CB.
+
+First live A/B (2026-11-19 22:07Z, Biscay, 90 minutes, FMC route loaded):
+no errors, but 83 planner moves against 16 storm placer moves without the
+planner, and 22 CBs gone within 90 s against 4, all 235-410 nm away and
+mostly 80-107 degrees off the nose. With a route, every storm had a
+distance from it, so far-abeam storms escaped the behind-limit filter; the
+zones then moved every minute between leftover storms scoring 0-0.4.
+Both fixed (the route filter, `MIN_VALUE`). With `--route` on real radar
+Two more live bugs came out of the next runs. A zone checked whether it
+still had its storm by measuring from the storm's position in its radar
+frame (up to 30 minutes old, 20 nm for a 40 kt storm), so it lost the
+planner's storm at once, took the nearest cell, and the planner moved it
+back a minute later; now measured from where the storm is now. And a
+planner-placed zone skipped the "no new CB in view" check for 300 s even
+after the maneuvering redistribution had moved it elsewhere (a forecast CB
+appeared 85 nm ahead); now only while the zone is within 30 nm of where
+the planner put it. Q1 (the same Biscay flight, both fixes but the last):
+30 planner moves in 90 minutes (R1 83; the storm placer without the
+planner 17), no errors, one CB appearing in view (the redistribution
+bug), CBs per message 5.9 against 5.4.
+
+plansim's flights then still started at random within the recorded areas
+and mostly flew out of them (1.3 CBs shown; live 5.9); now cruise and turn
+flights start near an area's edge heading across it (`--nd 320` as the
+live tests): 3.6 CBs shown, and the fix took zone moves from 18.7 to 14.5
+an hour and CBs going in view from 2.6 to 2.0 an hour, with 60 % of the
+significant clusters ahead covered (58 % before), no rule violations.
+
+## History
+
+The first planner (2026-11-18) and the work of 2026-11-19 tried to make two
+sims flying together show the same CBs (one storm list for every sim,
+replanning on the UTC clock, near-equal scores counted as equal, lightning
+fetched on the clock). Repeat runs of the same code differed by 30 points
+and more (planner 57 % and 25 %, the code without it 40 % and 39 % of the
+CBs both crews could see within 1 nm), and the user dropped the goal. The
+fixes that help every sim (radar tiles and coverage tiles asked for again,
+the tile cache, lightning on the clock) stayed.
+
+### Headless A/B tests (2026-11-17/18)
 
 Stack A with `--cb-planner`, stack B without, the same flight and weather
 (`--radar-cbs` on both). Per run: new CBs first seen where the crew could
@@ -204,4 +229,10 @@ zone layout and forecast CBs, two of which (in one sim) sat near weak
 radar cells (44-46 dBZ) and stayed while the crew could see them; the
 other sim may not put a new CB there. The current code matches less
 exactly (its CBs sit on the zones near a storm) but nearly always within
-30 nm.
+30 nm. Z10 (the same code again, 4 hours later): 25 %, 0-11 % for the
+first 40 minutes. Before the first radar frame (1-2 minutes after the
+start) each sim moved its zones 140-230 nm ahead, each to its own places,
+with forecast CBs; when the radar came, each of those CBs followed the
+storm nearest to it and stayed as the crew could see it. Now, with the
+planner, a zone moved before the first radar frame gets no forecast CB;
+only the planner gives it one.

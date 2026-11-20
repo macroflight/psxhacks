@@ -1,23 +1,27 @@
-"""CB placement planner for frankenweather (design agreed with the user 2026-11-18; not used yet).
+"""CB placement planner for frankenweather (--cb-planner; rules agreed with the user 2026-11-19).
 
-One scored decision per radar frame about which storms the movable weather zones show, in
-place of the separate storm placer, SIGMET placer and route storm view. Pure functions only:
-no clock, no downloads, no PSX. frankenweather (later) and the synthetic test runner give it
-the storms, the zones and the aircraft, and apply what it returns.
+Decides which storms the movable weather zones show. Pure functions only: no clock (the caller
+passes the time), no downloads, no PSX. frankenweather and the synthetic test runner
+(flighttest/plansim.py) give it the storms, the zones and the aircraft, and apply what it
+returns. docs/developers/cb-planner.md describes the rules.
 
-Priorities, in order (user, 2026-11-18):
-1. Don't startle the pilot: no new CB where the crew may see it, no visible CB moved.
-2. Only place CBs where there are CBs in real life (the storms given).
-3. Sims in the same area see similar CBs (deterministic: the same inputs, the same plan).
-4. At least one CB in each distinct area of CB activity (a cluster's first CB scores full,
-   each further one less: DIVERSITY per CB already in it).
+Rules, in order (user, 2026-11-19):
+1. Don't startle the pilot, as a cost that grows the closer a CB is: within HARD_NM
+   (HARD_BIG_NM for a big CB) no CB appears, disappears or moves; from there out to what the
+   crew may see a change must win by a margin (change_cost()); a CB the crew may see changes
+   at most once per CHANGE_GAP_S; beyond what the crew may see any gain will do (HIDDEN_KEEP
+   against flapping).
+2. CBs only on real storms (the storms given).
+3. (Sameness between sims: dropped 2026-11-19; the plan is still deterministic.)
+4. Each area of storms first gets one CB (a cluster's n-th further CB scores DIVERSITY ** n),
+   but only areas at least WEAK_CLUSTER_FRAC as intense as the most intense one; weaker ones
+   only get zones left over.
 5. More CBs where there is more activity (stronger storms score more).
 
-Never moved: fixed zones (the anchor, airports, the focused zone) and zones whose CB the crew
-may see; their storms count as shown. A zone that already shows a storm keeps it unless
-another scores clearly better (STABILITY). CBs closer than SPACING_MIN_NM are not placed;
-closer than SPACING_SOFT_NM score less (PSX shrinks a CB's echo near another zone and only
-the aircraft's zone's CB turbulence counts, measured 2026-11-15/16).
+Never moved: fixed zones (the anchor, airports, the focused zone). CBs closer than
+SPACING_MIN_NM are not placed; closer than SPACING_SOFT_NM score less (PSX shrinks a CB's
+echo near another zone and only the aircraft's zone's CB turbulence counts, measured
+2026-11-15/16).
 """
 import math
 from dataclasses import dataclass, field
@@ -25,19 +29,34 @@ from typing import Optional
 
 EARTH_NM = 3440.065
 CLUSTER_LINK_NM = 25.0     # storms this close (chained) are one cluster
-DIVERSITY = 0.25           # a cluster's n-th further CB scores DIVERSITY ** n (a medium cluster
-#                            beats a very strong one's second CB: priority 4 before 5)
+DIVERSITY = 0.25           # a cluster's n-th further CB scores DIVERSITY ** n (priority 4 before 5)
+WEAK_CLUSTER_FRAC = 0.25   # a cluster less intense than this x the most intense one (the sum of
+#                            its storms' scores) gets no CB of its own first (user 2026-11-19:
+#                            a very large intense cluster and a small weak one: all CBs to the
+#                            intense one) ...
+WEAK_CLUSTER_SKIP = 6      # ... its first CB scores as a cluster's 7th (zones left over only)
 SPACING_MIN_NM = 25.0      # no CB this close to another
 SPACING_SOFT_NM = 45.0     # ... and less score up to this (PSX draws a CB full size from ~45 nm)
-STABILITY = 1.3            # a zone's current storm scores this much more (no swaps for a little)
+HARD_NM = 40.0             # no CB appears, disappears or moves this close to the aircraft ...
+HARD_BIG_NM = 60.0         # ... or this close for a big CB (6/8 or more, or tops above 40,000 ft)
+#                            (user 2026-11-06/19: CBs popping 10-30 nm away on approach)
+CHANGE_COST = ((60.0, 3.0), (100.0, 1.5))   # a change the crew may see must win by this factor
+#                            at this distance (between: linear; nearer: the first; out to what
+#                            the crew may see: down to EDGE_COST)
+EDGE_COST = 1.2            # ... at the edge of what the crew may see
+HIDDEN_KEEP = 1.1          # a CB the crew can't see changes for a storm scoring this much more
+CHANGE_GAP_S = 600.0       # a CB the crew may see changes at most once in this long
+DEAD_SCORE = 1.0           # what a CB without a storm (a dead storm's, a model CB) is worth
+APPEAR_BASE = 2.5          # a new CB the crew would see appear must be worth this x its change
+#                            cost (a free zone's alternative is no CB: without a bar any storm
+#                            at 45 nm in view would do; 2.5: about a 45-50 dBZ storm)
 AHEAD_DEG = 75.0           # relevance: ahead within this (frankenweather's storm view)
 ABEAM_DEG = 110.0          # ... abeam up to this
 ROUTE_NM = 60.0            # with a route: storms within this of the route ahead count as ahead
-CANONICAL = True           # zones show the storms of one list ranked from the storms alone (each
-#                            zone's own history made two sims flying together diverge; synthetic
-#                            pairs 92 -> 93-94 %, 15 % more moves of zones the crew can't see)
-SCORE_STEP = 1.3           # scores within this factor count as equal (the one nearer ahead wins)
 RELEVANCE = {"ahead": 1.0, "abeam": 0.5, "behind": 0.05}
+MIN_VALUE = 0.25           # a zone's CB makes way only for a new CB worth at least this (a
+#                            zone without a CB takes any): live 2026-11-19, zones moved every
+#                            minute between leftover storms scoring 0-0.4
 
 
 @dataclass
@@ -54,10 +73,11 @@ class Storm:  # pylint: disable=too-many-instance-attributes
     route_off_nm: Optional[float] = None   # distance from the route ahead, if following one
     behind_nm: float = 0.0      # how far behind the aircraft it is (0: ahead or abeam), as the
     #                             caller's "behind" rule measures it (along the route if any)
+    big: bool = False           # its CB would be big (HARD_BIG_NM)
 
 
 @dataclass
-class Zone:
+class Zone:  # pylint: disable=too-many-instance-attributes
     """A weather zone: where it is, which storm it shows, whether it may be moved."""
 
     num: int
@@ -65,21 +85,25 @@ class Zone:
     lon: float
     storm: Optional[str] = None   # the key of the storm its CB is on, if any
     fixed: bool = False           # anchor, airport or focused zone: never moved for a CB
-    visible_cb: bool = False      # its CB may be seen by the crew: never moved
+    visible_cb: bool = False      # the crew may see its CB
     cb_at: Optional[tuple] = None   # (lat, lon) of a CB it shows without a storm (a dead storm's
     #                                 CB kept in view, a model CB): other CBs keep their distance
+    cb_big: bool = False          # its CB is big (HARD_BIG_NM)
+    changed_s: float = -math.inf  # when its CB last changed (the caller's clock, seconds)
 
 
 @dataclass
-class Aircraft:
+class Aircraft:  # pylint: disable=too-many-instance-attributes
     """Where the aircraft is and how it flies."""
 
     lat: float
     lon: float
-    hdg: float
+    hdg: float                    # the heading to plan for (HDG SEL: the selected one)
     maneuvering: bool = False     # holding or vectored: all round
     behind_limit_nm: float = math.inf   # the caller moves zones farther behind than this away
     maneuver_reach_nm: float = math.inf   # holding or vectored: no storm farther than this
+    visible_nm: float = 200.0     # how far the crew may see a CB (change_cost()'s edge)
+    now_s: float = 0.0            # the caller's clock (Zone.changed_s)
 
 
 @dataclass
@@ -91,6 +115,8 @@ class Move:
     lat: float
     lon: float
     score: float
+    was: Optional[str] = None     # for the log: the storm its CB was on (as given), if any
+    was_value: float = 0.0        # ... and what keeping it was worth
 
 
 @dataclass
@@ -147,39 +173,9 @@ def strength(storm: Storm) -> float:
     return dbz_class * (1.0 + min(storm.area_km2, 400.0) / 400.0) * ltg_factor(storm.lightning)
 
 
-def pick(cands: list, ac: Aircraft) -> tuple:
-    """Return the (storm, score) to take next from [(storm, score)]: (None, 0.0) if none.
-
-    Of the storms scoring within SCORE_STEP of the best, the one nearest ahead (along the
-    heading; then by key). In a big field of similar cells the exact scores differ a little
-    in each sim (its own lightning counts, a storm just in view or not): taking the exact
-    best, each sim chose other cells (synthetic pairs).
-    """
-    if not cands:
-        return None, 0.0
-    top = max(score for _, score in cands)
-    return min(((s, score) for s, score in cands if score >= top / SCORE_STEP),
-               key=lambda c: (_along(c[0], ac), c[0].key))
-
-
 def ltg_factor(flashes: int) -> float:
-    """Return the score factor for lightning near a storm: in steps, not per flash.
-
-    Each sim downloads the lightning itself, a few flashes apart: counted per flash, that
-    picked other storms in each sim (synthetic pairs in big fields 89 % -> 84 %).
-    """
+    """Return the score factor for lightning near a storm, in steps."""
     return 1.0 if flashes < 5 else 1.15 if flashes < 20 else 1.3 if flashes < 50 else 1.5
-
-
-def _along(storm: Storm, ac: Aircraft) -> float:
-    """Return how far ahead along the heading a storm is (nm; negative: behind).
-
-    The tie-break among storms of the same score step: their order only changes when the
-    aircraft turns (straight-line distance changes as it passes them), and it is the same for
-    sims in trail.
-    """
-    off = math.radians(bearing_deg(ac.lat, ac.lon, storm.lat, storm.lon) - ac.hdg)
-    return dist_nm(ac.lat, ac.lon, storm.lat, storm.lon) * math.cos(off)
 
 
 def _off_nose(storm: Storm, ac: Aircraft) -> float:
@@ -191,17 +187,17 @@ def relevance(storm: Storm, ac: Aircraft) -> float:
     """Return how much the crew will meet a storm: ahead (or near the route), abeam, behind."""
     if ac.maneuvering:
         return RELEVANCE["ahead"]
-    if storm.route_off_nm is not None and storm.route_off_nm <= ROUTE_NM:
+    if _near_route(storm):
         return RELEVANCE["ahead"]
-    off = abs((bearing_deg(ac.lat, ac.lon, storm.lat, storm.lon) - ac.hdg + 180.0) % 360.0 - 180.0)
+    off = _off_nose(storm, ac)
     if off <= AHEAD_DEG:
         return RELEVANCE["ahead"]
     return RELEVANCE["abeam"] if off <= ABEAM_DEG else RELEVANCE["behind"]
 
 
-def spacing_factor(storm: Storm, placed: list) -> float:
-    """Return the score factor for a CB this near the CBs placed (0: too close)."""
-    near = min((dist_nm(storm.lat, storm.lon, la, lo) for la, lo in placed), default=math.inf)
+def spacing_factor(lat: float, lon: float, placed: list) -> float:
+    """Return the score factor for a CB at (lat, lon) this near the CBs placed (0: too close)."""
+    near = min((dist_nm(lat, lon, la, lo) for la, lo in placed), default=math.inf)
     if near < SPACING_MIN_NM:
         return 0.0
     if near >= SPACING_SOFT_NM:
@@ -209,131 +205,201 @@ def spacing_factor(storm: Storm, placed: list) -> float:
     return (near - SPACING_MIN_NM) / (SPACING_SOFT_NM - SPACING_MIN_NM)
 
 
-def canonical(storms: list, result: Plan, base: dict, ac: Aircraft, n: int) -> list:
-    """Return up to n [(storm, score)] in the order every sim would show them (storms only).
+def hard_nm(big: bool) -> float:
+    """Return how close to the aircraft a CB never appears, disappears or moves."""
+    return HARD_BIG_NM if big else HARD_NM
 
-    Like plan()'s choice, but without the zones: no CBs shown yet, no STABILITY. Each sim
-    then shows as many of them, in this order, as it has zones for.
+
+def change_cost(dist: float, visible: bool, visible_nm: float, big: bool = False) -> float:
+    """Return by what factor a change of a CB at dist nm must win (inf: never).
+
+    Within hard_nm(): inf. Not visible: 1.0. Visible: CHANGE_COST's points, then down to
+    EDGE_COST at the edge of what the crew may see (visible_nm).
     """
-    out: list = []
-    in_cluster: dict = {}
-    placed: list = []
-    used: set = set()
-    while len(out) < n:
-        cands = []
-        for s in sorted(storms, key=lambda s: s.key):
-            if s.key in used:
-                continue
-            score = (base[s.key] * DIVERSITY ** in_cluster.get(result.cluster_of[s.key], 0) *
-                     spacing_factor(s, placed))
-            result.score_of.setdefault(s.key, score)
-            if score <= 0.0:
-                continue
-            cands.append((s, score))
-        best, best_score = pick(cands, ac)
-        if best is None:
-            break
-        used.add(best.key)
-        placed.append((best.lat, best.lon))
-        cid = result.cluster_of[best.key]
-        in_cluster[cid] = in_cluster.get(cid, 0) + 1
-        out.append((best, best_score))
-    return out
+    if dist <= hard_nm(big):
+        return math.inf
+    if not visible:
+        return 1.0
+    pts = list(CHANGE_COST) + [(max(visible_nm, CHANGE_COST[-1][0] + 1.0), EDGE_COST)]
+    if dist <= pts[0][0]:
+        return pts[0][1]
+    for (d0, c0), (d1, c1) in zip(pts, pts[1:]):
+        if dist <= d1:
+            return c0 + (c1 - c0) * (dist - d0) / (d1 - d0)
+    return EDGE_COST
 
 
-def plan(storms: list, zones: list, ac: Aircraft) -> Plan:  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+def _usable(storms: list, ac: Aircraft) -> list:
+    """Return the storms a zone may go to: not where the caller's "behind" rule moves it away.
+
+    Behind the aircraft, or (holding) farther than the maneuvering reach, where every turn
+    makes it "behind"; nor abeam and farther than the behind limit (behind a minute later).
+    """
+    return [s for s in storms if s.behind_nm <= 0.0 and not (
+        ac.maneuvering and dist_nm(ac.lat, ac.lon, s.lat, s.lon) > ac.maneuver_reach_nm) and not (
+        not ac.maneuvering and not _near_route(s) and _off_nose(s, ac) > AHEAD_DEG and
+        dist_nm(ac.lat, ac.lon, s.lat, s.lon) > ac.behind_limit_nm)]
+
+
+def _near_route(storm: Storm) -> bool:
+    """Return True if the storm is near the route ahead (it counts as ahead)."""
+    return storm.route_off_nm is not None and storm.route_off_nm <= ROUTE_NM
+
+
+class _Planning:  # pylint: disable=too-many-instance-attributes
+    """One plan()'s working state."""
+
+    def __init__(self, storms: list, zones: list, ac: Aircraft):
+        """Sort the zones into locked and movable; score the storms; find the weak clusters."""
+        self.ac = ac
+        self.result = Plan()
+        self.all_by_key = {s.key: s for s in storms}
+        usable = _usable(storms, ac)
+        self.by_key = {s.key: s for s in usable}
+        self.storms = sorted(usable, key=lambda s: s.key)
+        self.result.cluster_of = clusters(storms)
+        self.base = {s.key: strength(s) * relevance(s, ac) for s in storms}
+        intensity: dict = {}
+        for s in self.storms:
+            cid = self.result.cluster_of[s.key]
+            intensity[cid] = intensity.get(cid, 0.0) + self.base[s.key]
+        top = max(intensity.values(), default=0.0)
+        # weak clusters: their first CB counts as their (WEAK_CLUSTER_SKIP + 1)-th
+        self.in_cluster = {cid: WEAK_CLUSTER_SKIP for cid, v in intensity.items()
+                           if v < WEAK_CLUSTER_FRAC * top}
+        self.placed: dict = {}        # owner -> (lat, lon): zone num, or ("new", key)
+        self.taken: set = set()
+        self.movable = []
+        for z in sorted(zones, key=lambda z: z.num):
+            pos = self.cb_pos(z)
+            if pos is None:
+                if not z.fixed:
+                    self.movable.append(z)
+                continue
+            d = dist_nm(ac.lat, ac.lon, *pos)
+            if (z.fixed or d <= hard_nm(z.cb_big) or
+                    (z.visible_cb and ac.now_s - z.changed_s < CHANGE_GAP_S)):
+                self.show(z.num, z.storm, pos)        # locked
+            else:
+                self.movable.append(z)
+                if z.visible_cb:      # kept unless something beats it: others keep away
+                    self.placed[z.num] = pos
+
+    def cb_pos(self, z: Zone) -> Optional[tuple]:
+        """Return where zone z's CB is, or None (no CB)."""
+        if z.storm in self.all_by_key:
+            s = self.all_by_key[z.storm]
+            return (s.lat, s.lon)
+        return z.cb_at
+
+    def show(self, owner, key: Optional[str], pos: tuple) -> None:
+        """Count a CB shown: on storm key (or none) at pos."""
+        self.placed[owner] = pos
+        if key in self.all_by_key:
+            self.taken.add(key)
+            cid = self.result.cluster_of[key]
+            self.in_cluster[cid] = self.in_cluster.get(cid, 0) + 1
+
+    def others(self, owner) -> list:
+        """Return the CB positions placed, except owner's."""
+        return [p for o, p in self.placed.items() if o != owner]
+
+    def value(self, key: Optional[str], pos: tuple, owner) -> float:
+        """Return what a CB at pos (on storm key, or none) is worth now, before change costs."""
+        if key not in self.all_by_key:
+            return DEAD_SCORE
+        cid = self.result.cluster_of[key]
+        return (self.base[key] * DIVERSITY ** self.in_cluster.get(cid, 0) *
+                spacing_factor(*pos, self.others(owner)))
+
+    def keep_value(self, z: Zone) -> float:
+        """Return what keeping zone z's CB is worth, its change cost included (0: no CB)."""
+        pos = self.cb_pos(z)
+        if pos is None:
+            return 0.0
+        if z.storm not in self.by_key and not z.visible_cb:
+            return 0.0                # a storm left out (behind, ...) or none, unseen: free
+        d = dist_nm(self.ac.lat, self.ac.lon, *pos)
+        cost = change_cost(d, z.visible_cb, self.ac.visible_nm, z.cb_big)
+        return self.value(z.storm, pos, z.num) * (cost if z.visible_cb else HIDDEN_KEEP)
+
+    def new_value(self, s: Storm) -> float:
+        """Return what a new CB on storm s is worth, its change cost included (0: not allowed)."""
+        d = dist_nm(self.ac.lat, self.ac.lon, s.lat, s.lon)
+        cost = change_cost(d, s.in_view, self.ac.visible_nm, s.big)
+        if math.isinf(cost):
+            return 0.0
+        v = self.value(s.key, (s.lat, s.lon), ("new", s.key))
+        if s.in_view and v < APPEAR_BASE * cost:
+            return 0.0
+        return v / cost
+
+    def run(self) -> Plan:
+        """Choose, best first, between keeping a zone's CB and a new CB on a storm."""
+        undecided = list(self.movable)
+        current = {z.storm for z in undecided if z.storm}
+        skipped: set = set()
+        while True:
+            options = []   # (value, rank: keep 1 > new 0, order, kind, item)
+            for i, s in enumerate(self.storms):
+                if s.key in self.taken or s.key in current or s.key in skipped:
+                    continue
+                v = self.new_value(s)
+                self.result.score_of.setdefault(s.key, round(v, 3))
+                if v > 0.0:
+                    options.append((v, 0, -i, "new", s))
+            options += [(v, 1, -z.num, "keep", z) for z in undecided
+                        if (v := self.keep_value(z)) > 0.0]
+            if not options:
+                break
+            v, _, _, kind, item = max(options, key=lambda o: o[:3])
+            if kind == "keep":
+                undecided.remove(item)
+                self.show(item.num, item.storm, self.cb_pos(item))
+                continue
+            zone = self.zone_for(undecided, v)
+            if zone is None:
+                skipped.add(item.key)
+                continue
+            was_value = self.keep_value(zone)
+            undecided.remove(zone)
+            self.placed.pop(zone.num, None)
+            current.discard(zone.storm)
+            self.show(zone.num, item.key, (item.lat, item.lon))
+            self.result.moves.append(Move(zone.num, item.key, item.lat, item.lon, v,
+                                          zone.storm, was_value))
+        # left over: a CB the crew can't see goes if too close to a CB placed
+        for z in undecided:
+            pos = self.cb_pos(z)
+            if pos is not None and not z.visible_cb and \
+                    spacing_factor(*pos, self.others(z.num)) == 0.0:
+                self.result.moves.append(Move(z.num, None, z.lat, z.lon, 0.0))
+        return self.result
+
+    def zone_for(self, undecided: list, value: float) -> Optional[Zone]:
+        """Return the zone a new CB worth value goes to: one without a CB, else the cheapest.
+
+        A zone showing a CB makes way only for a CB worth at least MIN_VALUE.
+        """
+        empty = [z for z in undecided if self.cb_pos(z) is None]
+        if empty:
+            return empty[0]
+        if value < MIN_VALUE:
+            return None
+        cands = [(self.keep_value(z), z.num, z) for z in undecided]
+        cands = [c for c in cands if c[0] < value]
+        return min(cands, key=lambda c: c[:2])[2] if cands else None
+
+
+def plan(storms: list, zones: list, ac: Aircraft) -> Plan:
     """Return which movable zones go onto which storms (see the module docstring).
 
-    Kept as they are: fixed zones and zones with a visible CB (their storms count as shown).
-    CANONICAL: the movable zones show, in order, the storms of canonical() (ranked from the
-    storms alone: strength x relevance x DIVERSITY ** (CBs before it in its cluster) x
-    spacing, picked by pick()), skipping storms already shown, too close to a CB shown, or
-    that the crew would see appear (in_view) unless a zone shows them already; so a sim with
-    fewer zones free shows the start of the same list. (Not CANONICAL: filled one by one
-    with the storm that scores most now, a zone's current storm x STABILITY.) A zone whose
-    storm is chosen stays (no move); the others are moved, the ones without a CB first.
-    Deterministic: ties go by position ahead, storm key and zone number.
+    Greedy, best first: each step takes the most valuable of keeping a movable zone's CB
+    (its value x its change cost, x HIDDEN_KEEP if the crew can't see it) and a new CB on a
+    storm (its value / its change cost if the crew would see it appear), where value =
+    strength x relevance x DIVERSITY ** (CBs before it in its cluster) x spacing. A new CB
+    goes to a zone without a CB, else to the zone whose CB is worth least, if worth less.
+    Locked: fixed zones, CBs within hard_nm(), and CBs the crew may see that changed within
+    CHANGE_GAP_S. Deterministic: ties go by storm key and zone number.
     """
-    result = Plan()
-    all_by_key = {s.key: s for s in storms}   # every storm: existing CBs keep their spacing
-    # not a storm the caller's "behind" rule would take the zone away from at once: a CB that
-    # comes and goes (frankenweather, headless 2026-11-18): behind the aircraft, or (holding)
-    # farther than the maneuvering reach, where every turn makes it "behind"
-    # Nor abeam and farther than the limit: it is behind a minute later (frankenweather's
-    # storm placer: 75 degrees of the nose since a zone went away and back every 30-60 s)
-    # Behind at all: going away, the rule takes it soon (placed 43 nm behind, moved 30 s later
-    # at 50 nm: synthetic flights 2026-11-18)
-    storms = [s for s in storms if s.behind_nm <= 0.0 and not (
-        ac.maneuvering and dist_nm(ac.lat, ac.lon, s.lat, s.lon) > ac.maneuver_reach_nm) and not (
-        not ac.maneuvering and s.route_off_nm is None and _off_nose(s, ac) > AHEAD_DEG and
-        dist_nm(ac.lat, ac.lon, s.lat, s.lon) > ac.behind_limit_nm)]
-    if not storms:
-        return result
-    by_key = {s.key: s for s in storms}
-    result.cluster_of = clusters(storms)
-    base = {s.key: strength(s) * relevance(s, ac) for s in storms}
-    in_cluster: dict = {}
-    placed: list = []
-    taken: set = set()
-    movable = []
-    for z in sorted(zones, key=lambda z: z.num):
-        if z.cb_at is not None and z.storm not in all_by_key:
-            placed.append(z.cb_at)
-        elif z.storm in all_by_key and z.storm not in by_key:   # its storm left out above
-            placed.append((all_by_key[z.storm].lat, all_by_key[z.storm].lon))
-        if (z.fixed or z.visible_cb) and z.storm in by_key:
-            s = by_key[z.storm]
-            taken.add(s.key)
-            placed.append((s.lat, s.lon))
-            cid = result.cluster_of[s.key]
-            in_cluster[cid] = in_cluster.get(cid, 0) + 1
-        elif not (z.fixed or z.visible_cb):
-            movable.append(z)
-    current = {z.storm: z for z in movable if z.storm in by_key}
-    chosen = []
-    if CANONICAL:
-        for s, score in canonical(storms, result, base, ac, 2 * len(zones)):
-            if len(chosen) == len(movable):
-                break
-            if (s.key in taken or (s.in_view and s.key not in current) or
-                    spacing_factor(s, placed) == 0.0):
-                continue
-            taken.add(s.key)
-            placed.append((s.lat, s.lon))
-            chosen.append((s, score))
-    for _ in [] if CANONICAL else movable:
-        cands = []
-        for s in sorted(storms, key=lambda s: s.key):
-            if s.key in taken or (s.in_view and s.key not in current):
-                continue
-            score = (base[s.key] * DIVERSITY ** in_cluster.get(result.cluster_of[s.key], 0) *
-                     spacing_factor(s, placed) * (STABILITY if s.key in current else 1.0))
-            result.score_of[s.key] = score
-            if score <= 0.0:
-                continue
-            cands.append((s, score))
-        best, best_score = pick(cands, ac)
-        if best is None:
-            break
-        taken.add(best.key)
-        placed.append((best.lat, best.lon))
-        cid = result.cluster_of[best.key]
-        in_cluster[cid] = in_cluster.get(cid, 0) + 1
-        chosen.append((best, best_score))
-    keep = {s.key for s, _ in chosen if s.key in current}
-    free = [z for z in movable if z.storm not in keep]
-    free.sort(key=lambda z: (z.storm is not None, z.num))   # zones without a CB first
-    new = [c for c in chosen if c[0].key not in keep]
-    for (s, score), z in zip(new, free):
-        result.moves.append(Move(z.num, s.key, s.lat, s.lon, score))
-    # a movable zone left with a CB it showed before (not chosen, not reassigned) keeps it if
-    # it is far enough from every CB placed, else it goes (the crew can't see it: movable)
-    for z in free[len(new):]:
-        s = by_key.get(z.storm) if z.storm else None
-        if s is None and z.storm in all_by_key:   # its storm left out: already in placed
-            continue
-        if s is not None and spacing_factor(s, placed) == 0.0:
-            result.moves.append(Move(z.num, None, z.lat, z.lon, 0.0))
-        elif s is not None:
-            placed.append((s.lat, s.lon))
-    return result
+    return _Planning(storms, zones, ac).run()

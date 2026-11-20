@@ -396,9 +396,9 @@ boundary. Entering maneuvering mode re-places all zones around the
 aircraft, except those whose CB turbulence can still reach it; leaving it
 doesn't move any zone, the ordinary relocation rules take over.
 
-**Route-based zones (`--route-zones`, testing):** with this option, or
-switched on on the web UI's CB test page, the zones follow the FMC route
-instead of the heading:
+**Route-based zones (`--route-zones`, on by default since 2026-11-19;
+`--no-route-zones` or the web UI's CB test page switch it off):** the zones
+follow the FMC route instead of the heading:
 
 - **On the route** means within 10 nm of a leg and tracking within 30° of
   it, for 2 minutes. While on it, new and relocated zones go 150-250 nm
@@ -446,11 +446,12 @@ the same picture VATSIM Radar can show) decides where the CBs are.
   30 minutes, and goes once it is out of view (shrinking away only with the
   CB oktas life cycle on).
 - **No new CB appears where the crew may see it:** within `--cb-visible-dist`
-  (200 nm) and 120° either side of the nose (the side windows too), or within
+  (200 nm) and 120° either side of the nose (the side windows too;
+  `--cb-visible-angle`, as many sims show less), or within
   the range an ND showed the weather radar at in the last 10 minutes and 90°;
   holding or vectored, anywhere within that range. New CBs are born just
-  beyond (the radar storms are looked for out to 60 nm past it: 260 nm, or
-  380 nm with an ND on 320 nm). In the first 2 minutes after a start or a
+  beyond (the radar storms are looked for out to 120 nm past it: 320 nm, or
+  440 nm with an ND on 320 nm). With the CB planner, see below. In the first 2 minutes after a start or a
   situ load CBs may appear anywhere.
 - **The CB's size comes from the radar and the satellite.** Its oktas go by
   the cell's strength (3 below 50 dBZ, 4 to 54, 6 to 59, 7 from 60), one
@@ -531,19 +532,29 @@ the same picture VATSIM Radar can show) decides where the CBs are.
   folder (the headless test sims do). `--radar-tile-cache ""` keeps none.
 - **CB placement planner (`--cb-planner`, testing, with `--radar-cbs`):**
   instead of filling free zones with the strongest storms ahead one at a
-  time, frankenweather makes one scored plan for all movable zones on every
-  radar frame and every minute on the UTC clock (the same moments in every
-  sim, so sims flying together catch the same storms; every sim ranks the
-  storms the same way and shows as many of them as it has zones free):
-  each distinct area of storms
-  gets a CB before a strong area gets a second one, CBs stay at least 25 nm
-  apart, storms scoring within 30 % of each other count as equal (the one
-  nearer ahead wins), and lightning makes a storm count more (fetched on
-  the UTC clock every 5 minutes, so sims nearby count the same flashes). The rules above (a CB the crew may
-  see stays, no new CB in view, behind the aircraft) still apply. The log
-  shows each plan that moves a zone or has a new radar frame ("CB planner:
-  55 storms in 11 clusters, 4 zones movable, 4 move(s)") and each move's
-  storm and score. How it decides:
+  time, frankenweather makes one scored plan for all movable zones every
+  minute (rules agreed 2026-11-19):
+  - each significant area of storms (at least a quarter as intense as the
+    most intense one: dBZ, area and lightning) gets a CB before a strong
+    area gets a second one; small weak areas only get zones left over;
+    CBs stay at least 25 nm apart;
+  - not startling the crew is a cost that grows the closer the CB is,
+    instead of the rules above: within 40 nm (60 nm for a CB of 6/8 or
+    more or with tops above 40,000 ft; `--cb-startle-dist 40:60`) no CB
+    appears, goes or moves; farther out, where the crew may see it, a CB
+    may appear, go or move for a clearly better one (3 times better at
+    60 nm, 1.5 times at 100 nm, 1.2 times at the edge of view), and a CB
+    the crew sees changes at most once in 10 minutes; out of view anything
+    better will do;
+  - in HDG SEL with the selected heading more than 5° off, it plans for the
+    heading after the turn, and no new CB goes where the crew will see it
+    on the roll-out;
+  - a zone moved before the first radar frame after the start gets no
+    forecast CB (it would follow whichever storm lay near it once the radar
+    came).
+  The log shows each plan that moves a zone or has a new radar frame ("CB
+  planner: 55 storms in 11 clusters, 4 zones movable, 4 move(s)") and each
+  move's storm and score. How it decides:
   [docs/developers/cb-planner.md](developers/cb-planner.md).
 
 **Status map (`/devel` on frankenweather's web UI, read-only):** a map of

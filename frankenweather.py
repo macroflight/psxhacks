@@ -477,7 +477,7 @@ _RADAR_CELL_NM = 250.0        # --radar-cbs: radar cells looked for at least thi
 # aircraft, and to _CB_NEW_BEYOND_NM past what the crew may see (_radar_cell_nm()): new CBs are
 # only born out of their view, so storms and zones must reach past it (headless tile count at
 # 50N: 36 a frame up to 260 nm, as for 250; 64 up to 380 nm with an ND on 320 nm)
-_CB_NEW_BEYOND_NM = 60.0
+_CB_NEW_BEYOND_NM = 120.0
 _RADAR_MOVED_NM = 60.0        # ... again (before the next frame) after a move this far
 _RADAR_MISSING_TRIES = 3   # a frame with tiles missing is used after this many tries
 _RADAR_FRESH_S = 1800.0       # a radar frame older than this doesn't decide any more
@@ -518,6 +518,12 @@ _STORM_VIEW_DEG = 75.0
 _STORM_ROUTE_NM = 60.0
 _STORM_OFF_ROUTE_MAX = 2
 _STORM_PLACE_INTERVAL_S = 30.0  # ... a zone moved onto a top storm at most this often
+_PLANNER_BIG_DBZ = 55          # --cb-planner: a storm this strong makes a big CB (6/8 or more,
+#                                tops above 40,000 ft: _radar_cb_size()), fw_planner.HARD_BIG_NM
+_PLANNER_SEL_HDG_DEG = 5.0     # HDG SEL: plan for the selected heading once it is this far off
+_PLANNER_PLACED_S = 300.0      # a CB the planner placed shows even where the crew may see it
+_PLANNER_PLACED_NM = 30.0      # ... while the zone is still within this of where it put it
+#                                (it weighed the cost: fw_planner.change_cost()) for this long
 _PLANNER_TICK_S = 60.0         # --cb-planner: replan every this on the UTC clock (the same moments
 # in every sim), on every new frame and when zones were freed. A storm only gets a new CB between
 # what the crew may see and _CB_NEW_BEYOND_NM past it: a few minutes' flight. Replanning only on
@@ -550,7 +556,6 @@ _DEAD_STORM_KEEP_S = 1800.0
 # radar within its range (held, _ND_RANGE_HOLD_S) and 90 degrees. No new CB appears there
 # (user 2026-11-18: no CBs created that the pilots can see out of the window or on the ND),
 # except in the first _CB_NEW_ANYWHERE_S after a start or a situ load (nothing on screen yet)
-_WINDOW_VIEW_DEG = 120.0
 _ND_VIEW_DEG = 90.0
 _CB_NEW_ANYWHERE_S = 120.0
 _ND_WXR_MAX_NM = 320.0        # the weather radar shows nothing farther (640 nm: no WXR returns)
@@ -2928,6 +2933,16 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._planner_stamp: Optional[tuple] = None   # --cb-planner: the inputs last planned for
         self._planner_last = 0.0       # ... and when
         self._planner_tick = 0         # ... and in which _PLANNER_TICK_S of the UTC clock
+        self._planner_changed: dict = {}   # zone -> when (monotonic) the planner last changed it
+        self._planner_placed_at: dict = {}  # zone -> (lat, lon) the planner last put it at
+        try:
+            near, _, big = str(getattr(self.args, "cb_startle_dist", "40:60")).partition(":")
+            _fw_planner.HARD_NM = float(near)
+            _fw_planner.HARD_BIG_NM = max(float(big), float(near)) if big else float(near)
+        except ValueError:
+            self.logger.warning("--cb-startle-dist %r: not NM or NM:BIG; using %.0f:%.0f",
+                                self.args.cb_startle_dist, _fw_planner.HARD_NM,
+                                _fw_planner.HARD_BIG_NM)
         self._maneuver_rank_logged: Optional[str] = None   # _maneuver_storms_ranked() log
         self._nd_range_seen: list = []   # [(monotonic, nm)]: the NDs' longer range, when (hold)
         self._no_new_cb_logged: set = set()   # zones logged as kept CB-free in view
@@ -7041,6 +7056,25 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         dropped = {id(r) for r in [r for r in out if r[6] == 2][_STORM_OFF_ROUTE_MAX:]}
         return [r[:5] for r in out if id(r) not in dropped]
 
+    def _storm_missing_why(self, key: str) -> str:
+        """Return why storm key is not in _storms_ranked(None, 180.0) (for the planner's log)."""
+        cell = next((c for c in self._cells() if c.key == key), None)
+        if cell is None:
+            return "gone from the radar"
+        if not cell.is_cb:
+            return f"no longer a CB ({cell.max_dbz} dBZ)"
+        storm = _fw_storms.is_storm(cell)
+        if not storm and not self._radar_fresh():
+            return "no fresh radar frame"
+        lat, lon = self._radar_cell_now(cell)
+        dist = self._dist_nm(self.ac_lat, self.ac_lon, lat, lon)
+        limit = max(_STORM_VIEW_NM, self._radar_cell_nm())
+        if dist > limit:
+            return f"{dist:.0f}nm away (limit {limit:.0f}nm)"
+        if not storm and not self._radar_covered(lat, lon):
+            return "outside radar coverage"
+        return "listed: behind or far abeam"
+
     def _storm_in_view(self, lat: float, lon: float, rel: float, view_nm: float,  # pylint: disable=too-many-arguments,too-many-positional-arguments
                        view_deg: float, use_angle: bool, on_route: bool) -> int:
         """Return whether a storm is in _storms_ranked()'s view (beyond its distance check).
@@ -7096,9 +7130,31 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         """Return True if the CB planner (--cb-planner, fw_planner) decides which storms get CBs."""
         return bool(self.args.cb_planner and self.args.radar_cbs)
 
+    def _planning_hdg(self) -> Optional[float]:
+        """Return HDG SEL's selected heading (true) if the aircraft will turn to it, else None.
+
+        The autopilot in HDG SEL (Afds roll mode 3) with the MCP heading more than
+        _PLANNER_SEL_HDG_DEG off the aircraft's: the CB planner plans for the heading after
+        the turn (user 2026-11-19). The MCP heading is magnetic unless HdgTru is 1
+        (MiscFltData's magnetic variation, east positive).
+        """
+        if self.psx is None or self.ac_hdg is None:
+            return None
+        try:
+            if (self.psx.get("Afds") or "").split(";")[1] != "3":
+                return None
+            sel = float(self.psx.get("McpWdoHdg"))
+            if str(self.psx.get("HdgTru") or "0").strip() != "1":
+                sel += int((self.psx.get("MiscFltData") or "").split(";")[5]) / 10.0
+        except (IndexError, TypeError, ValueError):
+            return None
+        sel %= 360.0
+        return sel if _fw_route.angle_diff(sel, self.ac_hdg) > _PLANNER_SEL_HDG_DEG else None
+
     def _planner_inputs(self) -> tuple:  # pylint: disable=too-many-locals
         """Return (storms, zones, aircraft) for fw_planner.plan() from what frankenweather knows."""
         route_on = self._route_mode == "on" and self._route_pos is not None
+        plan_hdg = self._planning_hdg()
         storms = []
         limit = (self.args.cruise_behind_dist
                  if (self.ac_alt_ft or 0.0) >= 18000.0 and not self._maneuvering
@@ -7116,11 +7172,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 got = _fw_route.offset_ahead(self._route_points, along,
                                              along + self._radar_cell_nm(), lat, lon)
                 off = got[0] if got else None
+            # HDG SEL: nor where the crew will see it after the turn (no CB appearing ahead on
+            # the roll-out)
+            in_view = self._no_new_cb_at(lat, lon) or (
+                plan_hdg is not None and not self._new_cb_anywhere() and
+                self._crew_sees(lat, lon, plan_hdg))
             storms.append(_fw_planner.Storm(cell.key, lat, lon, dbz=cell.max_dbz,
                                             area_km2=cell.area_km2,
                                             lightning=self._lightning_count(lat, lon),
-                                            in_view=self._no_new_cb_at(lat, lon),
-                                            route_off_nm=off, behind_nm=max(0.0, behind)))
+                                            in_view=in_view,
+                                            route_off_nm=off, behind_nm=max(0.0, behind),
+                                            big=cell.max_dbz >= _PLANNER_BIG_DBZ))
         arpt_icaos = {icao for icao, _, _ in self._arpt_coverage_needed()}
         sim_ms = self.sim_time_ms()
         zones = []
@@ -7138,16 +7200,21 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                           else None) or (lat, lon)) if shows and storm is None else None
             fixed = (zn in (self._anchor_zone, self.focused_zone) or icao in arpt_icaos or
                      self._is_cb_free_zone(zn) or self._cb_turb_in_reach(zn) is not None)
+            zwx = (self.zone_wx.get(zn) or "").split(";")
+            big = len(zwx) > 10 and (_fw_drift.cb_oktas(";".join(zwx)) >= 6 or
+                                     int(float(zwx[10] or 0)) > 40000)
             zones.append(_fw_planner.Zone(
                 zn, lat, lon, storm=storm, fixed=fixed, cb_at=cb_at,
-                visible_cb=self._cb_visible(zn) or self._cb_kept_in_hold(zn) is not None))
+                visible_cb=self._cb_visible(zn) or self._cb_kept_in_hold(zn) is not None,
+                cb_big=big, changed_s=self._planner_changed.get(zn, -math.inf)))
         # holding or vectored: within the maneuvering placement range (every turn makes a zone
         # farther than --low-alt-dist "behind": placed at 360 nm, moved, placed again; headless
         # hold 2026-11-18, 49 planner moves in 40 min)
         ac = _fw_planner.Aircraft(
-            self.ac_lat, self.ac_lon, self.ac_hdg, maneuvering=self._maneuvering,
-            behind_limit_nm=limit,
-            maneuver_reach_nm=self.args.low_alt_dist - _MANEUVER_PLACE_MARGIN_NM)
+            self.ac_lat, self.ac_lon, self.ac_hdg if plan_hdg is None else plan_hdg,
+            maneuvering=self._maneuvering, behind_limit_nm=limit,
+            maneuver_reach_nm=self.args.low_alt_dist - _MANEUVER_PLACE_MARGIN_NM,
+            visible_nm=self._cb_visible_range_nm(), now_s=time.monotonic())
         return storms, zones, ac
 
     def _lightning_count(self, lat: float, lon: float) -> int:
@@ -7215,11 +7282,16 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self.zone_placement_reason[zn] = (
             f"{self._placement_desc(move.lat, move.lon, icao)}, on a {dbz} dBZ storm (planner)")
         self.zone_relocated_time[zn] = now
+        self._planner_changed[zn] = now
+        self._planner_placed_at[zn] = (move.lat, move.lon)
         self.zone_cb_ramp.pop(zn, None)
         self._radar_zone_cell[zn] = move.storm
         self.logger.info("Zone %d: relocated from %s @ %.3f/%.3f → %s @ %.3f/%.3f [%.0fnm] (CB "
-                         "planner: storm %s, %d dBZ, score %.2f)", zn, old[2], old[0], old[1],
-                         icao, move.lat, move.lon, dist_nm, move.storm, dbz, move.score)
+                         "planner: storm %s, %d dBZ, score %.2f; its CB was %s, worth %.2f)",
+                         zn, old[2], old[0], old[1], icao, move.lat, move.lon, dist_nm,
+                         move.storm, dbz, move.score,
+                         (f"on storm {move.was} ({self._storm_missing_why(move.was)})"
+                          if move.was else "on no storm"), move.was_value)
 
     def _place_storm_zones(self) -> bool:  # pylint: disable=too-many-locals
         """--radar-cbs: move a zone onto the most important storm no zone shows; True if one moved.
@@ -7424,18 +7496,20 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return 0.0
         return min(_ND_WXR_MAX_NM, max(r for _, r in self._nd_range_seen))
 
-    def _crew_sees(self, lat: float, lon: float) -> bool:
+    def _crew_sees(self, lat: float, lon: float, hdg: Optional[float] = None) -> bool:
         """Return True if the crew may see a CB at (lat, lon) now: out of the window or on an ND.
 
-        Window: within --cb-visible-dist and _WINDOW_VIEW_DEG of the heading;
+        Window: within --cb-visible-dist and --cb-visible-angle of the heading (hdg: of
+        that heading instead, HDG SEL's selected one);
         ND: within the weather radar's recent range (_nd_wxr_range_nm()) and
         _ND_VIEW_DEG.
         """
         if self.ac_lat is None or self.ac_hdg is None:
             return False
         az, _, dist_m = self.geod.inv(self.ac_lon, self.ac_lat, lon, lat)
-        dist_nm, rel = dist_m / _NM_TO_M, _fw_route.angle_diff(az % 360.0, self.ac_hdg)
-        return ((dist_nm <= self.args.cb_visible_dist and rel <= _WINDOW_VIEW_DEG) or
+        dist_nm = dist_m / _NM_TO_M
+        rel = _fw_route.angle_diff(az % 360.0, self.ac_hdg if hdg is None else hdg)
+        return ((dist_nm <= self.args.cb_visible_dist and rel <= self.args.cb_visible_angle) or
                 (dist_nm <= self._nd_wxr_range_nm() and rel <= _ND_VIEW_DEG))
 
     def _no_new_cb_at(self, lat: float, lon: float) -> bool:
@@ -7466,6 +7540,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         See _no_new_cb_at().
         """
         if _fw_drift.cb_oktas(wx) <= 0:
+            return wx
+        if (self._cb_planner_on() and time.monotonic() - self._planner_changed.get(
+                zone_num, -math.inf) < _PLANNER_PLACED_S and self._dist_nm(
+                    *pos[:2], *self._planner_placed_at.get(zone_num, (90.0, 0.0))) <=
+                _PLANNER_PLACED_NM):
+            # the planner placed it, weighing what the crew sees (change_cost()); not if
+            # something else moved the zone since (the maneuvering redistribution: a forecast
+            # CB 85 nm ahead in view, headless 2026-11-20)
             return wx
         drift_ended = zone_num in self._drift_ended
         self._drift_ended.discard(zone_num)
@@ -10985,8 +11067,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         cell = None
         kept = self._radar_zone_cell.get(zone_num)
         if kept is not None:
+            # measured from where the storm is now, not where its frame had it (up to 30 min
+            # and 20 nm ago: the planner's storm was lost at once and the zone took the
+            # nearest cell, headless 2026-11-20, a planner move every minute)
             cell = next((c for c in self._cells() if c.key == kept and c.is_cb and
-                         self._dist_nm(lat, lon, c.lat, c.lon) <= _RADAR_KEEP_NM), None)
+                         self._dist_nm(lat, lon, *self._radar_cell_now(c)) <= _RADAR_KEEP_NM),
+                        None)
         # one storm, one zone: cells other zones (or drifting CBs) have are taken
         taken = ({k for zn, k in self._radar_zone_cell.items() if zn != zone_num} |
                  {c.radar for zn, c in self._drift.items() if zn != zone_num and c.radar})
@@ -11546,7 +11632,16 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                   not self._is_cb_free_zone(zone_num)):
                 # no radar frame yet after the start: keep the CB PSX already has
                 now_wx = self.psx.get(f"Wx{zone_num}") or ""
-                if _fw_drift.cb_oktas(now_wx) > _fw_drift.cb_oktas(final_wx):
+                if self._cb_planner_on() and zone_num in self.zone_relocated_time:
+                    # moved since the start: no forecast CB, only the planner gives it one (a
+                    # CB there followed whichever storm was near when the radar came, and stayed
+                    # as the crew could see it: two sims flying together started with other
+                    # storms and matched 0-11 % for 40 minutes, headless 2026-11-19)
+                    if _fw_drift.cb_oktas(final_wx) > 0:
+                        final_wx = _strip_cb(final_wx)
+                        self.logger.info("Zone %d radar: moved before the first radar frame: no "
+                                         "CB until the CB planner gives it one", zone_num)
+                elif _fw_drift.cb_oktas(now_wx) > _fw_drift.cb_oktas(final_wx):
                     final_wx = _fw_drift.with_cb_of(final_wx, now_wx)
                     self.logger.info("Zone %d radar: keeps its %d/8 CB until the first radar "
                                      "frame", zone_num, _fw_drift.cb_oktas(final_wx))
@@ -12976,7 +13071,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             # Qs497: so psx.get() holds PSX's current value and
             # _apply_enroute_wind_qs497() only sends it when it differs
             self.psx.subscribe("WxCorridorSel")
-            self.psx.subscribe("MiscFltData")       # OAT for _check_corridor_oat()
+            self.psx.subscribe("MiscFltData")       # OAT for _check_corridor_oat(), magvar
+            for name in ("Afds", "McpWdoHdg", "HdgTru"):   # HDG SEL: _planning_hdg()
+                self.psx.subscribe(name)
             self.psx.subscribe("MetarsUp", self._handle_metars_up)
             self.psx.subscribe("PrinterText", self._handle_printer_text)
             # The weather variables we control (_OWNED_KEYS): subscribing
@@ -13113,10 +13210,22 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "(default 200). The longest ND range of the last 10 minutes counts if longer "
                  "(up to 320 nm; see --no-cb-visible-nd).")
         parser.add_argument(
+            '--cb-visible-angle', type=float, default=120.0, metavar='DEG',
+            help="Out of the window, the crew may see a CB within this many degrees of the nose "
+                 "(and --cb-visible-dist; default 120: a real 747's windows; many sims show "
+                 "less).")
+        parser.add_argument(
+            '--cb-startle-dist', default="40:60", metavar='NM[:BIG]',
+            help="With --cb-planner: no CB appears, disappears or moves within NM of the "
+                 "aircraft, or BIG nm for a big CB (6/8 or more, or tops above 40,000 ft); "
+                 "default 40:60. Farther out, in the crew's view, a change needs a margin "
+                 "that shrinks with distance (docs/developers/cb-planner.md).")
+        parser.add_argument(
             '--cb-planner', action='store_true',
-            help="With --radar-cbs: the CB planner (testing) decides once per radar frame which "
-                 "storms the weather zones show: one CB in each area of storms first, more "
-                 "where they are stronger, spaced apart, never moving a CB the crew may see "
+            help="With --radar-cbs: the CB planner (testing) decides every minute which storms "
+                 "the weather zones show: one CB in each significant area of storms first, "
+                 "more where they are stronger, spaced apart; a CB the crew may see changes "
+                 "only for a clearly better one, never close in (--cb-startle-dist) "
                  "(docs/developers/cb-planner.md). Instead of placing zones on storms one by "
                  "one and into TS SIGMET areas.")
         parser.add_argument(
@@ -13201,8 +13310,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "coverage tiles for 6 hours), so a restart doesn't fetch them all again; "
                  "frankenweathers on one computer may share it. \"\" (empty): don't keep them.")
         parser.add_argument(
-            '--route-zones', action='store_true',
-            help="Plan the weather zones along the FMC route (testing). While the aircraft "
+            '--no-route-zones', dest='route_zones', action='store_false',
+            help="Don't plan the weather zones along the FMC route (see --route-zones, the "
+                 "default since 2026-11-19).")
+        parser.add_argument(
+            '--route-zones', action='store_true', default=True,
+            help="Plan the weather zones along the FMC route (the default; --no-route-zones: "
+                 "off). While the aircraft "
                  "follows its route (within 10nm, track within 30 degrees, for 2 minutes), new "
                  "zones go 150-250nm ahead along the route, through its turns, and a zone only "
                  "counts as behind by its distance along the route; off the route (more than "
@@ -13663,7 +13777,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                        "there would be moved ahead at once")
         if self._no_new_cb_at(lat, lon):
             why.append("the crew may see a new CB here (window "
-                       f"{self.args.cb_visible_dist:.0f} nm / {_WINDOW_VIEW_DEG:.0f}°, ND "
+                       f"{self.args.cb_visible_dist:.0f} nm / "
+                       f"{self.args.cb_visible_angle:.0f}°, ND "
                        f"{self._nd_wxr_range_nm():.0f} nm / {_ND_VIEW_DEG:.0f}°"
                        f"{', holding: all round' if self._maneuvering else ''}): no new CB in view")
         # spacing
@@ -13746,7 +13861,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             return out
         out["aircraft"] = {"lat": self.ac_lat, "lon": self.ac_lon, "hdg": self.ac_hdg,
                            "alt_ft": self.ac_alt_ft, "maneuvering": self._maneuvering}
-        out["view"] = {"window_nm": self.args.cb_visible_dist, "window_deg": _WINDOW_VIEW_DEG,
+        out["view"] = {"window_nm": self.args.cb_visible_dist,
+                       "window_deg": self.args.cb_visible_angle,
                        "nd_nm": self._nd_wxr_range_nm(), "nd_deg": _ND_VIEW_DEG,
                        "visible_nm": self._cb_visible_range_nm(),
                        "scan_nm": self._radar_cell_nm(), "new_anywhere": self._new_cb_anywhere()}
