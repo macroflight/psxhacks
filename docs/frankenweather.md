@@ -392,7 +392,13 @@ trailing 5-minute window: accumulating more than 180° of change enters
 maneuvering mode (a hold or vectoring pattern), and dropping back below
 60° of change exits it back to normal cruise placement. The 180°/60° gap
 is deliberate hysteresis so the mode doesn't flap back and forth near the
-boundary. Entering maneuvering mode re-places all zones around the
+boundary. Within 10 nm of the FMC route (route zones on, see below) only
+the turns the route doesn't explain count: the heading change minus the
+course change of the route leg going the aircraft's way, summed with its
+sign. A SID or STAR that turns back on itself, or vectors a few miles off
+the route, add next to nothing, while a hold adds 360° a circuit (a 180°
+departure turn re-placed every zone and took away CBs the crew could see,
+live flight 2026-11-20). Entering maneuvering mode re-places all zones around the
 aircraft, except those whose CB turbulence can still reach it; leaving it
 doesn't move any zone, the ordinary relocation rules take over.
 

@@ -144,6 +144,11 @@ _OBSOLETE_CACHE_FILES = [
 _LOG_FLUSH_INTERVAL_S = 60.0
 
 
+def _wrap180(deg: float) -> float:
+    """Return an angle difference folded into -180..180 degrees."""
+    return ((deg + 180.0) % 360.0) - 180.0
+
+
 def _om_pos_key(lat: float, lon: float) -> str:
     """Return a stable disk-cache key for an Open-Meteo fetch position."""
     return f"{lat:.3f},{lon:.3f}"
@@ -2884,7 +2889,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self.cloud_sync_last_alt_ft: float = 0.0
 
         # Maneuvering mode detection
-        self._hdg_history: list = []   # [(monotonic_time, heading_deg)]
+        self._hdg_history: list = []   # [(monotonic_time, heading_deg, route course or None)]
         self._maneuvering: bool = False
         # CB life cycle (CB test page, --cb-height-cycle / --cb-oktas-cycle, [cb_life_cycle]):
         # off (default) = a CB is created at its full height / oktas and removed at them;
@@ -6779,16 +6784,29 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 return True
             return False
 
+        # Within 10 nm of the FMC route only the turns the route doesn't explain
+        # count, summed with their sign: heading change minus the route's own
+        # course change. A SID or STAR that turns back on itself, or vectors a
+        # few miles off it, add next to nothing; a hold adds 360° a circuit (a
+        # 180° departure turn re-placed every zone and took away CBs the crew
+        # could see, live 2026-11-20). Away from the route: every turn counts.
         now = time.monotonic()
-        self._hdg_history.append((now, self.ac_hdg))
+        course = (_fw_route.course_near(self._route_points, self.ac_lat, self.ac_lon, self.ac_hdg,
+                                        _fw_route.ON_ROUTE_XTK_NM)
+                  if self._route_mode != "none" and len(self._route_points) >= 2 else None)
+        self._hdg_history.append((now, self.ac_hdg, course))
         cutoff = now - _HDG_WINDOW_S
-        self._hdg_history = [(t, h) for t, h in self._hdg_history if t >= cutoff]
+        self._hdg_history = [e for e in self._hdg_history if e[0] >= cutoff]
         if len(self._hdg_history) < 2:
             return False
-        total_change = sum(
-            abs(((b - a + 180.0) % 360.0) - 180.0)
-            for (_, a), (_, b) in zip(self._hdg_history, self._hdg_history[1:])
-        )
+        if course is not None:
+            total_change = abs(sum(
+                _wrap180(b[1] - a[1]) - (_wrap180(b[2] - a[2]) if a[2] is not None and
+                                         b[2] is not None else 0.0)
+                for a, b in zip(self._hdg_history, self._hdg_history[1:])))
+        else:
+            total_change = sum(abs(_wrap180(b[1] - a[1]))
+                               for a, b in zip(self._hdg_history, self._hdg_history[1:]))
         if not self._maneuvering and total_change > _MANEUVER_ENTER_DEG:
             self._maneuvering = True
             self.logger.info(

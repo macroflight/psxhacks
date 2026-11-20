@@ -105,6 +105,29 @@ def locate(points: list, lat: float, lon: float) -> Optional[RoutePos]:  # pylin
     return best
 
 
+def course_near(points: list, lat: float, lon: float, heading: float,
+                max_nm: float) -> Optional[float]:
+    """Return the course of the route leg within max_nm nearest in direction to heading, or None.
+
+    A route that turns back on itself (a SID, a STAR) has legs near each
+    other going different ways; the nearest leg isn't always the one flown,
+    the leg going the aircraft's way is. The course is the leg's own course
+    (the initial course from its first point).
+    """
+    best = None
+    for i in range(len(points) - 1):
+        a, b = points[i], points[i + 1]
+        xtk, atk = _leg_xtk_atk(a, b, lat, lon)
+        course, length = _bearing_dist(*a, *b)
+        clamped = max(0.0, min(length, atk))
+        off = abs(xtk) if clamped == atk else math.hypot(atk - clamped, xtk)
+        if off > max_nm:
+            continue
+        if best is None or angle_diff(heading, course) < angle_diff(heading, best):
+            best = course
+    return best
+
+
 def point_along(points: list, along_nm: float) -> Optional[tuple]:
     """Return (lat, lon, course) at along_nm from the route's first point, or None past its end."""
     if len(points) < 2 or along_nm < 0.0:
