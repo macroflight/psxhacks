@@ -44,7 +44,10 @@ CHANGE_COST = ((60.0, 3.0), (100.0, 1.5))   # a change the crew may see must win
 #                            at this distance (between: linear; nearer: the first; out to what
 #                            the crew may see: down to EDGE_COST)
 EDGE_COST = 1.2            # ... at the edge of what the crew may see
-HIDDEN_KEEP = 1.1          # a CB the crew can't see changes for a storm scoring this much more
+HIDDEN_KEEP = 1.5          # a CB the crew can't see changes for a storm scoring this much more
+#                            (1.1: storms' scores move by tens of percent between radar frames;
+#                            plansim on recorded radar 2026-11-20: zone moves 4.3/h -> 3.8/h,
+#                            the same coverage)
 CHANGE_GAP_S = 600.0       # a CB the crew may see changes at most once in this long
 DEAD_SCORE = 1.0           # what a CB without a storm (a dead storm's, a model CB) is worth
 APPEAR_BASE = 2.5          # a new CB the crew would see appear must be worth this x its change

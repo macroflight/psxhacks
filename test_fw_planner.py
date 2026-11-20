@@ -122,7 +122,8 @@ class TestPlanner(unittest.TestCase):
         storms = [storm("A", 90.0, 300.0, dbz=50, area=100.0),
                   storm("B", 60.0, 300.0, dbz=50, area=105.0)]
         self.assertEqual(P.plan(storms, zones, AC).moves, [])
-        storms[1].dbz = 55
+        storms[1].dbz = 65
+        storms[1].area_km2 = 300.0     # clearly stronger: worth the change
         self.assertEqual([m.storm for m in P.plan(storms, zones, AC).moves], ["B"])
 
     def test_behind_scores_little(self):

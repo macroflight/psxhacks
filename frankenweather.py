@@ -2766,6 +2766,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # the fuel mass and time it was last stepped at, our last write to PSX
         # (time.monotonic()) and what it's doing (web/efb)
         self._fuel_model_c: Optional[float] = None
+        # --cb-planner: {zone: the position the planner turned its CB off at}
+        self._planner_off: dict = {}
+        self._fuel_uplift_c: Optional[float] = None   # this refuelling's supply temperature
+        self._fuel_uplift_t = 0.0
+        self._fuel_soil: dict = {}           # {(lat, lon, hour): soil temperature at 54 cm C}
+        self._fuel_soil_pending: set = set()
         self._fuel_prev_kg = 0.0
         self._fuel_prev_t = 0.0
         self._fuel_written_t = 0.0
@@ -7305,6 +7311,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 self._zone_pinned[zn] = (old[0], old[1])
                 self._drift_retired[zn] = (old[0], old[1])
             self._radar_zone_cell.pop(zn, None)
+            # it stays off until the zone moves: a storm near it gave it a CB again at the next
+            # zone update and the planner took it away again a minute later, every minute (CBs
+            # living 0-85 s 380-420 nm out, headless 2026-11-20)
+            self._planner_off[zn] = (old[0], old[1])
             self.logger.info("Zone %d: CB planner: CB off (too close to another CB)", zn)
             return
         if zn in self._drift:
@@ -11127,7 +11137,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 best = cell
         return best
 
-    def _radar_cb_wx(self, wx: str, lat: float, lon: float, month: int,  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    def _radar_cb_wx(self, wx: str, lat: float, lon: float, month: int,  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
                      zone_num: int = 0) -> tuple:
         """--radar-cbs: return (wx, why) for a zone's CB at (lat, lon) inside radar coverage.
 
@@ -11138,6 +11148,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         radius made the CB grow and fade by turns (FTECH1 2026-11-15).
         """
         cell = None
+        off = self._planner_off.get(zone_num)
+        if off is not None:
+            pos = self.zone_positions.get(zone_num)
+            if pos is not None and (pos[0], pos[1]) == off and self._cb_planner_on():
+                self._radar_zone_cell.pop(zone_num, None)
+                return (_strip_cb(wx), "radar: CB off (the CB planner: too close to another "
+                        "CB)") if _fw_drift.cb_oktas(wx) else (wx, "")
+            self._planner_off.pop(zone_num, None)   # moved since: the zone is free again
         kept = self._radar_zone_cell.get(zone_num)
         if kept is not None:
             # measured from where the storm is now, not where its frame had it (up to 30 min

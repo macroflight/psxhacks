@@ -42,8 +42,13 @@ Meteosat cloud top heights as without the planner.
      the alternative is no CB.
    - A CB the crew may see changes at most once in 10 minutes
      (`CHANGE_GAP_S`).
-   - Beyond what the crew may see, any gain will do (10 % against flapping,
-     `HIDDEN_KEEP`).
+   - Beyond what the crew may see, a clear gain will do (50 % against
+     flapping, `HIDDEN_KEEP`; 10 % let zones swap storms whose scores moved
+     between frames: plansim on recorded radar 2026-11-20, zone moves
+     4.3/h with 10 %, 3.8/h with 50 %, the same coverage). A zone whose CB
+     the planner turned off (too close to another CB) stays CB-free until
+     it moves: a storm near it gave it a CB again every minute (CBs living
+     under 90 s 380-420 nm out, headless 2026-11-20).
    - What the crew may see: out of the window within `--cb-visible-dist`
      (200 nm) and `--cb-visible-angle` (120 degrees of the nose), and on an
      ND showing the weather radar (its range, up to 320 nm). The user will
