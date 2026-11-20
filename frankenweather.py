@@ -483,6 +483,7 @@ _ICING_FZ_METAR_NM = 30.0
 _FUEL_WRITE_MIN_S = 60.0      # Advanced Icing fuel temperature: write PSX's at most this often
 _FUEL_JUMP_C = 5.0            # PSX's own fuel temperature this far off: a situation load, adopt it
 _FUEL_JUMP_KG = 3000.0        # fuel this much lower in one step: a situation load, start over
+_FUEL_UPLIFT_GAP_S = 300.0    # refuelling this long ago ended: the next one draws a new temperature
 _ROUTE_TRACK_S = 30.0         # --route-zones: the track over the ground over this long
 _ROUTE_TRACK_MAX_S = 60.0     # ... at most this long
 _RADAR_CELL_NM = 250.0        # --radar-cbs: radar cells looked for at least this far around the
@@ -9984,6 +9985,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         and when the fuel reaches FUEL TEMP LOW and its freezing point.
         """
         fq = _fw_icing.parse_fuelqty(self.psx.get("FuelQty") or "")
+        if self._on_ground() and self._fuel_cooling == "realistic":
+            self._fuel_soil_fetch()
         try:
             sat = int((self.psx.get("MiscFltData") or "").split(";")[1]) / 10.0
             tas = int((self.psx.get("PiBaHeAlTas") or "").split(";")[4]) / 1000.0
@@ -10017,6 +10020,42 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             rate = _fw_icing.fuel_rate_c_h([(t - now, c) for t, c in samples])
         self._fuel_set_info(fq, rate, model_info, target)
 
+    def _fuel_soil_key(self) -> Optional[tuple]:
+        """Return the cache key (0.1 degree, UTC hour) of the soil temperature here, or None."""
+        if self.ac_lat is None:
+            return None
+        return (round(self.ac_lat, 1), round(self.ac_lon, 1), int(time.time() // 3600))
+
+    def _fuel_soil_here(self) -> Optional[float]:
+        """Return the forecast's soil temperature at 54 cm here (C), or None (not fetched)."""
+        key = self._fuel_soil_key()
+        return self._fuel_soil.get(key) if key else None
+
+    def _fuel_soil_fetch(self) -> None:
+        """Fetch the forecast's soil temperature at 54 cm here once an hour (for refuelling).
+
+        In the background (an executor thread); a refuelling before it arrives
+        uses the air temperature alone.
+        """
+        key = self._fuel_soil_key()
+        if key is None or key in self._fuel_soil or key in self._fuel_soil_pending:
+            return
+        self._fuel_soil_pending.add(key)
+
+        def fetch():
+            try:
+                data = _OM_CLIENT.get({"latitude": key[0], "longitude": key[1],
+                                       "current": "soil_temperature_54cm"}, "fuel",
+                                      self.args.om_proxy)
+                value = ((data or {}).get("current") or {}).get("soil_temperature_54cm")
+                self._fuel_soil[key] = None if value is None else float(value)
+            finally:
+                self._fuel_soil_pending.discard(key)
+        try:
+            asyncio.get_running_loop().run_in_executor(None, fetch)
+        except RuntimeError:   # no event loop (a test): skip
+            self._fuel_soil_pending.discard(key)
+
     def _fuel_step_model(self, fq, sat: float, target: float, tau: float) -> Optional[float]:
         """Step the realistic model and write PSX's fuel temperature when it's off.
 
@@ -10038,9 +10077,19 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         reload = now - self._last_situ_load_mono < _FUEL_SITU_LOAD_S
         if on_ground and fq.total_kg > self._fuel_prev_kg + 50.0 and not reload:
             old = model
-            model = _fw_icing.fuel_uplift_c(model, self._fuel_prev_kg, fq.total_kg, sat)
-            self.logger.info("Fuel temperature: refuelling %.0f -> %.0f kg mixes the fuel "
-                             "from %+.1f to %+.1f C", self._fuel_prev_kg, fq.total_kg, old, model)
+            soil = self._fuel_soil_here()
+            if self._fuel_uplift_c is None:   # one refuelling: one supply temperature
+                self._fuel_uplift_c = _fw_icing.fuel_uplift_temp_c(
+                    sat, soil, random.gauss(0.0, _fw_icing.FUEL_UPLIFT_SD_C))
+            model = _fw_icing.fuel_uplift_c(model, self._fuel_prev_kg, fq.total_kg,
+                                            self._fuel_uplift_c)
+            self._fuel_uplift_t = now
+            self.logger.info("Fuel temperature: refuelling %.0f -> %.0f kg at %+.1f C (air %+.1f, "
+                             "soil %s) mixes the fuel from %+.1f to %+.1f C", self._fuel_prev_kg,
+                             fq.total_kg, self._fuel_uplift_c, sat,
+                             "unknown" if soil is None else f"{soil:+.1f}", old, model)
+        elif self._fuel_uplift_c is not None and now - self._fuel_uplift_t > _FUEL_UPLIFT_GAP_S:
+            self._fuel_uplift_c = None
         model = _fw_icing.fuel_step(model, target, tau, now - self._fuel_prev_t)
         floor = self._fuel_floor()
         if floor is not None and model < floor[0]:

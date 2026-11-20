@@ -1297,8 +1297,15 @@ ground, with or without Advanced Icing):
   on from it. The fuel tends towards the skin temperature (in flight SAT
   plus 95 % of the rise to TAT, on the ground the outside air) with a
   time constant of 6 hours with full wing tanks, shorter as they empty
-  (at least 3 hours), 1.5 times longer on the ground. Refuelling mixes in
-  fuel at the outside temperature (between +5 and +30 C). Example: 76 t
+  (at least 3 hours), the same on the ground. Refuelling mixes in fuel at
+  half the outside air temperature plus half the forecast's soil
+  temperature at 54 cm (fuel from underground tanks and hydrant pipes is
+  nearer the ground's temperature), plus a little randomness (normal,
+  2 C, never more than 4 C), between -15 and +35 C; one refuelling uses
+  one supply temperature, and the log shows it. Without the soil
+  temperature (not fetched yet) the air's alone. Example: Stockholm in
+  November, air +1 C and soil +5 C: fuel at about +3 C; Dubai, air +28 C
+  and soil +29 C: about +28 C. Example: 76 t
   in the wing tanks at FL370 and TAT -25 C cool from +2 C to about -4 C
   in the first hour and -16 C after four.
 - Calibration: Boeing's "Polar Route Operations" (AERO, 2001) says the
@@ -1313,7 +1320,19 @@ ground, with or without Advanced Icing):
   to -41 C at an OAT of -70 C (the model's target there: about -42 C).
   With these settings full wing tanks 50 C above the target cool about
   8 C per hour, and no fuel load cools faster than about 13 C per hour.
-  The ground factor and the uplift temperatures are estimates.
+  On the ground the time constants are the same as in flight: the FAA's
+  fuel tank thermal model (the Fuel Tank Flammability Assessment Method,
+  DOT/FAA/AR-05/8, user's manual for version 11, 2005,
+  <https://rosap.ntl.bts.gov/view/dot/57849>) uses the same constants on
+  the ground, engines off or on, as in flight (its example: 200 minutes
+  near empty, 400 near full, like this model's 3 and 6 hours), and loads
+  the fuel "at ambient temperature". Boeing (I. Thomas, "An Overview of
+  Fuel and Ambient Temperatures", ASTM STP, 1979,
+  <https://store.astm.org/stp35048s.html>, abstract) found airport storage
+  temperatures reaching about 38 C at most, more typically 27-32 C at the
+  most. The half-and-half blend of air and soil temperature, the
+  randomness, and leaving out the sun warming a parked wing are estimates:
+  no published figures were found for them.
 - It starts from PSX's own value (a situation file carries one) and
   starts over when PSX's value jumps or the fuel drops suddenly (a
   situation load). It writes when PSX is 0.5 C or more off, at most once

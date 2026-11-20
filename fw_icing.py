@@ -548,10 +548,25 @@ class IcingReports:
 FUEL_SKIN_RECOVERY = 0.95     # skin temperature = SAT + this x (TAT - SAT) in flight
 FUEL_TAU_FULL_H = 6.0         # time constant with full wing tanks (estimate) ...
 FUEL_TAU_MIN_H = 3.0          # ... shorter as they empty, down to this
-FUEL_TAU_GROUND_X = 1.5       # parked: no forced airflow, slower
+# Parked: the same as in flight. The FAA's fuel tank thermal model (FTFAM,
+# DOT/FAA/AR-05/8) uses the same time constants on the ground, engines off
+# or on, as in flight (its example: 200 min near empty, 400 min near full,
+# like ours); the fuel's own mass, not the airflow outside, sets the pace.
+FUEL_TAU_GROUND_X = 1.0
 WING_FUEL_FULL_KG = 108000.0  # 747-400 mains 1-4 and reserves 2/3
-FUEL_UPLIFT_MIN_C = 5.0       # fuel from a hydrant or truck: about the
-FUEL_UPLIFT_MAX_C = 30.0      # outside temperature, within these limits
+# Uplift (refuelling) temperature. FTFAM loads the fuel "at ambient
+# temperature"; Boeing (Thomas, ASTM STP 1979) gives storage temperatures up
+# to about 38 C, typically 27-32 C at the most. Fuel from underground tanks
+# and hydrant pipes is nearer the ground's temperature than the air's, so
+# frankenweather takes half the air temperature and half the soil
+# temperature at 54 cm (the forecast's), plus a little randomness (the
+# supplier's tanks, trucks standing in the sun or not). No published
+# figures for this blend: an estimate.
+FUEL_UPLIFT_SOIL_SHARE = 0.5
+FUEL_UPLIFT_SD_C = 2.0        # randomness: normal, this standard deviation ...
+FUEL_UPLIFT_SD_MAX_C = 4.0    # ... cut at this
+FUEL_UPLIFT_MIN_C = -15.0     # never colder than this ...
+FUEL_UPLIFT_MAX_C = 35.0      # ... nor warmer than this
 FUEL_WRITE_DIFF_C = 0.5       # write PSX's fuel temperature when this far off
 _LB_KG = 0.45359237
 
@@ -606,12 +621,23 @@ def fuel_step(temp_c: float, target_c: float, tau_h: float, seconds: float) -> f
     return target_c + (temp_c - target_c) * math.exp(-seconds / (tau_h * 3600.0))
 
 
-def fuel_uplift_c(temp_c: float, old_kg: float, new_kg: float, oat_c: float) -> float:
-    """Return the temperature after refuelling from old_kg to new_kg (fuel at about OAT)."""
+def fuel_uplift_temp_c(oat_c: float, soil_c: Optional[float], noise_c: float = 0.0) -> float:
+    """Return the temperature of fuel delivered now (see FUEL_UPLIFT_*).
+
+    soil_c: the soil temperature at 54 cm, or None (unknown: the air's);
+    noise_c: a random number of standard deviation FUEL_UPLIFT_SD_C.
+    """
+    base = oat_c if soil_c is None else (
+        (1.0 - FUEL_UPLIFT_SOIL_SHARE) * oat_c + FUEL_UPLIFT_SOIL_SHARE * soil_c)
+    noise = max(-FUEL_UPLIFT_SD_MAX_C, min(FUEL_UPLIFT_SD_MAX_C, noise_c))
+    return min(FUEL_UPLIFT_MAX_C, max(FUEL_UPLIFT_MIN_C, base + noise))
+
+
+def fuel_uplift_c(temp_c: float, old_kg: float, new_kg: float, uplift_c: float) -> float:
+    """Return the temperature after refuelling from old_kg to new_kg with fuel at uplift_c."""
     if new_kg <= old_kg or new_kg <= 0.0:
         return temp_c
-    uplift = min(FUEL_UPLIFT_MAX_C, max(FUEL_UPLIFT_MIN_C, oat_c))
-    return (temp_c * max(0.0, old_kg) + uplift * (new_kg - old_kg)) / new_kg
+    return (temp_c * max(0.0, old_kg) + uplift_c * (new_kg - old_kg)) / new_kg
 
 
 # PSX's fuel types (FuelType, Instructor > Situation > Service) in index
