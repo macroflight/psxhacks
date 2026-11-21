@@ -12,7 +12,10 @@ formation autopilot.
 frankenpush logs on with the sim's logon code from Flight Centre's My sim
 page (`--logon-code CODE`, or `--logon-code-file FILE` to keep it out of the
 process list and start scripts; the same file frankenweather's
-`--logon-code-file` reads; remembered in `~/.frankenpush_cache.json`) at
+`--logon-code-file` reads; remembered per `--portal-url` in
+`~/.frankenpush_cache.json`, so a test site's code never goes to the live
+Flight Centre; a code remembered before 2026-11-21 belongs to the portal
+frankenpush is first started with after the update) at
 `--portal-url` (default the live Flight Centre). If Flight Centre refuses
 the code, the log says "Portal rejected logon code" and frankenpush retries
 every 30 s. If a code that worked earlier in the same run stops working (the

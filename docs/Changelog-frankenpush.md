@@ -5,6 +5,10 @@
 - **`--logon-code-file FILE`:** the logon code from a file, so it isn't in
   the process list or the start script (the same file frankenweather's
   `--logon-code-file` reads).
+- **The remembered logon code is kept per portal** (`--portal-url`), so a
+  test site's code is never sent to the live Flight Centre. An existing
+  remembered code goes on working with the portal you start frankenpush
+  with next.
 - **The weather is no longer in the Flight Centre telemetry:** frankenweather
   now sends its own, fuller flight report to Flight Centre (same logon code),
   so frankenpush's `weather` part (zones, CBs, turbulence) is gone.

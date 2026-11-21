@@ -32,6 +32,7 @@ import inspect
 import json
 import logging
 import math
+import os
 import pathlib
 import sys
 import time
@@ -92,18 +93,45 @@ def _parse_afds_fma(value):
         return None
 
 
-def _load_cached_logon_code():
-    """Return the cached logon code, or None if no cache exists."""
+def _read_cache():
+    """Return the logon code cache: {"portals": {portal URL: code}, "logon_code": legacy}."""
     try:
-        return json.loads(_CACHE_FILE.read_text()).get('logon_code') or None
+        cache = json.loads(_CACHE_FILE.read_text())
     except (OSError, json.JSONDecodeError):
-        return None
+        return {}
+    return cache if isinstance(cache, dict) else {}
 
 
-def _save_cached_logon_code(code):
-    """Persist the logon code to the cache file for future runs."""
+def _load_cached_logon_code(portal):
+    """Return the logon code remembered for portal (a URL), or None.
+
+    A code is only used for the portal it was given for, so a test site's
+    code never goes to the live Flight Centre. A cache from before the
+    codes were kept per portal (one "logon_code") belongs to the portal
+    frankenpush is first started with after the update.
+    """
+    cache = _read_cache()
+    portals = cache.get('portals') if isinstance(cache.get('portals'), dict) else {}
+    code = portals.get(portal.rstrip('/'))
+    if code:
+        return code
+    legacy = cache.get('logon_code')
+    if legacy and not portals:
+        _save_cached_logon_code(portal, legacy)
+        return legacy
+    return None
+
+
+def _save_cached_logon_code(portal, code):
+    """Remember the logon code for portal (only readable by the user)."""
+    cache = _read_cache()
+    portals = cache.get('portals') if isinstance(cache.get('portals'), dict) else {}
+    portals[portal.rstrip('/')] = code
     try:
-        _CACHE_FILE.write_text(json.dumps({'logon_code': code}))
+        fd = os.open(_CACHE_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'w', encoding='utf-8') as fh:
+            json.dump({'portals': portals}, fh)
+        os.chmod(_CACHE_FILE, 0o600)   # an older file keeps its mode otherwise
     except OSError:
         pass  # not fatal — just means the next run will prompt again
 
@@ -2261,7 +2289,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
             '--logon-code',
             type=str, action='store', default=None, dest='logon_code',
             help="Logon code from the 'My sim' page on the portal. "
-                 "Saved to frankenpush_cache.json after first use; "
+                 "Remembered per --portal-url in .frankenpush_cache.json after first use; "
                  "omit this option on subsequent runs to use the cached value.",
         )
         parser.add_argument(
@@ -2269,7 +2297,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
             type=str, action='store', default=None, metavar='FILE',
             help="Read the logon code from this file instead (it then isn't in the process list "
                  "or the start script); the same file frankenweather's --logon-code-file reads. "
-                 "Saved to frankenpush_cache.json like --logon-code.",
+                 "Remembered like --logon-code.",
         )
         parser.add_argument(
             '--logon-key',
@@ -2351,16 +2379,16 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 sys.exit(1)
         if self.args.logon_code:
             # Explicitly provided — persist for future runs.
-            _save_cached_logon_code(self.args.logon_code)
+            _save_cached_logon_code(self.args.portal_url, self.args.logon_code)
         else:
-            cached = _load_cached_logon_code()
+            cached = _load_cached_logon_code(self.args.portal_url)
             if cached:
                 print(f"Using cached logon code from {_CACHE_FILE.name}.")
                 self.args.logon_code = cached
             else:
                 print("Enter the logon code shown on the 'My sim' page of the portal.")
                 self.args.logon_code = input("Logon code: ").strip()
-                _save_cached_logon_code(self.args.logon_code)
+                _save_cached_logon_code(self.args.portal_url, self.args.logon_code)
 
     async def run(self):
         """Start everything."""
