@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Wing anti-ice switched on at >ICING WING no longer stays on for the rest
+  of the flight: the "clear of cloud" time now starts when the ice
+  detectors fire (an old one, from cloud too short to count as icing, ended
+  the icing in the same second, before the switch moved; live flight
+  2026-11-21, wing anti-ice on from 03:17Z in clear air at FL330).
 - The departure weather is checked for icing conditions every minute until
   the takeoff roll, not only once after engine start: fog rolling in, or
   the temperature dropping to 10 C, during a long taxi queue now gets

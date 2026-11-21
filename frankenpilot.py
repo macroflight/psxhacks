@@ -1494,6 +1494,7 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.anti_ice_on(now, on_ground, in_icing, tat, new_c)
         if not on_ground and EICAS_A['ICING WING'] in new_a:
             self.icing = True
+            self.ice_detected(now, in_icing)
             self.decide(">ICING WING appeared on EICAS (ice detectors): wing anti-ice ON")
             self.spawn(self.set_anti_ice('wai', True, ">ICING WING"))
         self.anti_ice_off(now, on_ground, tat, new_a)
@@ -1506,6 +1507,7 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             return
         if self.icing_nac_waiting and EICAS_C['ICING NAC'] in self.last_eicas['C']:
             self.icing, self.icing_nac_waiting = True, False
+            self.ice_detected(now, in_icing)
             self.decide(">ICING NAC on EICAS (ice detectors)" +
                         (" and all engines running" if on_ground else "") + ": engine anti-ice ON")
             self.spawn(self.set_anti_ice('nai', True, ">ICING NAC"))
@@ -1550,6 +1552,17 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             self.icing = True
             self.spawn(self.set_anti_ice('nai', True, reason))
 
+    def ice_detected(self, now, in_icing):
+        """Start icing conditions now: the ice detectors found ice, whatever the cloud said.
+
+        The clear-of-cloud timer starts afresh (now, or when we leave the
+        cloud): an old one, left from cloud too short to count as icing, ended
+        the icing in the same second and the wing anti-ice switched on just
+        after stayed on for hours (FTECH1 2026-11-21: PSX iced in a CB zone's
+        cloud at FL330 while MSFS showed clear air).
+        """
+        self.cloud_exit_at = None if in_icing else now
+
     def anti_ice_off(self, now, on_ground, tat, new_a):
         """Switch anti-ice back to AUTO / off when icing conditions have ended.
 
@@ -1571,6 +1584,7 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
                         "wing anti-ice back to AUTO/off")
             self.spawn(self.set_anti_ice('wai', False, ">ANTI-ICE WING (on, no ice)"))
         if not self.icing:
+            self.cloud_exit_at = None   # only an icing episode's cloud exit counts (ice_detected())
             return
         wait = min(600.0, 120.0 + 0.5 * self.icing_seconds)
         why = None

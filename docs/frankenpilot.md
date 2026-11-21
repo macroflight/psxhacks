@@ -123,7 +123,9 @@ config file (`[actions]`, names in brackets).
   Back to AUTO (or off) when TAT has been above 10 C for a minute, and in
   flight at >ANTI-ICE NAC/WING or a while after leaving cloud (longer after
   a long time in icing conditions; the time counts from liftoff, so fog
-  patches on the ground don't end it). An engine failure never switches
+  patches on the ground don't end it, and after an ICING message from when
+  the ice detectors fired: PSX can ice in a weather zone's cloud while
+  MSFS shows clear air). An engine failure never switches
   anti-ice off, and if you switch it off or to AUTO yourself it stays that
   way until the next trigger.
 - **F/D**: your F/D switch moves, the other one follows (`fd_follow`).
