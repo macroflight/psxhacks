@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **CB planner (testing): a CB the crew can see keeps its storm's worth,**
+  so it goes only for a clearly stronger storm (one went 101 nm away in
+  view because its storm area counted as weak).
 - **Flight Centre report (new default).** frankenweather sends PSCC Flight
   Centre its settings (no keys or codes), every weather decision with its
   reason and a status snapshot a minute, so a flight's weather can be checked

@@ -42,6 +42,13 @@ Meteosat cloud top heights as without the planner.
      the alternative is no CB.
    - A CB the crew may see changes at most once in 10 minutes
      (`CHANGE_GAP_S`).
+   - A CB the crew may see is worth its own storm (strength x relevance,
+     `Planner.keep_value()`), also when the storm is left out of the
+     new-CB list (far abeam of the route), and without the cluster and
+     spacing factors, which rank new CBs: a further CB of a weak storm area
+     counted 0.25^6 and went 101 nm away in view (FTECH1 2026-11-21).
+     plansim on recorded radar: CBs going in view 0.89/h -> 0.64/h, zone
+     moves 3.8/h -> 3.5/h, the same coverage.
    - Beyond what the crew may see, a clear gain will do (50 % against
      flapping, `HIDDEN_KEEP`; 10 % let zones swap storms whose scores moved
      between frames: plansim on recorded radar 2026-11-20, zone moves

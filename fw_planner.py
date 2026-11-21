@@ -324,7 +324,13 @@ class _Planning:  # pylint: disable=too-many-instance-attributes
             return 0.0                # a storm left out (behind, ...) or none, unseen: free
         d = dist_nm(self.ac.lat, self.ac.lon, *pos)
         cost = change_cost(d, z.visible_cb, self.ac.visible_nm, z.cb_big)
-        return self.value(z.storm, pos, z.num) * (cost if z.visible_cb else HIDDEN_KEEP)
+        if z.visible_cb:
+            # a CB the crew sees keeps its own storm's worth (strength x relevance), also when
+            # the storm is left out of the new-CB list (far abeam of the route) and without the
+            # cluster and spacing factors, which rank NEW CBs: a further CB of a weak storm area
+            # counted 0.25 ** 6 and went 101 nm away in view (FTECH1 2026-11-21, user)
+            return (self.base[z.storm] if z.storm in self.base else DEAD_SCORE) * cost
+        return self.value(z.storm, pos, z.num) * HIDDEN_KEEP
 
     def new_value(self, s: Storm) -> float:
         """Return what a new CB on storm s is worth, its change cost included (0: not allowed)."""

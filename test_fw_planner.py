@@ -126,6 +126,24 @@ class TestPlanner(unittest.TestCase):
         storms[1].area_km2 = 300.0     # clearly stronger: worth the change
         self.assertEqual([m.storm for m in P.plan(storms, zones, AC).moves], ["B"])
 
+    def test_visible_cb_keeps_its_own_worth(self):
+        """A CB the crew sees keeps its storm's worth: no cluster dilution (FTECH1 2026-11-21).
+
+        W's two storms are a weak area beside a big area of ten as strong storms: as a new CB, W
+        would count DIVERSITY ** 6 (it went 101 nm away in view before). Seen at 100 nm it stays
+        against the big area's storms and a somewhat stronger one in view, and goes only for a
+        much stronger one.
+        """
+        weak = [storm("W", 60.0, 100.0), storm("W2", 60.0, 120.0)]
+        big = [storm(f"L{i}", 100.0, 250.0 + 20 * i) for i in range(10)]
+        zone = P.Zone(1, *at(60.0, 100.0), storm="W", visible_cb=True)
+        nearby = storm("X", 20.0, 110.0, dbz=55, area=150.0, in_view=True)
+        moves = P.plan(weak + big + [nearby], [zone], AC).moves
+        self.assertEqual([m.storm for m in moves if m.zone == 1], [])
+        nearby.dbz, nearby.area_km2 = 65, 400.0
+        moves = P.plan(weak + big + [nearby], [zone], AC).moves
+        self.assertEqual([m.storm for m in moves if m.zone == 1], ["X"])
+
     def test_behind_scores_little(self):
         """A storm behind loses to a weaker one ahead (relevance)."""
         storms = [storm("A", 270.0, 100.0, dbz=60), storm("B", 90.0, 200.0, dbz=45)]
