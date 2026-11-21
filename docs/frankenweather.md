@@ -24,7 +24,7 @@ set once (by hand, or baked into a saved situ) and never updated again
   from EUMETSAT's MTG Lightning Imager (© EUMETSAT) over Europe, Africa,
   the Atlantic, the western Indian Ocean and northern South America (it
   doesn't see southern Brazil, Paraguay, Uruguay or Argentina: measured
-  against GOES 2026-11-20), and with `--glm-lightning`
+  against GOES 2026-11-20), and (`--glm-lightning`, on by default)
   (testing, needs h5py) also from the GOES satellites' Geostationary
   Lightning Mappers (NOAA, free) over the Americas, the Atlantic and the
   eastern Pacific: one file of about 250 KB a minute, turned into the same
@@ -438,9 +438,10 @@ follow the FMC route instead of the heading:
   destination airport. The log shows each change ("Route zones: following
   the FMC route", "off the FMC route", "vectors near ...").
 
-**Radar decides where CBs are (`--radar-cbs`, testing):** with this option,
-or switched on on the web UI's CB test page, the weather radar (RainViewer,
-the same picture VATSIM Radar can show) decides where the CBs are.
+**Radar decides where CBs are (`--radar-cbs`, testing, on by default):**
+the weather radar (RainViewer, the same picture VATSIM Radar can show)
+decides where the CBs are; `--no-radar-cbs` or the web UI's CB test page
+switches it off.
 
 - Every new radar frame (every 10 minutes), frankenweather finds the storm
   cells within 250 nm of the aircraft: areas of 40 dBZ or more, with large
@@ -534,7 +535,7 @@ the same picture VATSIM Radar can show) decides where the CBs are.
     never from a random number of this frankenweather's own;
   - the chance comes from the SIGMET's qualifier (ISOL about one storm per
     7 points, OCNL one per 3, FRQ one per 2), lightning nearby (MTG, or
-    GOES with `--glm-lightning`), or with `--sat-storms` (testing) a deep,
+    GOES), or (satellite storms) a deep,
     cold satellite cloud top over thunderstorm air (below);
   - a storm moves with the 850-300 hPa mean wind at its grid point, from
     the same forecast hour.
@@ -543,7 +544,8 @@ the same picture VATSIM Radar can show) decides where the CBs are.
   moving with it, fading at the end of its life), and the SIGMET's other
   points get no CB. Elsewhere outside radar coverage nothing changes yet:
   the forecast places the CBs, and they differ between sims.
-- **Satellite storms (`--sat-storms`, testing).** Outside radar coverage
+- **Satellite storms (`--sat-storms`, testing, on by default;
+  `--no-sat-storms` switches them off).** Outside radar coverage
   and away from lightning, a cold cloud top is the next best sign of a
   thunderstorm. The cloud tops come from the satellite nearest overhead:
   Meteosat over Europe, Africa and the Atlantic, and its Indian Ocean
@@ -589,7 +591,8 @@ the same picture VATSIM Radar can show) decides where the CBs are.
   A frame's tiles never change and are kept for an hour; coverage tiles
   for 6 hours. Several frankenweathers on one computer may share the
   folder (the headless test sims do). `--radar-tile-cache ""` keeps none.
-- **CB placement planner (`--cb-planner`, testing, with `--radar-cbs`):**
+- **CB placement planner (`--cb-planner`, testing, on by default with
+  `--radar-cbs`; `--no-cb-planner` switches it off):**
   instead of filling free zones with the strongest storms ahead one at a
   time, frankenweather makes one scored plan for all movable zones every
   minute (rules agreed 2026-11-19):
@@ -1206,11 +1209,12 @@ done.
 
 ### Advanced Icing (`--advanced-icing`, testing)
 
-Makes in-flight icing realistic. Off by default; `--advanced-icing`
-switches it on at startup, and the web UI's Cold weather page and the
+Makes in-flight icing realistic. On by default; `--no-advanced-icing`
+switches it off at startup, and the web UI's Cold weather page and the
 router's /efb page (Advanced Icing, under SIGMETs) have an on/off toggle
 with a line saying what it's doing right now. The setting is saved with
-the other settings in the config file (`--advanced-icing` wins over it).
+the other settings in the config file (`--[no-]advanced-icing` wins over
+it; a config file saved with it off keeps it off).
 
 **What PSX does by itself** (measured on the test sim, PSX 10.180 and
 10.195, 2026-11-13/14):
@@ -1294,9 +1298,9 @@ the ground PSX's icing, the de-icing and the holdover stay as they are):
   (0.35 x PSX's rate): layer cloud 8/8, SAT -12 C, top -16 C; last minute
   left wing PSX +11 kg, kept +4 kg`.
 
-**Fuel temperature** (fuel cooling Realistic, on the Cold weather page or
-`--fuel-cooling realistic`; PSX default for now; in flight and on the
-ground, with or without Advanced Icing):
+**Fuel temperature** (fuel cooling Realistic, the default; on the Cold
+weather page, or `--no-realistic-fuel-cooling` for PSX's own; in flight
+and on the ground, with or without Advanced Icing):
 
 - PSX's own fuel temperature doesn't behave like a tank. On the test
   sim (2026-11-14), with 76 t in the wing tanks, 90 minutes at FL370
@@ -1418,7 +1422,8 @@ every 20 seconds.
 - **Fuel cooling**: PSX default (PSX's own fuel temperature) or
   Realistic (frankenweather's wing tank model, see Fuel temperature
   under [Advanced Icing](#advanced-icing---advanced-icing-testing)).
-  PSX default for now; `--fuel-cooling` sets it at startup.
+  Realistic by default; `--[no-]realistic-fuel-cooling` sets it at
+  startup.
 - **Advanced Icing**: on/off and what it's doing right now.
 - **Log**: what Advanced Icing, the fuel temperature and the realistic
   holdover did (ice kept or added and why, Advanced Icing on/off, ICE
@@ -1429,7 +1434,7 @@ every 20 seconds.
 Fuel cooling, prevent fuel freezing and Advanced Icing are saved with the
 other settings in the config file (section `cold_weather`).
 
-### Realistic de-icing holdover times (`--realistic-holdover`, testing)
+### Realistic de-icing holdover times (on by default, testing)
 
 PSX's anti-icing fluid is a holdover timer (AntiIceFluid, 0-45 minutes):
 while it runs, no ice builds up; when it reaches 0, PSX ices again at its
@@ -1439,7 +1444,7 @@ Type IV 40 minutes, the same in snow at -3 C as in clear weather:
 checked on a real sim 2026-11-14, where it also wrote AntiIceFluid=14
 for Type I in the snow).
 
-With `--realistic-holdover`, frankenweather replaces that time with the
+By default (`--no-realistic-holdover` switches it off) frankenweather replaces that time with the
 holdover time the FAA guidelines (winter 2026-2027) give for the fluid in
 the airport's current weather:
 

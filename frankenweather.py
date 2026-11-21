@@ -583,7 +583,7 @@ _CBS_CHECK_S = 5.0            # CBS messages: look for changes this often
 _CBS_SAME_CB_NM = 20.0        # a zone's CB this far from where it was: a new CB (new id)
 _FUEL_SITU_LOAD_S = 30.0      # fuel changes this soon after a situ load: the load, not a refuel
 _FUEL_LOG_S = 600.0           # log the fuel temperature model this often
-# Fuel cooling (Cold weather page, --fuel-cooling): PSX's own, or frankenweather's
+# Fuel cooling (Cold weather page, --[no-]realistic-fuel-cooling): PSX's own, or frankenweather's
 # realistic wing tank model (fw_icing's fuel section)
 _FUEL_COOLING_MODES = ("psx", "realistic")
 # Prevent fuel freezing (Cold weather page, on by default): PSX starves the engines
@@ -2762,7 +2762,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # PSX's Icing kg as last seen or written (6 fields), the rounding left
         # over from the last write, what's going on (web/efb) and the
         # minute's sums for the log
-        self._adv_icing = False
+        self._adv_icing = True     # Advanced Icing (default on; config file, web UI, option)
         self._icing_prev: Optional[list] = None
         self._icing_carry: list = [0.0] * 6
         self._icing_prev_t = 0.0
@@ -2792,7 +2792,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         # Fuel cooling (Cold weather page): "psx" or "realistic" (the model
         # above); PSX's fuel temperature history (time.monotonic(), C) for
         # the rate, and what the Cold weather page shows about the fuel
-        self._fuel_cooling = "psx"
+        self._fuel_cooling = "realistic"   # (default; config file, web UI, option)
         # Prevent fuel freezing: keep PSX's fuel _FUEL_FREEZE_MARGIN_C above
         # its freezing point; when we last logged holding it there
         self._prevent_fuel_freezing = True
@@ -9970,11 +9970,12 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self._set_prevent_fuel_freezing(bool(cold["prevent_fuel_freezing"]), "config")
 
     def _apply_cold_weather_options(self) -> None:
-        """Apply --advanced-icing and --fuel-cooling (they win over the config file)."""
-        if self.args.advanced_icing:
-            self._set_advanced_icing(True, "--advanced-icing")
-        if self.args.fuel_cooling:
-            self._set_fuel_cooling(self.args.fuel_cooling, "--fuel-cooling")
+        """Apply --[no-]advanced-icing, --[no-]realistic-fuel-cooling (they win over the config)."""
+        if self.args.advanced_icing is not None:
+            self._set_advanced_icing(self.args.advanced_icing, "--[no-]advanced-icing")
+        if self.args.realistic_fuel_cooling is not None:
+            self._set_fuel_cooling("realistic" if self.args.realistic_fuel_cooling else "psx",
+                                   "--[no-]realistic-fuel-cooling")
         if self.args.prevent_fuel_freezing is not None:
             self._set_prevent_fuel_freezing(self.args.prevent_fuel_freezing,
                                             "--[no-]prevent-fuel-freezing")
@@ -13775,8 +13776,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "default 40:60. Farther out, in the crew's view, a change needs a margin "
                  "that shrinks with distance (docs/developers/cb-planner.md).")
         parser.add_argument(
-            '--cb-planner', action='store_true',
-            help="With --radar-cbs: the CB planner (testing) decides every minute which storms "
+            '--cb-planner', action=argparse.BooleanOptionalAction, default=True,
+            help="With --radar-cbs: the CB planner (testing, on by default; --no-cb-planner "
+                 "switches it off) decides every minute which storms "
                  "the weather zones show: one CB in each significant area of storms first, "
                  "more where they are stronger, spaced apart; a CB the crew may see changes "
                  "only for a clearly better one, never close in (--cb-startle-dist) "
@@ -13849,8 +13851,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "removed; off, it's created and removed at its full oktas. Overrides the "
                  "config file.")
         parser.add_argument(
-            '--radar-cbs', action='store_true',
-            help="The weather radar decides where CBs are (testing). Inside radar coverage "
+            '--radar-cbs', action=argparse.BooleanOptionalAction, default=True,
+            help="The weather radar decides where CBs are (testing, on by default; "
+                 "--no-radar-cbs switches it off). Inside radar coverage "
                  "(RainViewer), a zone only keeps a CB where the radar has a storm cell (43 dBZ "
                  "or more) within 20nm, and gets one where the forecast has none; METARs and "
                  "SIGMETs no longer make CBs there. A drifting CB sits exactly on its radar cell "
@@ -13880,17 +13883,19 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             '--flight-centre-report-path', default=_fw_fcreport.REPORT_PATH,
             help=argparse.SUPPRESS)
         parser.add_argument(
-            '--sat-storms', action='store_true',
-            help="With --radar-cbs, outside radar coverage: storms also near where the satellite "
+            '--sat-storms', action=argparse.BooleanOptionalAction, default=True,
+            help="With --radar-cbs (on by default; --no-sat-storms switches it off), outside "
+                 "radar coverage: storms also near where the satellite "
                  "sees a deep, cold cloud top (-40 C or colder with forecast showers, -50 C "
                  "without) over air the forecast gives thunderstorm energy (CAPE 200 J/kg or "
                  "more) (testing). Cloud tops from "
                  "Meteosat (Europe, Africa), GOES (the Americas, needs h5py) and Himawari (Asia, "
                  "Australia, the western Pacific). See docs/frankenweather.md.")
         parser.add_argument(
-            '--glm-lightning', action='store_true',
+            '--glm-lightning', action=argparse.BooleanOptionalAction, default=True,
             help="Lightning from the GOES satellites' Geostationary Lightning Mappers too "
-                 "(testing): the Americas, the Atlantic and the eastern Pacific, where MTG's "
+                 "(testing, on by default; --no-glm-lightning switches it off): the Americas, "
+                 "the Atlantic and the eastern Pacific, where MTG's "
                  "Lightning Imager doesn't see. NOAA's free files, one of about 250 KB a minute. "
                  "Needs h5py. See docs/frankenweather.md.")
         parser.add_argument(
@@ -13915,8 +13920,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "or 45 degrees off the route) switch to maneuvering until landing or a new "
                  "route. See docs/frankenweather.md.")
         parser.add_argument(
-            '--realistic-holdover', action='store_true',
-            help="Realistic anti-icing fluid holdover times (testing). When a de-icing tool "
+            '--realistic-holdover', action=argparse.BooleanOptionalAction, default=True,
+            help="Realistic anti-icing fluid holdover times (default on; "
+                 "--no-realistic-holdover switches them off). When a de-icing tool "
                  "(PSX.NET.EFB's De-Icing page) sets PSX's fixed holdover time on the ground, "
                  "frankenweather replaces it with the FAA holdover time for that fluid type in "
                  "the airport's current METAR weather (snow intensity from visibility, freezing "
@@ -13928,11 +13934,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "type each one means (I, II or IV). Other values are left alone. Default: "
                  "PSX.NET.EFB 10.2.70's (Type I 14, Type II 28, Type IV 40 minutes).")
         parser.add_argument(
-            '--fuel-cooling', choices=_FUEL_COOLING_MODES, default=None,
-            help="How the wing tank fuel cools and warms (also on the web UI's Cold weather "
-                 "page): psx (PSX's own; the default for now) or realistic (frankenweather's "
-                 "model: the fuel follows the wing skin temperature over a few hours, as "
-                 "Boeing describes it). Overrides the config file. See docs/frankenweather.md.")
+            '--realistic-fuel-cooling', action=argparse.BooleanOptionalAction, default=None,
+            help="Realistic fuel cooling (on by default; also on the web UI's Cold weather "
+                 "page): frankenweather's model, the fuel following the wing skin temperature "
+                 "over a few hours as Boeing describes it; --no-realistic-fuel-cooling leaves it "
+                 "to PSX. Overrides the config file. See docs/frankenweather.md.")
         parser.add_argument(
             '--prevent-fuel-freezing', action=argparse.BooleanOptionalAction, default=None,
             help="Keep PSX's fuel at least 2 C above its freezing point (also on the web UI's Cold "
@@ -13941,9 +13947,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "flame out), while real fuel still flows about 6 C below it. Overrides the config "
                  "file. See docs/frankenweather.md.")
         parser.add_argument(
-            '--advanced-icing', action='store_true',
-            help="Advanced Icing (testing; also switchable on the web UI's Cold weather page "
-                 "and the router's /efb page): makes "
+            '--advanced-icing', action=argparse.BooleanOptionalAction, default=None,
+            help="Advanced Icing (testing, on by default; also switchable on the web UI's Cold "
+                 "weather page and the router's /efb page; this option overrides the config "
+                 "file): makes "
                  "PSX's in-flight icing realistic. PSX ices at one moderate rate in any cloud "
                  "below +9 C TAT; frankenweather keeps only the realistic share of that ice (none "
                  "above +2 C TAT, trace to light in most layer cloud, more in convective cloud, "
@@ -14102,8 +14109,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             parser.error(f"--holdover-efb-minutes: {exc}")
         if self.args.realistic_holdover:
             self._holdover_status = "waiting for a de-icing"
-        if self.args.advanced_icing:
-            self._adv_icing = True
+        if self.args.advanced_icing is not None:
+            self._adv_icing = self.args.advanced_icing
+        if self._adv_icing:
             self._icing_status = "on"
 
     # (arg_name, replacement_hint or None for the generic "just remove it" message)

@@ -8,6 +8,9 @@ a = Analysis(
     hiddenimports=[
         # rasterio is imported lazily inside frankenturb — invisible to Analysis
         'rasterio',
+        # h5py: GOES lightning and cloud-top files (fw_glm, fw_geosat; on by default since
+        # 2026-11-21); imported in a try block and inside functions
+        'h5py',
         # frankenturb/ package: name collision with frankenturb.py may prevent recursive scan
         'frankenturb',
         'frankenturb.boost',

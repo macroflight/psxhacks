@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **New defaults for testing (switch any of them off if needed):** the
+  weather radar decides where CBs are, the CB planner places them, GOES
+  lightning (the Americas) and satellite storms (outside radar coverage)
+  are on, and so are Advanced Icing and realistic fuel cooling. A config
+  file saved earlier with Advanced Icing off or PSX fuel cooling keeps
+  those. `--fuel-cooling` is replaced by `--realistic-fuel-cooling` /
+  `--no-realistic-fuel-cooling`. The Windows build includes h5py (GOES).
+- **Realistic de-icing holdover times (new default, testing).** After a
+  de-icing (such as PSX.NET.EFB's De-Icing page), the anti-icing fluid
+  lasts as long as the FAA holdover tables give for the fluid type in the
+  airport's current weather, instead of the tool's fixed time.
 - **CB planner (testing): a CB the crew can see keeps its storm's worth,**
   so it goes only for a clearly stronger storm (one went 101 nm away in
   view because its storm area counted as weak).
