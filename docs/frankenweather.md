@@ -1618,6 +1618,47 @@ default; toggleable from the `/weather/enroute-wind` web page (or the
   wind state including the diff. Reset when the FMC route is cleared,
   so the next flight starts a fresh pair of files.
 
+### Flight Centre report (on by default)
+
+frankenweather sends PSCC Flight Centre what it decided and why, so a
+flight's weather can be checked afterwards (did it do a good job?) without
+the sim's own log files:
+
+- **its settings**, at the start and whenever one changes: every command-line,
+  config-file and web UI setting, without API keys, logon codes, key files,
+  webhooks, passwords, proxies or local paths (only settings with plain names
+  and values get through, so a new secret option can't leak);
+- **every weather decision with its reason**: frankenweather's log lines (each
+  zone move, CB placed, removed, kept or kept at its size, maneuvering and
+  route mode changes, icing and fuel events), every 30 seconds;
+- **a status snapshot** every minute: what the `/devel` status page shows
+  (the aircraft, the seven zones with why each is where it is, the CBs, the
+  storms, the planner's moves, how fresh the radar, satellite and lightning
+  data are).
+
+That is under 0.5 MB an hour, compressed. Flight Centre keeps it for the
+flight and 48 hours after it; the sim's owner sees it on the sim's page
+there.
+
+- **The logon code:** the sim's code from Flight Centre's "My sim" page, the
+  same one frankenpush uses: `--logon-code-file FILE` (preferred: not in the
+  process list) or `--logon-code CODE`. A code given once is remembered for
+  later runs with the same `--portal-url`
+  (`~/.cache/frankenweather/flight_centre.json`, only readable by you), so a
+  test site's code never goes to the live Flight Centre. Without a code frankenweather logs a warning and runs normally,
+  without reports.
+- **On or off:** the web UI's Config page (saved in the config file,
+  `[flight_centre]` `report`), or `--no-flight-centre-report` /
+  `--flight-centre-report`, which override both.
+- **Flight Centre not answering:** the report waits on disk
+  (`~/.cache/frankenweather/fc_reports`, at most 50 MB, the oldest goes first)
+  and is sent when Flight Centre is back (tried every 10 seconds for a minute,
+  then every 5 minutes), so nothing is lost and the weather isn't affected.
+  The Config page and the log say what it is doing.
+- `--portal-url` sets Flight Centre's address (default
+  `https://mkro.se/flightcentre`). The format is in
+  [developers/flight-centre-reports.md](developers/flight-centre-reports.md).
+
 ### Configuration file
 
 `--config-file PATH` points frankenweather at a TOML file holding every

@@ -560,6 +560,11 @@
 #$FrankenweatherOptions = @("--web-port=9999", "--config-file=C:\fs\frankenweather.toml")
 # Add "--turb-profile=testing" (or "--turb-profile=stable") to choose the
 # turbulence profile here, overriding the one saved in the config file.
+# The Flight Centre flight report (on by default) needs the sim's logon code,
+# the same one FrankenPush uses (from a file, so it isn't in the process list):
+#$FrankenweatherOptions += @("--logon-code-file=C:\fs\flightcentre-logon-code.txt")
+# or switch the report off: "--no-flight-centre-report" (also on the web UI's
+# Config page, saved in the config file).
 #$FrankenweatherRepo    = $null
 
 

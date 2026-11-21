@@ -85,6 +85,7 @@ import fw_cbmsg as _fw_cbmsg  # pylint: disable=wrong-import-order
 import fw_route as _fw_route  # pylint: disable=wrong-import-order
 import fw_radar as _fw_radar  # pylint: disable=wrong-import-order
 import fw_storms as _fw_storms  # pylint: disable=wrong-import-order
+import fw_fcreport as _fw_fcreport
 import fw_geosat as _fw_geosat
 import fw_glm as _fw_glm
 import fw_lightning as _fw_lightning  # pylint: disable=wrong-import-order
@@ -2173,6 +2174,9 @@ _CONFIG_COLD_WEATHER_FIELDS = (
     ("advanced_icing", "_adv_icing", bool),
     ("prevent_fuel_freezing", "_prevent_fuel_freezing", bool),
 )
+_CONFIG_FLIGHT_CENTRE_FIELDS = (
+    ("report", "_fc_report_on", bool),
+)
 _CONFIG_CB_LIFE_CYCLE_FIELDS = (
     ("height", "_cb_cycle_height", bool),
     ("oktas", "_cb_cycle_oktas", bool),
@@ -2771,6 +2775,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._fuel_model_c: Optional[float] = None
         # --cb-planner: {zone: the position the planner turned its CB off at}
         self._planner_off: dict = {}
+        self._fc_log = _fw_fcreport.LogBuffer()        # the flight report's log lines
+        self._fc_logon_code: Optional[str] = None
+        self._fc_report_on = True     # the flight report (Config page, [flight_centre], option)
+        self._fc_status = ""          # what the flight report is doing (Config page)
         self._cb_frozen_logged: dict = {}   # _freeze_visible_cb(): the size last logged per zone
         self._fuel_uplift_c: Optional[float] = None   # this refuelling's supply temperature
         self._fuel_uplift_t = 0.0
@@ -4104,6 +4112,14 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             self._timesync_on_situ_load = bool(cmd["timesync_on_situ_load"])
             self.logger.info("timesync_on_situ_load → %s", self._timesync_on_situ_load)
             settings_changed = True
+        if "flight_centre_report" in cmd:
+            self._fc_report_on = bool(cmd["flight_centre_report"])
+            self.logger.info("Flight Centre reports: %s (web)",
+                             "on" if self._fc_report_on else "off")
+            if self._fc_report_on and not self._fc_logon_code:
+                self.logger.warning("Flight Centre reports: on, but no logon code "
+                                    "(--logon-code or --logon-code-file): not sending")
+            settings_changed = True
         if "timesync_periodic" in cmd:
             self._timesync_periodic = bool(cmd["timesync_periodic"])
             self.logger.info("timesync_periodic → %s", self._timesync_periodic)
@@ -4537,6 +4553,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 key: getattr(self, attr) for key, attr, _cast in _CONFIG_COLD_WEATHER_FIELDS},
             "cb_life_cycle": {
                 key: getattr(self, attr) for key, attr, _cast in _CONFIG_CB_LIFE_CYCLE_FIELDS},
+            "flight_centre": {
+                key: getattr(self, attr) for key, attr, _cast in _CONFIG_FLIGHT_CENTRE_FIELDS},
             "manual_weather": {
                 key: self._manual_wx_params[key] for key in _CONFIG_MANUAL_WX_FIELDS},
             "turbulence": {key: getattr(self, attr) for key, attr, _cast in _CONFIG_TURB_FIELDS},
@@ -4573,7 +4591,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         """Return True if any _weather_settings() differ from their startup values."""
         return self._weather_settings(self._build_config_dict()) != self._startup_weather_settings()
 
-    def _apply_config_dict(self, config: dict) -> None:  # pylint: disable=too-many-branches,too-many-locals
+    def _apply_config_dict(self, config: dict) -> None:  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
         """Apply a loaded config-file dict onto runtime state; reconciles side effects after."""
         old_mode = self._fw_mode
         general = config.get("general", {})
@@ -4626,6 +4644,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         for key, attr, cast in _CONFIG_CB_LIFE_CYCLE_FIELDS:
             if key in life:
                 setattr(self, attr, cast(life[key]))
+        fc_cfg = config.get("flight_centre", {})
+        for key, attr, cast in _CONFIG_FLIGHT_CENTRE_FIELDS:
+            if key in fc_cfg:
+                setattr(self, attr, cast(fc_cfg[key]))
 
         manual_wx = config.get("manual_weather", {})
         for key in _CONFIG_MANUAL_WX_FIELDS:
@@ -12309,6 +12331,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             "timesync_on_startup": self._timesync_on_startup,
             "timesync_on_situ_load": self._timesync_on_situ_load,
             "timesync_periodic": self._timesync_periodic,
+            "flight_centre_report": self._fc_report_on,
+            "flight_centre_status": self._fc_status,
             "use_sigmets": self._use_sigmets,
             "sigmet_enabled": self._sigmet_enabled,
             "sigmet_own": self._sigmet_own,
@@ -12544,6 +12568,149 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     self.logger.info("WxClust: parking the planet CB cells at Null Island")
                 self.psx_send_and_set("WxClust", _WXCLUST_PARKED)
                 parked += 1
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
+            self.logger.critical(traceback.format_exc())
+
+    def _fc_start(self) -> None:
+        """Read the Flight Centre logon code for the flight report; warn if it's on without one.
+
+        On or off: the Config page / [flight_centre] report, overridden by
+        --flight-centre-report / --no-flight-centre-report.
+        """
+        if self.args.flight_centre_report is not None:
+            self._fc_report_on = self.args.flight_centre_report
+        try:
+            self._fc_logon_code, source = _fw_fcreport.read_logon_code(
+                self.args.logon_code, self.args.logon_code_file, self.args.portal_url)
+        except OSError as exc:
+            raise SystemExit(f"--logon-code-file {self.args.logon_code_file}: {exc}") from exc
+        if not self._fc_report_on:
+            self.logger.info("Flight Centre reports: off")
+        elif self._fc_logon_code:
+            self.logger.info("Flight Centre reports: on, to %s (logon code %s)",
+                             self.args.portal_url, source)
+        else:
+            self.logger.warning(
+                "Flight Centre reports: no logon code (--logon-code or --logon-code-file, the "
+                "sim's code from Flight Centre's \"My sim\" page): not sending any; "
+                "--no-flight-centre-report switches them off")
+
+    def _fc_session_body(self) -> dict:
+        """Return a Flight Centre report "session" batch's body (fw_fcreport)."""
+        try:
+            config = self._build_config_dict()
+        except Exception:  # pylint: disable=broad-exception-caught
+            config = {}
+        return {"fw_version": __version__,
+                "flight": {"dep": self.fmc_dep_icao, "dst": self.fmc_dst_icao},
+                "settings": {"options": _fw_fcreport.safe_settings(vars(self.args)),
+                             "config": _fw_fcreport.safe_settings(config)}}
+
+    async def flight_centre_report_coro(self) -> None:  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
+        """Send the flight report to Flight Centre: settings, decisions, snapshots (fw_fcreport).
+
+        Every LOG_EVERY_S the log lines so far, every SNAPSHOT_EVERY_S a
+        snapshot of the /devel status data, and a "session" batch at the start
+        and when a setting changes, all queued on disk and sent oldest first.
+        Flight Centre not answering: tried every RETRY_S for GIVE_UP_S, then
+        again after BACKOFF_S; the logon code refused: after
+        REFUSED_BACKOFF_S. Off (--no-flight-centre-report) or without a logon
+        code: nothing (the warning came at the start).
+        """
+        myname = inspect.currentframe().f_code.co_name
+        try:
+            self.logger.debug("Starting %s", myname)
+            report = _fw_fcreport.Report()
+            url = self.args.portal_url.rstrip("/") + self.args.flight_centre_report_path
+            headers = {"Authorization": f"Bearer {self._fc_logon_code}",
+                       "Content-Type": "application/json", "Content-Encoding": "gzip"}
+            next_log = next_snap = next_session = time.monotonic()
+            next_send, failing_since = 0.0, None
+            sent_ok = False
+            loop = asyncio.get_running_loop()
+            async with aiohttp.ClientSession() as session:
+                while True:
+                    now = time.monotonic()
+                    if not self._fc_report_on or not self._fc_logon_code:
+                        self._fc_log.take()   # nothing kept while off
+                        self._fc_status = ("off" if not self._fc_report_on else
+                                           "no logon code (--logon-code-file): not sending")
+                        report.last_settings = None   # a new "session" when it's on again
+                        await asyncio.sleep(5.0)
+                        continue
+                    if now >= next_session:
+                        next_session = now + _fw_fcreport.SESSION_CHECK_S
+                        report.session_if_changed(self._fc_session_body())
+                    if now >= next_log:
+                        next_log = now + _fw_fcreport.LOG_EVERY_S
+                        lines = self._fc_log.take()
+                        if lines:
+                            report.add("log", {"lines": lines})
+                    if now >= next_snap:
+                        next_snap = now + _fw_fcreport.SNAPSHOT_EVERY_S
+                        if self.ac_lat is not None:
+                            devel = await loop.run_in_executor(None, self._devel_map_data)
+                            report.add("snapshot", {"data": _fw_fcreport.snapshot_of(devel)})
+                    while now >= next_send:
+                        names, body = report.next_post()
+                        if not names:
+                            break
+                        why, retry_after = "", None
+                        try:
+                            async with session.post(url, data=body, headers=headers,
+                                                    timeout=aiohttp.ClientTimeout(total=30)) as r:
+                                status = r.status
+                                retry_after = r.headers.get("Retry-After")
+                        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as exc:
+                            status, why = None, str(exc) or type(exc).__name__
+                        if status is not None and 200 <= status < 300:
+                            for name in names:
+                                report.done(name)
+                            if failing_since is not None or not sent_ok:
+                                self.logger.info("Flight Centre reports: sending (%d batch(es) "
+                                                 "waiting)", len(report.pending()))
+                            failing_since, sent_ok = None, True
+                            self._fc_status = f"sending to {self.args.portal_url}"
+                            continue
+                        if status == 401:
+                            self.logger.warning("Flight Centre reports: the logon code was "
+                                                "refused (HTTP 401); trying again in %.0f min",
+                                                _fw_fcreport.REFUSED_BACKOFF_S / 60.0)
+                            self._fc_status = "the logon code was refused (HTTP 401)"
+                            next_send = now + _fw_fcreport.REFUSED_BACKOFF_S
+                            break
+                        if status in (429, 507):   # too often / this sim's store full
+                            try:
+                                wait = max(_fw_fcreport.RETRY_S, float(retry_after))
+                            except (TypeError, ValueError):
+                                wait = _fw_fcreport.BACKOFF_S
+                            self.logger.info("Flight Centre reports: HTTP %d, trying again in "
+                                             "%.0f s", status, wait)
+                            next_send = now + wait
+                            break
+                        if status in (400, 413):   # not acceptable as it is: never again
+                            self.logger.warning("Flight Centre reports: %d batch(es) not accepted "
+                                                "(HTTP %d), dropped", len(names), status)
+                            for name in names:
+                                report.done(name)
+                            continue
+                        if status is not None:
+                            why = f"HTTP {status}"
+                        failing_since = failing_since or now
+                        if now - failing_since >= _fw_fcreport.GIVE_UP_S:
+                            self.logger.info("Flight Centre reports: not answering (%s); %d "
+                                             "batch(es) kept, trying again in %.0f min", why,
+                                             len(report.pending()),
+                                             _fw_fcreport.BACKOFF_S / 60.0)
+                            self._fc_status = (f"Flight Centre not answering ({why}): "
+                                               f"{len(report.pending())} batch(es) waiting")
+                            failing_since = None
+                            next_send = now + _fw_fcreport.BACKOFF_S
+                        else:
+                            next_send = now + _fw_fcreport.RETRY_S
+                        break
+                    await asyncio.sleep(5.0)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.critical("Unhandled exception %s in %s, shutting down", exc, myname)
             self.logger.critical(traceback.format_exc())
@@ -13528,6 +13695,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                     ("OwnSigmet", self.own_sigmet_coro),
                     ("SigmetStateBroadcast", self.sigmetstate_broadcast_coro),
                     ("LogFlush", self.log_flush_coro),
+                    ("FlightCentreReport", self.flight_centre_report_coro),
                 ]
                 coros += [
                     ("TurbulenceTask", self.turbulence_coro),
@@ -13689,6 +13857,28 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                  "and moves with the cell's tracked motion, and fades when the cell is gone. "
                  "Outside radar coverage nothing changes. Needs Pillow. See "
                  "docs/frankenweather.md.")
+        parser.add_argument(
+            '--flight-centre-report', action=argparse.BooleanOptionalAction, default=None,
+            help="Send the flight report to PSCC Flight Centre (default on; also on the web UI's "
+                 "Config page and in the config file, [flight_centre] report; this option "
+                 "overrides both): the settings (no "
+                 "keys or codes), every weather decision with its reason, and a status snapshot "
+                 "a minute, so a flight's weather can be checked later. Needs the sim's logon "
+                 "code (--logon-code or --logon-code-file); without it: a warning, no reports. "
+                 "See docs/frankenweather.md.")
+        parser.add_argument(
+            '--logon-code', default=None, metavar='CODE',
+            help="The sim's Flight Centre logon code (\"My sim\" page), the same as "
+                 "frankenpush's; remembered for later runs. Prefer --logon-code-file.")
+        parser.add_argument(
+            '--logon-code-file', default=None, metavar='FILE',
+            help="Read the Flight Centre logon code from this file.")
+        parser.add_argument(
+            '--portal-url', default='https://mkro.se/flightcentre', metavar='URL',
+            help="Flight Centre's address (default https://mkro.se/flightcentre).")
+        parser.add_argument(
+            '--flight-centre-report-path', default=_fw_fcreport.REPORT_PATH,
+            help=argparse.SUPPRESS)
         parser.add_argument(
             '--sat-storms', action='store_true',
             help="With --radar-cbs, outside radar coverage: storms also near where the satellite "
@@ -13960,7 +14150,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if _OM_CLIENT.paid:
             self.logger.info("Open-Meteo: using the paid customer API")
 
-    async def run(self) -> None:
+    async def run(self) -> None:  # pylint: disable=too-many-statements
         """Entry point."""
         self.handle_args()
 
@@ -13986,6 +14176,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self.logger = logging.getLogger(__MYNAME__)
         logging.getLogger().addHandler(_ColdEventHandler(self._cold_events))
         logging.getLogger().addHandler(_ZoneEventHandler(self._zone_events))
+        logging.getLogger().addHandler(self._fc_log)   # emptied unused while the report is off
         if self.args.debug:
             self.logger.setLevel(logging.DEBUG)
         if self._event_log_path:
@@ -14012,6 +14203,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._turb_gairmet_fetcher = GairmetFetcher()
         self.logger.info("Turbulence engine initialized")
         self._load_config_file()
+        self._fc_start()
         self._apply_cold_weather_options()
         self._load_sigmet_types()
         self._apply_turb_profile_option()      # also without a config file

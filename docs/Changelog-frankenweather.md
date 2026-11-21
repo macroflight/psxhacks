@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Flight Centre report (new default).** frankenweather sends PSCC Flight
+  Centre its settings (no keys or codes), every weather decision with its
+  reason and a status snapshot a minute, so a flight's weather can be checked
+  afterwards. It needs the sim's logon code, the same one frankenpush uses
+  (`--logon-code-file` or `--logon-code`); without one it logs a warning and
+  runs normally. On the web UI's Config page and in the config file.
 - **A CB the crew may see keeps its size:** its oktas, base and top no
   longer change while it is in view (the radar re-sizing its storm made a
   CB go from 6 to 3 oktas in view); the new size comes once it is out of

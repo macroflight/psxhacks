@@ -1466,7 +1466,7 @@ def _config_file_html(cfg: dict) -> str:
     return body
 
 
-def _build_weather_config_page(ctx):
+def _build_weather_config_page(ctx):  # pylint: disable=too-many-locals
     """Render the /weather/config page: the config file (save/load/reset) and time sync."""
     color_scheme = ctx.color_scheme
     state = ctx.fw_state
@@ -1530,6 +1530,21 @@ def _build_weather_config_page(ctx):
         '</td></tr>\n'
         '</table>\n</div>\n'
     )
+    if 'flight_centre_report' in cfg:
+        fc_on = bool(cfg.get('flight_centre_report'))
+        body += (
+            '<h2>Flight Centre report</h2>\n'
+            '<p class="note">Sends frankenweather\'s settings (no keys or codes), every weather '
+            'decision with its reason and a status snapshot a minute to PSCC Flight Centre, so a '
+            'flight\'s weather can be checked afterwards. Uses the sim\'s logon code (the same as '
+            'frankenpush\'s). Saved in the config file.</p>\n'
+            '<div class="card ok">\n<table>\n'
+            '<tr><td style="padding-right:0.8em">Send the flight report<br>'
+            '<span style="font-size:0.82em;color:#64748b">' +
+            _esc(cfg.get('flight_centre_status') or '') + '</span></td><td>' +
+            _toggle('flight_centre_report', 'false' if fc_on else 'true',
+                    'ON' if fc_on else 'OFF', fc_on) +
+            '</td></tr>\n</table>\n</div>\n')
     if getattr(ctx, 'event_log_dir', None):
         body += _event_logs_html(ctx)
     return _page(body)
@@ -2974,7 +2989,8 @@ def register_weather_routes(routes, ctx):  # pylint: disable=too-many-statements
     async def _weather_config_post(request):
         data = await request.post()
         cmd = {}
-        for field in ('timesync_on_startup', 'timesync_on_situ_load', 'timesync_periodic'):
+        for field in ('timesync_on_startup', 'timesync_on_situ_load', 'timesync_periodic',
+                      'flight_centre_report'):
             if field in data:
                 cmd[field] = data[field].lower() == 'true'
         if cmd:
