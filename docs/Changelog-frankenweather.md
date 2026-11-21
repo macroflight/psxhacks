@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Drifting CBs no longer jump** when the radar loses their storm for a
+  frame (as along Turkey's coast): they catch up with the storm at most
+  60 kt faster than it moves (live flight 2026-11-20: jumps up to 11 nm).
+- **A CB whose storm died on the radar no longer vanishes close ahead:**
+  after its 30 minutes in view it stays while it is within 60 nm (live
+  flight 2026-11-21: one went 32 nm ahead).
 - **A SID or STAR that turns back on itself no longer counts as a hold.**
   Within 10 nm of the FMC route only the turns the route doesn't explain
   count towards maneuvering mode, so a departure turn of 180° or a few

@@ -483,6 +483,8 @@ _ICING_FZ_METAR_NM = 30.0
 _FUEL_WRITE_MIN_S = 60.0      # Advanced Icing fuel temperature: write PSX's at most this often
 _FUEL_JUMP_C = 5.0            # PSX's own fuel temperature this far off: a situation load, adopt it
 _FUEL_JUMP_KG = 3000.0        # fuel this much lower in one step: a situation load, start over
+_DRIFT_CATCHUP_KT = 60.0      # a drifting CB catches up with its storm at most this much faster
+_DRIFT_CATCHUP_MIN_NM = 0.3   # ... and at least this far a step
 _FUEL_UPLIFT_GAP_S = 300.0    # refuelling this long ago ended: the next one draws a new temperature
 _ROUTE_TRACK_S = 30.0         # --route-zones: the track over the ground over this long
 _ROUTE_TRACK_MAX_S = 60.0     # ... at most this long
@@ -8389,13 +8391,19 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
     def _dead_storm_cb_ends(self, zone_num: int, cell, now: float) -> bool:
         """Return True if a dead storm's CB (cell.dead_since) starts to decay now.
 
-        Out of the crew's view, or kept _DEAD_STORM_KEEP_S: it decays as any CB
-        does (the CB life-cycle settings decide how). Kept: alive meanwhile.
+        Out of the crew's view, or kept _DEAD_STORM_KEEP_S (but never within
+        fw_planner.hard_nm(big) of the aircraft): it decays as any CB does (the
+        CB life-cycle settings decide how). Kept: alive meanwhile.
         """
         why = None
+        near = (self.ac_lat is not None and
+                self._dist_nm(self.ac_lat, self.ac_lon, cell.lat, cell.lon) <=
+                _fw_planner.hard_nm(True))
         if not self._in_crew_view(cell.lat, cell.lon):
             why = "its radar cell is gone, and it is out of view now"
-        elif now - cell.dead_since > _DEAD_STORM_KEEP_S:
+        elif now - cell.dead_since > _DEAD_STORM_KEEP_S and not near:
+            # never this near the aircraft: no CB goes within the planner's hard distance
+            # (one went 32 nm ahead after 30 min, FTECH1 2026-11-21): kept until out of view
             why = f"its radar cell is gone, kept {_DEAD_STORM_KEEP_S / 60.0:.0f} min in view"
         if why is None:
             cell.lifetime_s = max(cell.lifetime_s, cell.age_s + 60.0)
@@ -8601,7 +8609,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             if on_radar or moving or cell.test:
                 old = (cell.lat, cell.lon, cell.moved_nm)
                 if on_radar:   # where its storm is (the same in every sim), on the ground too
-                    cell.lat, cell.lon = self._radar_cell_now(cell.radar_cell)
+                    cell.lat, cell.lon = self._drift_towards(
+                        old[0], old[1], *self._radar_cell_now(cell.radar_cell),
+                        cell.speed_kt, dt_s * accel)
                     cell.moved_nm += self._dist_nm(old[0], old[1], cell.lat, cell.lon)
                 else:
                     cell.step(self.geod, dt_s * accel)   # the drift is in sim time
@@ -11031,6 +11041,24 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                              f"{_fw_drift.pos_text(c.lat, c.lon)} {c.max_dbz} dBZ" +
                              (f" {c.motion[0]:03.0f}/{c.motion[1]:.0f}kt" if c.motion else "")
                              for c in cbs[:3]) if cbs else "")
+
+    def _drift_towards(self, lat: float, lon: float, tlat: float, tlon: float,  # pylint: disable=too-many-arguments,too-many-positional-arguments
+                       speed_kt: float, dt_s: float) -> tuple:
+        """Return a drifting CB's next position: its storm's, but never faster than plausible.
+
+        At most _DRIFT_CATCHUP_KT faster than the storm moves (and at least
+        _DRIFT_CATCHUP_MIN_NM a step), so a correction glides: when the radar
+        lost a storm's link to the frame before (a frame without it, a new
+        cell number) its position came without the blend and the CB jumped,
+        up to 11 nm at 177 nm and 3 nm at 45-95 nm (FTECH1 2026-11-20).
+        """
+        dist = self._dist_nm(lat, lon, tlat, tlon)
+        step = max(_DRIFT_CATCHUP_MIN_NM, (speed_kt + _DRIFT_CATCHUP_KT) * dt_s / 3600.0)
+        if dist <= step:
+            return tlat, tlon
+        az, _, _ = self.geod.inv(lon, lat, tlon, tlat)
+        nlon, nlat, _ = self.geod.fwd(lon, lat, az, step * _NM_TO_M)
+        return nlat, nlon
 
     def _radar_cell_now(self, cell) -> tuple:
         """Return where a radar cell's storm is now, the same in every frankenweather.

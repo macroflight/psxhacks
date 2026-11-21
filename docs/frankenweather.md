@@ -457,8 +457,9 @@ the same picture VATSIM Radar can show) decides where the CBs are.
   farther away, are used for new storms. A CB goes once it is behind, or
   when its own storm dies on the radar: then it stays while the crew may see
   it (in that range, within 90° of the heading, also while turning), at most
-  30 minutes, and goes once it is out of view (shrinking away only with the
-  CB oktas life cycle on).
+  30 minutes (longer while it is within 60 nm of the aircraft: it never goes
+  that near, live 2026-11-21 one went 32 nm ahead), and goes once it is out
+  of view (shrinking away only with the CB oktas life cycle on).
 - **No new CB appears where the crew may see it:** within `--cb-visible-dist`
   (200 nm) and 120° either side of the nose (the side windows too;
   `--cb-visible-angle`, as many sims show less), or within
@@ -505,7 +506,11 @@ the same picture VATSIM Radar can show) decides where the CBs are.
   cell has been tracked over the three frames, 20 minutes; otherwise it
   stays where the frame has it). On a new frame the CB moves smoothly, over
   10 minutes, from where the frame before puts the storm to where the new
-  one does, so it never jumps. This works at any altitude, even while
+  one does, so it never jumps. When the radar loses the storm's link to the
+  frame before (a frame without it, as where a national radar drops out),
+  the new position comes without that blend; the CB then catches up at
+  most 60 kt faster than the storm moves, so it glides there over a few
+  minutes instead of jumping (up to 11 nm, FTECH1 2026-11-20). This works at any altitude, even while
   maneuvering. The CB stays alive as long as the radar has the cell, and
   fades when the cell is gone (or more than 12 nm away).
 - **Outside radar coverage** (oceans, most of Africa, Russia, polar areas),
