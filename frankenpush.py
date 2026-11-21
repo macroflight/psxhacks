@@ -2265,6 +2265,13 @@ class Script():  # pylint: disable=too-many-instance-attributes
                  "omit this option on subsequent runs to use the cached value.",
         )
         parser.add_argument(
+            '--logon-code-file',
+            type=str, action='store', default=None, metavar='FILE',
+            help="Read the logon code from this file instead (it then isn't in the process list "
+                 "or the start script); the same file frankenweather's --logon-code-file reads. "
+                 "Saved to frankenpush_cache.json like --logon-code.",
+        )
+        parser.add_argument(
             '--logon-key',
             type=str, action='store', default=None, dest='logon_code',
             help="Deprecated alias for --logon-code.",
@@ -2329,6 +2336,19 @@ class Script():  # pylint: disable=too-many-instance-attributes
                       f"overrides --psx-port={self.args.psx_port}", file=sys.stderr)
             self.args.psx_port = self.args.psx_port_override
 
+        if not self.args.logon_code and self.args.logon_code_file:
+            try:
+                with open(pathlib.Path(self.args.logon_code_file).expanduser(),
+                          encoding="utf-8") as fh:
+                    self.args.logon_code = fh.read().strip() or None
+            except OSError as exc:
+                print(f"ERROR: --logon-code-file {self.args.logon_code_file}: {exc}",
+                      file=sys.stderr)
+                sys.exit(1)
+            if not self.args.logon_code:
+                print(f"ERROR: --logon-code-file {self.args.logon_code_file} is empty",
+                      file=sys.stderr)
+                sys.exit(1)
         if self.args.logon_code:
             # Explicitly provided — persist for future runs.
             _save_cached_logon_code(self.args.logon_code)

@@ -576,6 +576,8 @@
 # ---------------------------------------------------------------------------
 #$StartFrankenpush  = $true   # FrankenPush
 #$FrankenpushOptions  = @("--simevents","--logon-code=CHANGEME","--upload-autosave-from=C:\fs\psx\Aerowinx\Situations")
+# Instead of --logon-code: "--logon-code-file=C:\fs\flightcentre-logon-code.txt" (not in the
+# process list; the same file FrankenWeather's --logon-code-file can read)
 # PinguEye (Flight Centre radar display) traffic from the PSX.NET.vPilot plugin on the vPilot PC (opt-in):
 #$FrankenpushOptions += @("--vpilot-api=ws://192.168.1.20:10781/api/v1/events")
 # PinguEye formation autopilot: let Flight Centre fly the MCP into formation (opt-in):

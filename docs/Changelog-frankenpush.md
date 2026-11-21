@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **`--logon-code-file FILE`:** the logon code from a file, so it isn't in
+  the process list or the start script (the same file frankenweather's
+  `--logon-code-file` reads).
 - **The weather is no longer in the Flight Centre telemetry:** frankenweather
   now sends its own, fuller flight report to Flight Centre (same logon code),
   so frankenpush's `weather` part (zones, CBs, turbulence) is gone.
