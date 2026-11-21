@@ -1,6 +1,6 @@
 # frankenpush changelog
 
-## Unreleased
+## 1.7.0 (2026-11-21)
 
 - **`--logon-code-file FILE`:** the logon code from a file, so it isn't in
   the process list or the start script (the same file frankenweather's
