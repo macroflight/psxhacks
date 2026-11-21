@@ -1,6 +1,6 @@
 # frankenpilot changelog
 
-## Unreleased
+## 0.3.0 (2026-11-21)
 
 - Wing anti-ice switched on at >ICING WING no longer stays on for the rest
   of the flight: the "clear of cloud" time now starts when the ice
