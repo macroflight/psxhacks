@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **The weather is no longer in the Flight Centre telemetry:** frankenweather
+  now sends its own, fuller flight report to Flight Centre (same logon code),
+  so frankenpush's `weather` part (zones, CBs, turbulence) is gone.
 - **Formation autopilot: FLCH and Flight Centre's V/S.** Altitude changes
   are flown the way Flight Centre commands: FLCH for big changes (the
   speed held by pitch), V/S at its rate (500-3,000 ft/min) for small ones

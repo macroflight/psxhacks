@@ -21,20 +21,11 @@ with it.
 
 ## Weather for Flight Centre
 
-When frankenweather runs on the same network, frankenpush adds its weather to
-the telemetry as `weather`:
-
-- `zones`: the seven weather zones (zone, ICAO, lat, lon, source, the
-  description frankenweather's web UI shows);
-- `cbs`, `cbs_time`, `tropopause_ft`: every CB, as in frankenweather's
-  CB messages ([format](developers/frankenweather-cb-messages.md));
-- `turbulence`: what shakes the aircraft now (`kind`, `intensity` 0-1,
-  `reason`).
-
-It goes in every full update, and in between when it changes: a new CB message,
-zones moved or changed, or a turbulence change of 0.05 or more. Weather older
-than 5 minutes (frankenweather stopped) isn't sent. Needs a frankenrouter that
-passes frankenweather's messages to frankenpush (this version's).
+frankenpush no longer uploads frankenweather's weather (since 2026-11-21):
+frankenweather sends its own flight report to Flight Centre, with the same
+zones and CBs and much more (its settings, every decision with its reason, a
+status snapshot a minute), using the same logon code. See
+[frankenweather](frankenweather.md).
 
 ## PinguEye: vPilot traffic for Flight Centre's radar display (opt-in)
 
