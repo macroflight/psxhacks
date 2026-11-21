@@ -1,5 +1,11 @@
 # start_scripts changelog
 
+## 1.14.2 (2026-11-21)
+
+- The override example shows frankenweather's and frankenpush's
+  `--logon-code-file` (the Flight Centre logon code from a file) and
+  frankenweather's `--no-flight-centre-report`.
+
 ## 1.14.1 (2026-11-13)
 
 - The override example file has commented examples for frankenpush's
