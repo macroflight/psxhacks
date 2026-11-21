@@ -9973,6 +9973,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         """Apply --[no-]advanced-icing, --[no-]realistic-fuel-cooling (they win over the config)."""
         if self.args.advanced_icing is not None:
             self._set_advanced_icing(self.args.advanced_icing, "--[no-]advanced-icing")
+        if self.args.realistic_fuel_cooling is None and self.args.fuel_cooling:
+            self.logger.warning("--fuel-cooling is replaced by --realistic-fuel-cooling / "
+                                "--no-realistic-fuel-cooling; still applied this time")
+            self._set_fuel_cooling(self.args.fuel_cooling, "--fuel-cooling")
         if self.args.realistic_fuel_cooling is not None:
             self._set_fuel_cooling("realistic" if self.args.realistic_fuel_cooling else "psx",
                                    "--[no-]realistic-fuel-cooling")
@@ -13933,6 +13937,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             help="With --realistic-holdover: the times the de-icing tool sets, and the fluid "
                  "type each one means (I, II or IV). Other values are left alone. Default: "
                  "PSX.NET.EFB 10.2.70's (Type I 14, Type II 28, Type IV 40 minutes).")
+        parser.add_argument(   # retired 2026-11-21: still applied, with a warning
+            '--fuel-cooling', choices=_FUEL_COOLING_MODES, default=None, help=argparse.SUPPRESS)
         parser.add_argument(
             '--realistic-fuel-cooling', action=argparse.BooleanOptionalAction, default=None,
             help="Realistic fuel cooling (on by default; also on the web UI's Cold weather "

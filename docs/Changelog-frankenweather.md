@@ -8,7 +8,7 @@
   are on, and so are Advanced Icing and realistic fuel cooling. A config
   file saved earlier with Advanced Icing off or PSX fuel cooling keeps
   those. `--fuel-cooling` is replaced by `--realistic-fuel-cooling` /
-  `--no-realistic-fuel-cooling`. The Windows build includes h5py (GOES).
+  `--no-realistic-fuel-cooling` (still accepted for now, with a warning). The Windows build includes h5py (GOES).
 - **Realistic de-icing holdover times (new default, testing).** After a
   de-icing (such as PSX.NET.EFB's De-Icing page), the anti-icing fluid
   lasts as long as the FAA holdover tables give for the fluid type in the
