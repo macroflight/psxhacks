@@ -460,6 +460,17 @@ the same picture VATSIM Radar can show) decides where the CBs are.
   30 minutes (longer while it is within 60 nm of the aircraft: it never goes
   that near, live 2026-11-21 one went 32 nm ahead), and goes once it is out
   of view (shrinking away only with the CB oktas life cycle on).
+- **A CB the crew may see keeps its size:** its oktas, base and top don't
+  change while it is in view (within the visible range and 90° of the
+  heading), whatever the radar, the forecast or a SIGMET says; the new size
+  comes once it is out of view, and the log says "CB in view keeps its
+  size". Out of view a CB may grow with its storm but not shrink, so it
+  comes into view at the biggest size its storm has had, not a weak
+  moment's (it may then stay in view a long time). Until CBs placed in MSFS can change size in a way that looks good
+  (user 2026-11-21; a CB went from 6 to 3 oktas in view, live 2026-11-20).
+  The CB life cycle switches (off by default) allow what they cycle: the
+  oktas cycle lets a visible CB's oktas change, the height cycle its top
+  and base. Not for the CB test page's CB.
 - **No new CB appears where the crew may see it:** within `--cb-visible-dist`
   (200 nm) and 120° either side of the nose (the side windows too;
   `--cb-visible-angle`, as many sims show less), or within

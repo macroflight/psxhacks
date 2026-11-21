@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **A CB the crew may see keeps its size:** its oktas, base and top no
+  longer change while it is in view (the radar re-sizing its storm made a
+  CB go from 6 to 3 oktas in view); the new size comes once it is out of
+  view. Out of view a CB may grow with its storm but not shrink, so it
+  comes into view at its storm's biggest size so far. Until CBs in MSFS can
+  change size smoothly (the CB life cycle switches allow it).
 - **Drifting CBs no longer jump** when the radar loses their storm for a
   frame (as along Turkey's coast): they catch up with the storm at most
   60 kt faster than it moves (live flight 2026-11-20: jumps up to 11 nm).

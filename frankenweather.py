@@ -2771,6 +2771,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._fuel_model_c: Optional[float] = None
         # --cb-planner: {zone: the position the planner turned its CB off at}
         self._planner_off: dict = {}
+        self._cb_frozen_logged: dict = {}   # _freeze_visible_cb(): the size last logged per zone
         self._fuel_uplift_c: Optional[float] = None   # this refuelling's supply temperature
         self._fuel_uplift_t = 0.0
         self._fuel_soil: dict = {}           # {(lat, lon, hour): soil temperature at 54 cm C}
@@ -8525,8 +8526,73 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                                  self._dist_nm(*old_pos, *new_pos))
                 self._write_zone_wx(zone_num, _strip_cb(wx))
 
+    def _freeze_visible_cb(self, zone_num: int, wx: str) -> str:  # pylint: disable=too-many-locals,too-many-return-statements,too-many-branches
+        """Return wx keeping the CB size (oktas, base, top) zone_num shows, if the crew may see it.
+
+        A CB the crew may see (_in_crew_view()) is never resized (user
+        2026-11-21: until CBs placed in MSFS can change size in a way that
+        looks good; one went from 6 to 3 oktas in view, FTECH1 2026-11-20).
+        Out of view it may grow but not shrink, so it enters the view at its
+        storm's biggest size so far.
+        Only a CB staying a CB: its removal and a new CB follow their own
+        rules. The CB life cycle switches (off by default) allow what they
+        cycle: the oktas cycle the oktas, the height cycle the top and base.
+        Not for a test CB.
+        """
+        old = self.zone_wx.get(zone_num)
+        if (self._cb_cycle_oktas and self._cb_cycle_height) or self.ac_lat is None:
+            return wx
+        if not old or _fw_drift.cb_oktas(old) <= 0 or _fw_drift.cb_oktas(wx) <= 0:
+            return wx
+        was, new = old.split(';')[9:12], wx.split(';')[9:12]   # oktas, top, base
+        # the CB life cycle switches allow what they cycle: oktas, or the height (top, base)
+        keep = list(was)
+        if self._cb_cycle_oktas:
+            keep[0] = new[0]
+        if self._cb_cycle_height:
+            keep[1:] = new[1:]
+        if keep == new:
+            return wx
+        cell = self._drift.get(zone_num)
+        if cell is not None and cell.test:
+            return wx
+        if cell is not None:
+            at = (cell.lat, cell.lon)
+        else:
+            sim_ms = self.sim_time_ms()
+            mode = self.zone_mode.get(zone_num)
+            pos = self.zone_positions.get(zone_num)
+            at = ((_fw_drift.cb_position(self.geod, mode, sim_ms) if mode and sim_ms is not None
+                   else None) or (pos[:2] if pos else None))
+        if at is None or not self._in_crew_view(*at):
+            # out of view: it may grow with its storm but not shrink, so it enters the view at
+            # the biggest size its storm has had, not a weak moment's, and keeps that there
+            # (user 2026-11-21)
+            try:
+                grown = [str(max(int(was[0]), int(new[0]))), str(max(int(was[1]), int(new[1]))),
+                         str(min(int(was[2]), int(new[2])))]
+            except ValueError:
+                return wx
+            for i, field in enumerate(grown):
+                if (i == 0 and not self._cb_cycle_oktas) or (i > 0 and not self._cb_cycle_height):
+                    keep[i] = field
+                else:
+                    keep[i] = new[i]
+            parts = wx.split(';')
+            parts[9:12] = keep
+            return ';'.join(parts)
+        if self._cb_frozen_logged.get(zone_num) != new:
+            self._cb_frozen_logged[zone_num] = new
+            self.logger.info("Zone %d: CB in view keeps its size, %s oktas %s-%s ft (would be %s "
+                             "oktas %s-%s ft)", zone_num, keep[0], keep[2], keep[1],
+                             new[0], new[2], new[1])
+        parts = wx.split(';')
+        parts[9:12] = keep
+        return ';'.join(parts)
+
     def _write_zone_wx(self, zone_num: int, wx: str) -> None:
-        """Send zone_num's weather if it changed."""
+        """Send zone_num's weather if it changed (a CB in view keeps its size)."""
+        wx = self._freeze_visible_cb(zone_num, wx)
         if self.zone_wx.get(zone_num) == wx:
             return
         self.zone_wx[zone_num] = wx
@@ -12175,6 +12241,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                             zone_num, old_qnh, new_qnh, old_dir, old_spd, new_dir, new_spd)
                 except (ValueError, IndexError):
                     pass
+            wx = self._freeze_visible_cb(zone_num, wx)
             self.zone_wx[zone_num] = wx
             self._zone_wx_pos[zone_num] = self.zone_positions.get(zone_num)
             self.psx_send_and_set(f"Wx{zone_num}", wx)
