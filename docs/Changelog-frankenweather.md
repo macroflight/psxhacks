@@ -1,6 +1,6 @@
 # frankenweather changelog
 
-## Unreleased
+## 2.9.0 (2026-11-21)
 
 - **New defaults for testing (switch any of them off if needed):** the
   weather radar decides where CBs are, the CB planner places them, GOES
