@@ -14600,4 +14600,6 @@ if __name__ == '__main__':
         input("An error occurred, press Enter to continue...")
     except SystemExit as exc:
         if exc.code not in (None, 0):
+            if isinstance(exc.code, str):   # the reason (e.g. an unreadable --logon-code-file)
+                print(f"ERROR: {exc.code}", file=sys.stderr)
             input("An error occurred, press Enter to continue...")

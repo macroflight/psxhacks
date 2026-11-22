@@ -1,5 +1,11 @@
 # frankenweather changelog
 
+## Unreleased
+
+- **Fix: a startup error showed no reason.** When frankenweather stopped at
+  startup on purpose (for example an unreadable `--logon-code-file`), the
+  window only said "An error occurred"; it now prints the reason first.
+
 ## 2.9.0 (2026-11-21)
 
 - **New defaults for testing (switch any of them off if needed):** the
