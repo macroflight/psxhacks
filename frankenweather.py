@@ -11209,11 +11209,17 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         """--sat-storms: fw_geosat's (chance, dBZ) for the cloud tops near a point, or None.
 
         The CAPE and showers come from the forecast at the whole-degree point
-        and UTC hour (fetched by _storm_motions_refresh()); unknown: no storm yet.
+        and UTC hour (fetched by _storm_motions_refresh()), the hour before
+        until it is there; unknown: no storm yet.
         """
         if not self._sat_deep_top(lat, lon):
             return None
-        got = self._sat_cape.get((round(lat), round(lon), int(time.time() // _fw_storms.HOUR_S)))
+        hour = int(time.time() // _fw_storms.HOUR_S)
+        # the hour before until this hour's is fetched: without it every satellite storm
+        # ended at once on the hour (headless 2026-11-22 21:00:12, 6 CBs in one second)
+        got = self._sat_cape.get((round(lat), round(lon), hour))
+        if got is None:
+            got = self._sat_cape.get((round(lat), round(lon), hour - 1))
         if got is None:
             return None
         top_ft = self._cloud_top_ft(lat, lon)
@@ -11234,7 +11240,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
 
         def motion(plat, plon):
             node = (round(plat), round(plon))
-            return self._storm_motion.get((*node, hour))
+            got = self._storm_motion.get((*node, hour))
+            return got if got is not None else self._storm_motion.get((*node, hour - 1))
 
         points = _fw_storms.grid_points(self.ac_lat, self.ac_lon, self._radar_cell_nm())
         storms = _fw_storms.storms_at(now_s, points, self._storm_chance, motion)

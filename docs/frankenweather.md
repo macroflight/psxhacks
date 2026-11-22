@@ -564,7 +564,8 @@ switches it off.
   - as cold as -50 C with that CAPE but no forecast showers: about one per
     7 points (the forecast misses some storms the satellite sees).
 
-  The CAPE and showers are the forecast's at the whole degree and hour.
+  The CAPE and showers are the forecast's at the whole degree and hour
+  (the hour before until the new hour's forecast is fetched).
   This is a rough guide, so the storms are made up near the cold tops, not
   on them. Checked against real radar on 2026-11-20 (0.5° points, radar
   storm of 43 dBZ or more within 20 nm): such a point had a radar storm

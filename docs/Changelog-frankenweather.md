@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Fix: satellite storms all ended on the hour.** Outside radar coverage,
+  every storm made up from satellite cloud tops ended at once at the top
+  of each UTC hour (6 CBs in one second), until the new hour's forecast
+  was fetched; the hour before's forecast is now used meanwhile.
+
 - **Fix: a CB the crew could see could vanish.** When a made-up storm's
   life was over (outside radar coverage), or a drifting CB's own life
   ended, its CB went at once, even in view: a 6/8 CB went 55 nm away
