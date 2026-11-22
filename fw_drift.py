@@ -129,7 +129,8 @@ class DriftCell:  # pylint: disable=too-many-instance-attributes
     age_s: float = 0.0
     decay_from: Optional[float] = None   # age_s when the decay started
     decay_why: str = ""
-    dead_since: Optional[float] = None   # --radar-cbs: its storm left the radar, CB kept in view
+    dead_since: Optional[float] = None   # its end came while the crew may see it: CB kept in view
+    dead_why: str = ""                   # ... what ended it
     start_oktas: int = 0
     moved_nm: float = 0.0
 

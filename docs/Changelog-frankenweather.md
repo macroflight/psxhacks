@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Fix: a CB the crew could see could vanish.** When a made-up storm's
+  life was over (outside radar coverage), or a drifting CB's own life
+  ended, its CB went at once, even in view: a 6/8 CB went 55 nm away
+  (FTECH1, 2026-11-22). It now stays like a CB whose radar storm is gone:
+  while the crew may see it, at most 30 minutes, never going within 60 nm.
+
 - **Fix: a startup error showed no reason.** When frankenweather stopped at
   startup on purpose (for example an unreadable `--logon-code-file`), the
   window only said "An error occurred"; it now prints the reason first.

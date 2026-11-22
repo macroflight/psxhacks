@@ -456,7 +456,8 @@ switches it off.
   all round) is never moved to make room for
   another storm, however strong: zones without a CB, or with one behind or
   farther away, are used for new storms. A CB goes once it is behind, or
-  when its own storm dies on the radar: then it stays while the crew may see
+  when its own storm dies on the radar, a made-up storm's life (below) is
+  over, or a drifting CB's own life ends: then it stays while the crew may see
   it (in that range, within 90° of the heading, also while turning), at most
   30 minutes (longer while it is within 60 nm of the aircraft: it never goes
   that near, live 2026-11-21 one went 32 nm ahead), and goes once it is out

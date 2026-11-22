@@ -8330,10 +8330,10 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         if _fw_storms.is_storm(cell.radar_cell):   # a made-up storm: alive or not, every tick
             match = next((c for c in self._storm_cells if c.key == cell.radar), None)
             if match is None:
-                cell.radar_cell = None
-                cell.start_decay(now, "its storm's life is over")
-                self.logger.info("CB drift: Zone %d starts to decay (%s)", zone_num,
-                                 cell.decay_why)
+                # in view it stays, as when a radar storm is gone (FTECH1 2026-11-22: a 6/8 CB
+                # went 55 nm away, 71 deg off the nose, when its made-up storm's life was over)
+                if self._cb_end(zone_num, cell, now, "its storm's life is over"):
+                    cell.radar_cell = None
             else:   # alive while its storm is (its life is the storm's, the same everywhere)
                 cell.radar_cell = match
                 cell.lifetime_s = max(cell.lifetime_s, cell.age_s + 1200.0)
@@ -8352,19 +8352,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                                 {c.radar for zn, c in self._drift.items() if zn != zone_num})
         if match is None:
             cell.radar_cell = None
-            if self._in_crew_view(cell.lat, cell.lon):
-                if cell.dead_since is None:
-                    cell.dead_since = now
-                    self.logger.info("CB drift: Zone %d: its radar cell is gone, but the crew may"
-                                     " see the CB: kept until it is out of view (at most %.0f min)",
-                                     zone_num, _DEAD_STORM_KEEP_S / 60.0)
-                return
-            cell.start_decay(now, "its radar cell is gone")
-            self.logger.info("CB drift: Zone %d starts to decay (%s)", zone_num, cell.decay_why)
+            self._cb_end(zone_num, cell, now, "its radar cell is gone")
             return
         if cell.dead_since is not None:
             self.logger.info("CB drift: Zone %d: its storm is back on the radar", zone_num)
-            cell.dead_since = None
+            cell.dead_since, cell.dead_why = None, ""
         self._radar_take(cell, match)
         cell.lifetime_s = max(cell.lifetime_s, cell.age_s + 1200.0)   # alive while the radar has it
         lat, lon = self._radar_cell_now(match)
@@ -8411,6 +8403,25 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         """
         return self._crew_sees(lat, lon)
 
+    def _cb_end(self, zone_num: int, cell, now: float, why: str) -> bool:
+        """End a drifting CB (its storm is gone, its life is over); return True if it decays now.
+
+        Out of the crew's view it decays at once. In view it is kept (cell.dead_since)
+        until _dead_storm_cb_ends() lets it go: no CB the crew may see just vanishes
+        (the CB rules of 2026-11-19). Already kept: nothing changes.
+        """
+        if cell.dead_since is not None:
+            return False
+        if self._in_crew_view(cell.lat, cell.lon):
+            cell.dead_since, cell.dead_why = now, why
+            self.logger.info("CB drift: Zone %d: %s, but the crew may see the CB: kept until it"
+                             " is out of view (at most %.0f min)", zone_num, why,
+                             _DEAD_STORM_KEEP_S / 60.0)
+            return False
+        cell.start_decay(now, why)
+        self.logger.info("CB drift: Zone %d starts to decay (%s)", zone_num, cell.decay_why)
+        return True
+
     def _dead_storm_cb_ends(self, zone_num: int, cell, now: float) -> bool:
         """Return True if a dead storm's CB (cell.dead_since) starts to decay now.
 
@@ -8422,12 +8433,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         near = (self.ac_lat is not None and
                 self._dist_nm(self.ac_lat, self.ac_lon, cell.lat, cell.lon) <=
                 _fw_planner.hard_nm(True))
+        gone = cell.dead_why or "its radar cell is gone"
         if not self._in_crew_view(cell.lat, cell.lon):
-            why = "its radar cell is gone, and it is out of view now"
+            why = f"{gone}, and it is out of view now"
         elif now - cell.dead_since > _DEAD_STORM_KEEP_S and not near:
             # never this near the aircraft: no CB goes within the planner's hard distance
             # (one went 32 nm ahead after 30 min, FTECH1 2026-11-21): kept until out of view
-            why = f"its radar cell is gone, kept {_DEAD_STORM_KEEP_S / 60.0:.0f} min in view"
+            why = f"{gone}, kept {_DEAD_STORM_KEEP_S / 60.0:.0f} min in view"
         if why is None:
             cell.lifetime_s = max(cell.lifetime_s, cell.age_s + 60.0)
             return False
@@ -8477,10 +8489,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         match = self._radar_cb_near(cell.lat, cell.lon,
                                     _RADAR_MATCH_NM + _fw_drift.CB_OFFSET_NM, taken)
         if match is None:
-            cell.start_decay(now, "no radar storm cell near it (inside radar coverage)" if covered
-                             else "no storm near it (SIGMET area or lightning)")
-            self.logger.info("CB drift: Zone %d starts to decay (%s)", zone_num, cell.decay_why)
+            self._cb_end(zone_num, cell, now,
+                         "no radar storm cell near it (inside radar coverage)" if covered
+                         else "no storm near it (SIGMET area or lightning)")
             return False
+        cell.dead_since, cell.dead_why = None, ""   # a storm after all
         cell.wind_motion = cell.wind_motion or (cell.heading_deg, cell.speed_kt)
         self._radar_take(cell, match)
         self.logger.info("CB drift: Zone %d takes radar cell %s %.1fnm away (%d dBZ)", zone_num,
@@ -8687,9 +8700,9 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
                 continue
             cell.advance(dt_s * accel)
             self._radar_follow(zone_num, cell, now)
-            if cell.decay_from is None and cell.life_over():
-                cell.start_decay(now, f"end of its {cell.lifetime_s / 60.0:.0f} min life")
-                self.logger.info("CB drift: Zone %d starts to decay (%s)", zone_num, cell.decay_why)
+            if cell.decay_from is None and cell.dead_since is None and cell.life_over():
+                self._cb_end(zone_num, cell, now,
+                             f"end of its {cell.lifetime_s / 60.0:.0f} min life")
             if cell.decay_from is not None and not self._cb_cycle_oktas:
                 cell.decay_from = min(cell.decay_from, cell.age_s - _fw_drift.DECAY_S)   # gone now
             on_radar = (cell.radar_cell is not None and cell.decay_from is None and
