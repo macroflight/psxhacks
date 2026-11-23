@@ -98,8 +98,10 @@ CB goes where the crew will see it on the roll-out either.
   without a CB, else to the zone whose CB is worth least, if worth less.
 - **Locked:** fixed zones (the anchor, airports, PSX's focused zone), CBs
   within the startle distance, and CBs the crew may see that changed in the
-  last 10 minutes. A CB without a storm (a dead storm's CB kept in view, a
-  model CB) is worth `DEAD_SCORE`.
+  last 10 minutes. A CB kept in view after its storm ended is worth what
+  that storm was last worth (so only a clearly stronger storm takes its
+  zone, user 2026-11-23); another CB without a storm (a model CB) is worth
+  `DEAD_SCORE`.
 - **Nothing frankenweather would take away at once, nor what the crew
   will never meet:** no storm behind the aircraft, none more than 75
   degrees off the nose and beyond the behind limit unless within 60 nm of

@@ -92,6 +92,8 @@ class Zone:  # pylint: disable=too-many-instance-attributes
     cb_at: Optional[tuple] = None   # (lat, lon) of a CB it shows without a storm (a dead storm's
     #                                 CB kept in view, a model CB): other CBs keep their distance
     cb_big: bool = False          # its CB is big (HARD_BIG_NM)
+    kept_score: Optional[float] = None   # a CB kept in view after its storm ended: what that
+    #                                      storm was last worth (strength x relevance)
     changed_s: float = -math.inf  # when its CB last changed (the caller's clock, seconds)
 
 
@@ -129,6 +131,7 @@ class Plan:
     moves: list = field(default_factory=list)
     cluster_of: dict = field(default_factory=dict)
     score_of: dict = field(default_factory=dict)
+    base_of: dict = field(default_factory=dict)   # every storm's strength x relevance
 
 
 def dist_nm(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -262,6 +265,7 @@ class _Planning:  # pylint: disable=too-many-instance-attributes
         self.storms = sorted(usable, key=lambda s: s.key)
         self.result.cluster_of = clusters(storms)
         self.base = {s.key: strength(s) * relevance(s, ac) for s in storms}
+        self.result.base_of = dict(self.base)
         intensity: dict = {}
         for s in self.storms:
             cid = self.result.cluster_of[s.key]
@@ -329,7 +333,11 @@ class _Planning:  # pylint: disable=too-many-instance-attributes
             # the storm is left out of the new-CB list (far abeam of the route) and without the
             # cluster and spacing factors, which rank NEW CBs: a further CB of a weak storm area
             # counted 0.25 ** 6 and went 101 nm away in view (FTECH1 2026-11-21, user)
-            return (self.base[z.storm] if z.storm in self.base else DEAD_SCORE) * cost
+            # A CB kept in view after its storm ended keeps that storm's last worth, so only a
+            # clearly stronger storm takes its zone (it went within seconds at DEAD_SCORE,
+            # headless 2026-11-22, user option b)
+            worth = self.base.get(z.storm) if z.storm in self.base else z.kept_score
+            return (worth if worth is not None else DEAD_SCORE) * cost
         return self.value(z.storm, pos, z.num) * HIDDEN_KEEP
 
     def new_value(self, s: Storm) -> float:

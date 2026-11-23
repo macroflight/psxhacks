@@ -144,6 +144,27 @@ class TestPlanner(unittest.TestCase):
         moves = P.plan(weak + big + [nearby], [zone], AC).moves
         self.assertEqual([m.storm for m in moves if m.zone == 1], ["X"])
 
+    def test_kept_cb_keeps_its_dead_storms_worth(self):
+        """A CB kept in view after its storm ended is worth that storm's last score (option b).
+
+        At DEAD_SCORE any decent storm took its zone within seconds (headless 2026-11-22); with
+        kept_score only a clearly stronger storm does, as for a CB on a live storm.
+        """
+        pos = at(90.0, 150.0)
+        dead = storm("A", 90.0, 150.0, dbz=50, area=100.0)
+        a_worth = P.strength(dead) * P.relevance(dead, AC)
+        similar = storm("B", 60.0, 300.0, dbz=50, area=110.0)
+        zone = P.Zone(1, *pos, storm=None, cb_at=pos, visible_cb=True)
+        self.assertEqual([m.storm for m in P.plan([similar], [zone], AC).moves], ["B"])
+        zone.kept_score = a_worth
+        self.assertEqual(P.plan([similar], [zone], AC).moves, [])
+        clear = storm("B", 60.0, 300.0, dbz=60, area=300.0)
+        self.assertEqual([m.storm for m in P.plan([clear], [zone], AC).moves], ["B"])
+        # where frankenweather gets kept_score from: every storm's strength x relevance
+        base = P.plan([dead, similar], free_zones(1), AC).base_of
+        self.assertEqual(set(base), {"A", "B"})
+        self.assertAlmostEqual(base["A"], a_worth)
+
     def test_behind_scores_little(self):
         """A storm behind loses to a weaker one ahead (relevance)."""
         storms = [storm("A", 270.0, 100.0, dbz=60), storm("B", 90.0, 200.0, dbz=45)]

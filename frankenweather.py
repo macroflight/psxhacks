@@ -2965,6 +2965,7 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._planner_tick = 0         # ... and in which _PLANNER_TICK_S of the UTC clock
         self._planner_changed: dict = {}   # zone -> when (monotonic) the planner last changed it
         self._planner_placed_at: dict = {}  # zone -> (lat, lon) the planner last put it at
+        self._storm_last_base: dict = {}   # storm key -> its last planner worth (kept CBs)
         try:
             near, _, big = str(getattr(self.args, "cb_startle_dist", "40:60")).partition(":")
             _fw_planner.HARD_NM = float(near)
@@ -7257,10 +7258,13 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         zones = []
         for zn, (lat, lon, icao) in sorted(self.zone_positions.items()):
             drift = self._drift.get(zn)
+            kept = None
             if drift is not None:
                 live = drift.radar and drift.decay_from is None and drift.dead_since is None
                 storm = drift.radar if live else None
                 cb_at = None if live else (drift.lat, drift.lon)
+                if drift.dead_since is not None and drift.radar:
+                    kept = self._storm_last_base.get(drift.radar)
             else:
                 storm = self._radar_zone_cell.get(zn)
                 shows = _fw_drift.cb_oktas(self.zone_wx.get(zn) or "") > 0
@@ -7275,7 +7279,8 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
             zones.append(_fw_planner.Zone(
                 zn, lat, lon, storm=storm, fixed=fixed, cb_at=cb_at,
                 visible_cb=self._cb_visible(zn) or self._cb_kept_in_hold(zn) is not None,
-                cb_big=big, changed_s=self._planner_changed.get(zn, -math.inf)))
+                cb_big=big, changed_s=self._planner_changed.get(zn, -math.inf),
+                kept_score=kept))
         # holding or vectored: within the maneuvering placement range (every turn makes a zone
         # farther than --low-alt-dist "behind": placed at 360 nm, moved, placed again; headless
         # hold 2026-11-18, 49 planner moves in 40 min)
@@ -7312,6 +7317,11 @@ class Script:  # pylint: disable=too-many-instance-attributes,too-many-public-me
         self._planner_stamp, self._planner_last, self._planner_tick = stamp, now, tick
         storms, zones, ac = self._planner_inputs()
         plan = _fw_planner.plan(storms, zones, ac)
+        # every storm's last worth, kept for the CBs of storms that end while in view; only
+        # the storms still drifting CBs need theirs once gone
+        drifting = {c.radar for c in self._drift.values() if c.radar}
+        self._storm_last_base = {**{k: v for k, v in self._storm_last_base.items()
+                                    if k in drifting}, **plan.base_of}
         self._planner_snapshot = {
             "time": time.time(), "cluster_of": dict(plan.cluster_of),
             "score_of": {k: round(v, 2) for k, v in plan.score_of.items()},

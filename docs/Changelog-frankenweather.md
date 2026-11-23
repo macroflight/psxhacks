@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **CB planner: a CB kept in view after its storm ended keeps that
+  storm's worth.** Such a CB counted almost nothing, so the planner gave
+  its zone to any decent storm within seconds and the CB still vanished in
+  view; now only a clearly stronger storm takes it, as for a CB on a live
+  storm.
 - **Fix: satellite storms all ended on the hour.** Outside radar coverage,
   every storm made up from satellite cloud tops ended at once at the top
   of each UTC hour (6 CBs in one second), until the new hour's forecast
