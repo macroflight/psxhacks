@@ -1,7 +1,7 @@
 # frankenstutter
 
-frankenstutter finds out what causes stutters in Microsoft Flight Simulator
-2024. It runs on the MSFS PC and logs every visible stutter together with
+frankenstutter finds out what causes stutters in Microsoft Flight
+Simulator 2024. It runs on the MSFS PC and logs every visible stutter together with
 where you were and what the whole PC was doing at that moment, guesses the
 cause, and makes a report: which airports, flight phases and views stutter,
 and what goes with it (the CPU, the GPU, disk streaming, downloads, VRAM,
