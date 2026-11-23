@@ -1,5 +1,18 @@
 # frankenpilot changelog
 
+## Unreleased
+
+- After the ice detectors fired (>ICING NAC/WING), anti-ice stays on until
+  10 minutes after their last detection, and the hold doubles (up to 40
+  minutes) when they fire again soon after it went off: on FTECH2
+  (2026-11-22) engine anti-ice cycled on and off every few minutes in clear
+  air, with ICING NAC coming back each time.
+- Wing anti-ice still on after landing goes back to AUTO (or off, on a
+  manual system) in the after-landing flow at runway exit.
+- Engine anti-ice goes back to AUTO (or off, on a manual system) at the
+  gate: once all engines have been shut down after landing and the
+  aircraft has stood still for a minute.
+
 ## 0.3.0 (2026-11-21)
 
 - Wing anti-ice switched on at >ICING WING no longer stays on for the rest

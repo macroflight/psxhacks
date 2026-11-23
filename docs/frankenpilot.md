@@ -81,7 +81,8 @@ config file (`[actions]`, names in brackets).
   40 degrees from the landing heading): flaps up and speedbrake down
   (`exit_flaps_speedbrake`); landing lights off, taxi light on (or both
   inboard landing lights if the aircraft has no taxi light), strobes off
-  (`exit_lights`); autobrake OFF (`exit_autobrake`); MCP speed 200 kt (a
+  (`exit_lights`); wing anti-ice back to AUTO (or off) if it is still on
+  (`anti_ice`); autobrake OFF (`exit_autobrake`); MCP speed 200 kt (a
   safe speed for the next takeoff if the crew forgets to set V2), both F/Ds
   and the A/T arm switch off (`exit_mcp`); radio and baro minimums off on both
   EFIS control panels (`exit_minimums`); weather radar and terrain off on
@@ -125,9 +126,16 @@ config file (`[actions]`, names in brackets).
   a long time in icing conditions; the time counts from liftoff, so fog
   patches on the ground don't end it, and after an ICING message from when
   the ice detectors fired: PSX can ice in a weather zone's cloud while
-  MSFS shows clear air). An engine failure never switches
+  MSFS shows clear air). After the ice detectors fired (>ICING NAC or
+  >ICING WING) anti-ice also stays on until 10 minutes after their last
+  detection; if they fire again within that time after it went off, the
+  hold doubles (up to 40 minutes, back to 10 on the next flight), so PSX's
+  detectors can't make it cycle on and off every few minutes
+  (`icing_detected_hold_s`, `icing_detected_hold_max_s`). An engine failure never switches
   anti-ice off, and if you switch it off or to AUTO yourself it stays that
-  way until the next trigger.
+  way until the next trigger. At the gate (all engines shut down after
+  landing, stopped for a minute) engine anti-ice goes back to AUTO, or
+  off on a manual system.
 - **F/D**: your F/D switch moves, the other one follows (`fd_follow`).
 - **Altimeters** (`altimeters`): frankenpilot never decides when to go to
   STD or QNH (ATC does: STD when cleared to a flight level, QNH when cleared
@@ -250,6 +258,8 @@ icing_dense_cont_s = 30.0    # auto system: or this long in dense cloud ...
 icing_dense = 0.1            # ... of at least this MSFS cloud density
 icing_manual_cont_s = 30.0   # manual system and fog on the ground
 icing_atis_base_ft = 3000.0  # departure ATIS: BKN/OVC below this
+icing_detected_hold_s = 600.0       # after >ICING NAC/WING: anti-ice on this long after the last
+icing_detected_hold_max_s = 2400.0  # ... doubled up to this when they fire again soon after
 ```
 
 Airport elevations (for "10,000 ft above the airport") come from the UCAR

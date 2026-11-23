@@ -121,6 +121,11 @@ DEFAULT_PARAMS = {
     'icing_dense': 0.1,             # ... with at least this mean MSFS cloud density
     'icing_manual_cont_s': 30.0,    # manual system (and fog on the ground): this long in cloud
     'icing_atis_base_ft': 3000.0,   # departure ATIS: BKN/OVC below this (AGL) after engine start
+    # After the ice detectors (>ICING NAC/WING): anti-ice stays on at least this long after the
+    # last detection, doubled (up to the max) when they fire again within the hold after the
+    # anti-ice went off (FTECH2 2026-11-22: on/off/on every few minutes in clear air)
+    'icing_detected_hold_s': 600.0,
+    'icing_detected_hold_max_s': 2400.0,
 }
 
 
@@ -500,6 +505,9 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         self.cloud_exit_at = None      # when we last left cloud while icing
         self.icing_clear_since = None  # TAT > 10 C since
         self.icing_nac_waiting = False  # >ICING NAC on the ground before all engines ran
+        self.ice_detected_at = None     # the ice detectors' last >ICING NAC/WING
+        self.ice_hold_s = None          # anti-ice held this long after it (None: the parameter)
+        self.icing_ended_at = None      # when we last switched anti-ice back after icing
         self.engines_started_at = None  # when all engines were first running and started
         self.stby_std_above, self.arrival_qnh_done, self.prev_alt = None, None, None
         self.step_cruise_since = None   # level in VNAV PTH cruise since (step climbs)
@@ -984,8 +992,9 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         """After landing (TAXI_IN): start a new flight when this one is over; True if so.
 
         Over when every engine has been shut down with the aircraft stopped for a
-        minute, or when the FMC has a new origin (a quick turnaround with engines
-        running). Without this a turnaround in the same session stayed in TAXI_IN:
+        minute (at the gate: engine anti-ice goes back to AUTO, or off, user
+        2026-11-23), or when the FMC has a new origin (a quick turnaround with
+        engines running). Without this a turnaround in the same session stayed in TAXI_IN:
         the next departure runway was "crossed" and the runway entry flow never ran
         (WorldFlight1, YBBN 2026-11-10: 10 hours in TAXI_IN).
         """
@@ -1002,6 +1011,9 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
             return False
         self.decide(f"{why}: that flight is over, the next taxi is a new departure")
         self.reset_flight()
+        if why.startswith("all engines") and self.actions['anti_ice']:
+            # after reset_flight(), which cancels the running actions
+            self.spawn(self.set_anti_ice('nai', False, "Engines shut down at the gate"))
         return True
 
     # --- runway entry / crossing
@@ -1217,7 +1229,7 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         return False
 
     def on_runway_exit(self):
-        """Flaps, speedbrake, lights, strobes, WXR/TERR, stab trim, APU (delayed)."""
+        """Flaps, speedbrake, lights, strobes, wing anti-ice, WXR/TERR, stab trim, APU (delayed)."""
         self.decide(f"runway exit: landed on heading {self.touchdown_hdg:.0f}, now {self.exit_why} "
                     f"(slower than {self.params['exit_speed_kt']:.0f} kt): after-landing flow")
         self.spawn(self.runway_exit_flow())
@@ -1245,6 +1257,10 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
                     await self.write(name, 1, f"Runway exit: {text} on as taxi light")
             if self.get_int("LtStrobe") == 1:
                 await self.write("LtStrobe", 0, "Runway exit: strobes off")
+        if self.actions['anti_ice']:
+            # wing anti-ice still on after landing: back to AUTO / off (user 2026-11-23);
+            # set_anti_ice() only moves a switch that isn't there already
+            await self.set_anti_ice('wai', False, "Runway exit")
         if self.actions['exit_autobrake'] and self.get_int("Autobr") != AUTOBRAKE['OFF']:
             await self.write("Autobr", AUTOBRAKE['OFF'], "Runway exit: autobrake OFF")
         if self.actions['exit_mcp']:
@@ -1562,12 +1578,22 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         cloud at FL330 while MSFS showed clear air).
         """
         self.cloud_exit_at = None if in_icing else now
+        base = self.params['icing_detected_hold_s']
+        hold = self.ice_hold_s or base
+        if self.icing_ended_at is not None and now - self.icing_ended_at < hold:
+            hold = min(self.params['icing_detected_hold_max_s'], 2 * hold)
+            self.decide(f"ice detected again {(now - self.icing_ended_at) / 60:.0f} min after "
+                        f"anti-ice went off: it stays on at least {hold / 60:.0f} min after the "
+                        "last detection from now on (this flight)")
+        self.ice_hold_s, self.ice_detected_at = hold, now
 
     def anti_ice_off(self, now, on_ground, tat, new_a):
         """Switch anti-ice back to AUTO / off when icing conditions have ended.
 
         TAT above 10 C for a minute; in flight also >ANTI-ICE NAC/WING, or clear
-        of cloud for 2 min plus half the time spent in icing (at most 10 min).
+        of cloud for 2 min plus half the time spent in icing (at most 10 min), and
+        after the ice detectors fired, also icing_detected_hold_s since the last
+        detection (doubled when they fire again soon after anti-ice went off).
         Nothing here depends on the engines: an engine failure on takeoff never
         switches anti-ice off. On the ground only TAT > 10 C ends icing
         conditions; fog patches or breaking out of a low layer on the takeoff
@@ -1591,11 +1617,17 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         if self.icing_clear_since and now - self.icing_clear_since > 60:
             why = f"TAT {tat:.0f} > 10"
         elif self.cloud_exit_at is not None and now - self.cloud_exit_at > wait:
-            why = f"Clear of cloud for {wait / 60:.0f} min"
+            held = (now - self.ice_detected_at if self.ice_detected_at is not None
+                    else math.inf)
+            if held >= (self.ice_hold_s or 0.0):
+                why = f"Clear of cloud for {wait / 60:.0f} min"
+                if self.ice_detected_at is not None:
+                    why += f", {held / 60:.0f} min since the ice detectors last fired"
         if why:
             self.decide(f"icing conditions over ({why}; {self.icing_seconds / 60:.0f} min in "
                         "icing conditions): anti-ice back to AUTO/off")
             self.icing, self.icing_seconds, self.cloud_exit_at = False, 0.0, None
+            self.icing_ended_at, self.ice_detected_at = now, None
             self.spawn(self.set_anti_ice('nai', False, why))
             if not on_ground:
                 self.spawn(self.set_anti_ice('wai', False, why))
