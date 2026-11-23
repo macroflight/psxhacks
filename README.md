@@ -24,6 +24,20 @@ Maturity: new (2026-11).
 
 [More information is available here](docs/frankenpilot.md)
 
+### frankenstutter.py
+
+Finds what causes stutters in MSFS 2024: logs every visible stutter (from
+PresentMon's frame times) with where you were (SimConnect) and what the
+whole PC was doing (every process, CPU per core, DPC time, the real CPU
+clock, disk, network, GPU and VRAM), guesses whether the CPU, the GPU or
+the presentation (frame generation, VSync) was behind it, and makes a
+report by airport, flight phase and view. A read-only web page and JSON
+API show it live.
+
+Maturity: new (2026-11).
+
+[More information is available here](docs/frankenstutter.md)
+
 ### frankenusb.py
 
 Replacement for the PSX USB subsystem (for my needs at least). Things
