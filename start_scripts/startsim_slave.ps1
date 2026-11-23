@@ -69,6 +69,12 @@ if ($StartFrankenboostproxy ) {
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenboostproxy.ps1"
 }
 
+if ($StartFrankenstutter ) {
+    AddonDelay
+    Write-Output "Starting FrankenStutter..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenstutter.ps1"
+}
+
 if ($StartSrslPsxSlave ) {
     AddonDelay
     Write-Output "Starting SRSL-PSX..."

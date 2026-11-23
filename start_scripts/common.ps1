@@ -214,6 +214,7 @@ $FrankenpushOptions  = @()
 $FrankenpilotOptions = @()
 $FrankencontrolOptions = @()
 $FrankenboostproxyOptions = @()
+$FrankenstutterOptions = @()
 $PsxWinctrlPfpOptions = @()
 # Extra vPilot.exe command line arguments, e.g. @("-remote") when MSFS and
 # PSX are on different PCs ("/novoice" is added anyway when $RadioApp isn't
@@ -239,6 +240,7 @@ $FrankenpushRepo        = $null
 $FrankenpilotRepo       = $null
 $FrankencontrolRepo     = $null
 $FrankenboostproxyRepo  = $null
+$FrankenstutterRepo     = $null
 
 # Which of the addons that we can manage you actually want started in
 # your sim. You can override these in the override file.
@@ -270,6 +272,7 @@ $StartCsCdu           = $false
 $StartCpflightFsCom   = $false
 $StartPsxSimlinkBridge = $false
 $StartFrankenboostproxy = $false
+$StartFrankenstutter = $false
 $StartPsxWinctrlPfp = $false
 
 # Unlike every other addon above, FrankenControl defaults to enabled: it
@@ -374,6 +377,7 @@ $SimAddonNames = [ordered]@{
     "frankenpilot"         = "FrankenPilot"
     "frankencontrol"       = "FrankenControl"
     "frankenboostproxy"    = "FrankenBoostProxy"
+    "frankenstutter"       = "FrankenStutter"
     "frankenrouter slave"    = "FrankenRouter (slave)"
     "frankenrouter master"   = "FrankenRouter (master)"
     "SimObjectRouter"        = "SimObjectRouter"
@@ -403,6 +407,7 @@ $KnownWindowTitlePatterns = @{
     "ACARS Print App"      = 'Thermal ACARS Printer for PSX'
     "CMC-PSX"               = 'Central Maintenance Computer For PSX'
     "frankenboostproxy"     = 'FrankenBoostProxy'
+    "frankenstutter"        = 'FrankenStutter'
     "frankencduproxy"       = 'FrankenCDUProxy'
     "frankencontrol"        = 'FrankenControl'
     "frankenprint"          = 'FrankenPrinter'

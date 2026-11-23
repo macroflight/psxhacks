@@ -143,6 +143,7 @@ There are also programs that you would want to run in every instance/location in
 * AcarsPrint
 * FrankenUSB
 * FrankenBoostProxy
+* FrankenStutter (on the MSFS PC)
 * vPilot
 
 ## The scripts

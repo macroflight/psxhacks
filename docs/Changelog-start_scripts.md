@@ -1,5 +1,13 @@
 # start_scripts changelog
 
+## Unreleased
+
+- **New: frankenstutter** (MSFS 2024 stutter finder, on the MSFS sim).
+  `$StartFrankenstutter`, `$FrankenstutterOptions` and `$FrankenstutterRepo`
+  (see the FrankenStutter section of `psxhacks-start-override-EXAMPLE.ps1`);
+  started by `startsim_slave.ps1` and `startsim_norouter.ps1`, stopped by the
+  matching `stopsim_*`.
+
 ## 1.14.2 (2026-11-21)
 
 - The override example shows frankenweather's and frankenpush's

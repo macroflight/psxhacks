@@ -528,6 +528,22 @@
 
 
 # ---------------------------------------------------------------------------
+# FrankenStutter settings (the MSFS sim: slave sim, or a sim without a router)
+# Logs every MSFS 2024 stutter with where you were and what the whole PC
+# was doing, to find what to optimise; a read-only web page/API on port 9787
+# (docs/frankenstutter.md). Needs PresentMon's console exe in
+# %USERPROFILE%\.cache\frankenstutter\ (or --presentmon=PATH) and permission
+# to trace: once, as administrator,
+#   net localgroup "Performance Log Users" %USERNAME% /add
+# then sign out and in. Started from startsim_slave.ps1 and
+# startsim_norouter.ps1; it doesn't connect to PSX.
+# ---------------------------------------------------------------------------
+#$StartFrankenstutter   = $true   # FrankenStutter
+#$FrankenstutterOptions = @("--presentmon=C:\fs\PresentMon\PresentMon-2.3.0-x64.exe")
+#$FrankenstutterRepo    = $null
+
+
+# ---------------------------------------------------------------------------
 # FrankenTanker settings (master sim)
 # Fire retardant loading/dropping simulation (e.g. CL-415/AT-802 water bombers).
 #

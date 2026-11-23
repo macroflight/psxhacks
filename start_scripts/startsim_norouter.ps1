@@ -106,6 +106,12 @@ if ($StartFrankenboostproxy ) {
     Invoke-WindowPosition "frankenboostproxy"
 }
 
+if ($StartFrankenstutter ) {
+    Write-Output "Starting FrankenStutter..."
+    Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_frankenstutter.ps1"
+    Invoke-WindowPosition "frankenstutter"
+}
+
 if ($StartSrslPsxMaster ) {
     Write-Output "Starting SRSL-PSX..."
     Start-Process powershell -ArgumentList "-File", "$PSScriptRoot\restart_srsl_psx_master.ps1"
