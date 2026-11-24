@@ -11,6 +11,15 @@
   Flight Centre's simulation tips the aircraft onto its tail (PSX can't),
   a red FLIGHTCENTRE EICAS warning with MASTER WARNING tells the crew to
   look at Flight Centre. See docs/frankenpush.md.
+- **Telemetry for unloading at the destination:** `on_ground`,
+  `parking_brake`, `engines_running` (0-4) and `beacon_on`, with or
+  without `--allow-cargo-loading`, sent at once while parked when one
+  changes. Flight Centre starts unloading when the aircraft is parked with
+  the brake set, engines off and the beacon off.
+- **Cargo loading: entry door 1L** (`entry_1l` in `cargo_state` and
+  `cargo_doors`): Flight Centre opens it for the ground crew and closes it
+  once the loadsheet is accepted; it needs no cargo handling bus power.
+  The log shows a written ZFW in kg as well as lb.
 
 ## 1.7.0 (2026-11-21)
 

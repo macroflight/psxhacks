@@ -182,13 +182,23 @@ them to PSX:
 
 - **ZFW and CG** (PSX's `TrueZfw` and `TrueCg`, the real CG: the
   autopilot's stabiliser trim follows it). PSX updates the EICAS gross
-  weight and the FMC's ZFW itself.
+  weight and the FMC's ZFW itself. `TrueCg` is the CG *with the fuel on
+  board*, and PSX's only CG: PSX keeps a zero fuel CG of its own, moves
+  `TrueCg` as fuel goes in or out, and takes a written `TrueCg` as the
+  CG at the fuel it has then. So Flight Centre sends the CG for PSX's
+  actual fuel (from the fuel per tank frankenpush reports), not the
+  zero fuel CG; during refuelling the CG it sends changes with the fuel.
+  PSX limits `TrueCg` to 8.5-33.0 % MAC.
 - **The nose, side, lower forward, lower aft and bulk cargo doors**, one
   by one. frankenpush sets PSX's door preset (the Instructor's
   CLOSE/OPEN/PARK) to OFF for this, so PSX keeps each door as set. PSX
   switches a door at once; Flight Centre simulates the travel times.
+- **Entry door 1L**, the ground crew's way in: Flight Centre opens it when
+  loading starts and closes it once the captain has accepted the
+  loadsheet, and opens it again when unloading starts. It needs no cargo
+  handling bus power.
 
-Only on the ground, and the doors only while the cargo handling bus has
+Only on the ground, and the cargo doors only while the cargo handling bus has
 power: an EXT PWR or APU GEN available but not connected to the main
 buses (its button shows AVAIL, not ON). Otherwise the doors stay as they
 are and the log says why. Values outside PSX's ranges are ignored.
@@ -199,7 +209,22 @@ In its telemetry frankenpush reports `cargo_loading_allowed`, the doors
 tank (mains 1-4, reserves 2/3, centre, stabiliser, AUX) and refuelling.
 While parked, a change goes out at once (normally every 60 s then).
 Without the option frankenpush ignores Flight Centre's loading messages and
-reports only `"cargo_loading_allowed": false`.
+reports only `"cargo_loading_allowed": false` and the four arrival fields
+below.
+
+For unloading at the destination, Flight Centre starts once the aircraft
+has flown, landed and parked with the parking brake set, all engines off
+and the beacon off (the ground crew doesn't come near before that). With
+or without the option, frankenpush reports, and sends at once while parked
+when one changes:
+
+- `on_ground`: PSX's own on-ground state (`OnGround`).
+- `parking_brake`: the parking brake lever set (`ParkBrkLev`).
+- `engines_running`: 0-4, the engines running (`EngRunt`: an engine stops
+  counting the moment its fuel control switch goes to CUTOFF).
+- `beacon_on`: the beacon switch in either ON position (`LtBeacon`).
+
+Each is `null` until PSX has sent it.
 
 PSX doesn't tip onto its tail with the CG far aft, and can't be made to (it
 keeps a ground pitch of 0 even through a reposition). Flight Centre

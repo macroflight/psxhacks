@@ -13,6 +13,11 @@ PSX facts (measured on the headless test sim 2026-11-24, PSX 10.195):
 - TrueCg (Qi122) is %MAC x 10, the real CG (the autopilot's stabiliser
   trim follows it). TrueZfw (Qi123) is lb; both stick when written, one
   at a time, and PSX updates EicasGrWt and the FMC's ZFW itself.
+- TrueCg is the CG with the fuel on board (PSX's only CG variable): PSX
+  keeps a hidden zero fuel CG, moves TrueCg with the fuel, and takes a
+  written TrueCg as the CG at its current fuel (wrote 200 with no fuel,
+  151 t of fuel -> 178, no fuel again -> 200). Flight Centre therefore
+  sends the CG for PSX's actual fuel. TrueCg is clamped at 330.
 - PSX never tips onto its tail and keeps a ground pitch of 0: Flight
   Centre simulates the tip.
 - DoorOpenBits (Qi180, Aerowinx's Doors class): a bit set = open. With a
@@ -32,7 +37,9 @@ from typing import Optional
 from fp_formation import gross_weight_t
 
 LB_KG = 0.45359237
-DOOR_BITS = {"nose": 1, "side": 256, "lower_fwd": 2048, "lower_aft": 131072, "bulk": 262144}
+DOOR_BITS = {"nose": 1, "side": 256, "lower_fwd": 2048, "lower_aft": 131072, "bulk": 262144,
+             "entry_1l": 8}
+UNPOWERED_DOORS = ("entry_1l",)        # the entry door needs no cargo handling bus
 DOOR_COM_OFF = 32
 LIGHT_AVAIL = 256
 LIGHT_ON = 128
@@ -99,15 +106,44 @@ def power(on_ground: Optional[bool], lights: dict) -> tuple:
     return False, "NO GROUND POWER OR APU AVAILABLE"
 
 
+def engines_running(eng_runt) -> Optional[int]:
+    """Return how many engines run (0-4) from EngRunt ("300;300;0;0"), or None.
+
+    EngRunt (Qs363) has one field per engine: 300 while it runs, 0 as soon
+    as its fuel control switch goes to CUTOFF (measured 2026-11-24).
+    """
+    try:
+        fields = [int(x) for x in eng_runt.split(";")[:4]]
+    except (AttributeError, ValueError):
+        return None
+    return sum(1 for v in fields if v > 0) if len(fields) == 4 else None
+
+
+def arrival(state: dict) -> dict:
+    """Return the fields Flight Centre starts unloading from (sent with or without the option).
+
+    state: on_ground (bool), park_brake_lever (ParkBrkLev 0/1), beacon
+    (LtBeacon -1/0/1, 0 = OFF), eng_runt (EngRunt). None when not known yet.
+    """
+    brake, beacon = state.get("park_brake_lever"), state.get("beacon")
+    return {
+        "on_ground": state.get("on_ground"),
+        "parking_brake": bool(brake) if brake is not None else None,
+        "engines_running": engines_running(state.get("eng_runt")),
+        "beacon_on": beacon != 0 if beacon is not None else None,
+    }
+
+
 def telemetry(allowed: bool, state: dict) -> dict:  # pylint: disable=too-many-locals
     """Return the cargo fields for frankenpush's telemetry, from PSX's values in state.
 
     state: on_ground (bool), door_open_bits, true_cg (x10), true_zfw (lb),
-    eicas_grwt, fuelqty (str), refueling (0/1), and the lights of
-    POWER_SOURCES. Without the option only cargo_loading_allowed (false).
+    eicas_grwt, fuelqty (str), refueling (0/1), the lights of
+    POWER_SOURCES and what arrival() reads. Without the option only
+    cargo_loading_allowed (false) and the arrival() fields.
     """
     if not allowed:
-        return {"cargo_loading_allowed": False}
+        return {"cargo_loading_allowed": False, **arrival(state)}
     ok, why = power(state.get("on_ground"), state)
     zfw_lb = state.get("true_zfw")
     gw_t = gross_weight_t(state.get("eicas_grwt"), zfw_lb)
@@ -124,6 +160,7 @@ def telemetry(allowed: bool, state: dict) -> dict:  # pylint: disable=too-many-l
         "cg_pct_mac": cg / 10.0 if cg is not None else None,
         "fuel_kg": fuel_kg(state.get("fuelqty")),
         "refueling": bool(refueling) if refueling is not None else None,
+        **arrival(state),
     }
 
 
@@ -173,21 +210,27 @@ def apply(msg: dict, allowed: bool, state: dict) -> tuple:  # pylint: disable=to
             continue
         want[name] = value in ("opening", "open")
     if want:
-        ok, why = power(state.get("on_ground"), state)
-        bits = state.get("door_open_bits")
-        if not ok:
-            notes.append(f"doors not moved: {why}")
-        elif bits is None:
-            notes.append("doors not moved: PSX's door state not known yet")
-        else:
-            new = bits
-            for name, is_open in want.items():
-                new = (new | DOOR_BITS[name]) if is_open else (new & ~DOOR_BITS[name])
-            if new != bits:
-                if state.get("door_com_bits") != DOOR_COM_OFF:
-                    writes.append(("DoorComBits", DOOR_COM_OFF))
-                writes.append(("DoorOpenBits", new))
+        writes += _door_writes(want, state, notes)
     return writes, notes
+
+
+def _door_writes(want: dict, state: dict, notes: list) -> list:
+    """Return the DoorComBits/DoorOpenBits writes for {door: open?}; cargo doors need power."""
+    bits = state.get("door_open_bits")
+    if bits is None:
+        notes.append("doors not moved: PSX's door state not known yet")
+        return []
+    ok, why = power(state.get("on_ground"), state)
+    if not ok and any(name not in UNPOWERED_DOORS for name in want):
+        notes.append(f"cargo doors not moved: {why}")
+        want = {name: v for name, v in want.items() if name in UNPOWERED_DOORS}
+    new = bits
+    for name, is_open in want.items():
+        new = (new | DOOR_BITS[name]) if is_open else (new & ~DOOR_BITS[name])
+    if new == bits:
+        return []
+    writes = [] if state.get("door_com_bits") == DOOR_COM_OFF else [("DoorComBits", DOOR_COM_OFF)]
+    return writes + [("DoorOpenBits", new)]
 
 
 class TestCargo(unittest.TestCase):
@@ -195,7 +238,8 @@ class TestCargo(unittest.TestCase):
 
     GROUND = {"on_ground": True, "ExtPow1": 256, "ExtPow2": 256, "ApuGen1": 0, "ApuGen2": 0,
               "door_open_bits": 0, "door_com_bits": 1, "true_cg": 185, "true_zfw": 529109,
-              "eicas_grwt": 2542, "refueling": 0,
+              "eicas_grwt": 2542, "refueling": 0, "park_brake_lever": 1, "beacon": 0,
+              "eng_runt": "0;0;0;0",
               "fuelqty": "d100000;110000;120000;130000;10000;20000;300000;50000;0;359413;2124;"}
 
     def test_power(self):
@@ -224,7 +268,9 @@ class TestCargo(unittest.TestCase):
 
     def test_telemetry(self):
         """Fields with the option; only the flag without it."""
-        self.assertEqual(telemetry(False, self.GROUND), {"cargo_loading_allowed": False})
+        self.assertEqual(telemetry(False, self.GROUND),
+                         {"cargo_loading_allowed": False, "on_ground": True, "parking_brake": True,
+                          "engines_running": 0, "beacon_on": False})
         t = telemetry(True, self.GROUND)
         self.assertTrue(t["cargo_power_ok"])
         self.assertEqual(t["cg_pct_mac"], 18.5)
@@ -232,6 +278,17 @@ class TestCargo(unittest.TestCase):
         self.assertEqual(t["gross_weight_kg"], 254200)
         self.assertEqual(t["cargo_doors"]["nose"], "closed")
         self.assertIs(t["refueling"], False)
+
+    def test_arrival(self):
+        """Engines from EngRunt, beacon on in either ON position, None when unknown."""
+        self.assertEqual(engines_running("300;300;0;300"), 3)
+        self.assertIsNone(engines_running(None))
+        self.assertIsNone(engines_running("300;300"))
+        a = arrival({"on_ground": False, "park_brake_lever": 0, "beacon": -1,
+                     "eng_runt": "300;300;300;300"})
+        self.assertEqual(a, {"on_ground": False, "parking_brake": False, "engines_running": 4,
+                             "beacon_on": True})
+        self.assertEqual(set(arrival({}).values()), {None})
 
     def test_apply(self):
         """ZFW, CG and doors written in order; DoorComBits OFF before the doors."""
@@ -263,6 +320,12 @@ class TestCargo(unittest.TestCase):
         writes, notes = apply(msg, True, dict(self.GROUND, ExtPow1=128, ExtPow2=0))
         self.assertEqual(writes, [("TrueZfw", 540133)])
         self.assertIn("doors not moved", notes[0])
+        # the entry door needs no cargo handling bus: it moves, the cargo door doesn't
+        writes, notes = apply({"doors": {"entry_1l": "opening", "side": "open"}}, True,
+                              dict(self.GROUND, ExtPow1=128, ExtPow2=0))
+        self.assertEqual(writes, [("DoorComBits", 32), ("DoorOpenBits", 8)])
+        self.assertIn("cargo doors not moved", notes[0])
+        self.assertEqual(door_states(8)["entry_1l"], "open")
         writes, notes = apply({"zfw_kg": 900000, "cg_pct_mac": "x", "doors": {"cockpit": "open"}},
                               True, self.GROUND)
         self.assertEqual(writes, [])

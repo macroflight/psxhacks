@@ -462,6 +462,10 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self._door_com_bits = None      # DoorComBits: the door preset (OFF 32 = door by door)
         self._fuelqty = None            # FuelQty, raw
         self._power_lights: dict = {}   # ExtPow1/2, ApuGen1/2: AVAIL 256, ON 128
+        # Arrival (Flight Centre starts unloading from these; sent with or without the option)
+        self._park_brake_lever = None   # ParkBrkLev, 0/1
+        self._beacon = None             # LtBeacon, -1/0/1 (0 = OFF)
+        self._eng_runt = None           # EngRunt, raw ("300;300;300;300")
 
         # Control surface levers (ECON)
         self._flap_lever = None     # Qh389 FlapLever 0-6
@@ -614,7 +618,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
             pass
 
     def _on_int_var(self, key, value):
-        """Plain integers: McpBankLim, HdgTru, Elev, GroundSpeed, weights, CG, cargo state."""
+        """Plain integers: McpBankLim, HdgTru, Elev, GroundSpeed, weights, CG, cargo, arrival."""
         try:
             n = int(value)
         except ValueError:
@@ -625,9 +629,14 @@ class Script():  # pylint: disable=too-many-instance-attributes
         attr = {"McpBankLim": "_bank_limit", "HdgTru": "_hdg_true_ref", "Elev": "_elev_ft",
                 "GroundSpeed": "_ground_speed", "EicasGrWt": "_eicas_grwt",
                 "TrueZfw": "_true_zfw", "TrueCg": "_true_cg", "Refueling": "_refueling",
-                "DoorComBits": "_door_com_bits"}.get(key)
+                "DoorComBits": "_door_com_bits", "ParkBrkLev": "_park_brake_lever",
+                "LtBeacon": "_beacon"}.get(key)
         if attr:
             setattr(self, attr, n)
+
+    def _on_eng_runt(self, _key, value):
+        """EngRunt: kept raw, fp_cargo counts the running engines for the telemetry."""
+        self._eng_runt = value
 
     def _on_fuelqty(self, _key, value):
         """FuelQty: kept raw, decoded by fp_cargo for the cargo telemetry."""
@@ -1051,7 +1060,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
         return {"on_ground": self._on_ground, "door_open_bits": self._door_open_bits,
                 "door_com_bits": self._door_com_bits, "true_cg": self._true_cg,
                 "true_zfw": self._true_zfw, "eicas_grwt": self._eicas_grwt,
-                "fuelqty": self._fuelqty, "refueling": self._refueling, **self._power_lights}
+                "fuelqty": self._fuelqty, "refueling": self._refueling,
+                "park_brake_lever": self._park_brake_lever, "beacon": self._beacon,
+                "eng_runt": self._eng_runt, **self._power_lights}
 
     def _cargo_telemetry(self):
         """Return the cargo fields for the telemetry (only the flag without the option)."""
@@ -1066,7 +1077,11 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.logger.info("Cargo loading: no PSX connection, nothing written")
             return
         for name, value in writes:
-            self.logger.info("Cargo loading: %s = %s", name, value)
+            if name == "TrueZfw":
+                self.logger.info("Cargo loading: %s = %s lb (%.0f kg)", name, value,
+                                 value * fp_cargo.LB_KG)
+            else:
+                self.logger.info("Cargo loading: %s = %s", name, value)
             # send and cache: PSX and the router never echo our own write back, and the
             # subscriber callbacks keep our state (and so the telemetry) current
             self.psx.send(name, str(value))
@@ -1304,6 +1319,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
             for name in ("TrueCg", "Refueling", "DoorComBits") + fp_cargo.POWER_SOURCES:
                 self.psx.subscribe(name, self._on_int_var)
             self.psx.subscribe("FuelQty", self._on_fuelqty)
+            for name in ("ParkBrkLev", "LtBeacon"):
+                self.psx.subscribe(name, self._on_int_var)
+            self.psx.subscribe("EngRunt", self._on_eng_runt)
             self.psx.subscribe("FreeMsgW")   # cached: FLIGHTCENTRE is cleared only if ours
             self.psx.subscribe("MiscFltData", self._on_misc_flt_data)
             self.psx.subscribe("FltDkDoorTurn", self._on_fltdk_door_turn)
@@ -1453,9 +1471,10 @@ class Script():  # pylint: disable=too-many-instance-attributes
             elapsed += step
             if stationary and (self._tas_kt or 0) >= _STATIONARY_SPEED_THRESHOLD_KT:
                 return
-            # cargo loading: a door, weight or power change goes out at once while parked
-            # (Flight Centre waits for the doors' new state)
-            if (stationary and self.args.allow_cargo_loading and
+            # cargo: a door, weight or power change goes out at once while parked (Flight
+            # Centre waits for the doors' new state), and so do the parking brake, engines
+            # and beacon it starts unloading from (with or without the option)
+            if (stationary and
                     self._sent_state.get("cargo") not in (None, self._cargo_telemetry())):
                 return
 
