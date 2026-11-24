@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The override example shows frankenpush's `--allow-cargo-loading` (Flight
+  Centre's Cargo page).
 - **New: frankenstutter** (MSFS 2024 stutter finder, on the MSFS sim).
   `$StartFrankenstutter`, `$FrankenstutterOptions` and `$FrankenstutterRepo`
   (see the FrankenStutter section of `psxhacks-start-override-EXAMPLE.ps1`);

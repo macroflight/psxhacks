@@ -598,6 +598,8 @@
 #$FrankenpushOptions += @("--vpilot-api=ws://192.168.1.20:10781/api/v1/events")
 # PinguEye formation autopilot: let Flight Centre fly the MCP into formation (opt-in):
 #$FrankenpushOptions += @("--formation-autopilot")
+# Flight Centre's Cargo page: let it set ZFW, CG and the cargo doors while loading (opt-in):
+#$FrankenpushOptions += @("--allow-cargo-loading")
 #$FrankenpushRepo    = $null
 
 
