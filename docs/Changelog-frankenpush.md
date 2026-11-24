@@ -1,5 +1,17 @@
 # frankenpush changelog
 
+## Unreleased
+
+- **New: cargo loading for Flight Centre's Cargo page
+  (`--allow-cargo-loading`, opt-in).** On the ground Flight Centre may set
+  PSX's zero fuel weight and CG after each loading step, and open and close
+  the nose and cargo doors one by one (only while an EXT PWR or APU GEN is
+  available, powering the cargo handling bus). The telemetry reports the
+  weights, CG, fuel per tank, refuelling, cargo doors and power. When
+  Flight Centre's simulation tips the aircraft onto its tail (PSX can't),
+  a red FLIGHTCENTRE EICAS warning with MASTER WARNING tells the crew to
+  look at Flight Centre. See docs/frankenpush.md.
+
 ## 1.7.0 (2026-11-21)
 
 - **`--logon-code-file FILE`:** the logon code from a file, so it isn't in

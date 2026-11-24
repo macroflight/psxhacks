@@ -171,3 +171,46 @@ also carries `frankenpush_version`, which Flight Centre shows for the sim.
 The interface (v1, `formation_version` 1) is defined by Flight Centre. The
 decisions are in `fp_formation.py` (unit tests: `python3 -m unittest
 fp_formation`).
+
+## Cargo loading: Flight Centre's Cargo page loads the freighter (opt-in)
+
+With `--allow-cargo-loading`, Flight Centre's Cargo page (for a master sim
+with the Freighter variant) may load the aircraft. It plans the load and
+simulates the loading pallet by pallet. After each step it sends the zero
+fuel weight, the CG and the cargo doors it wants, and frankenpush writes
+them to PSX:
+
+- **ZFW and CG** (PSX's `TrueZfw` and `TrueCg`, the real CG: the
+  autopilot's stabiliser trim follows it). PSX updates the EICAS gross
+  weight and the FMC's ZFW itself.
+- **The nose, side, lower forward, lower aft and bulk cargo doors**, one
+  by one. frankenpush sets PSX's door preset (the Instructor's
+  CLOSE/OPEN/PARK) to OFF for this, so PSX keeps each door as set. PSX
+  switches a door at once; Flight Centre simulates the travel times.
+
+Only on the ground, and the doors only while the cargo handling bus has
+power: an EXT PWR or APU GEN available but not connected to the main
+buses (its button shows AVAIL, not ON). Otherwise the doors stay as they
+are and the log says why. Values outside PSX's ranges are ignored.
+
+In its telemetry frankenpush reports `cargo_loading_allowed`, the doors
+(`cargo_doors`), whether the cargo handling bus has power and why not
+(`cargo_power_ok`, `cargo_power_text`), the ZFW, gross weight, CG, fuel per
+tank (mains 1-4, reserves 2/3, centre, stabiliser, AUX) and refuelling.
+While parked, a change goes out at once (normally every 60 s then).
+Without the option frankenpush ignores Flight Centre's loading messages and
+reports only `"cargo_loading_allowed": false`.
+
+PSX doesn't tip onto its tail with the CG far aft, and can't be made to (it
+keeps a ground pitch of 0 even through a reposition). Flight Centre
+simulates it, and tells the crew: it sends `flightcentre_warning`, and
+frankenpush puts a red **FLIGHTCENTRE** EICAS warning on PSX (with MASTER
+WARNING and the aural), the cue to look at Flight Centre's page, which
+tells the rest of the story. It stays until Flight Centre clears it; the
+crew can cancel the MASTER WARNING lights as usual. frankenpush clears it
+only while it is still its own text, so another add-on's free warning
+(frankenrouter's ROUTER, a WorldFlight alert) is never wiped. Also only
+with `--allow-cargo-loading`.
+
+The decisions are in `fp_cargo.py` (unit tests: `python3 -m unittest
+fp_cargo`).

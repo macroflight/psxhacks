@@ -41,6 +41,7 @@ import unicodedata
 
 import aiohttp
 
+import fp_cargo
 import fp_formation
 import psx
 from psxhacks_version import get_version
@@ -455,6 +456,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
         self._formation = None          # fp_formation.Formation, made in main()
         self._formation_lock = asyncio.Lock()
         self._formation_notify = False  # tell Flight Centre our state on the next connection
+        # Cargo loading (fp_cargo.py, --allow-cargo-loading): PSX state it reports and needs
+        self._true_cg = None            # TrueCg, % MAC x 10
+        self._refueling = None          # Refueling, 0/1
+        self._door_com_bits = None      # DoorComBits: the door preset (OFF 32 = door by door)
+        self._fuelqty = None            # FuelQty, raw
+        self._power_lights: dict = {}   # ExtPow1/2, ApuGen1/2: AVAIL 256, ON 128
 
         # Control surface levers (ECON)
         self._flap_lever = None     # Qh389 FlapLever 0-6
@@ -607,16 +614,24 @@ class Script():  # pylint: disable=too-many-instance-attributes
             pass
 
     def _on_int_var(self, key, value):
-        """McpBankLim, HdgTru, Elev, GroundSpeed: plain integers."""
+        """Plain integers: McpBankLim, HdgTru, Elev, GroundSpeed, weights, CG, cargo state."""
         try:
             n = int(value)
         except ValueError:
             return
+        if key in fp_cargo.POWER_SOURCES:
+            self._power_lights[key] = n
+            return
         attr = {"McpBankLim": "_bank_limit", "HdgTru": "_hdg_true_ref", "Elev": "_elev_ft",
                 "GroundSpeed": "_ground_speed", "EicasGrWt": "_eicas_grwt",
-                "TrueZfw": "_true_zfw"}.get(key)
+                "TrueZfw": "_true_zfw", "TrueCg": "_true_cg", "Refueling": "_refueling",
+                "DoorComBits": "_door_com_bits"}.get(key)
         if attr:
             setattr(self, attr, n)
+
+    def _on_fuelqty(self, _key, value):
+        """FuelQty: kept raw, decoded by fp_cargo for the cargo telemetry."""
+        self._fuelqty = value
 
     def _on_misc_flt_data(self, _key, value):
         """MiscFltData: IAS x10; OAT x10; TAT x10; wind dir; wind speed; magnetic variation x10."""
@@ -967,6 +982,11 @@ class Script():  # pylint: disable=too-many-instance-attributes
         if full or self._sent_state.get("curtain_open") != self._curtain_open:
             update["flight_deck_curtain_open"] = self._curtain_open
 
+        # Cargo loading (fp_cargo.py, --allow-cargo-loading) -- delta-tracked as a whole
+        cargo = self._cargo_telemetry()
+        if full or self._sent_state.get("cargo") != cargo:
+            update.update(cargo)
+
         # Captain's barometric setting — delta-tracked.
         capt_baro_mode, capt_baro_hpa = self._parse_capt_baro()
         capt_baro_now = (capt_baro_mode, capt_baro_hpa)
@@ -1023,6 +1043,47 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self._sent_state["is_freighter"] = update["is_freighter"]
         if "flight_deck_curtain_open" in update:
             self._sent_state["curtain_open"] = update["flight_deck_curtain_open"]
+        if "cargo_loading_allowed" in update:
+            self._sent_state["cargo"] = {k: update[k] for k in self._cargo_telemetry()}
+
+    def _cargo_state(self):
+        """Return the PSX state fp_cargo decides and reports on."""
+        return {"on_ground": self._on_ground, "door_open_bits": self._door_open_bits,
+                "door_com_bits": self._door_com_bits, "true_cg": self._true_cg,
+                "true_zfw": self._true_zfw, "eicas_grwt": self._eicas_grwt,
+                "fuelqty": self._fuelqty, "refueling": self._refueling, **self._power_lights}
+
+    def _cargo_telemetry(self):
+        """Return the cargo fields for the telemetry (only the flag without the option)."""
+        return fp_cargo.telemetry(self.args.allow_cargo_loading, self._cargo_state())
+
+    def _on_cargo_state(self, data):
+        """Apply Flight Centre's cargo_state: ZFW, CG and cargo doors (fp_cargo decides)."""
+        writes, notes = fp_cargo.apply(data, self.args.allow_cargo_loading, self._cargo_state())
+        for note in notes:
+            self.logger.info("Cargo loading: %s", note)
+        if writes and not self.psx_connected:
+            self.logger.info("Cargo loading: no PSX connection, nothing written")
+            return
+        for name, value in writes:
+            self.logger.info("Cargo loading: %s = %s", name, value)
+            # send and cache: PSX and the router never echo our own write back, and the
+            # subscriber callbacks keep our state (and so the telemetry) current
+            self.psx.send(name, str(value))
+            self.psx._set(name, str(value))  # pylint: disable=protected-access
+
+    def _on_flightcentre_warning(self, data):
+        """Show/clear the red FLIGHTCENTRE EICAS warning (fp_cargo.warning decides)."""
+        value, note = fp_cargo.warning(data, self.args.allow_cargo_loading,
+                                       self.psx.get("FreeMsgW") if self.psx else None)
+        self.logger.info("Flight Centre: %s", note)
+        if value is None:
+            return
+        if not self.psx_connected:
+            self.logger.info("Flight Centre: no PSX connection for the EICAS warning")
+            return
+        self.psx.send("FreeMsgW", value)
+        self.psx._set("FreeMsgW", value)  # pylint: disable=protected-access
 
     def _queue_initial_status(self):
         """Queue the currently-known door lock, seatbelt, variant and curtain state.
@@ -1239,6 +1300,11 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 self.psx.subscribe(name, self._on_mcp_button)
             for name in ("McpBankLim", "HdgTru", "Elev", "GroundSpeed", "EicasGrWt", "TrueZfw"):
                 self.psx.subscribe(name, self._on_int_var)
+            # Cargo loading (always subscribed, the subscribe-once rule; used with the option)
+            for name in ("TrueCg", "Refueling", "DoorComBits") + fp_cargo.POWER_SOURCES:
+                self.psx.subscribe(name, self._on_int_var)
+            self.psx.subscribe("FuelQty", self._on_fuelqty)
+            self.psx.subscribe("FreeMsgW")   # cached: FLIGHTCENTRE is cleared only if ours
             self.psx.subscribe("MiscFltData", self._on_misc_flt_data)
             self.psx.subscribe("FltDkDoorTurn", self._on_fltdk_door_turn)
             self.psx.subscribe("CallFrCabin", self._on_call_fr_cabin)
@@ -1386,6 +1452,11 @@ class Script():  # pylint: disable=too-many-instance-attributes
             await asyncio.sleep(step)
             elapsed += step
             if stationary and (self._tas_kt or 0) >= _STATIONARY_SPEED_THRESHOLD_KT:
+                return
+            # cargo loading: a door, weight or power change goes out at once while parked
+            # (Flight Centre waits for the doors' new state)
+            if (stationary and self.args.allow_cargo_loading and
+                    self._sent_state.get("cargo") not in (None, self._cargo_telemetry())):
                 return
 
     async def push_loop_coro(self):  # pylint: disable=too-many-statements,too-many-branches
@@ -1848,11 +1919,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
         ~/to-psxhacks.md's 2026-10-19 update.
         """
         msg_type = data.get("type")
-        if msg_type == "pingueye_request":
-            self._on_pingueye_request(data)
-            return
-        if msg_type == "formation_steer":
-            self._on_formation_steer(data)
+        handler = {"pingueye_request": self._on_pingueye_request,
+                   "formation_steer": self._on_formation_steer,
+                   "cargo_state": self._on_cargo_state,
+                   "flightcentre_warning": self._on_flightcentre_warning}.get(msg_type)
+        if handler:
+            handler(data)
             return
         if msg_type == "flight_deck_doorbell":
             call = data.get("call")
@@ -2334,6 +2406,13 @@ class Script():  # pylint: disable=too-many-instance-attributes
                  "only while CMD C is engaged with SPD, HDG SEL, ALT or V/S and the bank "
                  "limit at AUTO. See docs/frankenpush.md.")
         parser.add_argument(
+            '--allow-cargo-loading', action='store_true',
+            help="Let Flight Centre's Cargo page load the aircraft (opt-in): on the ground it "
+                 "then sets PSX's zero fuel weight and CG after each loading step and opens "
+                 "and closes the nose and cargo doors (only while an EXT PWR or APU GEN is "
+                 "available, powering the cargo handling bus). Weights, CG, fuel, doors and "
+                 "power are reported in the telemetry. See docs/frankenpush.md.")
+        parser.add_argument(
             '--worldflight-shop-alerts',
             action='store_true',
             help="Show an EICAS master caution alert when a purchase is made in the "
@@ -2407,6 +2486,9 @@ class Script():  # pylint: disable=too-many-instance-attributes
         if self.args.debug:
             self.logger.setLevel(logging.DEBUG)
             asyncio.get_event_loop().set_debug(True)
+        if self.args.allow_cargo_loading:
+            self.logger.info("Cargo loading allowed (--allow-cargo-loading): Flight Centre may set "
+                             "ZFW, CG and the cargo doors on the ground")
 
         print(f"frankenpush version {__version__} starting")
         print(f"Connecting to PSX at {self.args.psx_host}:{self.args.psx_port}")
