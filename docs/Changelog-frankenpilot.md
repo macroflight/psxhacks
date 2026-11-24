@@ -1,6 +1,6 @@
 # frankenpilot changelog
 
-## Unreleased
+## 0.4.0 (2026-11-24)
 
 - After the ice detectors fired (>ICING NAC/WING), anti-ice stays on until
   10 minutes after their last detection, and the hold doubles (up to 40

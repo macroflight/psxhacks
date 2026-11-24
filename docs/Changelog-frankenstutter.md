@@ -1,6 +1,6 @@
 # frankenstutter changelog
 
-## Unreleased
+## 0.2.0 (2026-11-24)
 
 - **Fixed: false stutters when PresentMon's output came in bursts.** A
   second without PresentMon lines fell back to SimConnect's frames and

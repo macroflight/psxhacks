@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.44.0 (2026-11-24)
 
 - **FrankenWeather's messages also go to FrankenPush**, which puts the
   weather (zones, CBs, turbulence) into its Flight Centre upload. All of

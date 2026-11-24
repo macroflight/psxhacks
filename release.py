@@ -17,7 +17,7 @@ suggestion to add a changelog entry. A major release requires typing "YES"
 to confirm the changelog has actually been updated.
 
 <addon> is one of: frankenboostproxy, frankencduproxy, frankenpilot, frankenprint, frankenpush,
-frankenrouter, frankentanker, frankenusb, frankenweather, psxutils,
+frankenrouter, frankenstutter, frankentanker, frankenusb, frankenweather, psxutils,
 start_scripts.
 
 psxutils is a shared version number for a group of small diagnostic
@@ -68,6 +68,9 @@ _ADDONS = {
     'frankenrouter': (
         _ROOT / 'router' / 'frankenrouter.version',
         _ROOT / 'router' / 'docs' / 'Changelog.md'),
+    'frankenstutter': (
+        _ROOT / 'frankenstutter.version',
+        _ROOT / 'docs' / 'Changelog-frankenstutter.md'),
     'frankentanker': (
         _ROOT / 'frankentanker.version',
         _ROOT / 'docs' / 'Changelog-frankentanker.md'),
@@ -115,8 +118,13 @@ _ADDON_PATHS = {
         ['frankenpilot.py', 'frankenpilot.spec', 'fp_cdu.py', 'fp_webui.py',
          'docs/frankenpilot.md'], []),
     'frankenprint': (['frankenprint.py', 'frankenprint.spec'], []),
-    'frankenpush': (['frankenpush.py', 'frankenpush.spec'], []),
+    'frankenpush': (
+        ['frankenpush.py', 'frankenpush.spec', 'fp_cargo.py', 'fp_formation.py',
+         'docs/frankenpush.md'], []),
     'frankenrouter': (['router/'], ['router']),
+    'frankenstutter': (
+        ['frankenstutter.py', 'frankenstutter.spec', 'fst_report.py', 'fst_web.py',
+         'docs/frankenstutter.md'], []),
     'frankentanker': (['frankentanker.py', 'frankentanker.spec'], []),
     'frankenusb': (['frankenusb.py', 'frankenusb.spec'], []),
     'frankenweather': (

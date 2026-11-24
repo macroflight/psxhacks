@@ -1,6 +1,6 @@
 # start_scripts changelog
 
-## Unreleased
+## 1.15.0 (2026-11-24)
 
 - The override example shows frankenpush's `--allow-cargo-loading` (Flight
   Centre's Cargo page).

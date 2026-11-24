@@ -1,6 +1,6 @@
 # frankenpush changelog
 
-## Unreleased
+## 1.8.0 (2026-11-24)
 
 - **New: cargo loading for Flight Centre's Cargo page
   (`--allow-cargo-loading`, opt-in).** On the ground Flight Centre may set
