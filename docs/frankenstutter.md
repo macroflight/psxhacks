@@ -38,8 +38,8 @@ sign out and in:
 net localgroup "Performance Log Users" %USERNAME% /add
 ```
 
-Without PresentMon (not found or not allowed) frankenstutter uses
-SimConnect's frame events instead: it still sees the longer stutters, but
+Without PresentMon (not found or not allowed, or no frames from it for 5
+seconds) frankenstutter uses SimConnect's frame events instead: it still sees the longer stutters, but
 not what reaches the screen and not whether the CPU or the GPU was busy.
 
 ## Starting it
@@ -65,6 +65,7 @@ frame time and the stutters of the last minute. Ctrl+C stops it.
 | `--dll PATH` | SimConnect.dll |
 | `--small-ms 30`, `--medium-ms 60`, `--major-ms 150` | the stutter sizes |
 | `--factor 1.75` | a stutter is also this many times the recent typical frame |
+| `--hold-ms 5000` | a picture held this long is a hold (pause, menu, load), not a stutter |
 | `--out DIR` | where the session folders go |
 | `--web-port 9787`, `--web-bind 0.0.0.0` | the web page and API (`--web-port 0`: off) |
 | `--report FOLDER ...` | write the report for these sessions and exit |
@@ -75,6 +76,14 @@ A picture held on screen for at least 30 ms (one missed refresh at 60 Hz)
 and at least 1.75 times the recent median: **small** 30-60 ms, **medium**
 60-150 ms, **major** 150 ms and more. With frame generation on,
 frankenstutter watches what reaches the screen.
+
+A picture held 5 seconds or more (`--hold-ms`) is a **hold**, not a
+stutter: the world map, a menu, a pause, loading a flight, MSFS in the
+background. So is anything while MSFS is paused, and the first 10 seconds
+after a hold or a pause. Holds are counted on their own (the `holds`
+column, and the report's first lines), and long waits don't count as frame
+times, so they don't spoil the frame rate or the stutter counts. The
+report leaves them out of older sessions too.
 
 For each stutter it looks at the slowest frame MSFS made just before:
 

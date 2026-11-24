@@ -12,6 +12,9 @@ import statistics
 import sys
 
 SEVS = ("small", "medium", "major")
+HOLD_MS = 5000.0   # a picture held this long is a pause, a menu or a load: a "hold", not a stutter
+SETTLE_S = 10.0    # ... and the first seconds after a hold or a pause don't count either
+
 # a context "spike": the value in the stutter's last 10 s, the baseline: the same over all seconds
 SPIKES = (("msfs_read_mbs", "MSFS reading from disk", 50.0),
           ("net_rx_mbs", "network download", 2.0),
@@ -27,6 +30,12 @@ def num(v):
         return float(v)
     except (TypeError, ValueError):
         return None
+
+
+def is_hold(rec: dict) -> bool:
+    """Return True for an old stutter record that is really a hold (long or while paused)."""
+    return ((num(rec.get("shown_ms")) or 0) >= HOLD_MS or
+            str((rec.get("row") or {}).get("paused")) in ("1", "1.0"))
 
 
 def load(folders):
@@ -106,9 +115,18 @@ def rates(rs):
 def report(folders, dest=None) -> None:  # pylint: disable=too-many-locals,too-many-statements,too-many-branches
     """Load the session folders, print the report and write it (dest, or report.md in the first)."""
     rows, stutters, markers, infos = load(folders)
+    holds = sum(1 for s in stutters if is_hold(s))   # sessions before holds were left out
+    stutters = [s for s in stutters if not is_hold(s)]
+    # sessions before 2026-11-24: with PresentMon running, a second without its (bursty) lines
+    # fell back to a stale SimConnect frame and made fake stutters; leave those out
+    with_pm = sum(r.get("source") == "presentmon" for r in rows) > len(rows) / 2
+    fake = [s for s in stutters if with_pm and str(s.get("guess", "")).startswith(
+        "unknown (SimConnect only)")]
+    stutters = [s for s in stutters if s not in fake]
     if not rows:
         sys.exit("no seconds.csv rows in " + ", ".join(folders))
     out = ["# frankenstutter report", ""]
+    holds += sum(num(r.get("holds")) or 0 for r in rows)
     for info in infos:
         plan = (info.get("power_plan") or "?").split(":")[-1].strip()
         out.append(f"- Session {info.get('start_utc')}: {info.get('cpu')}, {info.get('ram_gb')} GB "
@@ -118,7 +136,10 @@ def report(folders, dest=None) -> None:  # pylint: disable=too-many-locals,too-m
     sources = ", ".join(f"{k} {v}" for k, v in src.items())
     out.append(f"- {len(rows)} seconds ({len(rows) / 60:.0f} min), frames from: {sources}")
     kinds = ", ".join(f"{sum(s['severity'] == v for s in stutters)} {v}" for v in SEVS)
-    out.append(f"- {len(stutters)} stutters: {kinds}; {len(markers)} markers typed")
+    out.append(f"- {len(stutters)} stutters: {kinds}; {len(markers)} markers typed; "
+               f"{holds} holds left out (pauses, menus, loads: {HOLD_MS / 1000:.0f} s or more, "
+               "or while paused)" +
+               (f", {len(fake)} false ones from PresentMon gaps" if fake else ""))
     out += ["", "## Where", "",
             "Stutters per minute; places with at least 1 minute, worst (major, then medium) "
             "first.", ""]

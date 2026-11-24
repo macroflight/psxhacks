@@ -86,6 +86,9 @@ CAMERA = {2: "cockpit", 3: "external", 4: "drone", 5: "fixed", 6: "environment",
           19: "drone_top_down", 21: "hangar", 24: "ground", 25: "follow_traffic"}
 
 # PresentMon columns, by name in its 1.x / 2.x versions (first one present wins)
+# SimConnect frames only after this long without PresentMon's (bursty: a stale SimConnect frame
+# made fake "3 s"/"2 min" stutters at a steady 30 fps, MACRO 2026-11-24)
+PM_QUIET_S = 5.0
 PM_COLS = {
     "app": ("MsBetweenPresents", "msBetweenPresents", "FrameTime"),
     "disp": ("MsBetweenDisplayChange", "msBetweenDisplayChange", "DisplayedTime"),
@@ -590,7 +593,7 @@ def session_info(args, out_dir: str, pm_exe) -> dict:
 SECOND_COLS = (
     "utc", "source", "frames", "fps", "disp_p50", "disp_p95", "disp_p99", "disp_max",
     "over_20", "over_30", "over_60", "app_fps", "app_p95", "app_max", "cpu_busy_p95",
-    "gpu_busy_p95", "stutter_small", "stutter_medium", "stutter_major", "sim_fps",
+    "gpu_busy_p95", "stutter_small", "stutter_medium", "stutter_major", "holds", "sim_fps",
     "lat", "lon", "alt_ft", "agl_ft", "gs_kt", "ias_kt", "hdg", "on_ground", "camera", "sim_rate",
     "paused", "airport", "airport_nm",
     "cpu_total", "cpu_max_core", "cpu_dpc_pct", "cpu_interrupt_pct", "cpu_clock_mhz",
@@ -700,6 +703,8 @@ def parse_args():
     ap.add_argument("--factor", type=float, default=1.75,
                     help="a stutter is also this many times the recent median (1.75: one "
                     "repeated refresh at 60 Hz, 33.3 ms, counts)")
+    ap.add_argument("--hold-ms", type=float, default=fst_report.HOLD_MS,
+                    help="a picture held this long is a pause, a menu or a load, not a stutter")
     ap.add_argument("--app-frames", action="store_true",
                     help="detect on MSFS's own frames when PresentMon gives no display times")
     ap.add_argument("--simconnect-stutter-ms", type=float, default=100.0,
@@ -767,6 +772,8 @@ class Agent:  # pylint: disable=too-many-instance-attributes
         self.totals = collections.Counter()
         self.last_status = 0.0
         self.last_sim_frame = None
+        self.last_pm_frames = 0.0                     # when PresentMon last gave frames
+        self.settle_until = 0.0                       # no stutters before this (after a hold)
 
     def take(self):
         """Return everything the threads gathered since the last second (and reset it)."""
@@ -785,24 +792,29 @@ class Agent:  # pylint: disable=too-many-instance-attributes
         stutters = []
         disp = [f["disp"] for _, f in frames if f.get("disp") is not None]
         app = [f["app"] for _, f in frames if f.get("app") is not None]
+        now = time.time()
         if frames:
+            self.last_pm_frames = now
             row["source"] = got["source"]
             for t, f in frames:
                 hit = self.det.feed(f)
                 if hit:
                     stutters.append((t, *hit, self.det.cause(hit[2])))
-        elif sim_frames:   # no PresentMon: gaps between the sim's frame events
+        # SimConnect frame gaps only without PresentMon for PM_QUIET_S (its output is bursty)
+        use_sim = not frames and now - self.last_pm_frames >= PM_QUIET_S
+        if use_sim and sim_frames:
             row["source"] = "simconnect"
-            for t, _ in sim_frames:
-                if self.last_sim_frame is not None:
-                    gap = (t - self.last_sim_frame) * 1000.0
-                    disp.append(gap)
-                    if gap >= self.args.simconnect_stutter_ms:
-                        sev = "major" if gap >= self.args.major_ms else "medium"
-                        stutters.append((t, sev, gap, None, {"guess": "unknown (SimConnect only)"}))
-                self.last_sim_frame = t
+        for t, _ in sim_frames:
+            if use_sim and self.last_sim_frame is not None:
+                gap = (t - self.last_sim_frame) * 1000.0
+                disp.append(gap)
+                if gap >= self.args.simconnect_stutter_ms:
+                    sev = "major" if gap >= self.args.major_ms else "medium"
+                    stutters.append((t, sev, gap, None, {"guess": "unknown (SimConnect only)"}))
+            self.last_sim_frame = t
         if sim_frames:
             row["sim_fps"] = rnd(statistics.mean(r for _, r in sim_frames))
+        disp = [d for d in disp if d < self.args.hold_ms]   # a hold isn't a frame time
         if disp:
             row.update(frames=len(disp), fps=rnd(1000.0 * len(disp) / max(1.0, sum(disp))),
                        disp_p50=rnd(pct(disp, 50)), disp_p95=rnd(pct(disp, 95)),
@@ -816,10 +828,31 @@ class Agent:  # pylint: disable=too-many-instance-attributes
             vals = [f[key] for _, f in frames if f.get(key) is not None]
             if vals:
                 row[name] = rnd(pct(vals, 95))
+        stutters = self.real_stutters(row, stutters)
         counts = collections.Counter(s[1] for s in stutters)
         row.update(stutter_small=counts["small"], stutter_medium=counts["medium"],
                    stutter_major=counts["major"])
         return stutters
+
+    def real_stutters(self, row: dict, stutters: list) -> list:
+        """Return the stutters without holds (--hold-ms or longer, paused, SETTLE_S after)."""
+        paused = (row.get("paused") or 0) >= 1
+        if paused:
+            self.settle_until = time.time() + fst_report.SETTLE_S
+        out = []
+        for stutter in stutters:
+            t, dt = stutter[0], stutter[2]
+            if dt >= self.args.hold_ms:
+                self.settle_until = max(self.settle_until, t + fst_report.SETTLE_S)
+                self.totals["hold"] += 1
+                print(f"  hold {dt / 1000:.1f} s at {iso(t)[11:19]}Z (pause, menu or load): "
+                      "not a stutter", flush=True)
+            elif paused or t < self.settle_until:
+                self.totals["hold"] += 1
+            else:
+                out.append(stutter)
+        row["holds"] = len(stutters) - len(out)
+        return out
 
     def build_row(self, now: float, got: dict) -> dict:
         """Return this second's row: sim state, nearest airport, system and GPU."""
