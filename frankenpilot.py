@@ -1901,16 +1901,27 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         if self.alt_task is None or self.alt_task.done():
             self.alt_task = self.spawn(self.sync_altimeters())
 
+    def standby_step(self):
+        """Return StbyBaro's change per TurnStbyBaro click (hPa*100).
+
+        The ISFD (CfgStbyInstr 2) moves 1 hPa per click; the older standby
+        altimeters 0.04 hPa. Assuming 0.04 on an ISFD made frankenpilot turn
+        16 clicks = 16 hPa each way, 1016.77 <-> 1032.77 for ever (FTECH1
+        2026-11-25).
+        """
+        return 100 if self.get_int("CfgStbyInstr") == 2 else 4
+
     def standby_matches(self, want):
-        """Return True if the standby altimeter shows want ('STD' or hPa*100)."""
+        """Return True if the standby altimeter shows want ('STD' or hPa*100), to half a click."""
         isfd = self.get_int("CfgStbyInstr") == 2
         cur = self.get_int("StbyBaro")
+        near = self.standby_step() / 2
         if want == 'STD':
             return self.get_int("IsfdBaroStd") == 1 if isfd else \
-                cur is not None and abs(cur - 101325) <= 4
+                cur is not None and abs(cur - 101325) <= near
         if isfd and self.get_int("IsfdBaroStd") == 1:
             return False
-        return cur is not None and abs(cur - want) <= 4
+        return cur is not None and abs(cur - want) <= near
 
     async def sync_altimeters(self):
         """Bring our PFD (STD/QNH, baro) to the pilot flying's and the standby to stby_want.
@@ -1978,15 +1989,23 @@ class FrankenPilot:  # pylint: disable=too-many-instance-attributes,too-many-pub
         """Turn the standby altimeter's baro knob to target (StbyBaro, hPa*100)."""
         async with self.hands:
             await asyncio.sleep(self.hand_delay("TurnStbyBaro"))
-            moved = False
+            moved, flips, last_sign = False, 0, 0
             for _ in range(300):
                 cur = self.get_int("StbyBaro")
-                if cur is None or not self.active or abs(target - cur) <= 4:
+                step = self.standby_step()
+                if cur is None or not self.active or abs(target - cur) <= step / 2:
                     break
                 if self.stby_want not in (None, target) and not \
                         (self.stby_want == 'STD' and target == 101325):
                     break       # the pilot flying set something else meanwhile
-                clicks = max(-16, min(16, round((target - cur) / 4))) or (1 if target > cur else -1)
+                sign = 1 if target > cur else -1
+                flips += last_sign not in (sign, 0)
+                last_sign = sign
+                if flips >= 3:  # overshooting both ways: never fight the knob
+                    self.logger.warning("Standby altimeter: overshooting %s (at %s), stopped",
+                                        target, cur)
+                    break
+                clicks = max(-16, min(16, round((target - cur) / step))) or sign
                 self.psx.send("TurnStbyBaro", str(clicks))
                 moved = True
                 await asyncio.sleep(0.1)

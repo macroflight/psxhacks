@@ -1,5 +1,15 @@
 # frankenpilot changelog
 
+## Unreleased
+
+- **Fix: the standby altimeter's baro was turned back and forth for ever on
+  an ISFD.** The ISFD moves 1 hPa per knob click (the older standby
+  altimeters 0.04 hPa), but frankenpilot turned it as if it moved 0.04:
+  16 clicks each way, 1016.77 <-> 1032.77 hPa, around a QNH of 1020
+  (FTECH1, 2026-11-25). It now turns by the instrument's own step, is done
+  within half a click, and stops (with a warning) if it overshoots both
+  ways.
+
 ## 0.4.0 (2026-11-24)
 
 - After the ice detectors fired (>ICING NAC/WING), anti-ice stays on until
