@@ -1,5 +1,16 @@
 # frankenpush changelog
 
+## Unreleased
+
+- **New: the tail tip lifts the nose.** When Flight Centre's tail-tip
+  warning arrives while the aircraft is parked, frankenpush raises PSX's
+  pitch smoothly to about 12 degrees, holds it for 5 s and lets PSX
+  settle back down (`--allow-cargo-loading`). See docs/frankenpush.md.
+
+- **Fix: `engines_running` said 4 on a cold and dark aircraft.** It counted
+  PSX's EngRunt, which reads 8 for an engine that has never run; it now
+  counts the fuel control switches in RUN.
+
 ## 1.8.0 (2026-11-24)
 
 - **New: cargo loading for Flight Centre's Cargo page

@@ -38,6 +38,7 @@ import sys
 import time
 import traceback
 import unicodedata
+from typing import Optional
 
 import aiohttp
 
@@ -414,6 +415,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         # _close_curtain_after_delay().
         self._curtain_open = False
         self._curtain_close_task = None
+        self._tail_tip_task = None      # the tail tip's pitch-up (fp_cargo.tail_tip_pitch)
 
         # FRDP broadcast state, received over the single PSX connection -
         # see get_psx_connection_coro() and _handle_addon_message().
@@ -465,7 +467,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         # Arrival (Flight Centre starts unloading from these; sent with or without the option)
         self._park_brake_lever = None   # ParkBrkLev, 0/1
         self._beacon = None             # LtBeacon, -1/0/1 (0 = OFF)
-        self._eng_runt = None           # EngRunt, raw ("300;300;300;300")
+        self._fuel_cutoffs = [None] * 4  # FuelCutoff1-4: 1 = RUN, 0 = CUTOFF
 
         # Control surface levers (ECON)
         self._flap_lever = None     # Qh389 FlapLever 0-6
@@ -634,9 +636,12 @@ class Script():  # pylint: disable=too-many-instance-attributes
         if attr:
             setattr(self, attr, n)
 
-    def _on_eng_runt(self, _key, value):
-        """EngRunt: kept raw, fp_cargo counts the running engines for the telemetry."""
-        self._eng_runt = value
+    def _on_fuel_cutoff(self, key, value):
+        """FuelCutoff1-4: fp_cargo counts the running engines (switch in RUN) for the telemetry."""
+        try:
+            self._fuel_cutoffs[int(key[-1]) - 1] = int(value)
+        except (ValueError, IndexError):
+            pass
 
     def _on_fuelqty(self, _key, value):
         """FuelQty: kept raw, decoded by fp_cargo for the cargo telemetry."""
@@ -1062,7 +1067,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 "true_zfw": self._true_zfw, "eicas_grwt": self._eicas_grwt,
                 "fuelqty": self._fuelqty, "refueling": self._refueling,
                 "park_brake_lever": self._park_brake_lever, "beacon": self._beacon,
-                "eng_runt": self._eng_runt, **self._power_lights}
+                "fuel_cutoffs": list(self._fuel_cutoffs), **self._power_lights}
 
     def _cargo_telemetry(self):
         """Return the cargo fields for the telemetry (only the flag without the option)."""
@@ -1092,6 +1097,8 @@ class Script():  # pylint: disable=too-many-instance-attributes
         value, note = fp_cargo.warning(data, self.args.allow_cargo_loading,
                                        self.psx.get("FreeMsgW") if self.psx else None)
         self.logger.info("Flight Centre: %s", note)
+        if self.args.allow_cargo_loading and fp_cargo.is_tail_tip(data):
+            self._start_tail_tip()
         if value is None:
             return
         if not self.psx_connected:
@@ -1099,6 +1106,45 @@ class Script():  # pylint: disable=too-many-instance-attributes
             return
         self.psx.send("FreeMsgW", value)
         self.psx._set("FreeMsgW", value)  # pylint: disable=protected-access
+
+    def _start_tail_tip(self):
+        """Lift PSX's nose onto the tail (fp_cargo.tail_tip_pitch) if parked and not already."""
+        if self._tail_tip_task is not None and not self._tail_tip_task.done():
+            self.logger.info("Tail tip: already lifting the nose")
+            return
+        why = self._tail_tip_refusal()
+        if why:
+            self.logger.info("Tail tip: no pitch-up (%s)", why)
+            return
+        self._tail_tip_task = asyncio.ensure_future(self._tail_tip())
+
+    def _tail_tip_refusal(self) -> Optional[str]:
+        """Return why the tail tip can't lift the nose now, or None."""
+        if not self.psx_connected:
+            return "no PSX connection"
+        if self._on_ground is not True:
+            return "not on the ground"
+        speed = self._ground_speed if self._ground_speed is not None else self._tas_kt
+        if speed is None or speed > fp_cargo.TIP_MAX_GS_KT:
+            return f"not parked (ground speed {speed})"
+        return None
+
+    async def _tail_tip(self):
+        """Write a rising, then held, pitch ~20 times a second, then stop: PSX settles back."""
+        self.logger.info("Tail tip: lifting the nose to %.1f deg (PSX shows about 12)",
+                         fp_cargo.TIP_PITCH_DEG)
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        while (pitch := fp_cargo.tail_tip_pitch(loop.time() - start)) is not None:
+            why = self._tail_tip_refusal()
+            value = fp_cargo.with_pitch(self.psx.get("PiBaHeAlTas"), pitch) if not why else None
+            if value is None:
+                self.logger.info("Tail tip: stopped (%s)", why or "no PiBaHeAlTas from PSX")
+                return
+            # not cached: PSX's own PiBaHeAlTas keeps arriving and is the base of each write
+            self.psx.send("PiBaHeAlTas", value)
+            await asyncio.sleep(fp_cargo.TIP_STEP_S)
+        self.logger.info("Tail tip: done, PSX lets the nose down by itself")
 
     def _queue_initial_status(self):
         """Queue the currently-known door lock, seatbelt, variant and curtain state.
@@ -1321,7 +1367,8 @@ class Script():  # pylint: disable=too-many-instance-attributes
             self.psx.subscribe("FuelQty", self._on_fuelqty)
             for name in ("ParkBrkLev", "LtBeacon"):
                 self.psx.subscribe(name, self._on_int_var)
-            self.psx.subscribe("EngRunt", self._on_eng_runt)
+            for name in ("FuelCutoff1", "FuelCutoff2", "FuelCutoff3", "FuelCutoff4"):
+                self.psx.subscribe(name, self._on_fuel_cutoff)
             self.psx.subscribe("FreeMsgW")   # cached: FLIGHTCENTRE is cleared only if ours
             self.psx.subscribe("MiscFltData", self._on_misc_flt_data)
             self.psx.subscribe("FltDkDoorTurn", self._on_fltdk_door_turn)

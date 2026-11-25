@@ -18,8 +18,13 @@ PSX facts (measured on the headless test sim 2026-11-24, PSX 10.195):
   written TrueCg as the CG at its current fuel (wrote 200 with no fuel,
   151 t of fuel -> 178, no fuel again -> 200). Flight Centre therefore
   sends the CG for PSX's actual fuel. TrueCg is clamped at 330.
-- PSX never tips onto its tail and keeps a ground pitch of 0: Flight
-  Centre simulates the tip.
+- PSX never tips onto its tail by itself: a reposition keeps a ground pitch
+  of 0. But PiBaHeAlTas pitch written about 20 times a second lifts the nose
+  (2026-11-25, stack B): the boost feed (what MSFS shows) pivots about the
+  main gear and lags, reaching about 12 deg for 13.8 written (the eye
+  height rises about 20 ft). After the last write PSX lets the nose down
+  in about 1.7 s, dips to -1.5 deg and settles within about 4 s. Writing 0
+  at the end makes it bounce back up; just stopping is smoothest.
 - DoorOpenBits (Qi180, Aerowinx's Doors class): a bit set = open. With a
   door preset active (DoorComBits Qi179: CLOSE 1, OPEN 2, PARK 4) PSX puts
   the bits back within seconds; with DoorComBits OFF (32) written bits
@@ -31,6 +36,7 @@ PSX facts (measured on the headless test sim 2026-11-24, PSX 10.195):
 - FuelQty (Qs438): "d" + tanks in 0.1 lb: mains 1-4, reserves 2/3, centre
   wing, stabiliser, AUX (ER body tank; PSX zeroes it on other variants).
 """
+import math
 import unittest
 from typing import Optional
 
@@ -73,6 +79,41 @@ def warning(msg: dict, allowed: bool, current: Optional[str]) -> tuple:
     return None, f"EICAS warning {WARNING_TEXT} not showing: nothing to clear"
 
 
+# The tail tip's pitch-up (flightcentre_warning with reason "tail tip"): written pitch in deg
+# (PSX shows about 12 deg, where the 747's tail meets the ground), a smooth rise, a hold, then
+# frankenpush stops writing and PSX settles back down by itself (Mats 2026-11-25).
+TIP_PITCH_DEG = 13.8
+TIP_RISE_S = 3.0
+TIP_HOLD_S = 5.0
+TIP_STEP_S = 0.05             # 20 writes a second; fewer let PSX sag between writes
+TIP_MAX_GS_KT = 1.0           # only when parked
+
+
+def is_tail_tip(msg: dict) -> bool:
+    """Return True for a flightcentre_warning that raises a tail tip."""
+    return msg.get("active") is True and "tail tip" in str(msg.get("reason") or "").lower()
+
+
+def tail_tip_pitch(elapsed_s: float) -> Optional[float]:
+    """Return the pitch (deg) to write elapsed_s into the tail tip, None when done."""
+    if elapsed_s < 0:
+        return 0.0
+    if elapsed_s < TIP_RISE_S:
+        return TIP_PITCH_DEG * (1 - math.cos(math.pi * elapsed_s / TIP_RISE_S)) / 2
+    if elapsed_s < TIP_RISE_S + TIP_HOLD_S:
+        return TIP_PITCH_DEG
+    return None
+
+
+def with_pitch(pibahealtas: Optional[str], pitch_deg: float) -> Optional[str]:
+    """Return PSX's PiBaHeAlTas with the pitch field (1e-5 rad) replaced, None if malformed."""
+    parts = (pibahealtas or "").split(";")
+    if len(parts) != 7:
+        return None
+    parts[0] = str(round(math.radians(pitch_deg) * 100000))
+    return ";".join(parts)
+
+
 def door_states(open_bits: Optional[int]) -> Optional[dict]:
     """Return {door: "open"/"closed"} from DoorOpenBits, or None before PSX sent it."""
     if open_bits is None:
@@ -106,30 +147,30 @@ def power(on_ground: Optional[bool], lights: dict) -> tuple:
     return False, "NO GROUND POWER OR APU AVAILABLE"
 
 
-def engines_running(eng_runt) -> Optional[int]:
-    """Return how many engines run (0-4) from EngRunt ("300;300;0;0"), or None.
+def engines_running(cutoffs) -> Optional[int]:
+    """Return how many engines run (0-4) from FuelCutoff1-4 (1 = RUN, 0 = CUTOFF), or None.
 
-    EngRunt (Qs363) has one field per engine: 300 while it runs, 0 as soon
-    as its fuel control switch goes to CUTOFF (measured 2026-11-24).
+    The fuel control switches, not EngRunt: EngRunt reads 300 while an
+    engine runs and 0 after CUTOFF, but 8 on a cold and dark aircraft
+    (headless 2026-11-25), so it can't tell "off" reliably.
     """
-    try:
-        fields = [int(x) for x in eng_runt.split(";")[:4]]
-    except (AttributeError, ValueError):
+    if cutoffs is None or len(cutoffs) != 4 or any(c is None for c in cutoffs):
         return None
-    return sum(1 for v in fields if v > 0) if len(fields) == 4 else None
+    return sum(1 for c in cutoffs if int(c) & 1)
 
 
 def arrival(state: dict) -> dict:
     """Return the fields Flight Centre starts unloading from (sent with or without the option).
 
     state: on_ground (bool), park_brake_lever (ParkBrkLev 0/1), beacon
-    (LtBeacon -1/0/1, 0 = OFF), eng_runt (EngRunt). None when not known yet.
+    (LtBeacon -1/0/1, 0 = OFF), fuel_cutoffs ([FuelCutoff1-4]). None when not
+    known yet.
     """
     brake, beacon = state.get("park_brake_lever"), state.get("beacon")
     return {
         "on_ground": state.get("on_ground"),
         "parking_brake": bool(brake) if brake is not None else None,
-        "engines_running": engines_running(state.get("eng_runt")),
+        "engines_running": engines_running(state.get("fuel_cutoffs")),
         "beacon_on": beacon != 0 if beacon is not None else None,
     }
 
@@ -239,7 +280,7 @@ class TestCargo(unittest.TestCase):
     GROUND = {"on_ground": True, "ExtPow1": 256, "ExtPow2": 256, "ApuGen1": 0, "ApuGen2": 0,
               "door_open_bits": 0, "door_com_bits": 1, "true_cg": 185, "true_zfw": 529109,
               "eicas_grwt": 2542, "refueling": 0, "park_brake_lever": 1, "beacon": 0,
-              "eng_runt": "0;0;0;0",
+              "fuel_cutoffs": [0, 0, 0, 0],
               "fuelqty": "d100000;110000;120000;130000;10000;20000;300000;50000;0;359413;2124;"}
 
     def test_power(self):
@@ -280,12 +321,12 @@ class TestCargo(unittest.TestCase):
         self.assertIs(t["refueling"], False)
 
     def test_arrival(self):
-        """Engines from EngRunt, beacon on in either ON position, None when unknown."""
-        self.assertEqual(engines_running("300;300;0;300"), 3)
+        """Engines from the fuel control switches, beacon on in either ON position, None unknown."""
+        self.assertEqual(engines_running([1, 1, 0, 1]), 3)
         self.assertIsNone(engines_running(None))
-        self.assertIsNone(engines_running("300;300"))
+        self.assertIsNone(engines_running([1, None, 1, 1]))
         a = arrival({"on_ground": False, "park_brake_lever": 0, "beacon": -1,
-                     "eng_runt": "300;300;300;300"})
+                     "fuel_cutoffs": [1, 1, 1, 1]})
         self.assertEqual(a, {"on_ground": False, "parking_brake": False, "engines_running": 4,
                              "beacon_on": True})
         self.assertEqual(set(arrival({}).values()), {None})
@@ -308,6 +349,21 @@ class TestCargo(unittest.TestCase):
         self.assertEqual(warning({"active": True}, True, "")[0], "FLIGHTCENTRE")
         self.assertIsNone(warning({"active": True}, True, "FLIGHTCENTRE")[0])
         self.assertEqual(warning({"active": False}, True, "FLIGHTCENTRE")[0], "")
+
+    def test_tail_tip(self):
+        """A smooth rise to TIP_PITCH_DEG, a hold, then None; PiBaHeAlTas keeps its other fields."""
+        self.assertTrue(is_tail_tip({"active": True, "reason": "Tail tip"}))
+        self.assertFalse(is_tail_tip({"active": False, "reason": "tail tip"}))
+        self.assertFalse(is_tail_tip({"active": True, "reason": "fire"}))
+        self.assertFalse(is_tail_tip({"active": True}))
+        self.assertEqual(tail_tip_pitch(0), 0)
+        self.assertAlmostEqual(tail_tip_pitch(TIP_RISE_S / 2), TIP_PITCH_DEG / 2)
+        self.assertEqual(tail_tip_pitch(TIP_RISE_S + 1), TIP_PITCH_DEG)
+        self.assertIsNone(tail_tip_pitch(TIP_RISE_S + TIP_HOLD_S))
+        raw = "0;8;1.222;127461;0;-0.925;-1.236"
+        self.assertEqual(with_pitch(raw, 12), "20944;8;1.222;127461;0;-0.925;-1.236")
+        self.assertIsNone(with_pitch("1;2;3", 12))
+        self.assertIsNone(with_pitch(None, 12))
         self.assertIsNone(warning({"active": False}, True, "ROUTER")[0])
         self.assertIsNone(warning({"active": "yes"}, True, "")[0])
         self.assertEqual(warning({"active": True}, False, ""), (None, NOT_ALLOWED))

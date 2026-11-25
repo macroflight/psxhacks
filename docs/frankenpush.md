@@ -220,18 +220,30 @@ when one changes:
 
 - `on_ground`: PSX's own on-ground state (`OnGround`).
 - `parking_brake`: the parking brake lever set (`ParkBrkLev`).
-- `engines_running`: 0-4, the engines running (`EngRunt`: an engine stops
-  counting the moment its fuel control switch goes to CUTOFF).
+- `engines_running`: 0-4, the engines whose fuel control switch is in RUN
+  (`FuelCutoff1`-`4`): an engine stops counting the moment its switch goes
+  to CUTOFF.
 - `beacon_on`: the beacon switch in either ON position (`LtBeacon`).
 
 Each is `null` until PSX has sent it.
 
-PSX doesn't tip onto its tail with the CG far aft, and can't be made to (it
-keeps a ground pitch of 0 even through a reposition). Flight Centre
+PSX doesn't tip onto its tail with the CG far aft by itself. Flight Centre
 simulates it, and tells the crew: it sends `flightcentre_warning`, and
 frankenpush puts a red **FLIGHTCENTRE** EICAS warning on PSX (with MASTER
 WARNING and the aural), the cue to look at Flight Centre's page, which
-tells the rest of the story. It stays until Flight Centre clears it; the
+tells the rest of the story.
+
+When the warning's `reason` is "tail tip" and the aircraft is parked (on
+the ground, ground speed under 1 kt), frankenpush also lifts the nose:
+it writes PSX's pitch about 20 times a second, rising smoothly to about
+12 degrees (where the 747's tail meets the ground) over 3 s, holds it for
+5 s, then stops. PSX pivots about the main gear (the flight deck rises
+about 20 ft), and the outside view (MSFS, through PSX's boost feed)
+follows smoothly. After the last write PSX lets the nose down by itself
+in about 2 s, with a small dip below level, and is settled about 4 s
+later. A second tail tip during the lift is ignored; the lift stops early
+if the aircraft leaves the ground or starts moving. The pitch-up happens
+once per warning; the aircraft doesn't stay on its tail. It stays until Flight Centre clears it; the
 crew can cancel the MASTER WARNING lights as usual. frankenpush clears it
 only while it is still its own text, so another add-on's free warning
 (frankenrouter's ROUTER, a WorldFlight alert) is never wiped. Also only
