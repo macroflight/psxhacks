@@ -170,6 +170,16 @@ Run this once (and again whenever you want to change these values) to interactiv
 
 Run this once on a new machine to install Python and create the virtual environment that all the `franken*.py` addons and `frankenrouter.py` run in. It prints the path to use for `$PsxhacksPython` in your override file. If you already have Python 3.13 installed some other way (not installed by this script), you can point the script at it instead of downloading a fresh copy - it will still create the virtual environment for you.
 
+To bring an existing virtual environment up to date (after a `git pull` that added or raised a package in `requirements.txt`), run it with `-Update`:
+
+```powershell
+.\start_scripts\setup_python_venv.ps1 -Update -VenvPython C:\fs\python\psxhacks-venv-2026-11-25\Scripts\python.exe
+```
+
+It installs what is missing and upgrades what is too old, and leaves Python itself alone. Without `-VenvPython` it asks for the path (your `$PsxhacksPython`).
+
+You rarely need to do that by hand: `startsim_master.ps1`, `startsim_slave.ps1` and `startsim_norouter.ps1` check the virtual environment against `requirements.txt` when they start. If something is missing they offer to update it (`-Update`, the default when a needed package is missing) or to make a fresh one (then set the printed `$PsxhacksPython` in your override file and start again). A package marked `# optional: ...` in `requirements.txt` only turns a feature off, so for those the default is to continue without it.
+
 The next two scripts are `startsim_master.ps1` and `startsim_slave.ps1`.  As their names suggest, these scripts have different scopes and start different programs and scripts.
 
 ### startsim_master.ps1

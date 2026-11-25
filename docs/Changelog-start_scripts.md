@@ -1,5 +1,20 @@
 # start_scripts changelog
 
+## Unreleased
+
+- **New: `setup_python_venv.ps1 -Update`** brings an existing virtual
+  environment up to date with `requirements.txt` (installs what is
+  missing, upgrades what is too old). `-VenvPython` names it (it asks
+  otherwise), `-NoPause` skips the final "Press Enter".
+- **The Python package check at sim start offers the fix.** When packages
+  are missing, `startsim_master.ps1`, `startsim_slave.ps1` and
+  `startsim_norouter.ps1` offer to update the current virtual environment
+  (the default when a needed package is missing) or to make a fresh one.
+  A package marked `# optional: ...` in `requirements.txt` (h5py, Pillow,
+  hid-parser) no longer stops the start: the default is to continue with
+  that feature off. Package names now match regardless of `-`/`_`
+  (`hid-parser` vs `hid_parser`).
+
 ## 1.15.0 (2026-11-24)
 
 - The override example shows frankenpush's `--allow-cargo-loading` (Flight

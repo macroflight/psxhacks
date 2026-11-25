@@ -153,38 +153,118 @@ function Get-StartScriptsVersion {
     }
 }
 
-# Verify that every package listed in requirements.txt is installed in the
-# configured Python virtual environment ($PsxhacksPython). Called once at
-# startup by startsim_master.ps1/startsim_slave.ps1 - not from common.ps1,
-# since invoking pip is too slow to do on every single script that dot-
-# sources common.ps1 (e.g. a quick restart_frankentanker.ps1).
+# Normalise a Python package name for comparison (PEP 503: case, and runs of
+# "-", "_" and "." are all the same), so "hid-parser" matches "hid_parser".
+function ConvertTo-PythonPackageKey([string]$name) {
+    return ($name.Trim().ToLowerInvariant() -replace '[-_.]+', '-')
+}
+
+# Split requirements.txt into the missing mandatory and optional packages.
+# A line ending in "# optional: <what you lose>" is optional; every other
+# package is mandatory (so a new one without the marker fails safe). pip
+# ignores the inline comment. $installedKeys: a hashtable of
+# ConvertTo-PythonPackageKey names. Returns @{ Mandatory = @(names);
+# Optional = @("name (what you lose)") }.
+function Get-MissingPythonRequirement([string]$requirementsFile, [hashtable]$installedKeys) {
+    $result = @{ Mandatory = @(); Optional = @() }
+    foreach ($raw in Get-Content $requirementsFile) {
+        $line = $raw.Trim()
+        if ($line -eq '' -or $line.StartsWith('#')) { continue }
+        $spec, $comment = $line -split '#', 2
+        # Strip version specifiers/extras/markers, e.g. "aiohttp>=3.9" -> "aiohttp"
+        $name = ($spec -split '[<>=!~\[;\s]')[0].Trim()
+        if (-not $name -or $installedKeys.ContainsKey((ConvertTo-PythonPackageKey $name))) { continue }
+        if ($comment -and $comment.Trim() -match '^optional\b:?\s*(.*)$') {
+            $why = $Matches[1].Trim()
+            $result.Optional += $(if ($why) { "$name ($why)" } else { $name })
+        } else {
+            $result.Mandatory += $name
+        }
+    }
+    return $result
+}
+
+# The packages pip reports in $PsxhacksPython's environment, as a hashtable
+# of ConvertTo-PythonPackageKey names.
+function Get-InstalledPythonPackage {
+    $installed = @{}
+    & $PsxhacksPython -m pip list --format=freeze --disable-pip-version-check 2>$null |
+        ForEach-Object {
+            if ($_ -match '^([^=]+)==') {
+                $installed[(ConvertTo-PythonPackageKey $Matches[1])] = $true
+            }
+        }
+    return $installed
+}
+
+# Verify that the packages listed in requirements.txt are installed in the
+# configured Python virtual environment ($PsxhacksPython). If any are
+# missing, offer to update that environment (setup_python_venv.ps1 -Update)
+# or to make a fresh one (setup_python_venv.ps1); a missing mandatory
+# package otherwise stops the start, a missing optional one doesn't.
+# Called once at startup by startsim_master.ps1/startsim_slave.ps1/
+# startsim_norouter.ps1 - not from common.ps1, since invoking pip is too
+# slow to do on every single script that dot-sources common.ps1 (e.g. a
+# quick restart_frankentanker.ps1).
 function Test-PythonRequirement {
     $requirementsFile = Join-Path $PsxhacksDevel "requirements.txt"
     if (-not (Test-Path $requirementsFile -PathType Leaf)) {
         return
     }
-
-    $installed = @{}
-    & $PsxhacksPython -m pip list --format=freeze --disable-pip-version-check 2>$null |
-        ForEach-Object {
-            if ($_ -match '^([^=]+)==') {
-                $installed[$Matches[1].ToLowerInvariant()] = $true
-            }
-        }
-
-    $missing = @()
-    Get-Content $requirementsFile | ForEach-Object {
-        $line = $_.Trim()
-        if ($line -eq '' -or $line.StartsWith('#')) { return }
-        # Strip version specifiers/extras/markers, e.g. "aiohttp>=3.9" -> "aiohttp"
-        $name = ($line -split '[<>=!~\[;]')[0].Trim()
-        if ($name -and -not $installed.ContainsKey($name.ToLowerInvariant())) {
-            $missing += $name
-        }
+    $missing = Get-MissingPythonRequirement $requirementsFile (Get-InstalledPythonPackage)
+    if ($missing.Mandatory.Count -eq 0 -and $missing.Optional.Count -eq 0) {
+        return
     }
 
-    if ($missing.Count -gt 0) {
-        Show-ErrorAndExit "Missing Python module(s) in your virtual environment: $($missing -join ', ')`nEdit `$PsxhacksPython in $OverrideFile to point at a virtual environment with these installed, or run:`n  $PsxhacksPython -m pip install -r requirements.txt"
+    $setup = Join-Path (Join-Path $PsxhacksDevel "start_scripts") "setup_python_venv.ps1"
+    $mandatoryText = "Missing Python module(s) in your virtual environment: $($missing.Mandatory -join ', ')"
+    if ($missing.Mandatory.Count -gt 0) {
+        Write-Host $mandatoryText -ForegroundColor Red
+    }
+    if ($missing.Optional.Count -gt 0) {
+        Write-Host ("Optional Python module(s) missing, those features are off:`n  " +
+            ($missing.Optional -join "`n  ")) -ForegroundColor Yellow
+    }
+    Write-Host "Virtual environment: $PsxhacksPython"
+    if ($missing.Mandatory.Count -gt 0) {
+        $answer = Read-Host "[U]pdate this virtual environment, make a [F]resh one, or [Q]uit? [U]"
+        if ([string]::IsNullOrWhiteSpace($answer)) { $answer = 'U' }
+    } else {
+        $answer = Read-Host "[U]pdate this virtual environment, make a [F]resh one, or [C]ontinue without them? [C]"
+        if ([string]::IsNullOrWhiteSpace($answer)) { $answer = 'C' }
+    }
+
+    switch -Regex ($answer.Trim()) {
+        '^[Uu]' {
+            # Write-Host shows setup's progress; its VENV_PYTHON= marker line is dropped
+            & $setup -Update -VenvPython $PsxhacksPython -NoPause | Out-Null
+            $missing = Get-MissingPythonRequirement $requirementsFile (Get-InstalledPythonPackage)
+            if ($missing.Mandatory.Count -gt 0) {
+                Show-ErrorAndExit ("The update didn't install: $($missing.Mandatory -join ', ')`n" +
+                    "See pip's output above, or make a fresh virtual environment with`n  $setup")
+            }
+            if ($missing.Optional.Count -gt 0) {
+                Write-Host "Still missing (optional, those features stay off): $($missing.Optional -join ', ')" -ForegroundColor Yellow
+            }
+        }
+        '^[Ff]' {
+            $marker = & $setup -NoPause | Where-Object { $_ -like 'VENV_PYTHON=*' } | Select-Object -Last 1
+            if (-not $marker) {
+                Show-ErrorAndExit "No fresh virtual environment was made (see the output above)."
+            }
+            $newPython = $marker.Substring('VENV_PYTHON='.Length)
+            Show-ErrorAndExit ("Fresh virtual environment ready. Set this line in $OverrideFile`n" +
+                "  `$PsxhacksPython = `"$newPython`"`nand start the sim again.")
+        }
+        '^[Cc]' {
+            if ($missing.Mandatory.Count -gt 0) {
+                Show-ErrorAndExit $mandatoryText
+            }
+        }
+        default {
+            Show-ErrorAndExit ("$mandatoryText`nTo fix it later: $setup -Update -VenvPython $PsxhacksPython`n" +
+                "or make a fresh virtual environment with $setup")
+        }
     }
 }
 

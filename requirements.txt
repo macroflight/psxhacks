@@ -1,18 +1,16 @@
 # psxhacks requirements
 # Install with: pip install -r requirements.txt
 #
-# Note: pywin32 is Windows-only.
-# rasterio is only needed for frankenturb.
-# Pillow is optional (radar imagery in frankenweather/fw_scanner; graceful fallback without it).
-# h5py is optional (GOES lightning, frankenweather --glm-lightning; none without it).
-# hidapi is required by show_hid.py; hid-parser is optional (human-readable -r mode only).
+# The start scripts check this list at sim start: a missing package stops the
+# start, unless its line ends in "# optional: <what you lose>" (then only a
+# warning). Note: pywin32 is Windows-only.
 
 aiohttp>=3.9
 hidapi>=0.14
-hid-parser>=0.0.4
-h5py>=3.10
+hid-parser>=0.0.4  # optional: show_hid.py's human-readable -r mode
+h5py>=3.10  # optional: frankenweather's GOES lightning and satellite cloud tops
 numpy>=1.26
-Pillow>=10.0
+Pillow>=10.0  # optional: frankenweather's radar imagery
 psutil>=5.9
 pygame>=2.5
 pyproj>=3.6

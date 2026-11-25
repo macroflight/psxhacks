@@ -3,8 +3,88 @@
 # Run this once on a new machine (or to set up a new venv) from a normal
 # PowerShell window - no administrator rights required as long as the target
 # directory is writable.
+#
+# -Update brings an existing virtual environment up to date instead: it
+# installs what requirements.txt lists that is missing and upgrades what is
+# too old (pip install --upgrade -r requirements.txt), nothing else.
+#   .\setup_python_venv.ps1 -Update -VenvPython C:\fs\python\psxhacks-venv-2026-11-25\Scripts\python.exe
+# Without -VenvPython it asks for the path. -NoPause skips the final "Press
+# Enter to close" (used when the start scripts run it).
+param(
+    [switch]$Update,
+    [string]$VenvPython = "",
+    [switch]$NoPause
+)
 
 $ErrorActionPreference = 'Stop'
+$script:PauseAtExit = -not $NoPause
+
+function Exit-Setup([int]$code) {
+    if ($script:PauseAtExit) { Read-Host -Prompt "Press Enter to close" | Out-Null }
+    exit $code
+}
+
+function Get-RequirementsFile {
+    $file = Join-Path $PSScriptRoot "..\requirements.txt"
+    if (-not (Test-Path $file)) {
+        Write-Host "ERROR: requirements.txt not found at $file" -ForegroundColor Red
+        Exit-Setup 1
+    }
+    return (Resolve-Path $file).Path
+}
+
+# Upgrade pip, then install (and with -Upgrade, upgrade) requirements.txt's
+# packages into the virtual environment whose python.exe is $venvPython.
+function Install-Requirement([string]$venvPython, [switch]$Upgrade) {
+    $requirementsFile = Get-RequirementsFile
+    Write-Host "Upgrading pip..."
+    # Out-Host: pip's output on the screen, not in this script's output (a caller
+    # piping the output gets only the VENV_PYTHON= marker line)
+    & $venvPython -m pip install --upgrade pip | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "WARNING: pip upgrade failed - continuing anyway." -ForegroundColor Yellow
+    }
+    Write-Host ""
+    Write-Host "Installing packages from $requirementsFile ..."
+    Write-Host "(rasterio and pywin32 may take a moment to download)" -ForegroundColor DarkGray
+    if ($Upgrade) {
+        & $venvPython -m pip install --upgrade -r $requirementsFile | Out-Host
+    } else {
+        & $venvPython -m pip install -r $requirementsFile | Out-Host
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERROR: pip install failed. See output above." -ForegroundColor Red
+        Exit-Setup 1
+    }
+}
+
+if ($Update) {
+    Write-Host ""
+    Write-Host "=== Updating an existing virtual environment ===" -ForegroundColor White
+    if (-not $VenvPython) {
+        $VenvPython = Read-Host "Path to the virtual environment's python.exe (your `$PsxhacksPython)"
+    }
+    # Accept the venv folder too
+    if (Test-Path $VenvPython -PathType Container) {
+        $VenvPython = Join-Path $VenvPython "Scripts\python.exe"
+    }
+    if (-not (Test-Path $VenvPython -PathType Leaf)) {
+        Write-Host "ERROR: $VenvPython not found." -ForegroundColor Red
+        Exit-Setup 1
+    }
+    $versionOutput = (& $VenvPython --version 2>&1 | Out-String).Trim()
+    if ($versionOutput -notmatch '^Python 3\.13\.') {
+        Write-Host "ERROR: $VenvPython reports '$versionOutput', not Python 3.13.x." -ForegroundColor Red
+        Write-Host "Run this script without -Update to create a fresh virtual environment." -ForegroundColor Yellow
+        Exit-Setup 1
+    }
+    Write-Host "Updating $VenvPython ($versionOutput)" -ForegroundColor Cyan
+    Install-Requirement $VenvPython -Upgrade
+    Write-Host ""
+    Write-Host "=== Virtual environment up to date ===" -ForegroundColor Green
+    Write-Output "VENV_PYTHON=$VenvPython"
+    Exit-Setup 0
+}
 
 function Read-WithDefault([string]$question, [string]$default) {
     $answer = Read-Host "$question [$default]"
@@ -250,13 +330,7 @@ $VenvPath    = Read-WithDefault "Virtual environment path?" $defaultVenv
 Write-Host ""
 Write-Host "=== Step 7: Creating venv and installing packages ===" -ForegroundColor White
 
-$requirementsFile = Join-Path $PSScriptRoot "..\requirements.txt"
-if (-not (Test-Path $requirementsFile)) {
-    Write-Host "ERROR: requirements.txt not found at $requirementsFile" -ForegroundColor Red
-    Read-Host -Prompt "Press Enter to close" | Out-Null
-    exit 1
-}
-$requirementsFile = (Resolve-Path $requirementsFile).Path
+$null = Get-RequirementsFile   # fail before creating anything
 
 if (Test-Path (Join-Path $VenvPath "Scripts\python.exe")) {
     Write-Host "Virtual environment already exists at $VenvPath" -ForegroundColor DarkGray
@@ -265,30 +339,13 @@ if (Test-Path (Join-Path $VenvPath "Scripts\python.exe")) {
     & $pythonExe -m venv $VenvPath
     if ($LASTEXITCODE -ne 0) {
         Write-Host "ERROR: venv creation failed." -ForegroundColor Red
-        Read-Host -Prompt "Press Enter to close" | Out-Null
-        exit 1
+        Exit-Setup 1
     }
     Write-Host "Created." -ForegroundColor Green
 }
 
 $venvPython = Join-Path $VenvPath "Scripts\python.exe"
-$venvPip    = Join-Path $VenvPath "Scripts\pip.exe"
-
-Write-Host "Upgrading pip..."
-& $venvPython -m pip install --upgrade pip
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "WARNING: pip upgrade failed - continuing anyway." -ForegroundColor Yellow
-}
-
-Write-Host ""
-Write-Host "Installing packages from $requirementsFile ..."
-Write-Host "(rasterio and pywin32 may take a moment to download)" -ForegroundColor DarkGray
-& $venvPip install -r $requirementsFile
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "ERROR: pip install failed. See output above." -ForegroundColor Red
-    Read-Host -Prompt "Press Enter to close" | Out-Null
-    exit 1
-}
+Install-Requirement $venvPython
 
 # ---------------------------------------------------------------------------
 # Done
@@ -315,4 +372,4 @@ Write-Host ""
 # travel through that pipe instead.
 Write-Output "VENV_PYTHON=$venvPython"
 
-Read-Host -Prompt "Press Enter to close"
+Exit-Setup 0
