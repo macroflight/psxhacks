@@ -467,6 +467,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
         # Arrival (Flight Centre starts unloading from these; sent with or without the option)
         self._park_brake_lever = None   # ParkBrkLev, 0/1
         self._beacon = None             # LtBeacon, -1/0/1 (0 = OFF)
+        self._pin_prog = None           # CfgPinProg: the weight unit (fp_cargo.weight_unit)
         self._fuel_cutoffs = [None] * 4  # FuelCutoff1-4: 1 = RUN, 0 = CUTOFF
 
         # Control surface levers (ECON)
@@ -632,7 +633,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 "GroundSpeed": "_ground_speed", "EicasGrWt": "_eicas_grwt",
                 "TrueZfw": "_true_zfw", "TrueCg": "_true_cg", "Refueling": "_refueling",
                 "DoorComBits": "_door_com_bits", "ParkBrkLev": "_park_brake_lever",
-                "LtBeacon": "_beacon"}.get(key)
+                "LtBeacon": "_beacon", "CfgPinProg": "_pin_prog"}.get(key)
         if attr:
             setattr(self, attr, n)
 
@@ -1067,6 +1068,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
                 "true_zfw": self._true_zfw, "eicas_grwt": self._eicas_grwt,
                 "fuelqty": self._fuelqty, "refueling": self._refueling,
                 "park_brake_lever": self._park_brake_lever, "beacon": self._beacon,
+                "pin_prog": self._pin_prog,
                 "fuel_cutoffs": list(self._fuel_cutoffs), **self._power_lights}
 
     def _cargo_telemetry(self):
@@ -1365,7 +1367,7 @@ class Script():  # pylint: disable=too-many-instance-attributes
             for name in ("TrueCg", "Refueling", "DoorComBits") + fp_cargo.POWER_SOURCES:
                 self.psx.subscribe(name, self._on_int_var)
             self.psx.subscribe("FuelQty", self._on_fuelqty)
-            for name in ("ParkBrkLev", "LtBeacon"):
+            for name in ("ParkBrkLev", "LtBeacon", "CfgPinProg"):
                 self.psx.subscribe(name, self._on_int_var)
             for name in ("FuelCutoff1", "FuelCutoff2", "FuelCutoff3", "FuelCutoff4"):
                 self.psx.subscribe(name, self._on_fuel_cutoff)

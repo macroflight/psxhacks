@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **New telemetry field `weight_unit`:** PSX's weight unit setting, "kg"
+  or "lb", for Flight Centre's cargo pages.
 - **New: the tail tip lifts the nose.** When Flight Centre's tail-tip
   warning arrives while the aircraft is parked, frankenpush raises PSX's
   pitch smoothly to about 12 degrees, holds it for 5 s and lets PSX

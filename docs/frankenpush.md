@@ -209,8 +209,8 @@ In its telemetry frankenpush reports `cargo_loading_allowed`, the doors
 tank (mains 1-4, reserves 2/3, centre, stabiliser, AUX) and refuelling.
 While parked, a change goes out at once (normally every 60 s then).
 Without the option frankenpush ignores Flight Centre's loading messages and
-reports only `"cargo_loading_allowed": false` and the four arrival fields
-below.
+reports only `"cargo_loading_allowed": false`, `weight_unit` and the four
+arrival fields below.
 
 For unloading at the destination, Flight Centre starts once the aircraft
 has flown, landed and parked with the parking brake set, all engines off
@@ -226,6 +226,11 @@ when one changes:
 - `beacon_on`: the beacon switch in either ON position (`LtBeacon`).
 
 Each is `null` until PSX has sent it.
+
+`weight_unit` (with or without the option) is PSX's weight unit setting,
+`"kg"` or `"lb"`, as the EICAS and the FMC show weights: bit `0x100000` of
+`CfgPinProg` (Qi30) set means kg. Flight Centre uses it as the default
+unit on its cargo pages. `null` until PSX has sent it.
 
 PSX doesn't tip onto its tail with the CG far aft by itself. Flight Centre
 simulates it, and tells the crew: it sends `flightcentre_warning`, and

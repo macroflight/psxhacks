@@ -49,6 +49,9 @@ UNPOWERED_DOORS = ("entry_1l",)        # the entry door needs no cargo handling 
 DOOR_COM_OFF = 32
 LIGHT_AVAIL = 256
 LIGHT_ON = 128
+# CfgPinProg (Qi30) bit for weights in kg (clear: lb); found 2026-11-25 on stack B: clearing
+# it turned EicasGrWt 2542 (254.2 t) into 5605 (560.5 klb), no other bit changed the unit
+PIN_WEIGHT_KG = 0x100000
 POWER_SOURCES = ("ExtPow1", "ExtPow2", "ApuGen1", "ApuGen2")
 TANKS = ("M1", "M2", "M3", "M4", "R2", "R3", "CWT", "STAB", "AUX")
 ZFW_KG_RANGE = (160000.0, 290000.0)   # TrueZfw's range (352739-639340 lb), rounded inwards
@@ -175,16 +178,25 @@ def arrival(state: dict) -> dict:
     }
 
 
+def weight_unit(pin_prog: Optional[int]) -> Optional[str]:
+    """Return PSX's weight unit setting, "kg" or "lb", from CfgPinProg; None if unknown."""
+    if pin_prog is None:
+        return None
+    return "kg" if pin_prog & PIN_WEIGHT_KG else "lb"
+
+
 def telemetry(allowed: bool, state: dict) -> dict:  # pylint: disable=too-many-locals
     """Return the cargo fields for frankenpush's telemetry, from PSX's values in state.
 
     state: on_ground (bool), door_open_bits, true_cg (x10), true_zfw (lb),
     eicas_grwt, fuelqty (str), refueling (0/1), the lights of
-    POWER_SOURCES and what arrival() reads. Without the option only
-    cargo_loading_allowed (false) and the arrival() fields.
+    POWER_SOURCES, pin_prog (CfgPinProg) and what arrival() reads. Without
+    the option only cargo_loading_allowed (false), weight_unit and the
+    arrival() fields.
     """
+    unit = {"weight_unit": weight_unit(state.get("pin_prog"))}
     if not allowed:
-        return {"cargo_loading_allowed": False, **arrival(state)}
+        return {"cargo_loading_allowed": False, **unit, **arrival(state)}
     ok, why = power(state.get("on_ground"), state)
     zfw_lb = state.get("true_zfw")
     gw_t = gross_weight_t(state.get("eicas_grwt"), zfw_lb)
@@ -201,6 +213,7 @@ def telemetry(allowed: bool, state: dict) -> dict:  # pylint: disable=too-many-l
         "cg_pct_mac": cg / 10.0 if cg is not None else None,
         "fuel_kg": fuel_kg(state.get("fuelqty")),
         "refueling": bool(refueling) if refueling is not None else None,
+        **unit,
         **arrival(state),
     }
 
@@ -310,8 +323,8 @@ class TestCargo(unittest.TestCase):
     def test_telemetry(self):
         """Fields with the option; only the flag without it."""
         self.assertEqual(telemetry(False, self.GROUND),
-                         {"cargo_loading_allowed": False, "on_ground": True, "parking_brake": True,
-                          "engines_running": 0, "beacon_on": False})
+                         {"cargo_loading_allowed": False, "weight_unit": None, "on_ground": True,
+                          "parking_brake": True, "engines_running": 0, "beacon_on": False})
         t = telemetry(True, self.GROUND)
         self.assertTrue(t["cargo_power_ok"])
         self.assertEqual(t["cg_pct_mac"], 18.5)
@@ -319,6 +332,14 @@ class TestCargo(unittest.TestCase):
         self.assertEqual(t["gross_weight_kg"], 254200)
         self.assertEqual(t["cargo_doors"]["nose"], "closed")
         self.assertIs(t["refueling"], False)
+        with_unit = telemetry(True, {**self.GROUND, "pin_prog": 87900296})
+        self.assertEqual(with_unit["weight_unit"], "kg")
+
+    def test_weight_unit(self):
+        """The unit is kg with CfgPinProg's bit 0x100000, lb without, None unknown."""
+        self.assertEqual(weight_unit(87900296), "kg")
+        self.assertEqual(weight_unit(87900296 ^ PIN_WEIGHT_KG), "lb")
+        self.assertIsNone(weight_unit(None))
 
     def test_arrival(self):
         """Engines from the fuel control switches, beacon on in either ON position, None unknown."""
