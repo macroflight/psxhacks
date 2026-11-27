@@ -1,6 +1,6 @@
 # frankenpilot changelog
 
-## Unreleased
+## 0.4.1 (2026-11-27)
 
 - **Fix: the standby altimeter's baro was turned back and forth for ever on
   an ISFD.** The ISFD moves 1 hPa per knob click (the older standby

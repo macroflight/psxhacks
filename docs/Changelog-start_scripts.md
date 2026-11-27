@@ -1,6 +1,6 @@
 # start_scripts changelog
 
-## Unreleased
+## 1.16.0 (2026-11-27)
 
 - **New: `setup_python_venv.ps1 -Update`** brings an existing virtual
   environment up to date with `requirements.txt` (installs what is
